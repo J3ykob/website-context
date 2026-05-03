@@ -3,6 +3,7 @@ import type { EmbeddingProvider, VectorStore } from "../embeddings/types.js";
 import { searchContext } from "../embeddings/pipeline.js";
 import type { WebsiteContext, FlowDefinition } from "../context/types.js";
 import { VLLMProvider, type VLLMConfig } from "./vllm-provider.js";
+import { OpenRouterProvider, type OpenRouterConfig } from "./openrouter-provider.js";
 import {
   ClaudeCLIProvider,
   type ClaudeCLIConfig,
@@ -26,9 +27,10 @@ export interface ChatMessage {
 }
 
 export interface ChatConfig {
-  llmProvider: "claude-cli" | "vllm" | "anthropic";
+  llmProvider: "claude-cli" | "vllm" | "anthropic" | "openrouter";
   claudeCli?: ClaudeCLIConfig;
   vllm?: VLLMConfig;
+  openRouter?: OpenRouterConfig;
   anthropicApiKey?: string;
   anthropicModel?: string;
   maxTokens?: number;
@@ -102,6 +104,23 @@ class VLLMBackend implements LLMBackend {
       ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     ];
     const result = await this.provider.chat(vllmMessages);
+    return result.content;
+  }
+}
+
+class OpenRouterBackend implements LLMBackend {
+  private provider: OpenRouterProvider;
+
+  constructor(config?: OpenRouterConfig) {
+    this.provider = new OpenRouterProvider(config);
+  }
+
+  async generate(system: string, messages: ChatMessage[], maxTokens: number): Promise<string> {
+    const orMessages = [
+      { role: "system" as const, content: system },
+      ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    ];
+    const result = await this.provider.chat(orMessages);
     return result.content;
   }
 }
@@ -198,6 +217,8 @@ export class WebsiteChat {
     } else if (config.llmProvider === "vllm") {
       if (!config.vllm) throw new Error("vllm config required when llmProvider is 'vllm'");
       this.backend = new VLLMBackend(config.vllm);
+    } else if (config.llmProvider === "openrouter") {
+      this.backend = new OpenRouterBackend(config.openRouter);
     } else {
       this.backend = new AnthropicBackend(config.anthropicApiKey, config.anthropicModel);
     }

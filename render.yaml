@@ -6,8 +6,10 @@ services:
     envVars:
       - key: SITE_URL
         value: https://flowstock.so
-      - key: ANTHROPIC_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false # set manually in Render dashboard
+      - key: OPENROUTER_MODEL
+        value: deepseek/deepseek-chat-v3
       - key: BGE_HOST
         value: 176.9.1.133
       - key: BGE_PORT

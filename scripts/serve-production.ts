@@ -50,8 +50,8 @@ if (!url) {
   process.exit(1);
 }
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error("ANTHROPIC_API_KEY environment variable is required");
+if (!process.env.OPENROUTER_API_KEY && !process.env.ANTHROPIC_API_KEY) {
+  console.error("OPENROUTER_API_KEY or ANTHROPIC_API_KEY environment variable is required");
   process.exit(1);
 }
 
@@ -112,9 +112,17 @@ app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 app.use(express.static(resolve(__dirname, "../public")));
 
-// Use Anthropic SDK in production (not Claude CLI)
+// Use OpenRouter (DeepSeek V3) by default, fall back to Anthropic
+const llmProvider = process.env.OPENROUTER_API_KEY ? "openrouter" : "anthropic";
+console.log(`[llm] Using ${llmProvider}${llmProvider === "openrouter" ? " (DeepSeek V3)" : ""}`);
+
 const chat = new WebsiteChat(provider, store, context, {
-  llmProvider: "anthropic",
+  llmProvider: llmProvider as any,
+  openRouter: process.env.OPENROUTER_API_KEY ? {
+    apiKey: process.env.OPENROUTER_API_KEY,
+    model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat-v3",
+    siteUrl: url,
+  } : undefined,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6-20250514",
 });
