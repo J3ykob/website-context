@@ -34,4 +34,4 @@ COPY . .
 
 EXPOSE 3210
 
-CMD ["node", "--loader", "tsx", "scripts/serve-production.ts"]
+CMD ["node", "--import", "tsx", "scripts/serve-production.ts"]
