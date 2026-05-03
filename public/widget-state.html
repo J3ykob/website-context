@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body>
+<script>
+// Cross-domain state bridge for the website-context widget.
+// Loaded as a hidden iframe from the widget's origin.
+// Communicates with the parent widget via postMessage.
+window.addEventListener("message", function(e) {
+  if (!e.data || e.data.channel !== "wctx-state") return;
+
+  if (e.data.action === "get") {
+    var value = localStorage.getItem(e.data.key);
+    e.source.postMessage({
+      channel: "wctx-state",
+      action: "result",
+      key: e.data.key,
+      value: value,
+    }, e.origin);
+  }
+
+  if (e.data.action === "set") {
+    localStorage.setItem(e.data.key, e.data.value);
+    e.source.postMessage({
+      channel: "wctx-state",
+      action: "ack",
+      key: e.data.key,
+    }, e.origin);
+  }
+});
+</script>
+</body>
+</html>

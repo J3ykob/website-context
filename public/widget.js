@@ -486,12 +486,50 @@
   window.addEventListener("scroll", debouncedDetectTheme, { passive: true });
   window.addEventListener("resize", debouncedDetectTheme, { passive: true });
 
+  // --- Cross-domain state bridge (shared iframe) ---
+  var stateIframe = document.createElement("iframe");
+  stateIframe.src = API_HOST + "/widget-state.html";
+  stateIframe.style.cssText = "display:none;width:0;height:0;border:none;position:absolute;";
+  document.body.appendChild(stateIframe);
+
+  var statePending = {};
+  window.addEventListener("message", function(e) {
+    if (!e.data || e.data.channel !== "wctx-state") return;
+    var key = e.data.key;
+    if (statePending[key]) {
+      statePending[key](e.data.value);
+      delete statePending[key];
+    }
+  });
+
+  function getSharedState(key, cb) {
+    statePending[key] = cb;
+    stateIframe.contentWindow.postMessage({ channel: "wctx-state", action: "get", key: key }, "*");
+    // Timeout fallback — if iframe doesn't respond in 1s, check localStorage
+    setTimeout(function() {
+      if (statePending[key]) {
+        statePending[key](localStorage.getItem(key));
+        delete statePending[key];
+      }
+    }, 1000);
+  }
+
+  function setSharedState(key, value) {
+    localStorage.setItem(key, value); // local fallback
+    stateIframe.contentWindow.postMessage({ channel: "wctx-state", action: "set", key: key, value: value }, "*");
+  }
+
   // --- First-time onboarding modal ---
   var startedFullscreen = !(typeof START_MINIMIZED !== "undefined" && START_MINIMIZED);
-  if (!IS_OWNER && !startedFullscreen && !localStorage.getItem("wctx-onboarded")) {
-    setTimeout(function() {
-      showOnboardingModal();
-    }, 2000);
+  if (!IS_OWNER && !startedFullscreen) {
+    // Wait for iframe to load, then check shared state
+    stateIframe.addEventListener("load", function() {
+      getSharedState("wctx-onboarded", function(val) {
+        if (!val) {
+          setTimeout(showOnboardingModal, 1500);
+        }
+      });
+    });
   }
 
   function showOnboardingModal() {
@@ -507,25 +545,17 @@
           </svg>\
         </div>\
         <button class="wctx-onboard-btn" id="wctx-onboard-dismiss">Got it</button>\
-        <div class="wctx-onboard-check">\
-          <input type="checkbox" id="wctx-onboard-noshow" checked />\
-          <label for="wctx-onboard-noshow">Don\'t show again</label>\
-        </div>\
       </div>\
     ';
     document.body.appendChild(onboardEl);
 
     onboardEl.querySelector("#wctx-onboard-dismiss").addEventListener("click", function() {
-      var noShow = onboardEl.querySelector("#wctx-onboard-noshow").checked;
-      if (noShow) {
-        localStorage.setItem("wctx-onboarded", "1");
-      }
+      setSharedState("wctx-onboarded", "1");
       onboardEl.style.opacity = "0";
       onboardEl.style.transition = "opacity 0.3s";
       setTimeout(function() { onboardEl.remove(); }, 300);
     });
 
-    // Also dismiss on clicking outside the card
     onboardEl.addEventListener("click", function(e) {
       if (e.target === onboardEl) {
         onboardEl.querySelector("#wctx-onboard-dismiss").click();
