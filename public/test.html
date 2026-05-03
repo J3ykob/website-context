@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADL Design Challenge</title>
+</head>
+<body>
+  <!-- The website content sits behind the chat interface -->
+  <div style="padding: 40px; font-family: sans-serif;">
+    <h1>ADL Design Challenge</h1>
+    <p>This is the website. But visitors see the chat assistant first — like walking into a shop and being greeted by a clerk who knows everything about the store.</p>
+    <p>Click "Browse website manually" in the header to see this content.</p>
+  </div>
+
+  <!-- Single embed script — takes over the viewport -->
+  <script>
+  (function(w,d,c){
+    w.__wctx=c;
+    var s=d.createElement('script');
+    s.src='/widget.js';
+    s.async=true;
+    d.head.appendChild(s);
+  })(window,document,{
+    "tenantId":"adl",
+    "apiHost":"http://localhost:3210",
+    "mode":"fullscreen",
+    "primaryColor":"#6366f1",
+    "brandName":"ADL Design Challenge"
+  });
+  </script>
+</body>
+</html>

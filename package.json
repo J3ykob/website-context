@@ -1,0 +1,41 @@
+{
+  "name": "website-context",
+  "version": "0.1.0",
+  "description": "Framework to make websites accessible through AI chat interfaces",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "scrape": "tsx src/cli.ts scrape",
+    "lint": "eslint src/"
+  },
+  "keywords": [
+    "web-scraping",
+    "chat",
+    "llm",
+    "embeddings",
+    "rag"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.92.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@types/node": "^25.6.0",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "openai": "^6.35.0",
+    "playwright": "^1.59.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/cheerio": "^0.22.35",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6"
+  }
+}

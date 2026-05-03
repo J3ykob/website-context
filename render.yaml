@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: website-context
+    runtime: docker
+    plan: starter
+    envVars:
+      - key: SITE_URL
+        value: https://flowstock.so
+      - key: ANTHROPIC_API_KEY
+        sync: false # set manually in Render dashboard
+      - key: BGE_HOST
+        value: 176.9.1.133
+      - key: BGE_PORT
+        value: "7900"
+      - key: QDRANT_HOST
+        value: 152.53.243.28
+      - key: QDRANT_PORT
+        value: "6333"
+      - key: TENANT_ID
+        value: flowstock
+      - key: MAX_PAGES
+        value: "20"
+      - key: PORT
+        value: "3210"
