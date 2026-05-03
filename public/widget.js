@@ -12,6 +12,80 @@
   if (IS_OWNER) sessionStorage.setItem("wctx-owner", "1");
   if (sessionStorage.getItem("wctx-owner") === "1") IS_OWNER = true;
 
+  // --- Adaptive Theme Detection ---
+  var currentTheme = "light";
+  var themeDebounceTimer = null;
+
+  function getLuminance(r, g, b) {
+    return (0.299 * r + 0.587 * g + 0.114 * b);
+  }
+
+  function parseColor(colorStr) {
+    if (!colorStr || colorStr === "transparent" || colorStr === "rgba(0, 0, 0, 0)") return null;
+    var m = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (m) return { r: parseInt(m[1]), g: parseInt(m[2]), b: parseInt(m[3]) };
+    return null;
+  }
+
+  function detectTheme() {
+    var theme = "light";
+    try {
+      // Strategy 1: Check body background color
+      var bodyBg = getComputedStyle(document.body).backgroundColor;
+      var parsed = parseColor(bodyBg);
+      if (parsed && getLuminance(parsed.r, parsed.g, parsed.b) < 128) {
+        theme = "dark";
+      } else if (!parsed || bodyBg === "rgba(0, 0, 0, 0)") {
+        // Strategy 2: Check html background
+        var htmlBg = getComputedStyle(document.documentElement).backgroundColor;
+        var parsedHtml = parseColor(htmlBg);
+        if (parsedHtml && getLuminance(parsedHtml.r, parsedHtml.g, parsedHtml.b) < 128) {
+          theme = "dark";
+        } else {
+          // Strategy 3: Sample elementFromPoint at the bottom center (where bar sits)
+          var centerX = window.innerWidth / 2;
+          var bottomY = window.innerHeight - 50;
+          // Temporarily hide our elements to sample behind
+          var fabDisplay = fab ? fab.style.display : "";
+          var overlayDisplay = overlay ? overlay.style.display : "";
+          if (fab) fab.style.display = "none";
+          if (overlay) overlay.style.display = "none";
+          var el = document.elementFromPoint(centerX, bottomY);
+          if (fab) fab.style.display = fabDisplay;
+          if (overlay) overlay.style.display = overlayDisplay;
+          if (el) {
+            var elBg = getComputedStyle(el).backgroundColor;
+            var parsedEl = parseColor(elBg);
+            if (parsedEl && getLuminance(parsedEl.r, parsedEl.g, parsedEl.b) < 128) {
+              theme = "dark";
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    if (theme !== currentTheme) {
+      currentTheme = theme;
+      applyTheme(theme);
+    }
+    return theme;
+  }
+
+  function applyTheme(theme) {
+    if (theme === "dark") {
+      fab && fab.classList.add("wctx-dark");
+      overlay && overlay.classList.add("wctx-dark");
+    } else {
+      fab && fab.classList.remove("wctx-dark");
+      overlay && overlay.classList.remove("wctx-dark");
+    }
+  }
+
+  function debouncedDetectTheme() {
+    if (themeDebounceTimer) clearTimeout(themeDebounceTimer);
+    themeDebounceTimer = setTimeout(detectTheme, 150);
+  }
+
   // Check for pending guided execution (resumed after navigation)
   var pendingGuided = sessionStorage.getItem("wctx-guided-state");
   if (pendingGuided) {
@@ -172,6 +246,28 @@
   color:rgba(10,10,10,0.35); display:flex; transition:color 0.2s;\
 }\
 #wctx-fab .wctx-bar-expand:hover { color:rgba(10,10,10,0.7); }\
+\
+#wctx-fab.wctx-dark .wctx-bar-wrap {\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+  box-shadow:0 6px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);\
+}\
+#wctx-fab.wctx-dark .wctx-bar-wrap:hover,\
+#wctx-fab.wctx-dark .wctx-bar-wrap.pinned {\
+  box-shadow:0 12px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);\
+}\
+#wctx-fab.wctx-dark .wctx-bar-msg { color:rgba(255,255,255,0.7); }\
+#wctx-fab.wctx-dark .wctx-bar-msg.user { color:rgba(255,255,255,0.5); }\
+#wctx-fab.wctx-dark .wctx-bar-input { color:rgba(255,255,255,0.9); }\
+#wctx-fab.wctx-dark .wctx-bar-input::placeholder { color:rgba(255,255,255,0.3); }\
+#wctx-fab.wctx-dark .wctx-bar-send {\
+  color:rgba(255,255,255,0.6);\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+}\
+#wctx-fab.wctx-dark .wctx-bar-send:hover { background:rgba(255,255,255,0.15); color:rgba(255,255,255,0.9); }\
+#wctx-fab.wctx-dark .wctx-bar-expand { color:rgba(255,255,255,0.35); }\
+#wctx-fab.wctx-dark .wctx-bar-expand:hover { color:rgba(255,255,255,0.7); }\
 </style>\
 <div class="wctx-bar-wrap">\
   <div class="wctx-bar-messages" id="wctx-bar-msgs"></div>\
@@ -382,6 +478,59 @@
   } else {
     document.body.style.overflow = "hidden";
     els.input.focus();
+  }
+
+  // --- Initialize theme detection ---
+  // Run once DOM is settled, then on scroll
+  setTimeout(detectTheme, 100);
+  window.addEventListener("scroll", debouncedDetectTheme, { passive: true });
+  window.addEventListener("resize", debouncedDetectTheme, { passive: true });
+
+  // --- First-time onboarding modal ---
+  var startedFullscreen = !(typeof START_MINIMIZED !== "undefined" && START_MINIMIZED);
+  if (!IS_OWNER && !startedFullscreen && !localStorage.getItem("wctx-onboarded")) {
+    setTimeout(function() {
+      showOnboardingModal();
+    }, 2000);
+  }
+
+  function showOnboardingModal() {
+    var onboardEl = document.createElement("div");
+    onboardEl.className = "wctx-onboard-overlay" + (currentTheme === "dark" ? " wctx-dark" : "");
+    onboardEl.innerHTML = '\
+      <div class="wctx-onboard-card">\
+        <h2>Meet your AI assistant</h2>\
+        <p>You can interact with this website through a chat interface. Ask questions, get help, and complete tasks &mdash; all through conversation.</p>\
+        <div class="wctx-onboard-arrow">\
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\
+            <path d="M12 5v14M19 12l-7 7-7-7"/>\
+          </svg>\
+        </div>\
+        <button class="wctx-onboard-btn" id="wctx-onboard-dismiss">Got it</button>\
+        <div class="wctx-onboard-check">\
+          <input type="checkbox" id="wctx-onboard-noshow" checked />\
+          <label for="wctx-onboard-noshow">Don\'t show again</label>\
+        </div>\
+      </div>\
+    ';
+    document.body.appendChild(onboardEl);
+
+    onboardEl.querySelector("#wctx-onboard-dismiss").addEventListener("click", function() {
+      var noShow = onboardEl.querySelector("#wctx-onboard-noshow").checked;
+      if (noShow) {
+        localStorage.setItem("wctx-onboarded", "1");
+      }
+      onboardEl.style.opacity = "0";
+      onboardEl.style.transition = "opacity 0.3s";
+      setTimeout(function() { onboardEl.remove(); }, 300);
+    });
+
+    // Also dismiss on clicking outside the card
+    onboardEl.addEventListener("click", function(e) {
+      if (e.target === onboardEl) {
+        onboardEl.querySelector("#wctx-onboard-dismiss").click();
+      }
+    });
   }
 
   // Rotating placeholder
@@ -1014,6 +1163,153 @@
   .wctx-browse-btn{display:none}\
   .wctx-input-frame{border-radius:14px}\
 }\
+\
+#wctx-overlay.wctx-dark .wctx-shell {\
+  background:rgba(255,255,255,0.06);\
+  border-color:rgba(255,255,255,0.1);\
+  box-shadow:0 8px 32px rgba(0,0,0,0.3), inset 0 0 20px -5px rgba(255,255,255,0.05);\
+  color:rgba(255,255,255,0.9);\
+}\
+#wctx-overlay.wctx-dark .wctx-topbar {\
+  color:rgba(255,255,255,0.5);\
+  border-bottom-color:rgba(255,255,255,0.1);\
+}\
+#wctx-overlay.wctx-dark .wctx-logo { color:rgba(255,255,255,0.9); }\
+#wctx-overlay.wctx-dark .wctx-logo-mark { background:rgba(255,255,255,0.8); }\
+#wctx-overlay.wctx-dark .wctx-logo-mark::before { border-color:rgba(10,10,10,0.7); }\
+#wctx-overlay.wctx-dark .wctx-browse-btn {\
+  color:rgba(255,255,255,0.5);\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+}\
+#wctx-overlay.wctx-dark .wctx-browse-btn:hover { background:rgba(255,255,255,0.15); color:rgba(255,255,255,0.8); border-color:rgba(255,255,255,0.2); }\
+#wctx-overlay.wctx-dark .wctx-idle-prompt { color:rgba(255,255,255,0.35); }\
+#wctx-overlay.wctx-dark .wctx-idle-prompt::before { background:rgba(255,255,255,0.25); }\
+#wctx-overlay.wctx-dark .wctx-input-frame {\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+  box-shadow:0 4px 16px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.06);\
+}\
+#wctx-overlay.wctx-dark .wctx-input-frame:focus-within {\
+  border-color:rgba(255,255,255,0.2);\
+  box-shadow:0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1);\
+}\
+#wctx-overlay.wctx-dark .wctx-input-icon { color:rgba(255,255,255,0.35); }\
+#wctx-overlay.wctx-dark .wctx-chat-input { color:rgba(255,255,255,0.9); }\
+#wctx-overlay.wctx-dark .wctx-chat-input::placeholder { color:rgba(255,255,255,0.25); }\
+#wctx-overlay.wctx-dark .wctx-send-btn { color:rgba(255,255,255,0.5); }\
+#wctx-overlay.wctx-dark .wctx-send-btn:hover { color:rgba(255,255,255,0.8); }\
+#wctx-overlay.wctx-dark .wctx-idle-footnote { color:rgba(255,255,255,0.3); }\
+#wctx-overlay.wctx-dark .wctx-idle-footnote kbd {\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+  color:rgba(255,255,255,0.4);\
+}\
+#wctx-overlay.wctx-dark .wctx-state-chat .wctx-input-zone { border-top-color:rgba(255,255,255,0.08); }\
+#wctx-overlay.wctx-dark .wctx-msg-user {\
+  background:rgba(255,255,255,0.12);\
+  color:rgba(255,255,255,0.95);\
+  border-color:rgba(255,255,255,0.15);\
+}\
+#wctx-overlay.wctx-dark .wctx-msg-assistant {\
+  color:rgba(255,255,255,0.85);\
+  background:rgba(255,255,255,0.06);\
+  border-color:rgba(255,255,255,0.1);\
+}\
+#wctx-overlay.wctx-dark .wctx-msg-assistant code { background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.85); }\
+#wctx-overlay.wctx-dark .wctx-msg-assistant a { color:rgba(255,255,255,0.85); }\
+#wctx-overlay.wctx-dark .wctx-msg-assistant a.wctx-page-link {\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.15);\
+  color:rgba(255,255,255,0.7);\
+}\
+#wctx-overlay.wctx-dark .wctx-msg-assistant a.wctx-page-link:hover { background:rgba(255,255,255,0.15); color:rgba(255,255,255,0.9); border-color:rgba(255,255,255,0.25); }\
+#wctx-overlay.wctx-dark .wctx-sources { color:rgba(255,255,255,0.3); border-top-color:rgba(255,255,255,0.08); }\
+#wctx-overlay.wctx-dark .wctx-typing {\
+  color:rgba(255,255,255,0.4);\
+  background:rgba(255,255,255,0.06);\
+  border-color:rgba(255,255,255,0.1);\
+}\
+#wctx-overlay.wctx-dark .wctx-typing::before { background:rgba(255,255,255,0.4); }\
+#wctx-overlay.wctx-dark .wctx-owner-panel {\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+  box-shadow:0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);\
+}\
+#wctx-overlay.wctx-dark .wctx-owner-header { color:rgba(255,255,255,0.35); }\
+#wctx-overlay.wctx-dark .wctx-owner-action { color:rgba(255,255,255,0.7); }\
+#wctx-overlay.wctx-dark .wctx-owner-action:hover { background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.9); }\
+#wctx-overlay.wctx-dark .wctx-owner-action svg { color:rgba(255,255,255,0.4); }\
+\
+.wctx-onboard-overlay {\
+  position:fixed; inset:0; z-index:1000001;\
+  background:rgba(0,0,0,0.3);\
+  backdrop-filter:blur(4px);\
+  -webkit-backdrop-filter:blur(4px);\
+  display:flex; align-items:center; justify-content:center;\
+  animation:wctx-fadeIn 0.4s ease;\
+}\
+@keyframes wctx-fadeIn { from{opacity:0} to{opacity:1} }\
+.wctx-onboard-card {\
+  font-family:"Archivo",-apple-system,sans-serif;\
+  max-width:400px; width:calc(100% - 32px);\
+  background:rgba(255,255,255,0.4);\
+  backdrop-filter:blur(16px) saturate(1.3);\
+  -webkit-backdrop-filter:blur(16px) saturate(1.3);\
+  border:1px solid rgba(255,255,255,0.35);\
+  border-radius:24px;\
+  padding:36px 32px 28px;\
+  box-shadow:0 12px 48px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.5);\
+  text-align:center;\
+  animation:wctx-slideUp 0.5s cubic-bezier(0.4,0,0.2,1);\
+}\
+@keyframes wctx-slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }\
+.wctx-onboard-card h2 {\
+  margin:0 0 12px; font-size:22px; font-weight:700;\
+  color:rgba(10,10,10,0.85); letter-spacing:-0.02em;\
+}\
+.wctx-onboard-card p {\
+  margin:0 0 24px; font-size:14px; line-height:1.6;\
+  color:rgba(10,10,10,0.6);\
+}\
+.wctx-onboard-arrow {\
+  display:flex; justify-content:center; margin-bottom:20px;\
+  animation:wctx-bounce 1.5s ease-in-out infinite;\
+}\
+@keyframes wctx-bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(6px)} }\
+.wctx-onboard-arrow svg { color:rgba(10,10,10,0.4); }\
+.wctx-onboard-btn {\
+  font-family:"Archivo",sans-serif;\
+  font-size:14px; font-weight:600;\
+  color:rgba(255,255,255,0.95);\
+  background:rgba(10,10,10,0.75);\
+  border:none; border-radius:14px;\
+  padding:14px 32px; cursor:pointer;\
+  transition:all 0.2s;\
+}\
+.wctx-onboard-btn:hover { background:rgba(10,10,10,0.9); }\
+.wctx-onboard-check {\
+  display:flex; align-items:center; justify-content:center;\
+  gap:8px; margin-top:16px;\
+  font-size:12px; color:rgba(10,10,10,0.4);\
+}\
+.wctx-onboard-check input { margin:0; cursor:pointer; }\
+.wctx-onboard-check label { cursor:pointer; }\
+\
+.wctx-dark .wctx-onboard-card {\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+  box-shadow:0 12px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);\
+}\
+.wctx-dark .wctx-onboard-card h2 { color:rgba(255,255,255,0.9); }\
+.wctx-dark .wctx-onboard-card p { color:rgba(255,255,255,0.5); }\
+.wctx-dark .wctx-onboard-arrow svg { color:rgba(255,255,255,0.4); }\
+.wctx-dark .wctx-onboard-btn {\
+  background:rgba(255,255,255,0.15);\
+  color:rgba(255,255,255,0.9);\
+}\
+.wctx-dark .wctx-onboard-btn:hover { background:rgba(255,255,255,0.25); }\
+.wctx-dark .wctx-onboard-check { color:rgba(255,255,255,0.4); }\
 </style>\
 \
 <div class="wctx-shell">\

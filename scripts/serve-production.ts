@@ -116,6 +116,7 @@ app.use(express.static(resolve(__dirname, "../public")));
 const llmProvider = process.env.OPENROUTER_API_KEY ? "openrouter" : "anthropic";
 console.log(`[llm] Using ${llmProvider}${llmProvider === "openrouter" ? " (DeepSeek V3)" : ""}`);
 
+const siteDomain = new URL(url).hostname;
 const chat = new WebsiteChat(provider, store, context, {
   llmProvider: llmProvider as any,
   openRouter: process.env.OPENROUTER_API_KEY ? {
@@ -125,6 +126,7 @@ const chat = new WebsiteChat(provider, store, context, {
   } : undefined,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6-20250514",
+  systemPromptExtra: `This assistant is deployed on ${siteDomain}. Never reference or provide information about any other website or domain.`,
 });
 
 if (startupContextNotes.length > 0) {
