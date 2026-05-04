@@ -480,44 +480,82 @@
   }
 
   function openFullChat() {
+    // FLIP: measure bar position, then animate shell FROM bar TO full
+    var barRect = fab.getBoundingClientRect();
+    var barCX = barRect.left + barRect.width / 2;
+    var barCY = barRect.top + barRect.height / 2;
+
     overlay.style.display = "";
-    // Animate in: start scaled down from bar position, expand to full
-    var shell = els.shell;
-    shell.style.transition = "none";
-    shell.style.opacity = "0";
-    shell.style.transform = "translateY(40px) scale(0.95)";
-    shell.offsetHeight; // force reflow
-    shell.style.transition = "opacity 0.35s cubic-bezier(0.16,1,0.3,1), transform 0.4s cubic-bezier(0.16,1,0.3,1)";
-    shell.style.opacity = "1";
-    shell.style.transform = "translateY(0) scale(1)";
     fab.style.display = "none";
+    var shell = els.shell;
+
+    // Measure shell's final position
+    shell.style.transition = "none";
+    shell.style.transform = "none";
+    shell.style.opacity = "1";
+    var shellRect = shell.getBoundingClientRect();
+    var shellCX = shellRect.left + shellRect.width / 2;
+    var shellCY = shellRect.top + shellRect.height / 2;
+
+    // Calculate transform to make shell look like it's at the bar position
+    var scaleX = barRect.width / shellRect.width;
+    var scaleY = barRect.height / shellRect.height;
+    var dx = barCX - shellCX;
+    var dy = barCY - shellCY;
+
+    // Set initial state (at bar position)
+    shell.style.transform = "translate(" + dx + "px, " + dy + "px) scale(" + scaleX + ", " + scaleY + ")";
+    shell.style.borderRadius = "24px";
+    shell.style.opacity = "0.6";
+    shell.offsetHeight; // force reflow
+
+    // Animate to final position
+    shell.style.transition = "transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease, border-radius 0.4s ease";
+    shell.style.transform = "translate(0,0) scale(1,1)";
+    shell.style.opacity = "1";
+    shell.style.borderRadius = "";
+
     document.body.style.overflow = "hidden";
-    setTimeout(function() { els.input.focus(); }, 100);
+    setTimeout(function() {
+      shell.style.transition = "";
+      shell.style.transform = "";
+      els.input.focus();
+    }, 500);
   }
 
   function minimizeToBar() {
-    // Animate: compress shell down into the pill bar position
+    // FLIP: animate shell TO bar position, then show bar
     var shell = els.shell;
-    // Calculate where the bar will be (bottom center)
-    var targetY = window.innerHeight - 60;
     var shellRect = shell.getBoundingClientRect();
-    var deltaY = targetY - (shellRect.top + shellRect.height / 2);
+    var shellCX = shellRect.left + shellRect.width / 2;
+    var shellCY = shellRect.top + shellRect.height / 2;
 
-    shell.style.transition = "opacity 0.3s cubic-bezier(0.4,0,1,1), transform 0.35s cubic-bezier(0.4,0,1,1), border-radius 0.35s ease";
-    shell.style.transform = "translateY(" + (deltaY * 0.4) + "px) scaleY(0.15) scaleX(0.4)";
-    shell.style.opacity = "0.3";
-    shell.style.borderRadius = "40px";
+    // Where the bar will be
+    var barW = Math.min(520, window.innerWidth - 32);
+    var barH = 52;
+    var barCX = window.innerWidth / 2;
+    var barCY = window.innerHeight - 26 - barH / 2;
+
+    var scaleX = barW / shellRect.width;
+    var scaleY = barH / shellRect.height;
+    var dx = barCX - shellCX;
+    var dy = barCY - shellCY;
+
+    shell.style.transition = "transform 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.35s ease, border-radius 0.35s ease";
+    shell.style.transform = "translate(" + dx + "px, " + dy + "px) scale(" + scaleX + ", " + scaleY + ")";
+    shell.style.opacity = "0.4";
+    shell.style.borderRadius = "24px";
 
     setTimeout(function() {
       overlay.style.display = "none";
       shell.style.transition = "none";
-      shell.style.opacity = "";
       shell.style.transform = "";
+      shell.style.opacity = "";
       shell.style.borderRadius = "";
       fab.style.display = "block";
       document.body.style.overflow = "";
       syncBarMessages();
-    }, 350);
+    }, 420);
   }
 
   els.browse.addEventListener("click", minimizeToBar);
@@ -618,6 +656,53 @@
       }
     });
   }
+
+  // --- Global keyboard capture ---
+  // When no input/textarea is focused, typing goes to the chat widget
+  document.addEventListener("keydown", function(e) {
+    // Skip modifier keys, navigation, and function keys
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "Tab" || e.key === "Escape" || e.key === "Enter") return;
+    if (e.key.startsWith("Arrow") || e.key.startsWith("F") && e.key.length <= 3) return;
+    if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
+    if (e.key === "Backspace" || e.key === "Delete") return;
+
+    // Check if an input element is focused
+    var active = document.activeElement;
+    if (!active || active === document.body || active === document.documentElement) {
+      // No input focused — redirect to our chat input
+      var target;
+      if (overlay.style.display !== "none") {
+        target = els.input;
+      } else if (fab.style.display !== "none") {
+        target = barInput;
+        barWrap.classList.add("pinned");
+      } else {
+        return;
+      }
+
+      if (target && document.activeElement !== target) {
+        target.focus();
+        // The keydown event will now naturally go to the focused input
+      }
+      return;
+    }
+
+    var tag = active.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || active.isContentEditable) {
+      return; // already typing into a form field
+    }
+
+    // Focused on a non-input element (button, link, div, etc.) — redirect
+    var target2;
+    if (overlay.style.display !== "none") {
+      target2 = els.input;
+    } else if (fab.style.display !== "none") {
+      target2 = barInput;
+      barWrap.classList.add("pinned");
+    }
+    if (target2) target2.focus();
+  });
 
   // Rotating placeholder
   var placeholders = [
