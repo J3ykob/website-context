@@ -192,7 +192,8 @@
   box-shadow:0 12px 48px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.5);\
 }\
 #wctx-fab .wctx-bar-messages {\
-  flex:1;\
+  display:flex;\
+  flex-direction:column;\
   overflow-y:auto;\
   padding:0;\
   max-height:0;\
@@ -202,17 +203,34 @@
 #wctx-fab .wctx-bar-wrap:hover .wctx-bar-messages,\
 #wctx-fab .wctx-bar-wrap.pinned .wctx-bar-messages {\
   max-height:300px;\
-  padding:14px 18px;\
+  padding:12px 14px;\
   opacity:1;\
 }\
-#wctx-fab .wctx-bar-msg {\
+#wctx-fab .wctx-bar-bubble {\
   font-family:"Archivo",-apple-system,sans-serif;\
-  font-size:13px; line-height:1.5; margin-bottom:8px;\
-  color:rgba(10,10,10,0.7);\
+  font-size:12px; line-height:1.5; margin-bottom:6px;\
+  padding:6px 10px;\
+  border-radius:10px;\
+  max-width:85%;\
+  animation:wctx-bubbleIn 0.25s ease-out both;\
 }\
-#wctx-fab .wctx-bar-msg:last-child { margin-bottom:0; }\
-#wctx-fab .wctx-bar-msg.user {\
-  text-align:right; color:rgba(10,10,10,0.5); font-weight:500;\
+@keyframes wctx-bubbleIn {\
+  from { opacity:0; transform:translateY(6px) scale(0.95); }\
+  to { opacity:1; transform:translateY(0) scale(1); }\
+}\
+#wctx-fab .wctx-bar-bubble:last-child { margin-bottom:0; }\
+#wctx-fab .wctx-bar-bubble.user {\
+  align-self:flex-end; margin-left:auto;\
+  background:rgba(10,10,10,0.55);\
+  color:rgba(255,255,255,0.9);\
+  border-bottom-right-radius:4px;\
+}\
+#wctx-fab .wctx-bar-bubble.assistant {\
+  align-self:flex-start; margin-right:auto;\
+  background:rgba(255,255,255,0.3);\
+  color:rgba(10,10,10,0.75);\
+  border:1px solid rgba(0,0,0,0.04);\
+  border-bottom-left-radius:4px;\
 }\
 #wctx-fab .wctx-bar {\
   display:flex; align-items:center; gap:10px;\
@@ -256,8 +274,15 @@
 #wctx-fab.wctx-dark .wctx-bar-wrap.pinned {\
   box-shadow:0 12px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);\
 }\
-#wctx-fab.wctx-dark .wctx-bar-msg { color:rgba(255,255,255,0.7); }\
-#wctx-fab.wctx-dark .wctx-bar-msg.user { color:rgba(255,255,255,0.5); }\
+#wctx-fab.wctx-dark .wctx-bar-bubble.user {\
+  background:rgba(255,255,255,0.15);\
+  color:rgba(255,255,255,0.85);\
+}\
+#wctx-fab.wctx-dark .wctx-bar-bubble.assistant {\
+  background:rgba(255,255,255,0.06);\
+  color:rgba(255,255,255,0.7);\
+  border-color:rgba(255,255,255,0.08);\
+}\
 #wctx-fab.wctx-dark .wctx-bar-input { color:rgba(255,255,255,0.9); }\
 #wctx-fab.wctx-dark .wctx-bar-input::placeholder { color:rgba(255,255,255,0.3); }\
 #wctx-fab.wctx-dark .wctx-bar-send {\
@@ -372,11 +397,15 @@
   function syncBarMessages() {
     barMsgs.innerHTML = "";
     var recent = messages.slice(-4);
-    recent.forEach(function(m) {
-      var div = document.createElement("div");
-      div.className = "wctx-bar-msg" + (m.role === "user" ? " user" : "");
-      div.textContent = m.content.slice(0, 120) + (m.content.length > 120 ? "…" : "");
-      barMsgs.appendChild(div);
+    recent.forEach(function(m, i) {
+      var bubble = document.createElement("div");
+      bubble.className = "wctx-bar-bubble" + (m.role === "user" ? " user" : " assistant");
+      bubble.style.animationDelay = (i * 60) + "ms";
+      var text = m.content.slice(0, 100) + (m.content.length > 100 ? "…" : "");
+      // Simple markdown for bold
+      text = text.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+      bubble.innerHTML = text;
+      barMsgs.appendChild(bubble);
     });
     barMsgs.scrollTop = barMsgs.scrollHeight;
   }
@@ -452,16 +481,35 @@
 
   function openFullChat() {
     overlay.style.display = "";
+    // Animate in: start scaled down from bar position, expand to full
+    var shell = els.shell;
+    shell.style.transition = "none";
+    shell.style.opacity = "0";
+    shell.style.transform = "translateY(40px) scale(0.95)";
+    shell.offsetHeight; // force reflow
+    shell.style.transition = "opacity 0.35s cubic-bezier(0.16,1,0.3,1), transform 0.4s cubic-bezier(0.16,1,0.3,1)";
+    shell.style.opacity = "1";
+    shell.style.transform = "translateY(0) scale(1)";
     fab.style.display = "none";
     document.body.style.overflow = "hidden";
-    els.input.focus();
+    setTimeout(function() { els.input.focus(); }, 100);
   }
 
   function minimizeToBar() {
-    overlay.style.display = "none";
-    fab.style.display = "block";
-    document.body.style.overflow = "";
-    syncBarMessages();
+    // Animate out: shrink toward bar
+    var shell = els.shell;
+    shell.style.transition = "opacity 0.25s ease, transform 0.3s ease";
+    shell.style.opacity = "0";
+    shell.style.transform = "translateY(30px) scale(0.97)";
+    setTimeout(function() {
+      overlay.style.display = "none";
+      shell.style.transition = "none";
+      shell.style.opacity = "";
+      shell.style.transform = "";
+      fab.style.display = "block";
+      document.body.style.overflow = "";
+      syncBarMessages();
+    }, 300);
   }
 
   els.browse.addEventListener("click", minimizeToBar);
