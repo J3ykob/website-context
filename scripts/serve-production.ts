@@ -61,18 +61,6 @@ console.log(`[website-context] Starting production server`);
 console.log(`  Site: ${url}`);
 console.log(`  Collection: ${collection}`);
 
-// Step 1: Crawl
-console.log(`[crawl] Scraping ${url} (max ${maxPages} pages)...`);
-const crawlResult = await crawlSite(url, { maxPages, maxDepth: 3, rateLimit: 800 });
-await closeBrowser();
-console.log(`[crawl] ${crawlResult.stats.successPages} pages scraped`);
-
-// Step 2: Context
-const context = await buildContext(crawlResult);
-await closeBrowser();
-console.log(`[context] ${context.chunks.length} chunks built`);
-
-// Step 3: Embed
 const provider = new BGEEmbeddingProvider({
   host: process.env.BGE_HOST,
   port: process.env.BGE_PORT ? parseInt(process.env.BGE_PORT) : undefined,
@@ -83,8 +71,38 @@ const store = new QdrantVectorStore({
   collection,
   createIfMissing: true,
 });
-const embedResult = await embedChunks(context.chunks, provider, store);
-console.log(`[embed] ${embedResult.embeddedChunks} chunks embedded`);
+
+// Check if context is already cached (Qdrant collection exists with data)
+const cachedCount = await store.count();
+const contextCachePath = resolve(__dirname, `../data/${process.env.TENANT_ID || "default"}/context-cache.json`);
+let context: Awaited<ReturnType<typeof buildContext>>;
+
+if (cachedCount > 0 && existsSync(contextCachePath) && !process.env.FORCE_RESCRAPE) {
+  // Fast start — load from cache
+  console.log(`[cache] Found ${cachedCount} vectors in Qdrant + cached context. Skipping scrape.`);
+  const cached = JSON.parse(await readFile(contextCachePath, "utf-8"));
+  context = cached;
+  console.log(`[cache] Loaded ${context.pages.length} pages, ${context.chunks.length} chunks from cache`);
+} else {
+  // First deploy or forced rescrape — do full scrape + embed
+  console.log(`[crawl] ${cachedCount > 0 ? "FORCE_RESCRAPE set — re-scraping" : "First deploy — scraping"} ${url}...`);
+  const crawlResult = await crawlSite(url, { maxPages, maxDepth: 3, rateLimit: 800 });
+  await closeBrowser();
+  console.log(`[crawl] ${crawlResult.stats.successPages} pages scraped`);
+
+  context = await buildContext(crawlResult);
+  await closeBrowser();
+  console.log(`[context] ${context.chunks.length} chunks built`);
+
+  const embedResult = await embedChunks(context.chunks, provider, store);
+  console.log(`[embed] ${embedResult.embeddedChunks} chunks embedded`);
+
+  // Cache context to disk for fast restarts
+  const cacheDir = resolve(__dirname, `../data/${process.env.TENANT_ID || "default"}`);
+  if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
+  await writeFile(contextCachePath, JSON.stringify(context));
+  console.log(`[cache] Context cached to disk`);
+}
 
 // Step 4: Load flows
 const tenantId = process.env.TENANT_ID || context.tenantId || "default";
@@ -185,6 +203,32 @@ app.post("/api/chat", async (req, res) => {
 // Health
 app.get("/api/health", (_, res) => {
   res.json({ status: "ok", site: url, pages: context.pages.length, chunks: context.chunks.length, collection, activeFlows: activeFlows.length });
+});
+
+// Rescrape — owner triggers from dashboard
+app.post("/api/rescrape", async (_, res) => {
+  try {
+    console.log("[rescrape] Starting...");
+    const crawlResult = await crawlSite(url!, { maxPages, maxDepth: 3, rateLimit: 800 });
+    await closeBrowser();
+    const newContext = await buildContext(crawlResult);
+    await closeBrowser();
+    // Re-embed
+    const embedResult = await embedChunks(newContext.chunks, provider, store);
+    // Update in-memory context
+    context.pages = newContext.pages;
+    context.chunks = newContext.chunks;
+    context.siteMap = newContext.siteMap;
+    // Cache
+    const cacheDir = resolve(__dirname, "../data/" + tenantId);
+    if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
+    await writeFile(resolve(cacheDir, "context-cache.json"), JSON.stringify(context));
+    console.log("[rescrape] Done: " + crawlResult.stats.successPages + " pages, " + newContext.chunks.length + " chunks");
+    res.json({ success: true, pages: crawlResult.stats.successPages, chunks: newContext.chunks.length });
+  } catch (error: any) {
+    console.error("[rescrape error]", error.message);
+    res.status(500).json({ error: "Rescrape failed" });
+  }
 });
 
 // Flows endpoints (same as serve.ts)

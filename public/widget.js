@@ -496,20 +496,28 @@
   }
 
   function minimizeToBar() {
-    // Animate out: shrink toward bar
+    // Animate: compress shell down into the pill bar position
     var shell = els.shell;
-    shell.style.transition = "opacity 0.25s ease, transform 0.3s ease";
-    shell.style.opacity = "0";
-    shell.style.transform = "translateY(30px) scale(0.97)";
+    // Calculate where the bar will be (bottom center)
+    var targetY = window.innerHeight - 60;
+    var shellRect = shell.getBoundingClientRect();
+    var deltaY = targetY - (shellRect.top + shellRect.height / 2);
+
+    shell.style.transition = "opacity 0.3s cubic-bezier(0.4,0,1,1), transform 0.35s cubic-bezier(0.4,0,1,1), border-radius 0.35s ease";
+    shell.style.transform = "translateY(" + (deltaY * 0.4) + "px) scaleY(0.15) scaleX(0.4)";
+    shell.style.opacity = "0.3";
+    shell.style.borderRadius = "40px";
+
     setTimeout(function() {
       overlay.style.display = "none";
       shell.style.transition = "none";
       shell.style.opacity = "";
       shell.style.transform = "";
+      shell.style.borderRadius = "";
       fab.style.display = "block";
       document.body.style.overflow = "";
       syncBarMessages();
-    }, 300);
+    }, 350);
   }
 
   els.browse.addEventListener("click", minimizeToBar);
