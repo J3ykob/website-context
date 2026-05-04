@@ -72,36 +72,26 @@ const store = new QdrantVectorStore({
   createIfMissing: true,
 });
 
-// Check if context is already cached (Qdrant collection exists with data)
+// Always scrape to build the context object (pages, siteMap needed for system prompt)
+// BUT skip embedding if Qdrant already has vectors
 const cachedCount = await store.count();
-const contextCachePath = resolve(__dirname, `../data/${process.env.TENANT_ID || "default"}/context-cache.json`);
 let context: Awaited<ReturnType<typeof buildContext>>;
 
-if (cachedCount > 0 && existsSync(contextCachePath) && !process.env.FORCE_RESCRAPE) {
-  // Fast start — load from cache
-  console.log(`[cache] Found ${cachedCount} vectors in Qdrant + cached context. Skipping scrape.`);
-  const cached = JSON.parse(await readFile(contextCachePath, "utf-8"));
-  context = cached;
-  console.log(`[cache] Loaded ${context.pages.length} pages, ${context.chunks.length} chunks from cache`);
+console.log(`[crawl] Scraping ${url} (max ${maxPages} pages)...`);
+const crawlResult = await crawlSite(url, { maxPages, maxDepth: 3, rateLimit: 800 });
+await closeBrowser();
+console.log(`[crawl] ${crawlResult.stats.successPages} pages scraped`);
+
+context = await buildContext(crawlResult);
+await closeBrowser();
+console.log(`[context] ${context.chunks.length} chunks built`);
+
+if (cachedCount > 0 && !process.env.FORCE_RESCRAPE) {
+  console.log(`[embed] Qdrant already has ${cachedCount} vectors — skipping embedding`);
 } else {
-  // First deploy or forced rescrape — do full scrape + embed
-  console.log(`[crawl] ${cachedCount > 0 ? "FORCE_RESCRAPE set — re-scraping" : "First deploy — scraping"} ${url}...`);
-  const crawlResult = await crawlSite(url, { maxPages, maxDepth: 3, rateLimit: 800 });
-  await closeBrowser();
-  console.log(`[crawl] ${crawlResult.stats.successPages} pages scraped`);
-
-  context = await buildContext(crawlResult);
-  await closeBrowser();
-  console.log(`[context] ${context.chunks.length} chunks built`);
-
+  console.log(`[embed] ${cachedCount > 0 ? "FORCE_RESCRAPE — re-embedding" : "First deploy — embedding"}...`);
   const embedResult = await embedChunks(context.chunks, provider, store);
   console.log(`[embed] ${embedResult.embeddedChunks} chunks embedded`);
-
-  // Cache context to disk for fast restarts
-  const cacheDir = resolve(__dirname, `../data/${process.env.TENANT_ID || "default"}`);
-  if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
-  await writeFile(contextCachePath, JSON.stringify(context));
-  console.log(`[cache] Context cached to disk`);
 }
 
 // Step 4: Load flows
