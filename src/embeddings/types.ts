@@ -29,6 +29,12 @@ export interface SearchResult {
 export interface VectorStore {
   upsert(entries: VectorEntry[]): Promise<void>;
   search(query: number[], topK?: number, filter?: Record<string, unknown>): Promise<SearchResult[]>;
+  hybridSearch?(
+    query: number[],
+    queryText: string,
+    topK?: number,
+    filter?: Record<string, unknown>
+  ): Promise<SearchResult[]>;
   delete(ids: string[]): Promise<void>;
   count(): Promise<number>;
 }

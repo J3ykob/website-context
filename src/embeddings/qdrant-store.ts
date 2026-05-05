@@ -51,7 +51,39 @@ export class QdrantVectorStore implements VectorStore {
       }
     }
 
+    await this.createTextIndex();
     this.initialized = true;
+  }
+
+  /**
+   * Creates a full-text index on the `content` payload field for BM25-style
+   * keyword search. Idempotent — Qdrant ignores the call if the index exists.
+   */
+  private async createTextIndex(): Promise<void> {
+    const response = await fetch(
+      `${this.baseUrl}/collections/${this.collection}/index`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          field_name: "content",
+          field_schema: {
+            type: "text",
+            tokenizer: "word",
+            min_token_len: 2,
+            max_token_len: 30,
+            lowercase: true,
+          },
+        }),
+      }
+    );
+
+    // 400 can mean "index already exists" — that's fine
+    if (!response.ok && response.status !== 400) {
+      console.warn(
+        `Warning: could not create text index on "content": ${await response.text()}`
+      );
+    }
   }
 
   async upsert(entries: VectorEntry[]): Promise<void> {
@@ -132,6 +164,167 @@ export class QdrantVectorStore implements VectorStore {
       content: (point.payload.content as string) || "",
       metadata: point.payload,
       score: point.score,
+    }));
+  }
+
+  /**
+   * Hybrid search combining dense vector similarity with full-text keyword
+   * matching using Reciprocal Rank Fusion (RRF).
+   *
+   * Follows Anthropic's contextual retrieval recommendation of combining
+   * dense embeddings with BM25-style keyword search.
+   */
+  async hybridSearch(
+    query: number[],
+    queryText: string,
+    topK: number = 5,
+    filter?: Record<string, unknown>
+  ): Promise<SearchResult[]> {
+    await this.ensureCollection(query.length);
+
+    // Number of candidates to fetch from each source before RRF fusion
+    const prefetchLimit = Math.max(topK * 5, 25);
+
+    // Build optional Qdrant filter clause
+    const qdrantFilter =
+      filter && Object.keys(filter).length > 0
+        ? {
+            must: Object.entries(filter).map(([key, value]) => ({
+              key,
+              match: { value },
+            })),
+          }
+        : undefined;
+
+    // --- 1. Dense vector search ---
+    const denseBody: Record<string, unknown> = {
+      vector: query,
+      limit: prefetchLimit,
+      with_payload: true,
+    };
+    if (qdrantFilter) denseBody.filter = qdrantFilter;
+
+    const densePromise = fetch(
+      `${this.baseUrl}/collections/${this.collection}/points/search`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(denseBody),
+      }
+    );
+
+    // --- 2. Full-text keyword search ---
+    // Tokenize query into individual words matching the index settings
+    const keywords = queryText
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length >= 2 && w.length <= 30);
+
+    const textFilter: Record<string, unknown> = {
+      must: [
+        ...(qdrantFilter?.must ?? []),
+        // Match any keyword (OR semantics) for broad recall
+        {
+          should: keywords.map((word) => ({
+            key: "content",
+            match: { text: word },
+          })),
+        },
+      ],
+    };
+
+    const scrollBody: Record<string, unknown> = {
+      filter: textFilter,
+      limit: prefetchLimit,
+      with_payload: true,
+    };
+
+    const textPromise = fetch(
+      `${this.baseUrl}/collections/${this.collection}/points/scroll`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(scrollBody),
+      }
+    );
+
+    // Run both searches in parallel
+    const [denseResponse, textResponse] = await Promise.all([
+      densePromise,
+      textPromise,
+    ]);
+
+    // --- Parse dense results ---
+    type QdrantPoint = {
+      id: string;
+      score?: number;
+      payload: Record<string, unknown>;
+    };
+
+    let denseResults: QdrantPoint[] = [];
+    if (denseResponse.ok) {
+      const denseData = (await denseResponse.json()) as {
+        result: QdrantPoint[];
+      };
+      denseResults = denseData.result;
+    }
+
+    // --- Parse text/scroll results ---
+    let textResults: QdrantPoint[] = [];
+    if (textResponse.ok) {
+      const textData = (await textResponse.json()) as {
+        result: { points: QdrantPoint[] };
+      };
+      textResults = textData.result.points ?? [];
+    }
+
+    // --- 3. Reciprocal Rank Fusion ---
+    const RRF_K = 60;
+    const SEMANTIC_WEIGHT = 0.7;
+    const KEYWORD_WEIGHT = 0.3;
+
+    const fusedScores = new Map<
+      string,
+      { point: QdrantPoint; score: number }
+    >();
+
+    // Score dense results by rank
+    for (let rank = 0; rank < denseResults.length; rank++) {
+      const point = denseResults[rank];
+      const pointId = String(point.id);
+      const rrfScore = SEMANTIC_WEIGHT * (1 / (RRF_K + rank + 1));
+      const existing = fusedScores.get(pointId);
+      if (existing) {
+        existing.score += rrfScore;
+      } else {
+        fusedScores.set(pointId, { point, score: rrfScore });
+      }
+    }
+
+    // Score text results by rank
+    for (let rank = 0; rank < textResults.length; rank++) {
+      const point = textResults[rank];
+      const pointId = String(point.id);
+      const rrfScore = KEYWORD_WEIGHT * (1 / (RRF_K + rank + 1));
+      const existing = fusedScores.get(pointId);
+      if (existing) {
+        existing.score += rrfScore;
+      } else {
+        fusedScores.set(pointId, { point, score: rrfScore });
+      }
+    }
+
+    // Sort by fused score descending, take topK
+    const ranked = [...fusedScores.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK);
+
+    return ranked.map(({ point, score }) => ({
+      id:
+        (point.payload._original_id as string) || String(point.id),
+      content: (point.payload.content as string) || "",
+      metadata: point.payload,
+      score,
     }));
   }
 

@@ -92,7 +92,12 @@ export async function searchContext(
   const { topK = 5, filter } = options;
 
   const [queryEmbedding] = await provider.embed([query]);
-  const results = await store.search(queryEmbedding, topK, filter);
+
+  // Use hybrid search (dense + keyword via RRF) when the store supports it,
+  // falling back to pure dense vector search otherwise.
+  const results = store.hybridSearch
+    ? await store.hybridSearch(queryEmbedding, query, topK, filter)
+    : await store.search(queryEmbedding, topK, filter);
 
   return results.map((r) => ({
     content: r.content,

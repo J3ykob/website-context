@@ -586,7 +586,9 @@ ${contextBlocks}
 - Be concise and helpful
 - When a skill is relevant, proactively offer it
 - If no matching skill/flow exists for a user's request, DO NOT output any flow-related text, IDs, or function names. Simply tell the user how to accomplish their goal manually (e.g., provide a phone number or link).
-- NEVER output text like 'flow_start_...' or any internal identifiers in your response.`
+- NEVER output text like 'flow_start_...' or any internal identifiers in your response.
+- IMPORTANT: Your context may contain PARTIAL information. When listing items (menu, services, products), the context might only show SOME of the items. If the user asks to "list all" or "show everything", present what you have from the context AND explicitly say "these are the items I found in my context — the full list may include more items. I recommend checking the website directly for the complete list." NEVER claim a partial list is complete.
+- When answering about specific items, always check ALL provided context chunks — information may be spread across multiple sources.`
     + (recentlyCompletedFlowId ? `\n\n## IMPORTANT: Flow "${recentlyCompletedFlowId}" was JUST completed in this conversation. Do NOT invoke it again unless the user explicitly asks to submit a NEW one.` : "");
 
     if (this.systemPromptExtra) {
