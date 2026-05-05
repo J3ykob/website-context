@@ -147,6 +147,92 @@ app.get("/widget.js", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/widget.js"));
 });
 
+// Demo page — standalone chat for a tenant (no embed needed)
+app.get("/demo/:tenantId", (req, res) => {
+  const tenant = getTenant(req.params.tenantId);
+  if (!tenant || tenant.status !== "active") {
+    res.status(404).send("<!DOCTYPE html><html><body style='font-family:Archivo,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#57534e'><p>This bot is not ready yet. Check back soon.</p></body></html>");
+    return;
+  }
+
+  const protocol = req.protocol || "https";
+  const host = req.get("host") || "website-context-dwoj.onrender.com";
+  const baseUrl = process.env.BASE_URL || protocol + "://" + host;
+  const brand = tenant.brandName || tenant.domain;
+
+  res.send('<!DOCTYPE html>\
+<html lang="en">\
+<head>\
+<meta charset="UTF-8">\
+<meta name="viewport" content="width=device-width, initial-scale=1.0">\
+<title>' + brand + ' — AI Assistant</title>\
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">\
+<style>\
+* { margin:0; padding:0; box-sizing:border-box; }\
+body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; display:flex; flex-direction:column; }\
+.demo-header {\
+  padding:16px 28px; display:flex; align-items:center; justify-content:space-between;\
+  border-bottom:1px solid #e7e5e4; background:#fff;\
+}\
+.demo-brand { display:flex; align-items:center; gap:12px; }\
+.demo-mark { width:28px; height:28px; background:#ea580c; border-radius:8px; position:relative; }\
+.demo-mark::before { content:""; position:absolute; inset:5px; border:2px solid #fff; border-radius:4px; }\
+.demo-name { font-size:15px; font-weight:700; color:#1c1917; }\
+.demo-badge { font-size:11px; font-weight:600; color:#ea580c; background:#fff7ed; border:1px solid #fed7aa; padding:4px 12px; border-radius:12px; }\
+.demo-cta {\
+  padding:10px 20px; background:#ea580c; color:#fff; border:none; border-radius:12px;\
+  font-family:inherit; font-size:13px; font-weight:700; cursor:pointer; text-decoration:none;\
+  transition: all 0.2s;\
+}\
+.demo-cta:hover { background:#c2410c; transform:translateY(-1px); }\
+.demo-body { flex:1; position:relative; }\
+.demo-info {\
+  position:fixed; bottom:100px; left:50%; transform:translateX(-50%);\
+  background:#fff; border:1px solid #e7e5e4; border-radius:16px; padding:20px 28px;\
+  box-shadow:0 4px 24px rgba(0,0,0,0.08); z-index:10; text-align:center;\
+  max-width:400px; width:calc(100% - 40px); animation: fadeUp 0.5s ease 1s both;\
+}\
+@keyframes fadeUp { from{opacity:0;transform:translateX(-50%) translateY(10px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }\
+.demo-info h3 { font-family:"DM Serif Display",serif; font-size:20px; margin-bottom:6px; color:#1c1917; }\
+.demo-info p { font-size:14px; color:#57534e; line-height:1.6; margin-bottom:16px; }\
+.demo-info .arrow { font-size:20px; color:#a8a29e; animation:bounce 1.5s ease infinite; }\
+@keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(6px)} }\
+.demo-dismiss { font-size:12px; color:#a8a29e; cursor:pointer; border:none; background:none; font-family:inherit; }\
+.demo-dismiss:hover { color:#1c1917; }\
+@media(max-width:600px) { .demo-cta { display:none; } }\
+</style>\
+</head>\
+<body>\
+<div class="demo-header">\
+  <div class="demo-brand">\
+    <span class="demo-mark"></span>\
+    <span class="demo-name">' + brand + '</span>\
+    <span class="demo-badge">AI Assistant</span>\
+  </div>\
+  <a class="demo-cta" href="/">Get this for your website — free</a>\
+</div>\
+<div class="demo-body">\
+  <div class="demo-info" id="demo-info">\
+    <h3>Try it out!</h3>\
+    <p>This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.</p>\
+    <div class="arrow">↓</div>\
+    <button class="demo-dismiss" onclick="document.getElementById(\'demo-info\').style.display=\'none\'">Dismiss</button>\
+  </div>\
+</div>\
+<script>\
+window.addEventListener("load", function(){\
+  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '"};\
+  window.__wctx=c;\
+  var s=document.createElement("script");\
+  s.src=c.apiHost+"/widget.js";\
+  s.async=true;\
+  document.head.appendChild(s);\
+});\
+</script>\
+</body>\
+</html>');
+});
+
 // Create tenant
 app.post("/api/tenants", (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
