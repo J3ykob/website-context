@@ -528,7 +528,7 @@ export class WebsiteChat {
     const isPrivacyQuery = queryLower.includes("privacy") || queryLower.includes("polityka") || queryLower.includes("policy") || queryLower.includes("rodo") || queryLower.includes("gdpr");
 
     const contextBlocks = chunks
-      .filter((c) => c.score > 0.5)
+      .filter((c) => c.score > 0.005) // RRF scores are small (~0.01-0.03), cosine is larger (~0.3-0.9)
       .filter((c) => (c.metadata.type as string) !== "navigation")
       .filter((c) => {
         // Filter out privacy/policy pages unless the user is asking about privacy
