@@ -262,6 +262,12 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+// Global health check (for Render)
+app.get("/api/health", (_, res) => {
+  const tenants = listTenants();
+  res.json({ status: "ok", tenants: tenants.length, active: tenants.filter(t => t.status === "active").length });
+});
+
 // Health check per tenant
 app.get("/api/health/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
