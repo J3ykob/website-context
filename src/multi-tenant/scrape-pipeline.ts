@@ -1,0 +1,94 @@
+/**
+ * Reusable scrape+embed pipeline for a tenant.
+ * Crawls the site, builds context, embeds into Qdrant, and saves metadata.
+ */
+
+import { existsSync, mkdirSync } from "fs";
+import { writeFile } from "fs/promises";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+import { crawlSite, closeBrowser } from "../scraper/index.js";
+import { buildContext } from "../context/index.js";
+import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
+import { QdrantVectorStore } from "../embeddings/qdrant-store.js";
+import { embedChunks } from "../embeddings/pipeline.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = resolve(__dirname, "../../data");
+
+export interface ScrapePipelineResult {
+  pages: number;
+  chunks: number;
+}
+
+/**
+ * Scrapes a tenant's site, builds context, embeds into Qdrant, and saves metadata.
+ */
+export async function scrapeTenant(
+  tenantId: string,
+  siteUrl: string,
+  maxPages: number
+): Promise<ScrapePipelineResult> {
+  const collection = `wctx_${tenantId}`;
+
+  const provider = new BGEEmbeddingProvider({
+    host: process.env.BGE_HOST,
+    port: process.env.BGE_PORT ? parseInt(process.env.BGE_PORT) : undefined,
+  });
+
+  const store = new QdrantVectorStore({
+    host: process.env.QDRANT_HOST,
+    port: process.env.QDRANT_PORT ? parseInt(process.env.QDRANT_PORT) : undefined,
+    collection,
+    createIfMissing: true,
+  });
+
+  // Crawl site
+  console.log(`[scrape-pipeline] Crawling ${siteUrl} (max ${maxPages} pages) for tenant ${tenantId}`);
+  const crawlResult = await crawlSite(siteUrl, { maxPages, maxDepth: 3, rateLimit: 800 });
+  await closeBrowser();
+
+  const pagesScraped = crawlResult.stats.successPages;
+  console.log(`[scrape-pipeline] ${pagesScraped} pages scraped`);
+
+  // Build context
+  const context = await buildContext(crawlResult);
+  await closeBrowser();
+  console.log(`[scrape-pipeline] ${context.chunks.length} chunks built`);
+
+  // Embed into Qdrant
+  const embedResult = await embedChunks(context.chunks, provider, store);
+  console.log(`[scrape-pipeline] ${embedResult.embeddedChunks} chunks embedded`);
+
+  // Save context metadata (siteMap, flows, page list — NOT chunks)
+  const tenantDir = resolve(DATA_ROOT, tenantId);
+  if (!existsSync(tenantDir)) {
+    mkdirSync(tenantDir, { recursive: true });
+  }
+
+  const contextMeta = {
+    tenantId,
+    siteUrl,
+    siteMap: context.siteMap,
+    flows: context.flows,
+    pages: context.pages.map((p) => ({
+      id: p.id,
+      url: p.url,
+      title: p.title,
+      description: p.description,
+    })),
+    lastScrapedAt: new Date().toISOString(),
+    pagesCount: pagesScraped,
+    chunksCount: embedResult.embeddedChunks,
+  };
+
+  await writeFile(
+    resolve(tenantDir, "context-meta.json"),
+    JSON.stringify(contextMeta, null, 2)
+  );
+
+  return {
+    pages: pagesScraped,
+    chunks: embedResult.embeddedChunks,
+  };
+}
