@@ -155,9 +155,9 @@ app.get("/demo/:tenantId", (req, res) => {
     return;
   }
 
-  const protocol = req.protocol || "https";
+  // Always use HTTPS in production (Render terminates TLS at the proxy)
   const host = req.get("host") || "website-context-dwoj.onrender.com";
-  const baseUrl = process.env.BASE_URL || protocol + "://" + host;
+  const baseUrl = process.env.BASE_URL || "https://" + host;
   const brand = tenant.brandName || tenant.domain;
 
   res.send('<!DOCTYPE html>\
