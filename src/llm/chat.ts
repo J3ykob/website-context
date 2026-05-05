@@ -206,7 +206,7 @@ export class WebsiteChat {
     config: ChatConfig
   ) {
     this.maxTokens = config.maxTokens || 1024;
-    this.topK = config.topK || 5;
+    this.topK = config.topK || 10;
     this.embeddingProvider = embeddingProvider;
     this.store = store;
     this.context = context;
