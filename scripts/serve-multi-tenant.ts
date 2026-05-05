@@ -19,6 +19,14 @@ import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
 import {
+  logConversation,
+  getConversations,
+  getConversationStats,
+  logUnknownQuestion,
+  getUnknownQuestions,
+  clearUnknownQuestions,
+} from "../src/storage/conversation-store.js";
+import {
   runMigrations,
   createTenant,
   getTenant,
@@ -240,20 +248,16 @@ app.post("/api/chat", async (req, res) => {
     console.log(`[chat:${tenantId}] "${(messages[messages.length - 1]?.content || "").slice(0, 60)}"`);
     const response = await chat.chat(messages, sessionKey);
 
-    // Log conversation
-    try {
-      const logDir = resolve(__dirname, `../data/${tenantId}`);
-      if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
-      await appendFile(resolve(logDir, "conversations.jsonl"), JSON.stringify({
-        sessionId: sessionKey,
-        timestamp: new Date().toISOString(),
-        userMessage: messages[messages.length - 1]?.content || "",
-        botResponse: response.message,
-        flowInvoked: response.flowSession?.flowId || null,
-        navigatedTo: response.navigateTo || null,
-        hadToolCall: !!(response.flowSession || response.navigateTo),
-      }) + "\n");
-    } catch { /* ignore logging errors */ }
+    // Log conversation to Qdrant (persists across deploys)
+    logConversation(tenantId, {
+      sessionId: sessionKey,
+      timestamp: new Date().toISOString(),
+      userMessage: messages[messages.length - 1]?.content || "",
+      botResponse: response.message,
+      flowInvoked: response.flowSession?.flowId || null,
+      navigatedTo: response.navigateTo || null,
+      hadToolCall: !!(response.flowSession || response.navigateTo),
+    }).catch(() => {});
 
     res.json(response);
   } catch (error: any) {
@@ -365,78 +369,30 @@ app.get("/dashboard", authMiddleware, (_, res) => {
 // Stats
 app.get("/api/dashboard/stats", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
-  let total = 0, today = 0, flows = 0, gaps = 0;
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-
-  const cp = resolve(__dirname, `../data/${tenantId}/conversations.jsonl`);
-  if (existsSync(cp)) {
-    const content = await readFile(cp, "utf-8");
-    for (const l of content.trim().split("\n").filter(Boolean)) {
-      try {
-        const e = JSON.parse(l);
-        total++;
-        if (new Date(e.timestamp) >= todayStart) today++;
-        if (e.flowInvoked) flows++;
-      } catch { /* skip */ }
-    }
-  }
-
-  const qp = resolve(__dirname, `../data/${tenantId}/unknown_questions.jsonl`);
-  if (existsSync(qp)) {
-    const s = new Set<string>();
-    const content = await readFile(qp, "utf-8");
-    for (const l of content.trim().split("\n").filter(Boolean)) {
-      try {
-        const q = JSON.parse(l).question?.toLowerCase();
-        if (q) s.add(q);
-      } catch { /* skip */ }
-    }
-    gaps = s.size;
-  }
-
-  res.json({
-    totalConversations: total,
-    totalToday: today,
-    questionsAnswered: Math.max(0, total - gaps),
-    gapsFound: gaps,
-    flowsExecuted: flows,
-  });
+  try {
+    const convoStats = await getConversationStats(tenantId);
+    const gaps = await getUnknownQuestions(tenantId);
+    res.json({
+      totalConversations: convoStats.totalConversations,
+      totalToday: convoStats.totalToday,
+      questionsAnswered: Math.max(0, convoStats.totalConversations - gaps.length),
+      gapsFound: gaps.length,
+      flowsExecuted: convoStats.flowsExecuted,
+    });
+  } catch { res.json({ totalConversations: 0, totalToday: 0, questionsAnswered: 0, gapsFound: 0, flowsExecuted: 0 }); }
 });
 
-// Conversations
+// Conversations (from Qdrant — persists across deploys)
 app.get("/api/dashboard/conversations", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-  const fp = resolve(__dirname, `../data/${tenantId}/conversations.jsonl`);
-  if (!existsSync(fp)) { res.json([]); return; }
-
-  const lines = (await readFile(fp, "utf-8")).trim().split("\n").filter(Boolean);
-  res.json(
-    lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
-      .filter(Boolean)
-      .slice(-limit)
-      .reverse()
-  );
+  res.json(await getConversations(tenantId, limit));
 });
 
-// Unknown questions
+// Unknown questions (from Qdrant)
 app.get("/api/dashboard/unknown-questions", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
-  const fp = resolve(__dirname, `../data/${tenantId}/unknown_questions.jsonl`);
-  if (!existsSync(fp)) { res.json([]); return; }
-
-  const lines = (await readFile(fp, "utf-8")).trim().split("\n").filter(Boolean);
-  const seen = new Set<string>();
-  res.json(
-    lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
-      .filter((q: any) => {
-        if (!q) return false;
-        const k = q.question?.toLowerCase();
-        if (!k || seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      })
-  );
+  res.json(await getUnknownQuestions(tenantId));
 });
 
 // Context notes
