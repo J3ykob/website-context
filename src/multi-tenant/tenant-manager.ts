@@ -125,6 +125,11 @@ export class TenantManager {
   /**
    * Evict tenants that haven't been accessed in 30 minutes.
    */
+  evictTenant(tenantId: string): void {
+    this.cache.delete(tenantId);
+    console.log(`[tenant-manager] Evicted tenant: ${tenantId}`);
+  }
+
   evictStale(): void {
     const thirtyMinutes = 30 * 60 * 1000;
     const now = Date.now();

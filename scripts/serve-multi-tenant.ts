@@ -384,6 +384,16 @@ app.get("/api/health", (_, res) => {
   res.json({ status: "ok", tenants: tenants.length, active: tenants.filter(t => t.status === "active").length });
 });
 
+// Admin rescrape (temporary — use API key for auth)
+app.post("/api/admin/rescrape/:tenantId", (req, res) => {
+  const tenant = getTenant(req.params.tenantId);
+  if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
+  worker.enqueue(tenant.id, tenant.siteUrl);
+  updateTenant(tenant.id, { status: "scraping" });
+  tenantManager.evictTenant(tenant.id);
+  res.json({ ok: true, status: "scraping" });
+});
+
 // Health check per tenant
 app.get("/api/health/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
