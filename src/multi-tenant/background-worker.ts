@@ -5,8 +5,9 @@
 
 import { getDb } from "./db/connection.js";
 import { runMigrations } from "./db/migrations.js";
-import { updateTenant } from "./tenant-registry.js";
+import { getTenant, updateTenant } from "./tenant-registry.js";
 import { scrapeTenant } from "./scrape-pipeline.js";
+import { sendBotReadyEmail } from "./email.js";
 
 interface QueuedJob {
   tenantId: string;
@@ -102,6 +103,17 @@ export class ScrapeWorker {
       `).run(result.pages, result.chunks, job.tenantId);
 
       console.log(`[worker] Completed scrape for tenant ${job.tenantId}: ${result.pages} pages, ${result.chunks} chunks`);
+
+      // Send "bot ready" email
+      try {
+        const tenant = getTenant(job.tenantId);
+        if (tenant) {
+          const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3211}`;
+          await sendBotReadyEmail(tenant.email, tenant.id, tenant.domain, baseUrl);
+        }
+      } catch (emailErr: any) {
+        console.error(`[worker] Failed to send bot-ready email for ${job.tenantId}:`, emailErr.message);
+      }
     } catch (error: any) {
       console.error(`[worker] Failed scrape for tenant ${job.tenantId}:`, error.message);
 

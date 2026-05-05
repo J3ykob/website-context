@@ -591,6 +591,7 @@
       <div class="topbar-right">
         <a class="btn btn-outline" id="open-site-btn" href="#" target="_blank">Open site</a>
         <button class="btn btn-dark" onclick="window.open('/record','_blank')">Record flow</button>
+        <button class="btn btn-outline" onclick="logout()">Logout</button>
       </div>
     </div>
 
@@ -659,6 +660,35 @@
   </div>
 
   <script>
+    // ─── Auth Gate ────
+    var AUTH_TOKEN = localStorage.getItem("wctx-dashboard-token");
+    if (!AUTH_TOKEN) {
+      window.location.href = "/auth/login";
+    }
+
+    function authHeaders() {
+      return { "Authorization": "Bearer " + AUTH_TOKEN, "Content-Type": "application/json" };
+    }
+
+    async function authFetch(url, opts) {
+      opts = opts || {};
+      opts.headers = Object.assign({}, opts.headers || {}, { "Authorization": "Bearer " + AUTH_TOKEN });
+      var res = await fetch(url, opts);
+      if (res.status === 401) {
+        localStorage.removeItem("wctx-dashboard-token");
+        localStorage.removeItem("wctx-tenant-id");
+        window.location.href = "/auth/login";
+        throw new Error("Unauthorized");
+      }
+      return res;
+    }
+
+    function logout() {
+      localStorage.removeItem("wctx-dashboard-token");
+      localStorage.removeItem("wctx-tenant-id");
+      window.location.href = "/auth/login";
+    }
+
     var API = window.location.origin;
     var refreshTimer = null;
     var chunksPage = 0;
@@ -670,19 +700,19 @@
 
     async function loadSiteInfo() {
       try {
-        var res = await fetch(API + "/api/health");
+        var res = await authFetch(API + "/api/dashboard/embed-code");
         var data = await res.json();
-        document.getElementById("site-name").textContent = new URL(data.site).hostname;
-        document.getElementById("site-url").textContent = data.site;
-        document.getElementById("open-site-btn").href = data.site;
+        document.getElementById("site-name").textContent = data.tenantId || "Dashboard";
+        document.getElementById("site-url").textContent = data.apiUrl || API;
+        document.getElementById("open-site-btn").href = data.apiUrl || "#";
       } catch (e) {
-        document.getElementById("site-name").textContent = "Offline";
+        document.getElementById("site-name").textContent = "Dashboard";
       }
     }
 
     async function loadStats() {
       try {
-        var res = await fetch(API + "/api/stats");
+        var res = await authFetch(API + "/api/dashboard/stats");
         var data = await res.json();
         document.getElementById("stat-today").textContent = data.totalToday;
         document.getElementById("stat-answered").textContent = data.questionsAnswered;
@@ -693,9 +723,9 @@
 
     async function loadGaps() {
       try {
-        var res = await fetch(API + "/api/unknown-questions");
+        var res = await authFetch(API + "/api/dashboard/unknown-questions");
         var questions = await res.json();
-        var notesRes = await fetch(API + "/api/context-notes");
+        var notesRes = await authFetch(API + "/api/dashboard/context-notes");
         var notes = await notesRes.json();
         var resolvedSet = new Set(notes.map(function(n) { return n.question; }));
 
@@ -712,7 +742,7 @@
 
     async function loadActivity() {
       try {
-        var res = await fetch(API + "/api/conversations?limit=20");
+        var res = await authFetch(API + "/api/dashboard/conversations?limit=20");
         renderActivity(await res.json());
       } catch (e) {
         document.getElementById("activity-panel").innerHTML = '<div class="empty-state">Failed to load</div>';
@@ -721,7 +751,7 @@
 
     async function loadSkills() {
       try {
-        var res = await fetch(API + "/api/flows");
+        var res = await authFetch(API + "/api/dashboard/flows");
         renderSkills(await res.json());
       } catch (e) {
         document.getElementById("skills-panel").innerHTML = '<div class="empty-state">Failed to load</div>';
@@ -793,17 +823,17 @@
       var q = form.getAttribute("data-question");
       var a = document.getElementById("answer-text-"+i).value.trim();
       if (!a) return;
-      await fetch(API+"/api/context-notes",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,answer:a})});
+      await authFetch(API+"/api/dashboard/context-notes",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,answer:a})});
       loadGaps(); loadStats();
     }
     function toggleExpand(el) { el.classList.toggle("expanded"); }
     function toggleSkillEdit(id) { document.getElementById("skill-edit-"+id).classList.toggle("open"); }
     async function toggleFlowStatus(id, on) {
-      await fetch(API+"/api/flows/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:on?"active":"disabled"})});
+      await authFetch(API+"/api/dashboard/flows/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:on?"active":"disabled"})});
     }
     async function saveSkillTriggers(id) {
       var t = document.getElementById("skill-triggers-"+id).value.split(",").map(function(s){return s.trim()}).filter(Boolean);
-      await fetch(API+"/api/flows/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({triggerPhrases:t})});
+      await authFetch(API+"/api/dashboard/flows/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({triggerPhrases:t})});
       toggleSkillEdit(id); loadSkills();
     }
 
@@ -811,7 +841,7 @@
     async function loadChunks() {
       try {
         var params = chunksSearch ? "?search="+encodeURIComponent(chunksSearch) : "";
-        var res = await fetch(API+"/api/chunks"+params);
+        var res = await authFetch(API+"/api/dashboard/chunks"+params);
         var data = await res.json();
         document.getElementById("chunks-badge").textContent = data.total;
         var panel = document.getElementById("chunks-panel");
@@ -863,18 +893,18 @@
     function editChunk(id) {
       var el = document.getElementById("chunk-text-"+id);
       if (el.contentEditable==="true") {
-        fetch(API+"/api/chunks/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:el.innerText.trim()})}).then(function(){
+        authFetch(API+"/api/chunks/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:el.innerText.trim()})}).then(function(){
           el.contentEditable="false"; el.style.background=""; el.style.border=""; el.parentElement.querySelector(".btn-tiny").textContent="Edit";
         });
       } else { el.contentEditable="true"; el.focus(); el.style.background="rgba(245,158,11,0.06)"; el.style.border="1px solid rgba(245,158,11,0.2)"; el.parentElement.querySelector(".btn-tiny").textContent="Save"; }
     }
-    function deleteChunk(id) { if (!confirm("Delete this chunk?")) return; fetch(API+"/api/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
+    function deleteChunk(id) { if (!confirm("Delete this chunk?")) return; authFetch(API+"/api/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
     document.getElementById("add-chunk-btn").addEventListener("click",function(){ document.getElementById("add-chunk-modal").classList.add("open"); });
     function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; }
     function saveNewChunk() {
       var t=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();
       if (!c) return;
-      fetch(API+"/api/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:t})}).then(function(){closeChunkModal();loadChunks();});
+      authFetch(API+"/api/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:t})}).then(function(){closeChunkModal();loadChunks();});
     }
 
     function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }

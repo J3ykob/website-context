@@ -24,3 +24,4 @@ export { scrapeTenant } from "./scrape-pipeline.js";
 export type { ScrapePipelineResult } from "./scrape-pipeline.js";
 export { ScrapeWorker } from "./background-worker.js";
 export { TenantManager } from "./tenant-manager.js";
+export { sendWelcomeEmail, sendBotReadyEmail } from "./email.js";

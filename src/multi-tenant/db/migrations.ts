@@ -23,7 +23,8 @@ export function runMigrations(): void {
       qdrant_collection TEXT NOT NULL,
       settings_json TEXT DEFAULT '{}',
       owner_password_hash TEXT,
-      api_key TEXT UNIQUE
+      api_key TEXT UNIQUE,
+      setup_token TEXT
     );
 
     CREATE TABLE IF NOT EXISTS scrape_jobs (
@@ -45,4 +46,11 @@ export function runMigrations(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // Add setup_token column if missing (for existing databases)
+  try {
+    db.exec(`ALTER TABLE tenants ADD COLUMN setup_token TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 }

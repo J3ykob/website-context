@@ -28,6 +28,8 @@ services:
         value: "6333"
       - key: PORT
         value: "3210"
+      - key: RESEND_API_KEY
+        sync: false
 
   # Qdrant vector database (private, not exposed to internet)
   - type: pserv

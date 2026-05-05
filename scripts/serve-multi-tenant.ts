@@ -30,6 +30,7 @@ import {
   getUnknownQuestions,
   clearUnknownQuestions,
 } from "../src/storage/conversation-store.js";
+import { randomBytes } from "crypto";
 import {
   runMigrations,
   createTenant,
@@ -44,6 +45,7 @@ import {
   generateApiKey,
   ScrapeWorker,
   TenantManager,
+  sendWelcomeEmail,
 } from "../src/multi-tenant/index.js";
 import {
   saveFlow,
@@ -180,10 +182,21 @@ app.post("/api/tenants", (req, res) => {
 
     // Generate API key
     const apiKey = generateApiKey();
-    updateTenant(tenant.id, { apiKey });
+
+    // Generate setup token for password setup email
+    const setupToken = randomBytes(32).toString("hex");
+    updateTenant(tenant.id, { apiKey, setupToken });
 
     // Enqueue scrape job
     worker.enqueue(tenant.id, siteUrl);
+
+    // Send welcome email with setup link
+    const protocol = req.protocol || "http";
+    const host = req.get("host") || `localhost:${port}`;
+    const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+    sendWelcomeEmail(email, tenant.id, setupToken, baseUrl).catch((err) => {
+      console.error("[create-tenant] Failed to send welcome email:", err.message);
+    });
 
     res.status(201).json({
       tenantId: tenant.id,
@@ -325,11 +338,16 @@ app.post("/api/auth/login", (req, res) => {
   res.json({ token, tenantId: tenant.id });
 });
 
-// Setup password (first-time)
+// Setup password (first-time) — accepts either setup token or API key
 app.post("/api/auth/setup-password", (req, res) => {
-  const { tenantId, apiKey, password } = req.body;
-  if (!tenantId || !apiKey || !password) {
-    res.status(400).json({ error: "tenantId, apiKey, and password required" });
+  const { tenantId, apiKey, token: setupToken, password } = req.body;
+  if (!tenantId || !password) {
+    res.status(400).json({ error: "tenantId and password required" });
+    return;
+  }
+
+  if (!apiKey && !setupToken) {
+    res.status(400).json({ error: "Either apiKey or token is required" });
     return;
   }
 
@@ -344,9 +362,17 @@ app.post("/api/auth/setup-password", (req, res) => {
     return;
   }
 
-  if (tenant.apiKey !== apiKey) {
-    res.status(401).json({ error: "Invalid API key" });
-    return;
+  // Validate via setup token or API key
+  if (setupToken) {
+    if (!tenant.setupToken || tenant.setupToken !== setupToken) {
+      res.status(401).json({ error: "Invalid or expired setup token" });
+      return;
+    }
+  } else if (apiKey) {
+    if (tenant.apiKey !== apiKey) {
+      res.status(401).json({ error: "Invalid API key" });
+      return;
+    }
   }
 
   if (tenant.ownerPasswordHash) {
@@ -355,16 +381,26 @@ app.post("/api/auth/setup-password", (req, res) => {
   }
 
   const hash = hashPassword(password);
-  updateTenant(tenantId, { ownerPasswordHash: hash });
+  // Clear setup token after use
+  updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null });
 
-  const token = createSession(tenantId);
-  res.json({ token, tenantId });
+  const sessionToken = createSession(tenantId);
+  res.json({ token: sessionToken, tenantId });
+});
+
+// --- Auth pages ---
+app.get("/auth/login", (_, res) => {
+  res.sendFile(resolve(__dirname, "../public/auth/login.html"));
+});
+
+app.get("/auth/setup", (_, res) => {
+  res.sendFile(resolve(__dirname, "../public/auth/setup.html"));
 });
 
 // --- Dashboard routes (require auth) ---
 
-// Dashboard HTML
-app.get("/dashboard", authMiddleware, (_, res) => {
+// Dashboard HTML (auth handled client-side via localStorage token)
+app.get("/dashboard", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/dashboard.html"));
 });
 
@@ -428,7 +464,13 @@ app.post("/api/dashboard/context-notes", authMiddleware, async (req, res) => {
   res.status(201).json(notes[notes.length - 1]);
 });
 
-// Flows
+// Flows list
+app.get("/api/dashboard/flows", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  res.json(await getFlows(tenantId));
+});
+
+// Flow by ID
 app.get("/api/dashboard/flows/:id", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   const flowId = req.params.id as string;

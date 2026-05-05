@@ -21,6 +21,7 @@ export interface TenantRecord {
   settings: any;
   ownerPasswordHash: string | null;
   apiKey: string | null;
+  setupToken: string | null;
 }
 
 interface TenantRow {
@@ -39,6 +40,7 @@ interface TenantRow {
   settings_json: string;
   owner_password_hash: string | null;
   api_key: string | null;
+  setup_token: string | null;
 }
 
 function rowToRecord(row: TenantRow): TenantRecord {
@@ -58,6 +60,7 @@ function rowToRecord(row: TenantRow): TenantRecord {
     settings: JSON.parse(row.settings_json || "{}"),
     ownerPasswordHash: row.owner_password_hash,
     apiKey: row.api_key,
+    setupToken: row.setup_token,
   };
 }
 
@@ -113,6 +116,7 @@ export function updateTenant(id: string, updates: Partial<{
   settings: any;
   ownerPasswordHash: string | null;
   apiKey: string | null;
+  setupToken: string | null;
 }>): void {
   ensureMigrated();
   const db = getDb();
@@ -155,6 +159,10 @@ export function updateTenant(id: string, updates: Partial<{
   if (updates.apiKey !== undefined) {
     setClauses.push("api_key = ?");
     values.push(updates.apiKey);
+  }
+  if (updates.setupToken !== undefined) {
+    setClauses.push("setup_token = ?");
+    values.push(updates.setupToken);
   }
 
   if (setClauses.length === 0) return;
