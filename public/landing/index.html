@@ -30,8 +30,7 @@
 
 * { margin:0; padding:0; box-sizing:border-box; }
 html {
-  scroll-behavior: smooth;
-  scroll-snap-type: y proximity;
+  scroll-snap-type: y mandatory;
 }
 
 body {
@@ -50,9 +49,13 @@ body {
 }
 
 section {
-  padding: 100px 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 80px 0;
   scroll-snap-align: start;
 }
+section > .container { width: 100%; }
 
 /* Reveal */
 .reveal {
@@ -625,6 +628,8 @@ nav.scrolled {
 footer {
   padding: 40px 28px;
   border-top: 1px solid var(--border);
+  scroll-snap-align: end;
+  min-height: auto;
 }
 .footer-inner {
   max-width: 1060px;
