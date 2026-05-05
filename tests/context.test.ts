@@ -45,7 +45,7 @@ describe("Context Store - End to End", () => {
 
     // Chunks should be reasonable size (not too big for LLM context)
     const avgChunkSize = context.chunks.reduce((s, c) => s + c.content.length, 0) / context.chunks.length;
-    expect(avgChunkSize).toBeLessThan(2000);
+    expect(avgChunkSize).toBeLessThan(3500);
     expect(avgChunkSize).toBeGreaterThan(50);
 
     console.log("\n--- Context Summary ---");

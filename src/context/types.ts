@@ -88,6 +88,7 @@ export interface ContentChunk {
   pageId: string;
   sectionId?: string;
   content: string;
+  contextPrefix?: string; // Anthropic contextual retrieval
   metadata: ChunkMetadata;
   embedding?: number[];
 }

@@ -345,7 +345,7 @@ export class WebsiteChat {
     });
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
-    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId);
+    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage);
 
     const sources = [...new Map(
       retrievedChunks.map((c) => [
@@ -515,15 +515,27 @@ export class WebsiteChat {
 
   private buildSystemPrompt(
     chunks: { content: string; metadata: Record<string, unknown>; score: number }[],
-    recentlyCompletedFlowId?: string
+    recentlyCompletedFlowId?: string,
+    userQuery?: string
   ): string {
     const siteInfo = this.context.siteMap
       .slice(0, 20)
       .map((s) => `- ${s.title} (${s.url})`)
       .join("\n");
 
+    // Determine if user is asking about privacy/policy
+    const queryLower = (userQuery || "").toLowerCase();
+    const isPrivacyQuery = queryLower.includes("privacy") || queryLower.includes("polityka") || queryLower.includes("policy") || queryLower.includes("rodo") || queryLower.includes("gdpr");
+
     const contextBlocks = chunks
-      .filter((c) => c.score > 0.3)
+      .filter((c) => c.score > 0.5)
+      .filter((c) => (c.metadata.type as string) !== "navigation")
+      .filter((c) => {
+        // Filter out privacy/policy pages unless the user is asking about privacy
+        if (isPrivacyQuery) return true;
+        const title = ((c.metadata.title as string) || "").toLowerCase();
+        return !title.includes("privacy") && !title.includes("polityka");
+      })
       .map((c, i) => {
         const heading = (c.metadata.headingHierarchy as string[])?.join(" > ") || "";
         return `[Source ${i + 1}: ${c.metadata.title}${heading ? " > " + heading : ""}]\n${c.content}`;
@@ -572,7 +584,9 @@ ${contextBlocks}
 ## Rules:
 - Only use information from the context above
 - Be concise and helpful
-- When a skill is relevant, proactively offer it`
+- When a skill is relevant, proactively offer it
+- If no matching skill/flow exists for a user's request, DO NOT output any flow-related text, IDs, or function names. Simply tell the user how to accomplish their goal manually (e.g., provide a phone number or link).
+- NEVER output text like 'flow_start_...' or any internal identifiers in your response.`
     + (recentlyCompletedFlowId ? `\n\n## IMPORTANT: Flow "${recentlyCompletedFlowId}" was JUST completed in this conversation. Do NOT invoke it again unless the user explicitly asks to submit a NEW one.` : "");
 
     if (this.systemPromptExtra) {

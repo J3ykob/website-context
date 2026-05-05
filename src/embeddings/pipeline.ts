@@ -58,6 +58,13 @@ export async function embedChunks(
 }
 
 function prepareChunkForEmbedding(chunk: ContentChunk): string {
+  // Use Anthropic contextual retrieval prefix if available — it situates the
+  // chunk within its page/section so the embedding captures meaning in context.
+  if (chunk.contextPrefix) {
+    return chunk.contextPrefix + "\n\n" + chunk.content;
+  }
+
+  // Fallback for chunks without contextPrefix (e.g. legacy data)
   const parts: string[] = [];
 
   // Add heading hierarchy as prefix for better retrieval

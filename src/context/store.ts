@@ -91,6 +91,19 @@ function buildSections(sections: MarkdownSection[], pageId: string): SectionCont
     }));
 }
 
+function buildContextPrefix(page: ScrapedPage, section: MarkdownSection): string {
+  let domain: string;
+  try {
+    domain = new URL(page.url).hostname;
+  } catch {
+    domain = "unknown site";
+  }
+  const hierarchy = section.headingPath.length > 0
+    ? section.headingPath.join(" > ")
+    : "main content";
+  return `This chunk is from the page '${page.title}' on ${domain}. Section: ${hierarchy}.`;
+}
+
 function buildChunks(
   sections: MarkdownSection[],
   pageId: string,
@@ -105,52 +118,95 @@ function buildChunks(
 
     if (content.trim().length < 30) continue;
 
-    // If section is too long, split into sub-chunks
-    if (content.length > 1500) {
-      const subChunks = splitIntoChunks(content, 1000, 150);
+    const contextPrefix = buildContextPrefix(page, section);
+    const chunkType = classifyChunkType(section, page);
+
+    // Keep sections under 3000 chars as a single chunk to avoid splitting lists/tables
+    if (content.length <= 3000) {
+      chunks.push({
+        id: randomUUID(),
+        pageId,
+        content,
+        contextPrefix,
+        metadata: {
+          url: page.url,
+          title: page.title,
+          headingHierarchy: section.headingPath,
+          type: chunkType,
+        },
+      });
+    } else {
+      // For very long sections, split at safe paragraph boundaries only
+      const subChunks = splitIntoChunks(content, 2000, 150);
       for (const subChunk of subChunks) {
         chunks.push({
           id: randomUUID(),
           pageId,
           content: subChunk,
+          contextPrefix,
           metadata: {
             url: page.url,
             title: page.title,
             headingHierarchy: section.headingPath,
-            type: classifyChunkType(section, page),
+            type: chunkType,
           },
         });
       }
-    } else {
-      chunks.push({
-        id: randomUUID(),
-        pageId,
-        content,
-        metadata: {
-          url: page.url,
-          title: page.title,
-          headingHierarchy: section.headingPath,
-          type: classifyChunkType(section, page),
-        },
-      });
     }
   }
 
   return chunks;
 }
 
+/**
+ * Checks whether a paragraph is part of a list or table block.
+ * List lines start with `- `, `* `, or `1.` (ordered list).
+ * Table lines start with `|`.
+ */
+function isListOrTable(paragraph: string): boolean {
+  const lines = paragraph.split("\n");
+  return lines.some((l) => /^\s*[-*]\s|^\s*\d+\.\s|^\s*\|/.test(l));
+}
+
 function splitIntoChunks(text: string, maxSize: number, overlap: number): string[] {
   const chunks: string[] = [];
-  const paragraphs = text.split(/\n\n+/);
+  // Split on double-newlines but keep list/table blocks together
+  const rawParagraphs = text.split(/\n\n+/);
+
+  // Merge consecutive list/table paragraphs so they aren't split
+  const paragraphs: string[] = [];
+  for (const para of rawParagraphs) {
+    if (
+      isListOrTable(para) &&
+      paragraphs.length > 0 &&
+      isListOrTable(paragraphs[paragraphs.length - 1])
+    ) {
+      // Merge with previous list/table block
+      paragraphs[paragraphs.length - 1] += "\n\n" + para;
+    } else {
+      paragraphs.push(para);
+    }
+  }
+
   let current = "";
 
   for (const para of paragraphs) {
-    if (current.length + para.length > maxSize && current.length > 0) {
+    // Never split in the middle of a list or table — allow exceeding maxSize
+    const wouldExceed = current.length + para.length > maxSize && current.length > 0;
+    const paraIsListOrTable = isListOrTable(para);
+
+    if (wouldExceed && !paraIsListOrTable) {
       chunks.push(current.trim());
       // Keep overlap from end of current chunk
       const words = current.split(/\s+/);
       const overlapWords = words.slice(-Math.floor(overlap / 5));
       current = overlapWords.join(" ") + "\n\n" + para;
+    } else if (wouldExceed && paraIsListOrTable) {
+      // Flush current, then keep the entire list/table block intact
+      if (current.trim()) {
+        chunks.push(current.trim());
+      }
+      current = para;
     } else {
       current += (current ? "\n\n" : "") + para;
     }
