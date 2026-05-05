@@ -12,6 +12,7 @@ import { buildContext } from "../context/index.js";
 import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { QdrantVectorStore } from "../embeddings/qdrant-store.js";
 import { embedChunks } from "../embeddings/pipeline.js";
+import { scrapeGooglePlaces, placesToChunks } from "../scraper/google-places.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -55,6 +56,25 @@ export async function scrapeTenant(
   const context = await buildContext(crawlResult);
   await closeBrowser();
   console.log(`[scrape-pipeline] ${context.chunks.length} chunks built`);
+
+  // Scrape Google Maps data (reviews, rating, hours, etc.)
+  try {
+    const domain = new URL(siteUrl).hostname;
+    const businessName = domain.replace(/^www\./, "").split(".")[0];
+    const location = "Warszawa Poland"; // TODO: detect from site content
+    console.log(`[scrape-pipeline] Scraping Google Maps for "${businessName} ${location}"...`);
+
+    const placesData = await scrapeGooglePlaces(businessName, location);
+    if (placesData && placesData.name) {
+      const placesChunks = placesToChunks(placesData, tenantId);
+      context.chunks.push(...placesChunks);
+      console.log(`[scrape-pipeline] Added ${placesChunks.length} chunks from Google Maps (${placesData.reviewCount || 0} reviews, rating: ${placesData.rating || "N/A"})`);
+    } else {
+      console.log(`[scrape-pipeline] No Google Maps data found for "${businessName}"`);
+    }
+  } catch (err) {
+    console.log(`[scrape-pipeline] Google Maps scrape skipped: ${(err as Error).message}`);
+  }
 
   // Embed into Qdrant
   const embedResult = await embedChunks(context.chunks, provider, store);

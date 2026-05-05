@@ -54,6 +54,16 @@ import {
   deleteFlow,
   updateFlow,
 } from "../src/flows/flow-store.js";
+import {
+  detectPlatform,
+  extractMessage,
+  sendReply,
+  verifyWebhook,
+  getVerifyToken,
+  validateConfig,
+  ChannelSessionStore,
+} from "../src/channels/index.js";
+import type { MetaChannelConfig } from "../src/channels/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "3211");
@@ -70,6 +80,7 @@ console.log("[multi-tenant] Database initialized");
 // Initialize services
 const worker = new ScrapeWorker();
 const tenantManager = new TenantManager();
+const channelSessions = new ChannelSessionStore();
 
 // Express app
 const app = express();
@@ -675,6 +686,221 @@ app.get("/api/dashboard/embed-code", authMiddleware, (req, res) => {
 
   res.json({ embedCode, tenantId, apiUrl: baseUrl });
 });
+
+// ─── Meta Channel Webhook Routes ────────────────────────────────────────────
+
+// GET — Meta webhook verification (hub.challenge echo)
+app.get("/api/webhooks/meta/:tenantId", (req, res) => {
+  const tenant = getTenant(req.params.tenantId);
+  if (!tenant) {
+    res.status(404).send("Not found");
+    return;
+  }
+
+  const settings = tenant.settings || {};
+  const channelConfig = settings.channels as MetaChannelConfig | undefined;
+  if (!channelConfig) {
+    res.status(404).send("No channel config");
+    return;
+  }
+
+  // Try to find a matching verify token across all configured platforms
+  const verifyToken = getVerifyToken(channelConfig);
+  if (!verifyToken) {
+    res.status(404).send("No verify token configured");
+    return;
+  }
+
+  const challenge = verifyWebhook(req.query, verifyToken);
+  if (challenge) {
+    console.log(`[meta-webhook] Verified webhook for tenant ${req.params.tenantId}`);
+    res.status(200).send(challenge);
+  } else {
+    res.status(403).send("Verification failed");
+  }
+});
+
+// POST — Receive messages from WhatsApp/Messenger/Instagram
+app.post("/api/webhooks/meta/:tenantId", (req, res) => {
+  const tenantId = req.params.tenantId;
+
+  // Always respond 200 immediately — Meta requires a response within 5 seconds
+  res.status(200).send("EVENT_RECEIVED");
+
+  // Process the webhook asynchronously
+  processMetaWebhook(tenantId, req.body).catch((err) => {
+    console.error(`[meta-webhook:${tenantId}] Error processing webhook:`, err.message);
+  });
+});
+
+async function processMetaWebhook(tenantId: string, body: any): Promise<void> {
+  const tenant = getTenant(tenantId);
+  if (!tenant || tenant.status !== "active") {
+    console.warn(`[meta-webhook:${tenantId}] Tenant not found or not active`);
+    return;
+  }
+
+  const settings = tenant.settings || {};
+  const channelConfig = settings.channels as MetaChannelConfig | undefined;
+  if (!channelConfig) {
+    console.warn(`[meta-webhook:${tenantId}] No channel config for tenant`);
+    return;
+  }
+
+  // Detect which platform sent the message
+  const platform = detectPlatform(body);
+  if (!platform) {
+    console.warn(`[meta-webhook:${tenantId}] Could not detect platform from payload`);
+    return;
+  }
+
+  // Extract the message
+  const extracted = extractMessage(platform, body);
+  if (!extracted) {
+    // Not a text message (could be status update, read receipt, etc.) — ignore silently
+    return;
+  }
+
+  const { senderId, text, messageId } = extracted;
+  const sessionKey = ChannelSessionStore.buildKey(platform, senderId);
+
+  console.log(`[meta-webhook:${tenantId}:${platform}] Message from ${senderId}: "${text.slice(0, 60)}"`);
+
+  try {
+    // Add user message to session history and get full conversation
+    const messages = channelSessions.addUserMessage(sessionKey, text);
+
+    // Get chat instance for this tenant
+    const chat = await tenantManager.getChatForTenant(tenantId);
+
+    // Generate response
+    const response = await chat.chat(messages, sessionKey);
+
+    // Store assistant response in session
+    channelSessions.addAssistantMessage(sessionKey, response.message);
+
+    // Send reply via Graph API
+    await sendReply(platform, channelConfig, senderId, response.message);
+
+    // Log the conversation
+    logMessage(tenantId, sessionKey, "user", text).catch(() => {});
+    logMessage(tenantId, sessionKey, "assistant", response.message, {
+      flowInvoked: response.flowSession?.flowId || null,
+      navigatedTo: response.navigateTo || null,
+      hadToolCall: !!(response.flowSession || response.navigateTo),
+    }).catch(() => {});
+
+    console.log(`[meta-webhook:${tenantId}:${platform}] Replied to ${senderId}`);
+  } catch (err: any) {
+    console.error(`[meta-webhook:${tenantId}:${platform}] Failed to process message:`, err.message);
+
+    // Try to send a fallback error message to the user
+    try {
+      await sendReply(
+        platform,
+        channelConfig,
+        senderId,
+        "Sorry, I'm having trouble right now. Please try again in a moment."
+      );
+    } catch {
+      // If even the error message fails, just log it
+      console.error(`[meta-webhook:${tenantId}:${platform}] Failed to send error message`);
+    }
+  }
+}
+
+// ─── Dashboard Channel Config Endpoints ─────────────────────────────────────
+
+// GET — Retrieve current channel configuration
+app.get("/api/dashboard/channels", authMiddleware, (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const tenant = getTenant(tenantId);
+  if (!tenant) {
+    res.status(404).json({ error: "Tenant not found" });
+    return;
+  }
+
+  const settings = tenant.settings || {};
+  const channels = settings.channels || {};
+
+  // Return config but redact access tokens for security
+  const redacted = redactChannelConfig(channels as MetaChannelConfig);
+
+  res.json({
+    channels: redacted,
+    webhookUrl: `${process.env.BASE_URL || `https://${req.get("host")}`}/api/webhooks/meta/${tenantId}`,
+  });
+});
+
+// PUT — Save channel configuration
+app.put("/api/dashboard/channels", authMiddleware, (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const tenant = getTenant(tenantId);
+  if (!tenant) {
+    res.status(404).json({ error: "Tenant not found" });
+    return;
+  }
+
+  const channelConfig = req.body as MetaChannelConfig;
+
+  // Validate the configuration
+  const validation = validateConfig(channelConfig);
+  if (!validation.valid) {
+    res.status(400).json({ error: "Invalid channel configuration", details: validation.errors });
+    return;
+  }
+
+  // Merge into existing settings
+  const settings = tenant.settings || {};
+  settings.channels = channelConfig;
+
+  updateTenant(tenantId, { settings });
+
+  console.log(`[channels:${tenantId}] Channel config updated`);
+
+  res.json({
+    ok: true,
+    channels: redactChannelConfig(channelConfig),
+    webhookUrl: `${process.env.BASE_URL || `https://${req.get("host")}`}/api/webhooks/meta/${tenantId}`,
+  });
+});
+
+/**
+ * Redact access tokens in channel config for safe display.
+ * Shows only last 4 characters of tokens.
+ */
+function redactChannelConfig(config: MetaChannelConfig): any {
+  const redact = (token: string | undefined) =>
+    token ? `****${token.slice(-4)}` : undefined;
+
+  const result: any = {};
+
+  if (config.whatsapp) {
+    result.whatsapp = {
+      phoneNumberId: config.whatsapp.phoneNumberId,
+      accessToken: redact(config.whatsapp.accessToken),
+      verifyToken: config.whatsapp.verifyToken, // verify tokens are not secret
+    };
+  }
+
+  if (config.messenger) {
+    result.messenger = {
+      pageId: config.messenger.pageId,
+      pageAccessToken: redact(config.messenger.pageAccessToken),
+      verifyToken: config.messenger.verifyToken,
+    };
+  }
+
+  if (config.instagram) {
+    result.instagram = {
+      accountId: config.instagram.accountId,
+      pageAccessToken: redact(config.instagram.pageAccessToken),
+      verifyToken: config.instagram.verifyToken,
+    };
+  }
+
+  return result;
+}
 
 // Static assets
 app.use(express.static(resolve(__dirname, "../public")));
