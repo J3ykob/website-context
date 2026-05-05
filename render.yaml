@@ -1,13 +1,18 @@
 services:
+  # Main web service
   - type: web
     name: website-context
     runtime: docker
     plan: starter
+    region: oregon
+    healthCheckPath: /api/health
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1
     envVars:
-      - key: SITE_URL
-        value: https://flowstock.so
       - key: OPENROUTER_API_KEY
-        sync: false # set manually in Render dashboard
+        sync: false
       - key: OPENROUTER_MODEL
         value: deepseek/deepseek-chat-v3
       - key: BGE_HOST
@@ -15,12 +20,24 @@ services:
       - key: BGE_PORT
         value: "7900"
       - key: QDRANT_HOST
-        value: 152.53.243.28
+        fromService:
+          name: qdrant
+          type: pserv
+          property: host
       - key: QDRANT_PORT
         value: "6333"
-      - key: TENANT_ID
-        value: flowstock
-      - key: MAX_PAGES
-        value: "20"
       - key: PORT
         value: "3210"
+
+  # Qdrant vector database (private, not exposed to internet)
+  - type: pserv
+    name: qdrant
+    runtime: image
+    image:
+      url: qdrant/qdrant:latest
+    plan: starter
+    region: oregon
+    disk:
+      name: qdrant-data
+      mountPath: /qdrant/storage
+      sizeGB: 1
