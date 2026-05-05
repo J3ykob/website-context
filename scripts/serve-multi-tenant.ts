@@ -19,9 +19,13 @@ import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
 import {
-  logConversation,
+  logMessage,
   getConversations,
   getConversationStats,
+  getMessages,
+  getFirstMessages,
+  getIntentBreakdown,
+  getTopQuestions,
   logUnknownQuestion,
   getUnknownQuestions,
   clearUnknownQuestions,
@@ -248,12 +252,10 @@ app.post("/api/chat", async (req, res) => {
     console.log(`[chat:${tenantId}] "${(messages[messages.length - 1]?.content || "").slice(0, 60)}"`);
     const response = await chat.chat(messages, sessionKey);
 
-    // Log conversation to Qdrant (persists across deploys)
-    logConversation(tenantId, {
-      sessionId: sessionKey,
-      timestamp: new Date().toISOString(),
-      userMessage: messages[messages.length - 1]?.content || "",
-      botResponse: response.message,
+    // Log each message individually to Qdrant (enables per-message analytics)
+    const lastUserContent = messages[messages.length - 1]?.content || "";
+    logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
+    logMessage(tenantId, sessionKey, "assistant", response.message, {
       flowInvoked: response.flowSession?.flowId || null,
       navigatedTo: response.navigateTo || null,
       hadToolCall: !!(response.flowSession || response.navigateTo),
@@ -490,6 +492,37 @@ app.get("/api/dashboard/chunks", authMiddleware, async (req, res) => {
     pages: meta.pages || [],
     note: "Chunk content is stored in Qdrant. Use search to find specific content.",
   });
+});
+
+// ─── Analytics endpoints ─────────────────────────────────────────────────
+
+// First messages people send (entry intent)
+app.get("/api/dashboard/analytics/first-messages", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+  res.json(await getFirstMessages(tenantId, limit));
+});
+
+// Intent breakdown (question, action_request, greeting, complaint, etc.)
+app.get("/api/dashboard/analytics/intents", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  res.json(await getIntentBreakdown(tenantId));
+});
+
+// Top questions asked
+app.get("/api/dashboard/analytics/top-questions", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+  res.json(await getTopQuestions(tenantId, limit));
+});
+
+// Raw messages (filterable)
+app.get("/api/dashboard/analytics/messages", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+  const role = req.query.role as "user" | "assistant" | undefined;
+  const sessionId = req.query.sessionId as string | undefined;
+  res.json(await getMessages(tenantId, { limit, role, sessionId }));
 });
 
 // Embed code
