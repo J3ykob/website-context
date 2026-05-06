@@ -171,11 +171,11 @@ app.get("/api/screenshot/:tenantId", (req, res) => {
 // Demo page — standalone chat for a tenant (no embed needed)
 app.get("/demo/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
-  if (!tenant) {
-    res.status(404).send("<!DOCTYPE html><html><body style='font-family:Archivo,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#57534e'><p>Bot not found.</p></body></html>");
+  if (!tenant || tenant.status !== "active") {
+    res.status(404).send("<!DOCTYPE html><html><body style='font-family:Archivo,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#57534e'><p>This bot is not ready yet. Check back soon.</p></body></html>");
     return;
   }
-  const isReady = tenant.status === "active";
+  const isReady = true;
 
   // Always use HTTPS in production (Render terminates TLS at the proxy)
   const host = req.get("host") || "website-context-dwoj.onrender.com";
