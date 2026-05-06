@@ -19,6 +19,8 @@ services:
         value: 176.9.1.133
       - key: BGE_PORT
         value: "7900"
+      - key: BGE_API_KEY
+        sync: false
       - key: QDRANT_HOST
         fromService:
           name: qdrant

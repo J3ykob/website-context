@@ -5,11 +5,13 @@ export interface BGEProviderConfig {
   port?: number;
   batchSize?: number;
   model?: "bge-large-en-v1.5" | "bge-m3";
+  apiKey?: string;
 }
 
 export class BGEEmbeddingProvider implements EmbeddingProvider {
   private baseUrl: string;
   private batchSize: number;
+  private apiKey: string;
   readonly dimensions: number;
   readonly modelName: string;
 
@@ -18,6 +20,7 @@ export class BGEEmbeddingProvider implements EmbeddingProvider {
     const port = config.port || parseInt(process.env.BGE_PORT || "7900");
     this.baseUrl = `http://${host}:${port}`;
     this.batchSize = config.batchSize || 256;
+    this.apiKey = config.apiKey || process.env.BGE_API_KEY || "";
     this.modelName = config.model || "bge-large-en-v1.5";
     this.dimensions = this.modelName === "bge-m3" ? 1024 : 1024;
   }
@@ -28,9 +31,12 @@ export class BGEEmbeddingProvider implements EmbeddingProvider {
     for (let i = 0; i < texts.length; i += this.batchSize) {
       const batch = texts.slice(i, i + this.batchSize);
 
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (this.apiKey) headers["X-API-Key"] = this.apiKey;
+
       const response = await fetch(`${this.baseUrl}/embed`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ texts: batch }),
       });
 
