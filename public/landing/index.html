@@ -475,8 +475,7 @@ footer {
     <div class="onboarding-inner">
       <div class="onboarding-pulse"></div>
       <div class="onboarding-text">
-        <strong id="onboard-active">0</strong> businesses live &middot;
-        <strong id="onboard-queued">0</strong> onboarding now
+        <strong id="onboard-queued">0</strong> businesses onboarding right now
       </div>
       <div class="onboarding-bar-wrap">
         <div class="onboarding-bar-fill" id="onboard-bar" style="width:0%"></div>
@@ -802,8 +801,8 @@ function handleSignup(e) {
     fetch(BASE + '/api/onboarding-stats')
       .then(function(r) { return r.json(); })
       .then(function(d) {
+        if (d.queued === 0) return;
         strip.classList.remove('onboarding-hidden');
-        elActive.textContent = d.active;
         elQueued.textContent = d.queued;
         var pct = d.total > 0 ? Math.round((d.active / d.total) * 100) : 0;
         elBar.style.width = pct + '%';
