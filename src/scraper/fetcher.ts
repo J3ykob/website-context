@@ -33,15 +33,34 @@ async function fetchStatic(
   url: string,
   options: { timeout: number; userAgent: string }
 ): Promise<Omit<FetchResult, "renderMethod">> {
-  const response = await fetch(url, {
+  const fetchOpts = {
     headers: {
       "User-Agent": options.userAgent,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "en-US,en;q=0.5",
     },
     signal: AbortSignal.timeout(options.timeout),
-    redirect: "follow",
-  });
+    redirect: "follow" as const,
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, fetchOpts);
+  } catch (err: any) {
+    const code = err?.cause?.code;
+    if (code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" || code === "CERT_HAS_EXPIRED" || code === "DEPTH_ZERO_SELF_SIGNED_CERT") {
+      const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+      try {
+        response = await fetch(url, fetchOpts);
+      } finally {
+        if (prev === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
+      }
+    } else {
+      throw err;
+    }
+  }
 
   const html = await response.text();
   const headers: Record<string, string> = {};
