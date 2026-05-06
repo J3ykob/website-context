@@ -238,8 +238,8 @@ body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; d
 <div class="demo-body">\
   <div class="demo-bg"><img src="' + baseUrl + '/api/screenshot/' + tenant.id + '" alt="" loading="eager" onerror="this.parentElement.style.display=\'none\'" /></div>\
   <div class="demo-info" id="demo-info">\
-    <h3>' + (isReady ? 'Try it out!' : 'Almost ready...') + '</h3>\
-    <p>' + (isReady ? 'This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.' : 'We\\'re still indexing <strong>' + brand + '</strong>. The screenshot shows what the widget will look like. Chat will be available in a minute.') + '</p>\
+    <h3>Try it out!</h3>\
+    <p>This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.</p>\
     <div class="arrow">↓</div>\
     <button class="demo-dismiss" onclick="document.getElementById(\'demo-info\').style.display=\'none\'">Dismiss</button>\
   </div>\
