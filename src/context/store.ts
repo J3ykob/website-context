@@ -116,10 +116,25 @@ function buildChunks(
   const merged: MarkdownSection[] = [];
   let accumulator: MarkdownSection | null = null;
 
+  let pendingParentHeading = "";
+
   for (const section of sections) {
-    const content = section.heading
+    let content = section.heading
       ? `## ${section.heading}\n\n${section.content}`
       : section.content;
+
+    // If this section is just a heading with no body content, save it
+    // as a prefix for the next section (e.g., "## desery" followed by items)
+    if (section.heading && section.content.trim().length < 5) {
+      pendingParentHeading = `## ${section.heading}\n\n`;
+      continue;
+    }
+
+    // Prepend any pending parent heading
+    if (pendingParentHeading) {
+      content = pendingParentHeading + content;
+      pendingParentHeading = "";
+    }
 
     if (content.trim().length < 10) continue;
 
