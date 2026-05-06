@@ -399,6 +399,35 @@ app.get("/api/health", (_, res) => {
   res.json({ status: "ok", tenants: tenants.length, active: tenants.filter(t => t.status === "active").length });
 });
 
+// Public onboarding stats — live queue for landing page social proof
+app.get("/api/onboarding-stats", (_, res) => {
+  const tenants = listTenants();
+  const active = tenants.filter(t => t.status === "active" && t.chunksCount > 0);
+  const scraping = tenants.filter(t => t.status === "scraping");
+  const pending = tenants.filter(t => t.status === "pending");
+  const queued = scraping.length + pending.length;
+
+  const recentlyCompleted = active
+    .filter(t => t.lastScrapedAt)
+    .sort((a, b) => new Date(b.lastScrapedAt!).getTime() - new Date(a.lastScrapedAt!).getTime())
+    .slice(0, 5)
+    .map(t => ({
+      domain: t.domain,
+      completedAt: t.lastScrapedAt,
+      pages: t.pagesCount,
+    }));
+
+  res.json({
+    total: tenants.length,
+    active: active.length,
+    queued,
+    scraping: scraping.length,
+    pending: pending.length,
+    recentlyCompleted,
+    workerBusy: worker.isProcessing(),
+  });
+});
+
 // Admin rescrape single tenant (?maxPages=10 to limit crawl size)
 app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);

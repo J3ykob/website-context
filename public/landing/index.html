@@ -193,6 +193,44 @@ nav.scrolled {
 }
 .proof-label { font-size: 12px; color: var(--text-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 
+/* ─── Live onboarding queue ─── */
+.onboarding-strip {
+  min-height: auto; padding: 32px 0; scroll-snap-align: none;
+  background: var(--blue); color: #fff; overflow: hidden;
+}
+.onboarding-inner {
+  display: flex; align-items: center; gap: 24px;
+  flex-wrap: wrap; justify-content: center;
+}
+.onboarding-pulse {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #34d399; flex-shrink: 0;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.6); }
+  50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
+}
+.onboarding-text {
+  font-size: 15px; font-weight: 500;
+}
+.onboarding-text strong { font-weight: 800; }
+.onboarding-bar-wrap {
+  flex: 1; min-width: 200px; max-width: 320px;
+  height: 8px; background: rgba(255,255,255,0.2);
+  border-radius: 4px; overflow: hidden;
+}
+.onboarding-bar-fill {
+  height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, #34d399, #6ee7b7);
+  transition: width 1s ease;
+}
+.onboarding-recent {
+  font-size: 13px; opacity: 0.75;
+}
+.onboarding-recent span { font-weight: 600; }
+.onboarding-hidden { display: none; }
+
 /* ─── Section headers ─── */
 .section-label {
   font-size: 13px; font-weight: 700; letter-spacing: 0.1em;
@@ -427,6 +465,23 @@ footer {
       <div class="proof-stat"><div class="proof-num">12,000+</div><div class="proof-label">Conversations</div></div>
       <div class="proof-stat"><div class="proof-num">95%</div><div class="proof-label">Accuracy</div></div>
       <div class="proof-stat"><div class="proof-num">&lt;2s</div><div class="proof-label">Response time</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Live onboarding queue -->
+<div class="onboarding-strip onboarding-hidden" id="onboarding-live">
+  <div class="container">
+    <div class="onboarding-inner">
+      <div class="onboarding-pulse"></div>
+      <div class="onboarding-text">
+        <strong id="onboard-active">0</strong> businesses live &middot;
+        <strong id="onboard-queued">0</strong> onboarding now
+      </div>
+      <div class="onboarding-bar-wrap">
+        <div class="onboarding-bar-fill" id="onboard-bar" style="width:0%"></div>
+      </div>
+      <div class="onboarding-recent" id="onboard-recent"></div>
     </div>
   </div>
 </div>
@@ -725,6 +780,45 @@ function handleSignup(e) {
     btn.textContent = 'Get started free';
   });
 }
+
+// ─── Live onboarding stats ───
+(function() {
+  var strip = document.getElementById('onboarding-live');
+  var elActive = document.getElementById('onboard-active');
+  var elQueued = document.getElementById('onboard-queued');
+  var elBar = document.getElementById('onboard-bar');
+  var elRecent = document.getElementById('onboard-recent');
+  var BASE = window.location.origin;
+
+  function timeAgo(iso) {
+    var diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+    return Math.floor(diff/86400) + 'd ago';
+  }
+
+  function update() {
+    fetch(BASE + '/api/onboarding-stats')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        strip.classList.remove('onboarding-hidden');
+        elActive.textContent = d.active;
+        elQueued.textContent = d.queued;
+        var pct = d.total > 0 ? Math.round((d.active / d.total) * 100) : 0;
+        elBar.style.width = pct + '%';
+
+        if (d.recentlyCompleted && d.recentlyCompleted.length > 0) {
+          var r = d.recentlyCompleted[0];
+          elRecent.innerHTML = '<span>' + r.domain + '</span> joined ' + timeAgo(r.completedAt);
+        }
+      })
+      .catch(function() {});
+  }
+
+  update();
+  setInterval(update, 30000);
+})();
 </script>
 </body>
 </html>
