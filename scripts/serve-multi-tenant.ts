@@ -246,7 +246,7 @@ body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; d
 </div>\
 <script>\
 window.addEventListener("load", function(){\
-  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '"};\
+  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark"};\
   window.__wctx=c;\
   var s=document.createElement("script");\
   s.src=c.apiHost+"/widget.js";\

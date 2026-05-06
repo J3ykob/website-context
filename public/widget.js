@@ -28,6 +28,12 @@
   }
 
   function detectTheme() {
+    // Allow forcing theme via config
+    if (config.forceTheme === "dark" || config.forceTheme === "light") {
+      var forced = config.forceTheme;
+      if (forced !== currentTheme) { currentTheme = forced; applyTheme(forced); }
+      return forced;
+    }
     var theme = "light";
     try {
       // Strategy 1: Check body background color
