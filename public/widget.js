@@ -272,14 +272,13 @@
 #wctx-fab .wctx-bar-expand:hover { color:rgba(10,10,10,0.7); }\
 \
 #wctx-fab.wctx-dark .wctx-bar-wrap {\
-  background:rgba(30,30,30,0.85);\
-  border-color:rgba(60,60,60,0.6);\
-  box-shadow:0 6px 24px rgba(0,0,0,0.4);\
-  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+  box-shadow:0 6px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-wrap:hover,\
 #wctx-fab.wctx-dark .wctx-bar-wrap.pinned {\
-  box-shadow:0 12px 48px rgba(0,0,0,0.5);\
+  box-shadow:0 12px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-bubble.user {\
   background:rgba(80,80,80,0.7);\
@@ -293,9 +292,9 @@
 #wctx-fab.wctx-dark .wctx-bar-input { color:#fff; }\
 #wctx-fab.wctx-dark .wctx-bar-input::placeholder { color:rgba(255,255,255,0.4); }\
 #wctx-fab.wctx-dark .wctx-bar-send {\
-  color:rgba(255,255,255,0.8);\
-  background:rgba(80,80,80,0.5);\
-  border-color:rgba(100,100,100,0.4);\
+  color:rgba(255,255,255,0.6);\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-send:hover { background:rgba(255,255,255,0.15); color:rgba(255,255,255,0.9); }\
 #wctx-fab.wctx-dark .wctx-bar-expand { color:rgba(255,255,255,0.35); }\
@@ -1343,16 +1342,14 @@
 }\
 \
 #wctx-overlay.wctx-dark .wctx-shell {\
-  background:rgba(25,25,25,0.88);\
-  border-color:rgba(60,60,60,0.5);\
-  box-shadow:0 8px 32px rgba(0,0,0,0.4);\
-  color:#fff;\
-  backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);\
+  background:rgba(255,255,255,0.06);\
+  border-color:rgba(255,255,255,0.1);\
+  box-shadow:0 8px 32px rgba(0,0,0,0.3), inset 0 0 20px -5px rgba(255,255,255,0.05);\
+  color:rgba(255,255,255,0.9);\
 }\
 #wctx-overlay.wctx-dark .wctx-topbar {\
-  color:rgba(255,255,255,0.6);\
-  border-bottom-color:rgba(80,80,80,0.4);\
-  background:rgba(30,30,30,0.5);\
+  color:rgba(255,255,255,0.5);\
+  border-bottom-color:rgba(255,255,255,0.1);\
 }\
 #wctx-overlay.wctx-dark .wctx-logo { color:rgba(255,255,255,0.9); }\
 #wctx-overlay.wctx-dark .wctx-logo-mark { background:rgba(255,255,255,0.8); }\
@@ -1366,13 +1363,13 @@
 #wctx-overlay.wctx-dark .wctx-idle-prompt { color:rgba(255,255,255,0.35); }\
 #wctx-overlay.wctx-dark .wctx-idle-prompt::before { background:rgba(255,255,255,0.25); }\
 #wctx-overlay.wctx-dark .wctx-input-frame {\
-  background:rgba(40,40,40,0.7);\
-  border-color:rgba(80,80,80,0.5);\
-  box-shadow:0 4px 16px rgba(0,0,0,0.2);\
+  background:rgba(255,255,255,0.08);\
+  border-color:rgba(255,255,255,0.12);\
+  box-shadow:0 4px 16px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.06);\
 }\
 #wctx-overlay.wctx-dark .wctx-input-frame:focus-within {\
-  border-color:rgba(120,120,120,0.5);\
-  box-shadow:0 4px 24px rgba(0,0,0,0.3);\
+  border-color:rgba(255,255,255,0.2);\
+  box-shadow:0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1);\
 }\
 #wctx-overlay.wctx-dark .wctx-input-icon { color:rgba(255,255,255,0.35); }\
 #wctx-overlay.wctx-dark .wctx-chat-input { color:#fff; }\
