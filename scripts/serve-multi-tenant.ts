@@ -207,10 +207,9 @@ body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; d
   transition: all 0.2s;\
 }\
 .demo-cta:hover { background:#c2410c; transform:translateY(-1px); }\
-.demo-body { flex:1; position:relative; overflow:hidden; }\
-.demo-bg { position:absolute; inset:0; z-index:0; }\
-.demo-bg img { width:100%; display:block; filter:brightness(0.85); }\
-.demo-bg-fade { position:absolute; bottom:0; left:0; right:0; height:200px; background:linear-gradient(transparent, #fafaf8); }\
+.demo-body { flex:1; position:relative; overflow-y:auto; }\
+.demo-bg { position:relative; z-index:0; }\
+.demo-bg img { width:100%; display:block; }\
 .demo-info {\
   position:fixed; bottom:100px; left:50%; transform:translateX(-50%);\
   background:#fff; border:1px solid #e7e5e4; border-radius:16px; padding:20px 28px;\
@@ -237,7 +236,7 @@ body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; d
   <a class="demo-cta" href="/">Get this for your website — free</a>\
 </div>\
 <div class="demo-body">\
-  <div class="demo-bg"><img src="' + baseUrl + '/api/screenshot/' + tenant.id + '" alt="" loading="eager" onerror="this.parentElement.style.display=\'none\'" /><div class="demo-bg-fade"></div></div>\
+  <div class="demo-bg"><img src="' + baseUrl + '/api/screenshot/' + tenant.id + '" alt="" loading="eager" onerror="this.parentElement.style.display=\'none\'" /></div>\
   <div class="demo-info" id="demo-info">\
     <h3>' + (isReady ? 'Try it out!' : 'Almost ready...') + '</h3>\
     <p>' + (isReady ? 'This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.' : 'We\\'re still indexing <strong>' + brand + '</strong>. The screenshot shows what the widget will look like. Chat will be available in a minute.') + '</p>\
