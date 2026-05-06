@@ -115,28 +115,33 @@ export async function scrapeTenant(
     JSON.stringify(contextMeta, null, 2)
   );
 
-  // Take screenshot after everything else is done (separate browser, then close it)
-  try {
-    const { chromium } = await import("playwright");
-    const browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    await page.goto(siteUrl, { waitUntil: "networkidle", timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+  // Take screenshot only if one doesn't already exist (saves memory on re-scrapes)
+  const screenshotPath = resolve(DATA_ROOT, tenantId, "screenshot.png");
+  if (!existsSync(screenshotPath)) {
+    try {
+      const { chromium } = await import("playwright");
+      const browser = await chromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+      });
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.goto(siteUrl, { waitUntil: "networkidle", timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(2000);
 
-    const screenshotDir = resolve(DATA_ROOT, tenantId);
-    if (!existsSync(screenshotDir)) mkdirSync(screenshotDir, { recursive: true });
-    await page.screenshot({
-      path: resolve(screenshotDir, "screenshot.png"),
-      fullPage: true,
-    });
-    console.log(`[scrape-pipeline] Screenshot saved for ${tenantId}`);
-    await browser.close();
-  } catch (err) {
-    console.log(`[scrape-pipeline] Screenshot skipped: ${(err as Error).message}`);
+      const screenshotDir = resolve(DATA_ROOT, tenantId);
+      if (!existsSync(screenshotDir)) mkdirSync(screenshotDir, { recursive: true });
+      await page.screenshot({
+        path: screenshotPath,
+        fullPage: true,
+      });
+      console.log(`[scrape-pipeline] Screenshot saved for ${tenantId}`);
+      await browser.close();
+    } catch (err) {
+      console.log(`[scrape-pipeline] Screenshot skipped: ${(err as Error).message}`);
+    }
+  } else {
+    console.log(`[scrape-pipeline] Screenshot already exists for ${tenantId}, skipping`);
   }
 
   return {

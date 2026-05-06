@@ -34,4 +34,4 @@ COPY . .
 
 EXPOSE 3210
 
-CMD ["node", "--import", "tsx", "scripts/serve-multi-tenant.ts"]
+CMD ["node", "--import", "tsx", "--max-old-space-size=384", "scripts/serve-multi-tenant.ts"]

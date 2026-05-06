@@ -399,23 +399,25 @@ app.get("/api/health", (_, res) => {
   res.json({ status: "ok", tenants: tenants.length, active: tenants.filter(t => t.status === "active").length });
 });
 
-// Admin rescrape single tenant
+// Admin rescrape single tenant (?maxPages=10 to limit crawl size)
 app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
-  worker.enqueue(tenant.id, tenant.siteUrl);
+  const maxPages = parseInt(req.query.maxPages as string) || 20;
+  worker.enqueue(tenant.id, tenant.siteUrl, maxPages);
   updateTenant(tenant.id, { status: "scraping" });
   tenantManager.evictTenant(tenant.id);
-  res.json({ ok: true, status: "scraping" });
+  res.json({ ok: true, status: "scraping", maxPages });
 });
 
 // Admin bulk rescrape — re-enqueue all pending/error tenants
 app.post("/api/admin/rescrape-all", (req, res) => {
   const tenants = listTenants();
   const targets = tenants.filter(t => t.status === "pending" || t.status === "error" || (t.status === "active" && t.pagesCount === 0));
+  const maxPages = parseInt(req.query.maxPages as string) || 10;
   let queued = 0;
   for (const t of targets) {
-    worker.enqueue(t.id, t.siteUrl);
+    worker.enqueue(t.id, t.siteUrl, maxPages);
     updateTenant(t.id, { status: "scraping" });
     tenantManager.evictTenant(t.id);
     queued++;
