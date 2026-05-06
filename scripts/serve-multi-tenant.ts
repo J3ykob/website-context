@@ -79,6 +79,7 @@ console.log("[multi-tenant] Database initialized");
 
 // Initialize services
 const worker = new ScrapeWorker();
+worker.recoverStuckJobs();
 const tenantManager = new TenantManager();
 const channelSessions = new ChannelSessionStore();
 
@@ -398,7 +399,7 @@ app.get("/api/health", (_, res) => {
   res.json({ status: "ok", tenants: tenants.length, active: tenants.filter(t => t.status === "active").length });
 });
 
-// Admin rescrape (temporary — use API key for auth)
+// Admin rescrape single tenant
 app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
@@ -406,6 +407,20 @@ app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   updateTenant(tenant.id, { status: "scraping" });
   tenantManager.evictTenant(tenant.id);
   res.json({ ok: true, status: "scraping" });
+});
+
+// Admin bulk rescrape — re-enqueue all pending/error tenants
+app.post("/api/admin/rescrape-all", (req, res) => {
+  const tenants = listTenants();
+  const targets = tenants.filter(t => t.status === "pending" || t.status === "error" || (t.status === "active" && t.pagesCount === 0));
+  let queued = 0;
+  for (const t of targets) {
+    worker.enqueue(t.id, t.siteUrl);
+    updateTenant(t.id, { status: "scraping" });
+    tenantManager.evictTenant(t.id);
+    queued++;
+  }
+  res.json({ ok: true, queued, tenants: targets.map(t => t.id) });
 });
 
 // Health check per tenant
