@@ -11,8 +11,7 @@ import { closeBrowser } from "../scraper/index.js";
 import { sendBotReadyEmail } from "./email.js";
 
 const MAX_RETRIES = 3;
-const JOB_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes per scrape
-const RETRY_BACKOFF = [5_000, 15_000, 30_000]; // 5s, 15s, 30s
+const JOB_TIMEOUT_MS = 3 * 60 * 1000;
 
 interface QueuedJob {
   tenantId: string;
@@ -42,20 +41,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 async function forceCleanupBrowser(): Promise<void> {
   try {
     await closeBrowser();
-  } catch {
-    // Browser may already be dead — that's fine
-  }
+  } catch {}
 }
 
 export class ScrapeWorker {
   private queue: QueuedJob[] = [];
   private processing = false;
+  private retryQueue: QueuedJob[] = [];
 
   enqueue(tenantId: string, siteUrl: string, maxPages: number = 20): void {
     ensureMigrated();
     const db = getDb();
 
-    const alreadyQueued = this.queue.some((j) => j.tenantId === tenantId);
+    const alreadyQueued = this.queue.some((j) => j.tenantId === tenantId) ||
+      this.retryQueue.some((j) => j.tenantId === tenantId);
     if (alreadyQueued) {
       console.log(`[worker] ${tenantId} already in queue, skipping`);
       return;
@@ -67,7 +66,7 @@ export class ScrapeWorker {
     `).run(tenantId);
 
     this.queue.push({ tenantId, siteUrl, maxPages, attempt: 1 });
-    this.processNext();
+    this.kick();
   }
 
   isProcessing(): boolean {
@@ -75,13 +74,9 @@ export class ScrapeWorker {
   }
 
   getQueueLength(): number {
-    return this.queue.length;
+    return this.queue.length + this.retryQueue.length;
   }
 
-  /**
-   * On startup, recover tenants stuck in 'scraping' status (crashed mid-job).
-   * Re-enqueue them for retry.
-   */
   recoverStuckJobs(): void {
     ensureMigrated();
     const stuck = listTenants().filter((t) => t.status === "scraping");
@@ -95,11 +90,40 @@ export class ScrapeWorker {
     }
   }
 
-  private async processNext(): Promise<void> {
-    if (this.processing || this.queue.length === 0) return;
+  private kick(): void {
+    if (!this.processing) {
+      this.processLoop();
+    }
+  }
 
+  private async processLoop(): Promise<void> {
+    if (this.processing) return;
     this.processing = true;
-    const job = this.queue.shift()!;
+
+    while (this.queue.length > 0) {
+      const job = this.queue.shift()!;
+      await this.runJob(job);
+    }
+
+    // After primary queue is drained, process retries
+    if (this.retryQueue.length > 0) {
+      console.log(`[worker] Processing ${this.retryQueue.length} retry job(s)`);
+      const retries = [...this.retryQueue];
+      this.retryQueue = [];
+      for (const job of retries) {
+        await this.runJob(job);
+      }
+    }
+
+    this.processing = false;
+
+    // Check if new jobs arrived while we were finishing
+    if (this.queue.length > 0 || this.retryQueue.length > 0) {
+      this.processLoop();
+    }
+  }
+
+  private async runJob(job: QueuedJob): Promise<void> {
     const db = getDb();
 
     try {
@@ -113,7 +137,7 @@ export class ScrapeWorker {
         LIMIT 1
       `).run(job.tenantId);
 
-      console.log(`[worker] Starting scrape for ${job.tenantId} (attempt ${job.attempt}/${MAX_RETRIES})`);
+      console.log(`[worker] Starting ${job.tenantId} (attempt ${job.attempt}/${MAX_RETRIES})`);
 
       const result = await withTimeout(
         scrapeTenant(job.tenantId, job.siteUrl, job.maxPages),
@@ -143,7 +167,7 @@ export class ScrapeWorker {
         LIMIT 1
       `).run(result.pages, result.chunks, job.tenantId);
 
-      console.log(`[worker] Completed ${job.tenantId}: ${result.pages} pages, ${result.chunks} chunks`);
+      console.log(`[worker] Done ${job.tenantId}: ${result.pages} pages, ${result.chunks} chunks`);
 
       try {
         const tenant = getTenant(job.tenantId);
@@ -152,7 +176,7 @@ export class ScrapeWorker {
           await sendBotReadyEmail(tenant.email, tenant.id, tenant.domain, baseUrl);
         }
       } catch (emailErr: any) {
-        console.error(`[worker] Failed to send bot-ready email for ${job.tenantId}:`, emailErr.message);
+        console.error(`[worker] Email failed for ${job.tenantId}:`, emailErr.message);
       }
     } catch (error: any) {
       await forceCleanupBrowser();
@@ -169,32 +193,22 @@ export class ScrapeWorker {
       `).run(msg, job.tenantId);
 
       if (job.attempt < MAX_RETRIES) {
-        const delay = RETRY_BACKOFF[job.attempt - 1] || 30_000;
-        console.log(`[worker] Will retry ${job.tenantId} in ${delay / 1000}s (attempt ${job.attempt + 1}/${MAX_RETRIES})`);
-
+        console.log(`[worker] Queuing retry for ${job.tenantId} (attempt ${job.attempt + 1}/${MAX_RETRIES})`);
         updateTenant(job.tenantId, { status: "pending" });
 
-        setTimeout(() => {
-          db.prepare(`
-            INSERT INTO scrape_jobs (tenant_id, status)
-            VALUES (?, 'queued')
-          `).run(job.tenantId);
+        db.prepare(`
+          INSERT INTO scrape_jobs (tenant_id, status)
+          VALUES (?, 'queued')
+        `).run(job.tenantId);
 
-          this.queue.push({
-            tenantId: job.tenantId,
-            siteUrl: job.siteUrl,
-            maxPages: job.maxPages,
-            attempt: job.attempt + 1,
-          });
-          this.processNext();
-        }, delay);
+        this.retryQueue.push({
+          ...job,
+          attempt: job.attempt + 1,
+        });
       } else {
         console.error(`[worker] Giving up on ${job.tenantId} after ${MAX_RETRIES} attempts`);
         updateTenant(job.tenantId, { status: "error" });
       }
-    } finally {
-      this.processing = false;
-      this.processNext();
     }
   }
 }
