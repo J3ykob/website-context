@@ -44,6 +44,14 @@ export async function scrapeTenant(
     createIfMissing: true,
   });
 
+  // Clear old vectors before re-scraping (stale chunks cause retrieval issues)
+  const qdrantHost = process.env.QDRANT_HOST || "152.53.243.28";
+  const qdrantPort = process.env.QDRANT_PORT || "6333";
+  try {
+    await fetch(`http://${qdrantHost}:${qdrantPort}/collections/${collection}`, { method: "DELETE" });
+    console.log(`[scrape-pipeline] Cleared old collection ${collection}`);
+  } catch {}
+
   // Crawl site
   console.log(`[scrape-pipeline] Crawling ${siteUrl} (max ${maxPages} pages) for tenant ${tenantId}`);
   const crawlResult = await crawlSite(siteUrl, { maxPages, maxDepth: 3, rateLimit: 800 });
