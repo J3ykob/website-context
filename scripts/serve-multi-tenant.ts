@@ -171,10 +171,11 @@ app.get("/api/screenshot/:tenantId", (req, res) => {
 // Demo page — standalone chat for a tenant (no embed needed)
 app.get("/demo/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
-  if (!tenant || tenant.status !== "active") {
-    res.status(404).send("<!DOCTYPE html><html><body style='font-family:Archivo,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#57534e'><p>This bot is not ready yet. Check back soon.</p></body></html>");
+  if (!tenant) {
+    res.status(404).send("<!DOCTYPE html><html><body style='font-family:Archivo,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#57534e'><p>Bot not found.</p></body></html>");
     return;
   }
+  const isReady = tenant.status === "active";
 
   // Always use HTTPS in production (Render terminates TLS at the proxy)
   const host = req.get("host") || "website-context-dwoj.onrender.com";
@@ -238,8 +239,8 @@ body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; d
 <div class="demo-body">\
   <div class="demo-bg"><img src="' + baseUrl + '/api/screenshot/' + tenant.id + '" alt="" loading="eager" onerror="this.parentElement.style.display=\'none\'" /><div class="demo-bg-fade"></div></div>\
   <div class="demo-info" id="demo-info">\
-    <h3>Try it out!</h3>\
-    <p>This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.</p>\
+    <h3>' + (isReady ? 'Try it out!' : 'Almost ready...') + '</h3>\
+    <p>' + (isReady ? 'This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.' : 'We\\'re still indexing <strong>' + brand + '</strong>. The screenshot shows what the widget will look like. Chat will be available in a minute.') + '</p>\
     <div class="arrow">↓</div>\
     <button class="demo-dismiss" onclick="document.getElementById(\'demo-info\').style.display=\'none\'">Dismiss</button>\
   </div>\
