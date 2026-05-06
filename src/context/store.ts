@@ -109,20 +109,64 @@ function buildChunks(
   pageId: string,
   page: ScrapedPage
 ): ContentChunk[] {
-  const chunks: ContentChunk[] = [];
+  // Step 1: Merge small consecutive sections under the same parent heading.
+  // This prevents menu items, service lists, etc. from being split into
+  // tiny chunks that embed poorly. "Szarlotka" + "Fondant" + "Sernik"
+  // under "desery" become one chunk instead of three.
+  const merged: MarkdownSection[] = [];
+  let accumulator: MarkdownSection | null = null;
 
   for (const section of sections) {
     const content = section.heading
       ? `## ${section.heading}\n\n${section.content}`
       : section.content;
 
-    if (content.trim().length < 30) continue;
+    if (content.trim().length < 10) continue;
+
+    // Determine the parent heading (one level up in the path)
+    const parentKey = section.headingPath.slice(0, -1).join(" > ") || "__root__";
+    const accParentKey = accumulator
+      ? (accumulator.headingPath.slice(0, -1).join(" > ") || "__root__")
+      : null;
+
+    const isSmall = content.length < 200;
+    const sameParent = parentKey === accParentKey;
+
+    if (isSmall && accumulator && sameParent && (accumulator.content.length + content.length) < 3000) {
+      // Merge into accumulator
+      accumulator = {
+        heading: accumulator.heading,
+        level: accumulator.level,
+        url: accumulator.url,
+        headingPath: accumulator.headingPath,
+        content: accumulator.content + "\n\n" + content,
+      };
+    } else {
+      // Flush accumulator
+      if (accumulator) merged.push(accumulator);
+
+      if (isSmall) {
+        // Start new accumulator
+        accumulator = { heading: section.heading, level: section.level, url: section.url, headingPath: [...section.headingPath], content };
+      } else {
+        accumulator = null;
+        merged.push({ heading: section.heading, level: section.level, url: section.url, headingPath: [...section.headingPath], content });
+      }
+    }
+  }
+  if (accumulator) merged.push(accumulator);
+
+  // Step 2: Create chunks from merged sections
+  const chunks: ContentChunk[] = [];
+
+  for (const section of merged) {
+    const content = section.content;
+    if (content.trim().length < 15) continue;
 
     const contextPrefix = buildContextPrefix(page, section);
     const chunkType = classifyChunkType(section, page);
 
-    // Keep sections under 3000 chars as a single chunk to avoid splitting lists/tables
-    if (content.length <= 3000) {
+    if (content.length <= 4000) {
       chunks.push({
         id: randomUUID(),
         pageId,
@@ -136,8 +180,7 @@ function buildChunks(
         },
       });
     } else {
-      // For very long sections, split at safe paragraph boundaries only
-      const subChunks = splitIntoChunks(content, 2000, 150);
+      const subChunks = splitIntoChunks(content, 2500, 150);
       for (const subChunk of subChunks) {
         chunks.push({
           id: randomUUID(),
