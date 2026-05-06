@@ -158,6 +158,16 @@ app.get("/widget.js", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/widget.js"));
 });
 
+// Tenant screenshot (for demo background)
+app.get("/api/screenshot/:tenantId", (req, res) => {
+  const screenshotPath = resolve(__dirname, `../data/${req.params.tenantId}/screenshot.png`);
+  if (existsSync(screenshotPath)) {
+    res.sendFile(screenshotPath);
+  } else {
+    res.status(404).json({ error: "No screenshot available" });
+  }
+});
+
 // Demo page — standalone chat for a tenant (no embed needed)
 app.get("/demo/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
@@ -196,7 +206,10 @@ body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; d
   transition: all 0.2s;\
 }\
 .demo-cta:hover { background:#c2410c; transform:translateY(-1px); }\
-.demo-body { flex:1; position:relative; }\
+.demo-body { flex:1; position:relative; overflow:hidden; }\
+.demo-bg { position:absolute; inset:0; z-index:0; }\
+.demo-bg img { width:100%; display:block; filter:brightness(0.85); }\
+.demo-bg-fade { position:absolute; bottom:0; left:0; right:0; height:200px; background:linear-gradient(transparent, #fafaf8); }\
 .demo-info {\
   position:fixed; bottom:100px; left:50%; transform:translateX(-50%);\
   background:#fff; border:1px solid #e7e5e4; border-radius:16px; padding:20px 28px;\
@@ -223,6 +236,7 @@ body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; d
   <a class="demo-cta" href="/">Get this for your website — free</a>\
 </div>\
 <div class="demo-body">\
+  <div class="demo-bg"><img src="' + baseUrl + '/api/screenshot/' + tenant.id + '" alt="" loading="eager" onerror="this.parentElement.style.display=\'none\'" /><div class="demo-bg-fade"></div></div>\
   <div class="demo-info" id="demo-info">\
     <h3>Try it out!</h3>\
     <p>This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.</p>\

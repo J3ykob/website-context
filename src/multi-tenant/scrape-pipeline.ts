@@ -52,6 +52,30 @@ export async function scrapeTenant(
     console.log(`[scrape-pipeline] Cleared old collection ${collection}`);
   } catch {}
 
+  // Take a full-page screenshot for the demo page background
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox"],
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+    });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(siteUrl, { waitUntil: "networkidle", timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+
+    const screenshotDir = resolve(DATA_ROOT, tenantId);
+    if (!existsSync(screenshotDir)) mkdirSync(screenshotDir, { recursive: true });
+    await page.screenshot({
+      path: resolve(screenshotDir, "screenshot.png"),
+      fullPage: true,
+    });
+    console.log(`[scrape-pipeline] Screenshot saved for ${tenantId}`);
+    await browser.close();
+  } catch (err) {
+    console.log(`[scrape-pipeline] Screenshot skipped: ${(err as Error).message}`);
+  }
+
   // Crawl site
   console.log(`[scrape-pipeline] Crawling ${siteUrl} (max ${maxPages} pages) for tenant ${tenantId}`);
   const crawlResult = await crawlSite(siteUrl, { maxPages, maxDepth: 3, rateLimit: 800 });
