@@ -11,17 +11,17 @@
 <style>
 :root {
   --bg: #f8fafc;
-  --cream: #e0e7ef;
+  --cream: #eef2f7;
   --surface: #ffffff;
   --text: #0f172a;
   --text-2: #475569;
   --text-3: #94a3b8;
-  --amber: #2563eb;
-  --amber-light: #eff6ff;
-  --amber-border: #bfdbfe;
   --blue: #1e40af;
+  --blue-bright: #2563eb;
   --blue-light: #eff6ff;
   --blue-border: #bfdbfe;
+  --cta: #10b981;
+  --cta-hover: #059669;
   --green: #16a34a;
   --border: #e2e8f0;
   --shadow: 0 2px 8px rgba(15,23,42,0.04), 0 8px 32px rgba(15,23,42,0.06);
@@ -29,10 +29,9 @@
   --serif: "DM Serif Display", Georgia, serif;
   --sans: "Archivo", -apple-system, sans-serif;
   --radius: 24px;
-  --cta: #ea580c;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-html { scroll-snap-type: y proximity; }
+html { scroll-behavior: smooth; }
 body {
   font-family: var(--sans);
   background: var(--bg);
@@ -43,11 +42,9 @@ body {
 }
 .container { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
 section {
-  min-height: 100vh;
   display: flex;
   align-items: center;
-  padding: 80px 0;
-  scroll-snap-align: start;
+  padding: 100px 0;
 }
 section > .container { width: 100%; }
 
@@ -96,7 +93,7 @@ nav.scrolled {
   padding: 10px 24px; border-radius: 12px;
   transition: all 0.2s !important;
 }
-.nav-cta:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(234,88,12,0.25); }
+.nav-cta:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(16,185,129,0.3); }
 
 /* ─── Hero ─── */
 .hero {
@@ -147,8 +144,8 @@ nav.scrolled {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .signup-form:focus-within {
-  border-color: var(--blue-border);
-  box-shadow: var(--shadow-lg), 0 0 0 4px rgba(37,99,235,0.08);
+  border-color: var(--cta);
+  box-shadow: var(--shadow-lg), 0 0 0 4px rgba(16,185,129,0.1);
 }
 .signup-form input {
   flex: 1; min-width: 0; padding: 15px 16px;
@@ -164,7 +161,7 @@ nav.scrolled {
   font-size: 14px; font-weight: 700; cursor: pointer;
   white-space: nowrap; transition: background 0.2s; flex-shrink: 0;
 }
-.signup-form button:hover { background: #c2410c; }
+.signup-form button:hover { background: var(--cta-hover); }
 .signup-form button:disabled { opacity: 0.5; cursor: default; }
 .hero-note { font-size: 13px; color: var(--text-3); margin-top: 12px; }
 .signup-status {
@@ -181,7 +178,6 @@ nav.scrolled {
   min-height: auto; padding: 48px 0;
   background: var(--surface); border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  scroll-snap-align: none;
 }
 .proof-inner {
   display: flex; justify-content: center; gap: 56px;
@@ -313,7 +309,6 @@ nav.scrolled {
 .trust-strip {
   min-height: auto; padding: 36px 0; background: var(--blue-light);
   border-top: 1px solid var(--blue-border); border-bottom: 1px solid var(--blue-border);
-  scroll-snap-align: none;
 }
 .trust-inner { display: flex; justify-content: center; gap: 48px; flex-wrap: wrap; }
 .trust-badge { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--blue); }
@@ -353,7 +348,7 @@ nav.scrolled {
   font-weight: 700; text-decoration: none; transition: all 0.2s;
 }
 .price-btn-primary { background: var(--cta); color: white; }
-.price-btn-primary:hover { background: #c2410c; transform: translateY(-1px); }
+.price-btn-primary:hover { background: var(--cta-hover); transform: translateY(-1px); }
 .price-btn-outline { background: var(--bg); color: var(--text-2); border: 1px solid var(--border); }
 .price-btn-outline:hover { border-color: var(--text-3); color: var(--text); }
 
@@ -396,7 +391,7 @@ nav.scrolled {
 /* ─── Footer ─── */
 footer {
   padding: 40px 28px; border-top: 1px solid var(--border);
-  scroll-snap-align: end; min-height: auto;
+  min-height: auto;
 }
 .footer-inner {
   max-width: 1080px; margin: 0 auto;
@@ -758,7 +753,7 @@ function handleSignup(e) {
           if (s.status === 'active') {
             clearInterval(pollInterval);
             status.className = 'signup-status show';
-            status.innerHTML = '✓ Your AI assistant is ready! <a href="/dashboard" style="color:var(--amber);text-decoration:underline;font-weight:700">Go to dashboard →</a>';
+            status.innerHTML = '✓ Your AI assistant is ready! <a href="/dashboard" style="color:var(--blue);text-decoration:underline;font-weight:700">Go to dashboard →</a>';
             btn.textContent = 'Done!';
           } else if (s.status === 'error') {
             clearInterval(pollInterval);
