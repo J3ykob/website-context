@@ -272,29 +272,30 @@
 #wctx-fab .wctx-bar-expand:hover { color:rgba(10,10,10,0.7); }\
 \
 #wctx-fab.wctx-dark .wctx-bar-wrap {\
-  background:rgba(255,255,255,0.08);\
-  border-color:rgba(255,255,255,0.12);\
-  box-shadow:0 6px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);\
+  background:rgba(30,30,30,0.85);\
+  border-color:rgba(60,60,60,0.6);\
+  box-shadow:0 6px 24px rgba(0,0,0,0.4);\
+  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-wrap:hover,\
 #wctx-fab.wctx-dark .wctx-bar-wrap.pinned {\
-  box-shadow:0 12px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);\
+  box-shadow:0 12px 48px rgba(0,0,0,0.5);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-bubble.user {\
-  background:rgba(255,255,255,0.15);\
-  color:rgba(255,255,255,0.85);\
+  background:rgba(80,80,80,0.7);\
+  color:#fff;\
 }\
 #wctx-fab.wctx-dark .wctx-bar-bubble.assistant {\
-  background:rgba(255,255,255,0.06);\
-  color:rgba(255,255,255,0.7);\
-  border-color:rgba(255,255,255,0.08);\
+  background:rgba(50,50,50,0.7);\
+  color:rgba(255,255,255,0.95);\
+  border-color:rgba(80,80,80,0.4);\
 }\
-#wctx-fab.wctx-dark .wctx-bar-input { color:rgba(255,255,255,0.9); }\
-#wctx-fab.wctx-dark .wctx-bar-input::placeholder { color:rgba(255,255,255,0.3); }\
+#wctx-fab.wctx-dark .wctx-bar-input { color:#fff; }\
+#wctx-fab.wctx-dark .wctx-bar-input::placeholder { color:rgba(255,255,255,0.4); }\
 #wctx-fab.wctx-dark .wctx-bar-send {\
-  color:rgba(255,255,255,0.6);\
-  background:rgba(255,255,255,0.08);\
-  border-color:rgba(255,255,255,0.12);\
+  color:rgba(255,255,255,0.8);\
+  background:rgba(80,80,80,0.5);\
+  border-color:rgba(100,100,100,0.4);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-send:hover { background:rgba(255,255,255,0.15); color:rgba(255,255,255,0.9); }\
 #wctx-fab.wctx-dark .wctx-bar-expand { color:rgba(255,255,255,0.35); }\
@@ -1342,14 +1343,16 @@
 }\
 \
 #wctx-overlay.wctx-dark .wctx-shell {\
-  background:rgba(255,255,255,0.06);\
-  border-color:rgba(255,255,255,0.1);\
-  box-shadow:0 8px 32px rgba(0,0,0,0.3), inset 0 0 20px -5px rgba(255,255,255,0.05);\
-  color:rgba(255,255,255,0.9);\
+  background:rgba(25,25,25,0.88);\
+  border-color:rgba(60,60,60,0.5);\
+  box-shadow:0 8px 32px rgba(0,0,0,0.4);\
+  color:#fff;\
+  backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);\
 }\
 #wctx-overlay.wctx-dark .wctx-topbar {\
-  color:rgba(255,255,255,0.5);\
-  border-bottom-color:rgba(255,255,255,0.1);\
+  color:rgba(255,255,255,0.6);\
+  border-bottom-color:rgba(80,80,80,0.4);\
+  background:rgba(30,30,30,0.5);\
 }\
 #wctx-overlay.wctx-dark .wctx-logo { color:rgba(255,255,255,0.9); }\
 #wctx-overlay.wctx-dark .wctx-logo-mark { background:rgba(255,255,255,0.8); }\
@@ -1363,19 +1366,19 @@
 #wctx-overlay.wctx-dark .wctx-idle-prompt { color:rgba(255,255,255,0.35); }\
 #wctx-overlay.wctx-dark .wctx-idle-prompt::before { background:rgba(255,255,255,0.25); }\
 #wctx-overlay.wctx-dark .wctx-input-frame {\
-  background:rgba(255,255,255,0.08);\
-  border-color:rgba(255,255,255,0.12);\
-  box-shadow:0 4px 16px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.06);\
+  background:rgba(40,40,40,0.7);\
+  border-color:rgba(80,80,80,0.5);\
+  box-shadow:0 4px 16px rgba(0,0,0,0.2);\
 }\
 #wctx-overlay.wctx-dark .wctx-input-frame:focus-within {\
-  border-color:rgba(255,255,255,0.2);\
-  box-shadow:0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1);\
+  border-color:rgba(120,120,120,0.5);\
+  box-shadow:0 4px 24px rgba(0,0,0,0.3);\
 }\
 #wctx-overlay.wctx-dark .wctx-input-icon { color:rgba(255,255,255,0.35); }\
-#wctx-overlay.wctx-dark .wctx-chat-input { color:rgba(255,255,255,0.9); }\
-#wctx-overlay.wctx-dark .wctx-chat-input::placeholder { color:rgba(255,255,255,0.25); }\
-#wctx-overlay.wctx-dark .wctx-send-btn { color:rgba(255,255,255,0.5); }\
-#wctx-overlay.wctx-dark .wctx-send-btn:hover { color:rgba(255,255,255,0.8); }\
+#wctx-overlay.wctx-dark .wctx-chat-input { color:#fff; }\
+#wctx-overlay.wctx-dark .wctx-chat-input::placeholder { color:rgba(255,255,255,0.4); }\
+#wctx-overlay.wctx-dark .wctx-send-btn { color:rgba(255,255,255,0.7); }\
+#wctx-overlay.wctx-dark .wctx-send-btn:hover { color:#fff; }\
 #wctx-overlay.wctx-dark .wctx-idle-footnote { color:rgba(255,255,255,0.3); }\
 #wctx-overlay.wctx-dark .wctx-idle-footnote kbd {\
   background:rgba(255,255,255,0.08);\
@@ -1384,14 +1387,14 @@
 }\
 #wctx-overlay.wctx-dark .wctx-state-chat .wctx-input-zone { border-top-color:rgba(255,255,255,0.08); }\
 #wctx-overlay.wctx-dark .wctx-msg-user {\
-  background:rgba(255,255,255,0.12);\
-  color:rgba(255,255,255,0.95);\
-  border-color:rgba(255,255,255,0.15);\
+  background:rgba(80,80,80,0.6);\
+  color:#fff;\
+  border-color:rgba(100,100,100,0.4);\
 }\
 #wctx-overlay.wctx-dark .wctx-msg-assistant {\
-  color:rgba(255,255,255,0.85);\
-  background:rgba(255,255,255,0.06);\
-  border-color:rgba(255,255,255,0.1);\
+  color:#fff;\
+  background:rgba(45,45,45,0.7);\
+  border-color:rgba(70,70,70,0.5);\
 }\
 #wctx-overlay.wctx-dark .wctx-msg-assistant code { background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.85); }\
 #wctx-overlay.wctx-dark .wctx-msg-assistant a { color:rgba(255,255,255,0.85); }\
