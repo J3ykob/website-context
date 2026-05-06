@@ -12,6 +12,7 @@ import { sendBotReadyEmail } from "./email.js";
 
 const MAX_RETRIES = 3;
 const JOB_TIMEOUT_MS = 3 * 60 * 1000;
+const COOLDOWN_MS = 10_000; // 10s between jobs for GC / memory recovery
 
 interface QueuedJob {
   tenantId: string;
@@ -103,6 +104,10 @@ export class ScrapeWorker {
     while (this.queue.length > 0) {
       const job = this.queue.shift()!;
       await this.runJob(job);
+      if (this.queue.length > 0) {
+        console.log(`[worker] Cooldown ${COOLDOWN_MS / 1000}s before next job (${this.queue.length} remaining)`);
+        await new Promise((r) => setTimeout(r, COOLDOWN_MS));
+      }
     }
 
     // After primary queue is drained, process retries
@@ -111,6 +116,7 @@ export class ScrapeWorker {
       const retries = [...this.retryQueue];
       this.retryQueue = [];
       for (const job of retries) {
+        await new Promise((r) => setTimeout(r, COOLDOWN_MS));
         await this.runJob(job);
       }
     }
