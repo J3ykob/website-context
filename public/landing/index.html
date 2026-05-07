@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Whisp — Your website, but it talks</title>
 <meta name="description" content="Free AI chat widget that turns your website into a conversation. Visitors chat instead of clicking. Auto-scrapes, answers questions, fills forms.">
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -76,12 +77,7 @@ nav.scrolled {
   display: flex; align-items: center; gap: 10px;
 }
 .nav-mark {
-  width: 30px; height: 30px; background: var(--blue);
-  border-radius: 9px; position: relative;
-}
-.nav-mark::before {
-  content: ""; position: absolute; inset: 5px;
-  border: 2.5px solid white; border-radius: 5px;
+  width: 30px; height: 30px; flex-shrink: 0;
 }
 .nav-links { display: flex; gap: 28px; align-items: center; }
 .nav-links a {
@@ -429,7 +425,7 @@ footer {
 <body>
 
 <nav id="nav">
-  <a href="/" class="nav-logo"><span class="nav-mark"></span> Whisp</a>
+  <a href="/" class="nav-logo"><svg class="nav-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="8" fill="#1e40af"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#1e40af" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1 -.5 2.5-.5 3 0" stroke="#1e40af" stroke-width="1.3" stroke-linecap="round"/></svg> Whisp</a>
   <div class="nav-links">
     <a href="#features">Features</a>
     <a href="#pricing">Pricing</a>
