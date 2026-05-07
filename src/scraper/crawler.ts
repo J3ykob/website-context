@@ -14,7 +14,7 @@ const DEFAULT_OPTIONS: Required<CrawlOptions> = {
     /\/(wp-admin|wp-login|admin|login|logout|cart|checkout)\//i,
   ],
   timeout: 15000,
-  userAgent: "Mozilla/5.0 (compatible; WebsiteContextBot/1.0; +https://websitecontext.dev/bot)",
+  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
 };
 
 export async function crawlSite(

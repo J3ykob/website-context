@@ -6,7 +6,7 @@ export function generateEmbedCode(tenantId: string, options?: {
   position?: "bottom-right" | "bottom-left";
   primaryColor?: string;
 }): string {
-  const host = options?.apiHost || "https://api.websitecontext.dev";
+  const host = options?.apiHost || "https://api.whisp.so";
   const config = {
     tenantId,
     position: options?.position || "bottom-right",
@@ -29,7 +29,7 @@ export function generateEmbedCode(tenantId: string, options?: {
 export function generateWebComponentEmbed(tenantId: string, options?: {
   apiHost?: string;
 }): string {
-  const host = options?.apiHost || "https://api.websitecontext.dev";
+  const host = options?.apiHost || "https://api.whisp.so";
 
   return `<!-- Website Context Chat Widget -->
 <script src="${host}/widget.js" async></script>

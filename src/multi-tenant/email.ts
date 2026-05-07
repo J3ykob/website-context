@@ -22,7 +22,7 @@ export async function sendWelcomeEmail(
     await resend.emails.send({
       from: FROM,
       to: email,
-      subject: "Set your password — website.context",
+      subject: "Set your password — Whisp",
       html: `
 <!DOCTYPE html>
 <html>
@@ -36,13 +36,13 @@ export async function sendWelcomeEmail(
       <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;border:1px solid #e7e5e4;padding:48px 40px;">
         <tr><td>
           <div style="width:36px;height:36px;background:#1c1917;border-radius:9px;margin-bottom:28px;"></div>
-          <h1 style="font-family:Georgia,serif;font-size:26px;font-weight:400;color:#1c1917;margin:0 0 12px;">Welcome to website.context</h1>
+          <h1 style="font-family:Georgia,serif;font-size:26px;font-weight:400;color:#1c1917;margin:0 0 12px;">Welcome to Whisp</h1>
           <p style="font-size:15px;color:#57534e;line-height:1.6;margin:0 0 28px;">
             Your AI chat widget is being set up. Set your dashboard password to manage your bot, view conversations, and customize responses.
           </p>
           <a href="${setupUrl}" style="display:inline-block;background:#1c1917;color:#ffffff;font-size:14px;font-weight:600;padding:14px 28px;border-radius:10px;text-decoration:none;">Set your password</a>
           <p style="font-size:12px;color:#a8a29e;margin-top:28px;line-height:1.5;">
-            If you didn't sign up for website.context, you can ignore this email.
+            If you didn't sign up for Whisp, you can ignore this email.
           </p>
         </td></tr>
       </table>

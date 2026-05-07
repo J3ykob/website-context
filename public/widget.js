@@ -2,7 +2,7 @@
   var config = window.__wctx || {};
   var API_HOST = config.apiHost || window.location.origin;
   var TENANT_ID = config.tenantId || "default";
-  var BRAND = config.brandName || "website.context";
+  var BRAND = config.brandName || "Whisp";
 
   // Owner mode — activated via ?wctx-owner=true or config.ownerKey matching a cookie
   var urlParams = new URLSearchParams(window.location.search);
