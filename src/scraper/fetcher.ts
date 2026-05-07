@@ -77,13 +77,20 @@ async function fetchStatic(
 }
 
 let browserInstance: Browser | null = null;
+const BROWSERLESS_TOKEN = process.env.BROWSERLESS_TOKEN || "";
 
 async function getBrowser(): Promise<Browser> {
   if (!browserInstance || !browserInstance.isConnected()) {
-    browserInstance = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-    });
+    if (BROWSERLESS_TOKEN) {
+      browserInstance = await chromium.connectOverCDP(
+        `wss://chrome.browserless.io?token=${BROWSERLESS_TOKEN}`
+      );
+    } else {
+      browserInstance = await chromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+      });
+    }
   }
   return browserInstance;
 }
@@ -93,21 +100,19 @@ async function fetchDynamic(
   options: { timeout: number; userAgent: string }
 ): Promise<Omit<FetchResult, "renderMethod">> {
   const browser = await getBrowser();
-  const context = await browser.newContext({
-    userAgent: options.userAgent,
-    viewport: { width: 1280, height: 720 },
-  });
+  const context = BROWSERLESS_TOKEN
+    ? browser.contexts()[0] || await browser.newContext({ userAgent: options.userAgent, viewport: { width: 1280, height: 720 } })
+    : await browser.newContext({ userAgent: options.userAgent, viewport: { width: 1280, height: 720 } });
 
   const page: Page = await context.newPage();
 
   try {
     const response = await page.goto(url, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: options.timeout,
     });
 
-    // Wait a bit more for any late-loading content
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
 
     const html = await page.content();
     const headers: Record<string, string> = {};
@@ -123,7 +128,7 @@ async function fetchDynamic(
       headers,
     };
   } finally {
-    await context.close();
+    await page.close();
   }
 }
 

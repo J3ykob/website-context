@@ -32,6 +32,8 @@ services:
         value: "3210"
       - key: RESEND_API_KEY
         sync: false
+      - key: BROWSERLESS_TOKEN
+        sync: false
 
   # Qdrant vector database (private, not exposed to internet)
   - type: pserv

@@ -120,14 +120,17 @@ export async function scrapeTenant(
   if (!existsSync(screenshotPath)) {
     try {
       const { chromium } = await import("playwright");
-      const browser = await chromium.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-      });
+      const browserlessToken = process.env.BROWSERLESS_TOKEN || "";
+      const browser = browserlessToken
+        ? await chromium.connectOverCDP(`wss://chrome.browserless.io?token=${browserlessToken}`)
+        : await chromium.launch({
+            headless: true,
+            args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+            executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+          });
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-      await page.goto(siteUrl, { waitUntil: "networkidle", timeout: 15000 }).catch(() => {});
-      await page.waitForTimeout(2000);
+      await page.goto(siteUrl, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(3000);
 
       const screenshotDir = resolve(DATA_ROOT, tenantId);
       if (!existsSync(screenshotDir)) mkdirSync(screenshotDir, { recursive: true });
