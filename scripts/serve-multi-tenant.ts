@@ -159,6 +159,18 @@ app.get("/widget.js", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/widget.js"));
 });
 
+// Public widget config (for embed snippet to fetch startExpanded etc.)
+app.get("/api/widget-config/:tenantId", (req, res) => {
+  const tenant = getTenant(req.params.tenantId);
+  if (!tenant) { res.status(404).json({}); return; }
+  const s = tenant.settings || {};
+  res.json({
+    startExpanded: s.startExpanded || false,
+    forceTheme: s.forceTheme || "auto",
+    brandName: s.brandName || tenant.brandName || "",
+  });
+});
+
 // Tenant screenshot (for demo background)
 app.get("/api/screenshot/:tenantId", (req, res) => {
   const screenshotPath = resolve(__dirname, `../data/${req.params.tenantId}/screenshot.png`);
@@ -247,7 +259,7 @@ body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; d
 </div>\
 <script>\
 window.addEventListener("load", function(){\
-  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark"};\
+  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark","startExpanded":' + (tenant.settings?.startExpanded ? 'true' : 'false') + '};\
   window.__wctx=c;\
   var s=document.createElement("script");\
   s.src=c.apiHost+"/widget.js";\
@@ -676,6 +688,28 @@ app.delete("/api/dashboard/flows/:id", authMiddleware, async (req, res) => {
 });
 
 // Rescrape
+// Widget settings (startExpanded, theme, etc.)
+app.get("/api/dashboard/widget-settings", authMiddleware, (req, res) => {
+  const tenant = getTenant((req as any).tenantId);
+  if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
+  const settings = tenant.settings || {};
+  res.json({
+    startExpanded: settings.startExpanded || false,
+    forceTheme: settings.forceTheme || "auto",
+    brandName: settings.brandName || tenant.brandName || "",
+  });
+});
+
+app.put("/api/dashboard/widget-settings", authMiddleware, (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const tenant = getTenant(tenantId);
+  if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
+  const current = tenant.settings || {};
+  const updated = { ...current, ...req.body };
+  updateTenant(tenantId, { settings: updated });
+  res.json({ ok: true, settings: updated });
+});
+
 app.post("/api/dashboard/rescrape", authMiddleware, (req, res) => {
   const tenantId = (req as any).tenantId;
   const tenant = getTenant(tenantId);

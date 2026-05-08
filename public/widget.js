@@ -573,11 +573,12 @@
     messages.forEach(function(m) { appendMsg(m.role, m.content); });
   }
 
-  if (typeof START_MINIMIZED !== "undefined" && START_MINIMIZED) {
-    minimizeToBar();
-  } else {
+  var startExpanded = config.startExpanded === true;
+  if (startExpanded) {
     document.body.style.overflow = "hidden";
     els.input.focus();
+  } else {
+    minimizeToBar();
   }
 
   // --- Initialize theme detection ---
