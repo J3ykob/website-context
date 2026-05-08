@@ -4,35 +4,36 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Whisp — Your website, but it talks</title>
-<meta name="description" content="Free AI chat widget that turns your website into a conversation. Visitors chat instead of clicking. Auto-scrapes, answers questions, fills forms.">
+<meta name="description" content="AI chat widget that turns any website into a conversation. Visitors ask, your site answers. Free forever.">
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #f8fafc;
-  --cream: #eef2f7;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --text-2: #475569;
-  --text-3: #94a3b8;
-  --blue: #1e40af;
-  --blue-bright: #2563eb;
-  --blue-light: #eff6ff;
-  --blue-border: #bfdbfe;
-  --cta: #dc2645;
-  --cta-hover: #be1d3a;
-  --green: #16a34a;
-  --border: #e2e8f0;
-  --shadow: 0 2px 8px rgba(15,23,42,0.04), 0 8px 32px rgba(15,23,42,0.06);
-  --shadow-lg: 0 4px 16px rgba(15,23,42,0.05), 0 24px 48px rgba(15,23,42,0.1);
+  --bg: #0a0e1a;
+  --surface: rgba(255,255,255,0.04);
+  --surface-2: rgba(255,255,255,0.07);
+  --text: #f1f5f9;
+  --text-2: #94a3b8;
+  --text-3: #64748b;
+  --blue: #3b82f6;
+  --blue-dim: #1d4ed8;
+  --blue-glow: rgba(59,130,246,0.15);
+  --cta: #3b82f6;
+  --cta-hover: #2563eb;
+  --border: rgba(255,255,255,0.06);
+  --border-2: rgba(255,255,255,0.1);
+  --pill-bg: rgba(255,255,255,0.05);
+  --pill-border: rgba(255,255,255,0.08);
+  --shadow: 0 4px 24px rgba(0,0,0,0.3);
+  --shadow-lg: 0 8px 48px rgba(0,0,0,0.4);
   --serif: "DM Serif Display", Georgia, serif;
   --sans: "Archivo", -apple-system, sans-serif;
-  --radius: 24px;
+  --radius: 20px;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+html { scroll-behavior: smooth; }
 body {
   font-family: var(--sans);
   background: var(--bg);
@@ -41,44 +42,39 @@ body {
   overflow-x: hidden;
   line-height: 1.6;
 }
-.container { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
-section {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  padding: 80px 0;
-  scroll-snap-align: start;
-}
-section > .container { width: 100%; }
 
-.reveal {
-  opacity: 0;
-  transform: translateY(18px);
-  transition: opacity 0.6s ease, transform 0.6s ease;
+/* ─── Animated gradient bg ─── */
+.gradient-bg {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(59,130,246,0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 20%, rgba(99,102,241,0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 50% at 20% 80%, rgba(59,130,246,0.06) 0%, transparent 50%);
 }
+
+.container { max-width: 1080px; margin: 0 auto; padding: 0 28px; position: relative; z-index: 1; }
+
+.reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.7s ease, transform 0.7s ease; }
 .reveal.visible { opacity: 1; transform: translateY(0); }
 
 /* ─── Nav ─── */
 nav {
   position: fixed; top:0; left:0; right:0; z-index:1000;
-  padding: 14px 28px;
+  padding: 16px 28px;
   display: flex; align-items: center; justify-content: space-between;
   transition: all 0.3s;
 }
 nav.scrolled {
-  background: rgba(248,250,252,0.95);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(10,14,26,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border);
 }
 .nav-logo {
-  font-family: var(--sans); font-size: 15px; font-weight: 800;
+  font-family: var(--sans); font-size: 16px; font-weight: 800;
   color: var(--text); text-decoration: none;
   display: flex; align-items: center; gap: 10px;
 }
-.nav-mark {
-  width: 30px; height: 30px; flex-shrink: 0;
-}
+.nav-mark { width: 28px; height: 28px; flex-shrink: 0; }
 .nav-links { display: flex; gap: 28px; align-items: center; }
 .nav-links a {
   font-size: 14px; color: var(--text-2); text-decoration: none;
@@ -88,345 +84,341 @@ nav.scrolled {
 .nav-cta {
   font-size: 13px !important; font-weight: 700 !important;
   color: white !important; background: var(--cta);
-  padding: 10px 24px; border-radius: 12px;
+  padding: 10px 22px; border-radius: 12px;
   transition: all 0.2s !important;
 }
-.nav-cta:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(220,38,69,0.3); }
+.nav-cta:hover { background: var(--cta-hover); transform: translateY(-1px); box-shadow: 0 4px 20px rgba(59,130,246,0.3); }
 
 /* ─── Hero ─── */
 .hero {
-  position: relative;
-  background: linear-gradient(135deg, #dbeafe 0%, var(--bg) 60%);
-  padding-top: 100px;
-  overflow: hidden;
+  min-height: 100vh; display: flex; align-items: center;
+  padding: 120px 0 80px; position: relative;
 }
-.hero-photo {
-  position: absolute; right: -60px; bottom: 0;
-  width: 520px; height: 100%;
-  object-fit: cover;
-  mask-image: linear-gradient(to left, rgba(0,0,0,0.4) 0%, transparent 90%);
-  -webkit-mask-image: linear-gradient(to left, rgba(0,0,0,0.4) 0%, transparent 90%);
-  pointer-events: none;
+.hero-layout {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center;
 }
-.hero-content { position: relative; z-index: 2; max-width: 600px; }
+.hero-text { max-width: 480px; }
 .hero-badge {
   display: inline-flex; align-items: center; gap: 8px;
-  font-size: 13px; font-weight: 600; color: var(--blue);
-  background: var(--blue-light); border: 1px solid var(--blue-border);
-  padding: 8px 18px; border-radius: 24px; margin-bottom: 24px;
+  font-size: 12px; font-weight: 600; color: var(--blue);
+  background: var(--blue-glow); border: 1px solid rgba(59,130,246,0.2);
+  padding: 6px 16px; border-radius: 20px; margin-bottom: 24px;
+  text-transform: uppercase; letter-spacing: 0.06em;
 }
 .hero-badge::before {
-  content: ""; width: 7px; height: 7px;
-  background: var(--green); border-radius: 50%;
-  animation: pulse-dot 2s ease-in-out infinite;
+  content: ""; width: 6px; height: 6px;
+  background: #34d399; border-radius: 50%;
+  animation: pulse-green 2s ease-in-out infinite;
 }
-@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.3} }
+@keyframes pulse-green { 0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,0.5)} 50%{box-shadow:0 0 0 6px rgba(52,211,153,0)} }
 
 .hero h1 {
   font-family: var(--serif);
-  font-size: clamp(40px, 6vw, 68px);
-  font-weight: 400; line-height: 1.08;
+  font-size: clamp(36px, 5vw, 56px);
+  font-weight: 400; line-height: 1.1;
   letter-spacing: -0.02em; margin-bottom: 20px;
 }
 .hero h1 em { font-style: italic; color: var(--blue); }
 .hero-sub {
-  font-size: 18px; color: var(--text-2);
-  margin-bottom: 32px; line-height: 1.7; max-width: 480px;
+  font-size: 17px; color: var(--text-2);
+  margin-bottom: 32px; line-height: 1.7;
 }
 
+/* ─── Signup form ─── */
 .signup-form {
-  display: flex; gap: 0; max-width: 500px;
-  background: var(--surface); border: 2px solid var(--border);
-  border-radius: 16px; overflow: hidden;
-  box-shadow: var(--shadow);
+  display: flex; gap: 0; max-width: 440px;
+  background: var(--surface-2); border: 1px solid var(--border-2);
+  border-radius: 14px; overflow: hidden;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .signup-form:focus-within {
-  border-color: var(--blue-border);
-  box-shadow: var(--shadow-lg), 0 0 0 4px rgba(30,64,175,0.08);
+  border-color: rgba(59,130,246,0.3);
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.08);
 }
 .signup-form input {
-  flex: 1; min-width: 0; padding: 15px 16px;
+  flex: 1; min-width: 0; padding: 14px 14px;
   background: transparent; border: none; outline: none;
-  font-family: var(--sans); font-size: 14px; color: var(--text); font-weight: 500;
+  font-family: var(--sans); font-size: 13px; color: var(--text); font-weight: 500;
   border-right: 1px solid var(--border);
 }
-.signup-form input:last-of-type { border-right: none; }
 .signup-form input::placeholder { color: var(--text-3); }
 .signup-form button {
-  padding: 15px 24px; background: var(--cta);
+  padding: 14px 20px; background: var(--cta);
   color: white; border: none; font-family: var(--sans);
-  font-size: 14px; font-weight: 700; cursor: pointer;
+  font-size: 13px; font-weight: 700; cursor: pointer;
   white-space: nowrap; transition: background 0.2s; flex-shrink: 0;
 }
 .signup-form button:hover { background: var(--cta-hover); }
 .signup-form button:disabled { opacity: 0.5; cursor: default; }
-.hero-note { font-size: 13px; color: var(--text-3); margin-top: 12px; }
+.hero-note { font-size: 12px; color: var(--text-3); margin-top: 12px; }
 .signup-status {
-  display: none; max-width: 500px; margin: 14px 0 0;
-  padding: 14px 18px; background: var(--blue-light);
-  border: 1px solid var(--blue-border); border-radius: 14px;
-  font-size: 14px; color: var(--blue); font-weight: 600; text-align: center;
+  display: none; max-width: 440px; margin: 14px 0 0;
+  padding: 12px 16px; background: var(--blue-glow);
+  border: 1px solid rgba(59,130,246,0.2); border-radius: 12px;
+  font-size: 13px; color: var(--blue); font-weight: 600; text-align: center;
 }
 .signup-status.show { display: block; }
-.signup-status.error { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
+.signup-status.error { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.2); color: #ef4444; }
 
-/* ─── Social proof strip ─── */
-.proof-strip {
-  min-height: auto; padding: 48px 0;
-  background: var(--surface); border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  scroll-snap-align: start;
+/* ─── Chat demo (the star) ─── */
+.chat-demo {
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
+  border-radius: 24px;
+  padding: 0;
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  box-shadow: var(--shadow-lg), 0 0 80px -20px rgba(59,130,246,0.15);
+  overflow: hidden;
+  max-width: 420px;
+  margin-left: auto;
 }
-.proof-inner {
-  display: flex; justify-content: center; gap: 56px;
-  flex-wrap: wrap; align-items: center;
+.chat-demo-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; font-weight: 700; color: var(--text-2);
 }
-.proof-stat { text-align: center; }
-.proof-num {
-  font-family: var(--serif); font-size: 36px; color: var(--blue);
-  line-height: 1; margin-bottom: 4px;
+.chat-demo-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #34d399;
 }
-.proof-label { font-size: 12px; color: var(--text-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.chat-demo-site {
+  color: var(--text-3); font-weight: 500; margin-left: auto; font-size: 12px;
+}
+.chat-demo-body {
+  padding: 20px; min-height: 320px; display: flex; flex-direction: column; gap: 12px;
+}
+.chat-msg {
+  max-width: 85%; padding: 12px 16px;
+  border-radius: 16px; font-size: 14px; line-height: 1.5;
+  opacity: 0; transform: translateY(10px);
+  animation: msg-in 0.4s ease forwards;
+}
+.chat-msg.user {
+  align-self: flex-end; background: var(--blue); color: white;
+  border-bottom-right-radius: 4px;
+}
+.chat-msg.bot {
+  align-self: flex-start; background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-bottom-left-radius: 4px;
+}
+@keyframes msg-in { to { opacity: 1; transform: translateY(0); } }
 
-/* ─── Live onboarding queue ─── */
+.chat-demo-input {
+  padding: 14px 20px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+.chat-demo-input-pill {
+  flex: 1; padding: 10px 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 24px; font-size: 13px; color: var(--text-3);
+}
+.chat-demo-send {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--blue); border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.chat-demo-send svg { width: 14px; height: 14px; }
+
+/* ─── Typing indicator ─── */
+.typing-dots { display: flex; gap: 4px; padding: 12px 16px; }
+.typing-dots span {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--text-3);
+  animation: typing-bounce 1.2s infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+
+/* ─── Onboarding strip ─── */
 .onboarding-strip {
-  min-height: auto; padding: 32px 0; scroll-snap-align: start;
-  background: var(--blue); color: #fff; overflow: hidden;
+  min-height: auto; padding: 20px 0;
+  background: rgba(59,130,246,0.08); border-top: 1px solid rgba(59,130,246,0.1);
+  border-bottom: 1px solid rgba(59,130,246,0.1);
 }
 .onboarding-inner {
-  display: flex; align-items: center; gap: 24px;
+  display: flex; align-items: center; gap: 20px;
   flex-wrap: wrap; justify-content: center;
 }
 .onboarding-pulse {
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 8px; height: 8px; border-radius: 50%;
   background: #34d399; flex-shrink: 0;
-  animation: pulse-dot 2s ease-in-out infinite;
+  animation: pulse-green 2s ease-in-out infinite;
 }
-@keyframes pulse-dot {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.6); }
-  50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
-}
-.onboarding-text {
-  font-size: 15px; font-weight: 500;
-}
-.onboarding-text strong { font-weight: 800; }
+.onboarding-text { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.onboarding-text strong { font-weight: 800; color: var(--text); }
 .onboarding-bar-wrap {
-  flex: 1; min-width: 200px; max-width: 320px;
-  height: 8px; background: rgba(255,255,255,0.2);
-  border-radius: 4px; overflow: hidden;
+  flex: 1; min-width: 160px; max-width: 240px;
+  height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden;
 }
 .onboarding-bar-fill {
-  height: 100%; border-radius: 4px;
-  background: linear-gradient(90deg, #34d399, #6ee7b7);
+  height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
   transition: width 1s ease;
 }
-.onboarding-recent {
-  font-size: 13px; opacity: 0.75;
-}
-.onboarding-recent span { font-weight: 600; }
+.onboarding-recent { font-size: 12px; color: var(--text-3); }
+.onboarding-recent span { font-weight: 600; color: var(--text-2); }
 .onboarding-hidden { display: none; }
 
 /* ─── Section headers ─── */
 .section-label {
-  font-size: 13px; font-weight: 700; letter-spacing: 0.1em;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--blue); margin-bottom: 10px;
 }
 .section-title {
   font-family: var(--serif);
-  font-size: clamp(30px, 4vw, 46px);
-  font-weight: 400; line-height: 1.12;
-  margin-bottom: 52px; letter-spacing: -0.01em;
+  font-size: clamp(28px, 3.5vw, 42px);
+  font-weight: 400; line-height: 1.15;
+  margin-bottom: 48px;
 }
 .section-title em { font-style: italic; color: var(--blue); }
 
-/* ─── Steps ─── */
-.steps { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+section { padding: 100px 0; }
+
+/* ─── How it works ─── */
+.steps { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
 .step {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 36px 28px; text-align: center;
-  box-shadow: var(--shadow); transition: transform 0.2s, box-shadow 0.2s;
+  border-radius: var(--radius); padding: 32px 24px; text-align: center;
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
-.step:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.step:hover { border-color: var(--border-2); box-shadow: 0 4px 32px rgba(0,0,0,0.2); }
 .step-num {
-  width: 52px; height: 52px; margin: 0 auto 18px;
-  background: var(--blue-light); border: 1px solid var(--blue-border);
-  border-radius: 16px; display: flex; align-items: center; justify-content: center;
-  font-family: var(--serif); font-size: 24px; color: var(--blue);
+  width: 44px; height: 44px; margin: 0 auto 16px;
+  background: var(--blue-glow); border: 1px solid rgba(59,130,246,0.15);
+  border-radius: 14px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--serif); font-size: 20px; color: var(--blue);
 }
-.step h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
-.step p { font-size: 14px; color: var(--text-2); line-height: 1.6; }
+.step h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+.step p { font-size: 13px; color: var(--text-2); line-height: 1.6; }
 
 /* ─── Features ─── */
-.features-section { background: var(--cream); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.features-section { border-top: 1px solid var(--border); }
+.features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .feature-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 32px 28px;
-  box-shadow: var(--shadow); transition: transform 0.2s;
+  border-radius: var(--radius); padding: 28px 24px;
+  transition: border-color 0.3s;
 }
-.feature-card:hover { transform: translateY(-2px); }
+.feature-card:hover { border-color: var(--border-2); }
 .feature-icon {
-  width: 44px; height: 44px; background: var(--blue-light);
-  border: 1px solid var(--blue-border); border-radius: 14px;
+  width: 40px; height: 40px; background: var(--blue-glow);
+  border: 1px solid rgba(59,130,246,0.15); border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 18px; color: var(--blue);
+  margin-bottom: 16px; color: var(--blue);
 }
-.feature-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
-.feature-card p { font-size: 14px; color: var(--text-2); line-height: 1.7; }
-
-/* ─── Screenshot ─── */
-.screenshot-section { position: relative; overflow: hidden; }
-.screenshot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
-.screenshot-text .section-title { margin-bottom: 20px; }
-.screenshot-text p { font-size: 16px; color: var(--text-2); line-height: 1.7; margin-bottom: 24px; }
-.screenshot-img {
-  border-radius: 16px; overflow: hidden;
-  box-shadow: var(--shadow-lg); border: 1px solid var(--border);
-}
-.screenshot-img img { width: 100%; display: block; }
+.feature-card h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+.feature-card p { font-size: 13px; color: var(--text-2); line-height: 1.7; }
 
 /* ─── Testimonials ─── */
-.testimonials-section { background: var(--cream); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.testimonials-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+.testimonials-section { border-top: 1px solid var(--border); }
+.testimonials-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
 .testimonial {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 32px 28px;
-  box-shadow: var(--shadow);
+  border-radius: var(--radius); padding: 28px 24px;
 }
-.testimonial-stars { color: #f59e0b; font-size: 16px; margin-bottom: 14px; letter-spacing: 2px; }
-.testimonial-quote { font-size: 15px; color: var(--text); line-height: 1.7; margin-bottom: 20px; font-style: italic; }
-.testimonial-author { display: flex; align-items: center; gap: 12px; }
-.testimonial-avatar {
-  width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
-  border: 2px solid var(--border);
-}
-.testimonial-name { font-size: 14px; font-weight: 700; color: var(--text); }
-.testimonial-role { font-size: 12px; color: var(--text-3); }
+.testimonial-stars { color: #f59e0b; font-size: 14px; margin-bottom: 12px; letter-spacing: 2px; }
+.testimonial-quote { font-size: 14px; color: var(--text-2); line-height: 1.7; margin-bottom: 18px; font-style: italic; }
+.testimonial-author { display: flex; align-items: center; gap: 10px; }
+.testimonial-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); }
+.testimonial-name { font-size: 13px; font-weight: 700; }
+.testimonial-role { font-size: 11px; color: var(--text-3); }
 
 /* ─── Trust ─── */
 .trust-strip {
-  min-height: auto; padding: 36px 0; background: var(--blue-light);
-  border-top: 1px solid var(--blue-border); border-bottom: 1px solid var(--blue-border);
-  scroll-snap-align: start;
+  min-height: auto; padding: 28px 0;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
 }
-.trust-inner { display: flex; justify-content: center; gap: 48px; flex-wrap: wrap; }
-.trust-badge { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--blue); }
-.trust-badge svg { flex-shrink: 0; }
+.trust-inner { display: flex; justify-content: center; gap: 40px; flex-wrap: wrap; }
+.trust-badge { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text-3); }
+.trust-badge svg { opacity: 0.5; }
 
 /* ─── Pricing ─── */
-.pricing-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; align-items: start; }
+.pricing-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; align-items: start; }
 .price-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 36px 28px;
-  box-shadow: var(--shadow); display: flex; flex-direction: column;
+  border-radius: var(--radius); padding: 32px 24px;
+  display: flex; flex-direction: column;
 }
 .price-card.featured {
-  border: 2px solid var(--blue); position: relative;
-  box-shadow: var(--shadow-lg); transform: scale(1.02);
+  border: 1px solid rgba(59,130,246,0.3); position: relative;
+  box-shadow: 0 0 40px -10px rgba(59,130,246,0.15); transform: scale(1.02);
 }
 .price-card.featured::before {
   content: "Most popular"; position: absolute; top: -11px; left: 50%;
   transform: translateX(-50%); background: var(--blue); color: white;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
-  text-transform: uppercase; padding: 4px 16px; border-radius: 10px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 4px 14px; border-radius: 8px;
 }
-.price-name { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
-.price-amount { font-family: var(--serif); font-size: 44px; color: var(--text); line-height: 1; margin-bottom: 4px; }
-.price-amount span { font-family: var(--sans); font-size: 14px; color: var(--text-3); font-weight: 500; }
-.price-desc { font-size: 14px; color: var(--text-3); margin-bottom: 24px; }
-.price-features { list-style: none; margin-bottom: 28px; flex: 1; }
+.price-name { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
+.price-amount { font-family: var(--serif); font-size: 40px; color: var(--text); line-height: 1; margin-bottom: 4px; }
+.price-amount span { font-family: var(--sans); font-size: 13px; color: var(--text-3); font-weight: 500; }
+.price-desc { font-size: 13px; color: var(--text-3); margin-bottom: 24px; }
+.price-features { list-style: none; margin-bottom: 24px; flex: 1; }
 .price-features li {
-  font-size: 14px; color: var(--text-2); padding: 7px 0;
+  font-size: 13px; color: var(--text-2); padding: 6px 0;
   border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
 }
-.price-features li::before { content: "✓"; color: var(--green); font-weight: 700; font-size: 13px; }
+.price-features li::before { content: "✓"; color: var(--blue); font-weight: 700; font-size: 12px; }
 .price-btn {
-  display: block; text-align: center; padding: 14px;
-  border-radius: 14px; font-family: var(--sans); font-size: 14px;
+  display: block; text-align: center; padding: 12px;
+  border-radius: 12px; font-family: var(--sans); font-size: 13px;
   font-weight: 700; text-decoration: none; transition: all 0.2s;
 }
 .price-btn-primary { background: var(--cta); color: white; }
 .price-btn-primary:hover { background: var(--cta-hover); transform: translateY(-1px); }
-.price-btn-outline { background: var(--bg); color: var(--text-2); border: 1px solid var(--border); }
-.price-btn-outline:hover { border-color: var(--text-3); color: var(--text); }
+.price-btn-outline { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }
+.price-btn-outline:hover { border-color: var(--border-2); color: var(--text); }
 
 /* ─── FAQ ─── */
-.faq-section { background: var(--bg); }
-.faq-list { max-width: 680px; margin: 0 auto; }
+.faq-list { max-width: 640px; margin: 0 auto; }
 .faq-item { border-bottom: 1px solid var(--border); }
 .faq-q {
-  width: 100%; background: none; border: none; padding: 22px 0;
-  font-family: var(--sans); font-size: 16px; font-weight: 600;
+  width: 100%; background: none; border: none; padding: 20px 0;
+  font-family: var(--sans); font-size: 15px; font-weight: 600;
   color: var(--text); text-align: left; cursor: pointer;
   display: flex; justify-content: space-between; align-items: center;
 }
 .faq-q:hover { color: var(--blue); }
-.faq-q::after { content: "+"; font-size: 22px; color: var(--text-3); transition: transform 0.3s; }
+.faq-q::after { content: "+"; font-size: 20px; color: var(--text-3); transition: transform 0.3s; }
 .faq-item.open .faq-q::after { transform: rotate(45deg); color: var(--blue); }
 .faq-a { max-height: 0; overflow: hidden; transition: max-height 0.35s ease; }
-.faq-item.open .faq-a { max-height: 200px; padding-bottom: 20px; }
-.faq-a p { font-size: 15px; color: var(--text-2); line-height: 1.7; }
+.faq-item.open .faq-a { max-height: 200px; padding-bottom: 16px; }
+.faq-a p { font-size: 14px; color: var(--text-2); line-height: 1.7; }
 
 /* ─── CTA ─── */
-.cta-section {
-  text-align: center; background: var(--surface);
-  border-top: 1px solid var(--border);
-  background-image: url("https://images.unsplash.com/photo-1497366216548-37526070297c?w=1400&q=80");
-  background-size: cover; background-position: center;
-  position: relative;
-}
-.cta-section::before {
-  content: ""; position: absolute; inset: 0;
-  background: rgba(248,250,252,0.92);
-}
-.cta-section > .container { position: relative; z-index: 2; }
-.cta-section h2 {
-  font-family: var(--serif); font-size: clamp(28px,4vw,44px);
-  margin-bottom: 16px;
-}
-.cta-section p { font-size: 17px; color: var(--text-2); margin-bottom: 36px; max-width: 480px; margin-left: auto; margin-right: auto; }
+.cta-section { text-align: center; border-top: 1px solid var(--border); }
+.cta-section h2 { font-family: var(--serif); font-size: clamp(26px,3.5vw,40px); margin-bottom: 14px; }
+.cta-section p { font-size: 15px; color: var(--text-2); margin-bottom: 32px; max-width: 420px; margin-left: auto; margin-right: auto; }
 
 /* ─── Footer ─── */
-footer {
-  padding: 40px 28px; border-top: 1px solid var(--border);
-  min-height: auto; scroll-snap-align: end;
-}
-.footer-inner {
-  max-width: 1080px; margin: 0 auto;
-  display: flex; justify-content: space-between; align-items: center;
-}
-.footer-left { font-size: 13px; color: var(--text-3); }
-.footer-links { display: flex; gap: 20px; }
-.footer-links a { font-size: 13px; color: var(--text-3); text-decoration: none; }
+footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: auto; }
+.footer-inner { max-width: 1080px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+.footer-left { font-size: 12px; color: var(--text-3); }
+.footer-links { display: flex; gap: 16px; }
+.footer-links a { font-size: 12px; color: var(--text-3); text-decoration: none; }
 .footer-links a:hover { color: var(--text); }
 
-/* ─── Responsive ─── */
-@media (max-width: 900px) {
-  .hero-photo { display: none; }
-  .hero-content { max-width: 100%; }
-  .screenshot-grid { grid-template-columns: 1fr; }
-}
-@media (max-width: 768px) {
-  section { padding: 60px 0; }
-  .steps, .features-grid, .pricing-grid, .testimonials-grid { grid-template-columns: 1fr; }
-  .price-card.featured { transform: none; }
-  .signup-form { flex-direction: column; border-radius: 14px; }
-  .signup-form input { border-right: none; border-bottom: 1px solid var(--border); }
-  .signup-form button { border-radius: 0 0 12px 12px; }
-  nav { padding: 12px 20px; }
+/* ─── Mobile ─── */
+@media(max-width:768px) {
+  .hero-layout { grid-template-columns: 1fr; gap: 40px; }
+  .hero-text { max-width: 100%; }
+  .chat-demo { max-width: 100%; margin-left: 0; }
+  .steps { grid-template-columns: 1fr; }
+  .features-grid { grid-template-columns: 1fr; }
+  .testimonials-grid { grid-template-columns: 1fr; }
+  .pricing-grid { grid-template-columns: 1fr; }
   .nav-links a:not(.nav-cta) { display: none; }
-  .proof-inner, .trust-inner { gap: 28px; }
-  .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
 }
 </style>
 </head>
 <body>
 
+<div class="gradient-bg"></div>
+
 <nav id="nav">
-  <a href="/" class="nav-logo"><svg class="nav-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="8" fill="#1e40af"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#1e40af" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1 -.5 2.5-.5 3 0" stroke="#1e40af" stroke-width="1.3" stroke-linecap="round"/></svg> Whisp</a>
+  <a href="/" class="nav-logo"><svg class="nav-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1 -.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg> Whisp</a>
   <div class="nav-links">
+    <a href="#how">How it works</a>
     <a href="#features">Features</a>
     <a href="#pricing">Pricing</a>
     <a href="#faq">FAQ</a>
@@ -436,34 +428,37 @@ footer {
 
 <!-- Hero -->
 <section class="hero" id="signup">
-  <img class="hero-photo" src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=800&q=80" alt="" loading="eager" />
   <div class="container">
-    <div class="hero-content">
-      <div class="hero-badge reveal">Free for every website</div>
-      <h1 class="reveal" style="transition-delay:0.1s">Turn your website<br>into <em>ChatGPT</em></h1>
-      <p class="hero-sub reveal" style="transition-delay:0.2s">Your visitors chat instead of clicking through menus. The AI answers questions, navigates pages, and fills forms — automatically. Free forever.</p>
-      <form class="signup-form reveal" style="transition-delay:0.3s" id="signup-form">
-        <input type="url" name="url" placeholder="https://your-website.com" required id="signup-url" />
-        <input type="email" name="email" placeholder="your@email.com" required id="signup-email" />
-        <button type="submit" id="signup-btn">Get started free</button>
-      </form>
-      <p class="hero-note reveal" style="transition-delay:0.4s">No credit card. Live in under 5 minutes.</p>
-      <div class="signup-status" id="signup-status"></div>
+    <div class="hero-layout">
+      <div class="hero-text">
+        <div class="hero-badge reveal">Free for every website</div>
+        <h1 class="reveal" style="transition-delay:0.1s">Your website,<br>but it <em>talks</em></h1>
+        <p class="hero-sub reveal" style="transition-delay:0.2s">Visitors ask questions, your site answers. The AI reads every page and becomes your 24/7 assistant. No setup, no code knowledge needed.</p>
+        <form class="signup-form reveal" style="transition-delay:0.3s" id="signup-form">
+          <input type="url" name="url" placeholder="https://your-site.com" required id="signup-url" />
+          <input type="email" name="email" placeholder="email" required id="signup-email" />
+          <button type="submit" id="signup-btn">Start free</button>
+        </form>
+        <p class="hero-note reveal" style="transition-delay:0.4s">No credit card. Live in under 5 minutes.</p>
+        <div class="signup-status" id="signup-status"></div>
+      </div>
+
+      <!-- Animated chat demo -->
+      <div class="chat-demo reveal" style="transition-delay:0.3s">
+        <div class="chat-demo-header">
+          <div class="chat-demo-dot"></div>
+          Whisp
+          <div class="chat-demo-site">restauracja-sloik.pl</div>
+        </div>
+        <div class="chat-demo-body" id="chat-demo-body"></div>
+        <div class="chat-demo-input">
+          <div class="chat-demo-input-pill" id="demo-input">Ask anything about this site...</div>
+          <button class="chat-demo-send"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button>
+        </div>
+      </div>
     </div>
   </div>
 </section>
-
-<!-- Social proof -->
-<div class="proof-strip">
-  <div class="container">
-    <div class="proof-inner reveal">
-      <div class="proof-stat"><div class="proof-num">200+</div><div class="proof-label">Businesses</div></div>
-      <div class="proof-stat"><div class="proof-num">12,000+</div><div class="proof-label">Conversations</div></div>
-      <div class="proof-stat"><div class="proof-num">95%</div><div class="proof-label">Accuracy</div></div>
-      <div class="proof-stat"><div class="proof-num">&lt;2s</div><div class="proof-label">Response time</div></div>
-    </div>
-  </div>
-</div>
 
 <!-- Live onboarding queue -->
 <div class="onboarding-strip onboarding-hidden" id="onboarding-live">
@@ -495,7 +490,7 @@ footer {
       <div class="step">
         <div class="step-num">2</div>
         <h3>We index everything</h3>
-        <p>AI processes your content into searchable context. It understands your pages, forms, and services.</p>
+        <p>AI processes your content into searchable context — pages, forms, services, all of it.</p>
       </div>
       <div class="step">
         <div class="step-num">3</div>
@@ -513,41 +508,24 @@ footer {
     <div class="section-title reveal" style="transition-delay:0.1s">Not just a chatbot.<br>A better way to <em>browse</em>.</div>
     <div class="features-grid">
       <div class="feature-card reveal">
-        <div class="feature-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <div class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
         <h3>Conversational navigation</h3>
         <p>Visitors chat with your website instead of clicking through menus. The AI knows every page, every product, every answer.</p>
       </div>
       <div class="feature-card reveal" style="transition-delay:0.1s">
-        <div class="feature-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <div class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
         <h3>Flow recording & replay</h3>
         <p>Record any process — forms, orders, bookings. The AI replays it for visitors, filling forms on their behalf.</p>
       </div>
       <div class="feature-card reveal" style="transition-delay:0.2s">
-        <div class="feature-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
+        <div class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
         <h3>Knowledge gap detection</h3>
         <p>See what questions your site can't answer. Fill the gaps and watch conversions grow.</p>
       </div>
       <div class="feature-card reveal" style="transition-delay:0.3s">
-        <div class="feature-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
+        <div class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
         <h3>Owner dashboard</h3>
         <p>Manage knowledge, record flows, view conversations, and discover what your visitors really want.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Screenshot -->
-<section class="screenshot-section" id="demo">
-  <div class="container">
-    <div class="screenshot-grid">
-      <div class="screenshot-text">
-        <div class="section-label reveal">See it in action</div>
-        <div class="section-title reveal" style="transition-delay:0.1s">Your website, but <em>conversational</em></div>
-        <p class="reveal" style="transition-delay:0.2s">The widget sits at the bottom of your site. Visitors type a question and get instant answers from your content — no waiting, no searching through menus.</p>
-        <p class="reveal" style="transition-delay:0.3s">Works on any website: WordPress, Shopify, static HTML, React — anything with a <code style="background:var(--cream);padding:2px 6px;border-radius:4px;font-size:13px">&lt;/body&gt;</code> tag.</p>
-      </div>
-      <div class="screenshot-img reveal" style="transition-delay:0.2s">
-        <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&q=80" alt="Dashboard on laptop" loading="lazy" />
       </div>
     </div>
   </div>
@@ -561,7 +539,7 @@ footer {
     <div class="testimonials-grid">
       <div class="testimonial reveal">
         <div class="testimonial-stars">★★★★★</div>
-        <div class="testimonial-quote">"I set it up in 10 minutes. Now 40% of my customers use the chat instead of browsing the menu. Orders are faster and people find exactly what they want."</div>
+        <div class="testimonial-quote">"I set it up in 10 minutes. Now 40% of my customers use the chat instead of browsing the menu."</div>
         <div class="testimonial-author">
           <img class="testimonial-avatar" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=88&q=80" alt="" />
           <div><div class="testimonial-name">Anna Kowalska</div><div class="testimonial-role">Sklep Internetowy Modna.pl</div></div>
@@ -569,7 +547,7 @@ footer {
       </div>
       <div class="testimonial reveal" style="transition-delay:0.1s">
         <div class="testimonial-stars">★★★★★</div>
-        <div class="testimonial-quote">"My restaurant website gets 200 visits a day. Before, nobody used the booking form. Now the AI fills it for them — reservations are up 60%."</div>
+        <div class="testimonial-quote">"Before, nobody used the booking form. Now the AI fills it for them — reservations are up 60%."</div>
         <div class="testimonial-author">
           <img class="testimonial-avatar" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=88&q=80" alt="" />
           <div><div class="testimonial-name">Tomasz Nowak</div><div class="testimonial-role">Restauracja Pod Lipą</div></div>
@@ -577,7 +555,7 @@ footer {
       </div>
       <div class="testimonial reveal" style="transition-delay:0.2s">
         <div class="testimonial-stars">★★★★★</div>
-        <div class="testimonial-quote">"The knowledge gap feature is incredible. I discovered that 30% of my visitors were asking about pricing — and my site didn't mention it anywhere!"</div>
+        <div class="testimonial-quote">"I discovered that 30% of visitors asked about pricing — and my site didn't mention it anywhere!"</div>
         <div class="testimonial-author">
           <img class="testimonial-avatar" src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=88&q=80" alt="" />
           <div><div class="testimonial-name">Marta Wiśniewska</div><div class="testimonial-role">Kancelaria Prawna MW</div></div>
@@ -591,10 +569,10 @@ footer {
 <div class="trust-strip">
   <div class="container">
     <div class="trust-inner reveal">
-      <div class="trust-badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> GDPR Compliant</div>
-      <div class="trust-badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> 256-bit Encryption</div>
-      <div class="trust-badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> EU Data Storage</div>
-      <div class="trust-badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> 99.9% Uptime</div>
+      <div class="trust-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> GDPR Compliant</div>
+      <div class="trust-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> 256-bit Encryption</div>
+      <div class="trust-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> EU Data Storage</div>
+      <div class="trust-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> 99.9% Uptime</div>
     </div>
   </div>
 </div>
@@ -608,7 +586,7 @@ footer {
       <div class="price-card">
         <div class="price-name">Free</div>
         <div class="price-amount">0 <span>PLN / month</span></div>
-        <div class="price-desc">Everything you need to get started.</div>
+        <div class="price-desc">Everything to get started.</div>
         <ul class="price-features">
           <li>AI chat widget</li>
           <li>Auto-scrape your site</li>
@@ -654,7 +632,7 @@ footer {
 </section>
 
 <!-- FAQ -->
-<section class="faq-section" id="faq">
+<section id="faq">
   <div class="container">
     <div class="section-label reveal">FAQ</div>
     <div class="section-title reveal" style="transition-delay:0.1s">Common questions</div>
@@ -674,10 +652,10 @@ footer {
   <div class="container">
     <h2 class="reveal">Ready to try it?</h2>
     <p class="reveal" style="transition-delay:0.1s">Join hundreds of businesses that turned their websites into conversations.</p>
-    <form class="signup-form reveal" style="transition-delay:0.2s;margin:0 auto;max-width:500px" onsubmit="handleSignup(event)">
-      <input type="url" placeholder="https://your-website.com" required />
-      <input type="email" placeholder="your@email.com" required />
-      <button type="submit">Get started free</button>
+    <form class="signup-form reveal" style="transition-delay:0.2s;margin:0 auto;max-width:440px" onsubmit="handleSignup(event)">
+      <input type="url" placeholder="https://your-site.com" required />
+      <input type="email" placeholder="email" required />
+      <button type="submit">Start free</button>
     </form>
   </div>
 </section>
@@ -688,12 +666,12 @@ footer {
     <div class="footer-links">
       <a href="/dashboard">Dashboard</a>
       <a href="mailto:hello@whisp.so">Contact</a>
-
     </div>
   </div>
 </footer>
 
 <script>
+// ─── Reveal on scroll ───
 var reveals = document.querySelectorAll('.reveal');
 var observer = new IntersectionObserver(function(entries) {
   entries.forEach(function(entry) {
@@ -702,9 +680,11 @@ var observer = new IntersectionObserver(function(entries) {
 }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
 reveals.forEach(function(el) { observer.observe(el); });
 
+// ─── Nav scroll ───
 var nav = document.getElementById('nav');
 window.addEventListener('scroll', function() { nav.classList.toggle('scrolled', window.scrollY > 50); });
 
+// ─── FAQ accordion ───
 document.querySelectorAll('.faq-q').forEach(function(btn) {
   btn.addEventListener('click', function() {
     var item = this.parentElement;
@@ -714,6 +694,7 @@ document.querySelectorAll('.faq-q').forEach(function(btn) {
   });
 });
 
+// ─── Signup ───
 var signupForm = document.getElementById('signup-form');
 signupForm.addEventListener('submit', handleSignup);
 
@@ -742,7 +723,7 @@ function handleSignup(e) {
       status.className = 'signup-status show error';
       status.textContent = data.error;
       btn.disabled = false;
-      btn.textContent = 'Get started free';
+      btn.textContent = 'Start free';
       return;
     }
     var tenantId = data.id;
@@ -761,7 +742,7 @@ function handleSignup(e) {
             status.className = 'signup-status show error';
             status.textContent = 'Something went wrong. Please try again.';
             btn.disabled = false;
-            btn.textContent = 'Get started free';
+            btn.textContent = 'Start free';
           } else {
             status.textContent = 'Scraping your website... (' + (s.status || 'processing') + ')';
           }
@@ -773,14 +754,13 @@ function handleSignup(e) {
     status.className = 'signup-status show error';
     status.textContent = 'Network error. Please try again.';
     btn.disabled = false;
-    btn.textContent = 'Get started free';
+    btn.textContent = 'Start free';
   });
 }
 
 // ─── Live onboarding stats ───
 (function() {
   var strip = document.getElementById('onboarding-live');
-  var elActive = document.getElementById('onboard-active');
   var elQueued = document.getElementById('onboard-queued');
   var elBar = document.getElementById('onboard-bar');
   var elRecent = document.getElementById('onboard-recent');
@@ -803,7 +783,6 @@ function handleSignup(e) {
         elQueued.textContent = d.queued;
         var pct = d.total > 0 ? Math.round((d.active / d.total) * 100) : 0;
         elBar.style.width = pct + '%';
-
         if (d.recentlyCompleted && d.recentlyCompleted.length > 0) {
           var r = d.recentlyCompleted[0];
           elRecent.innerHTML = '<span>' + r.domain + '</span> joined ' + timeAgo(r.completedAt);
@@ -811,9 +790,81 @@ function handleSignup(e) {
       })
       .catch(function() {});
   }
-
   update();
   setInterval(update, 30000);
+})();
+
+// ─── Animated chat demo ───
+(function() {
+  var body = document.getElementById('chat-demo-body');
+  var input = document.getElementById('demo-input');
+  var convo = [
+    { type: 'user', text: 'Do you have any vegetarian options?' },
+    { type: 'bot', text: 'Yes! We have several vegetarian dishes: Makaron Rustica with sun-dried tomatoes, Risotto with seasonal mushrooms, and a Mediterranean Veggie Bowl. Would you like to see the full menu?' },
+    { type: 'user', text: 'What time do you close on Saturday?' },
+    { type: 'bot', text: 'On Saturdays we\'re open 12:00 - 23:00. Kitchen closes at 22:00. Want me to help you make a reservation?' },
+  ];
+  var i = 0;
+  var inputTexts = ['Do you have any vegetarian options?', 'What time do you close on Saturday?'];
+
+  function addMsg(msg) {
+    var el = document.createElement('div');
+    el.className = 'chat-msg ' + msg.type;
+    el.textContent = msg.text;
+    el.style.animationDelay = '0s';
+    body.appendChild(el);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function addTyping() {
+    var el = document.createElement('div');
+    el.className = 'chat-msg bot typing-dots';
+    el.innerHTML = '<span></span><span></span><span></span>';
+    el.style.animationDelay = '0s';
+    body.appendChild(el);
+    body.scrollTop = body.scrollHeight;
+    return el;
+  }
+
+  function typeInput(text, cb) {
+    input.textContent = '';
+    var j = 0;
+    var iv = setInterval(function() {
+      input.textContent = text.slice(0, ++j);
+      if (j >= text.length) { clearInterval(iv); setTimeout(cb, 400); }
+    }, 35);
+  }
+
+  function runNext() {
+    if (i >= convo.length) {
+      setTimeout(function() {
+        body.innerHTML = '';
+        i = 0;
+        input.textContent = 'Ask anything about this site...';
+        setTimeout(runNext, 1500);
+      }, 3000);
+      return;
+    }
+    var msg = convo[i];
+    if (msg.type === 'user') {
+      typeInput(msg.text, function() {
+        input.textContent = 'Ask anything about this site...';
+        addMsg(msg);
+        i++;
+        var dots = addTyping();
+        setTimeout(function() {
+          dots.remove();
+          runNext();
+        }, 1200);
+      });
+    } else {
+      addMsg(msg);
+      i++;
+      setTimeout(runNext, 2000);
+    }
+  }
+
+  setTimeout(runNext, 1500);
 })();
 </script>
 </body>
