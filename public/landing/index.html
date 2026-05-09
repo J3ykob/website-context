@@ -160,73 +160,153 @@ nav.scrolled {
 .signup-status.show { display: block; }
 .signup-status.error { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.2); color: #ef4444; }
 
-/* ─── Chat demo (the star) ─── */
-.chat-demo {
-  background: var(--pill-bg);
-  border: 1px solid var(--pill-border);
-  border-radius: 24px;
-  padding: 0;
-  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-  box-shadow: var(--shadow-lg), 0 0 80px -20px rgba(59,130,246,0.15);
+/* ─── MacBook mockup ─── */
+.macbook {
+  max-width: 540px; margin-left: auto;
+  perspective: 1200px;
+}
+.macbook-screen {
+  background: #1a1a2e;
+  border-radius: 12px 12px 0 0;
+  border: 2px solid #2a2a3e;
+  border-bottom: none;
   overflow: hidden;
-  max-width: 420px;
-  margin-left: auto;
+  box-shadow: 0 -4px 60px -10px rgba(59,130,246,0.15), var(--shadow-lg);
+  position: relative;
 }
-.chat-demo-header {
-  padding: 16px 20px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 10px;
-  font-size: 13px; font-weight: 700; color: var(--text-2);
+.macbook-topbar {
+  background: #12121e; padding: 8px 14px;
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid #2a2a3e;
 }
-.chat-demo-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: #34d399;
+.macbook-dot { width: 8px; height: 8px; border-radius: 50%; }
+.macbook-dot.r { background: #ff5f57; }
+.macbook-dot.y { background: #febc2e; }
+.macbook-dot.g { background: #28c840; }
+.macbook-url {
+  flex: 1; margin: 0 12px;
+  background: #0d0d18; border-radius: 6px; padding: 4px 12px;
+  font-size: 11px; color: #64748b; font-family: var(--sans);
+  text-align: center; border: 1px solid #1e1e30;
 }
-.chat-demo-site {
-  color: var(--text-3); font-weight: 500; margin-left: auto; font-size: 12px;
-}
-.chat-demo-body {
-  padding: 20px; min-height: 320px; display: flex; flex-direction: column; gap: 12px;
-}
-.chat-msg {
-  max-width: 85%; padding: 12px 16px;
-  border-radius: 16px; font-size: 14px; line-height: 1.5;
-  opacity: 0; transform: translateY(10px);
-  animation: msg-in 0.4s ease forwards;
-}
-.chat-msg.user {
-  align-self: flex-end; background: var(--blue); color: white;
-  border-bottom-right-radius: 4px;
-}
-.chat-msg.bot {
-  align-self: flex-start; background: var(--surface-2); color: var(--text);
-  border: 1px solid var(--border); border-bottom-left-radius: 4px;
-}
-@keyframes msg-in { to { opacity: 1; transform: translateY(0); } }
+.macbook-url span { color: #94a3b8; }
 
-.chat-demo-input {
-  padding: 14px 20px; border-top: 1px solid var(--border);
-  display: flex; align-items: center; gap: 10px;
+/* ─── Fake website inside mockup ─── */
+.fake-site {
+  height: 380px; position: relative; overflow: hidden;
+  background: #fafaf8;
 }
-.chat-demo-input-pill {
-  flex: 1; padding: 10px 16px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 24px; font-size: 13px; color: var(--text-3);
+.fake-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px; background: white;
+  border-bottom: 1px solid #e5e5e5;
 }
-.chat-demo-send {
-  width: 32px; height: 32px; border-radius: 50%;
-  background: var(--blue); border: none; cursor: pointer;
+.fake-logo { font-weight: 800; font-size: 13px; color: #1a1a1a; font-family: var(--sans); display: flex; align-items: center; gap: 6px; }
+.fake-logo-icon { width: 18px; height: 18px; background: #e85d3a; border-radius: 5px; }
+.fake-nav-links { display: flex; gap: 16px; }
+.fake-nav-links span { font-size: 11px; color: #888; font-family: var(--sans); }
+.fake-hero-img {
+  width: 100%; height: 160px; object-fit: cover; display: block;
+}
+.fake-content { padding: 16px 20px; }
+.fake-h1 {
+  font-family: var(--serif); font-size: 18px; color: #1a1a1a;
+  margin-bottom: 6px; line-height: 1.2;
+}
+.fake-p { font-size: 11px; color: #666; line-height: 1.6; max-width: 300px; margin-bottom: 12px; }
+.fake-cards { display: flex; gap: 8px; }
+.fake-card {
+  flex: 1; background: white; border: 1px solid #e5e5e5; border-radius: 8px;
+  padding: 10px; text-align: center;
+}
+.fake-card-icon { font-size: 16px; margin-bottom: 4px; }
+.fake-card-label { font-size: 9px; color: #888; font-family: var(--sans); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* ─── Widget bar inside mockup ─── */
+.mock-widget {
+  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+  width: calc(100% - 32px); max-width: 380px;
+}
+.mock-bar {
+  display: flex; flex-direction: column;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
+  overflow: hidden;
+  transition: all 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.mock-bar.expanded {
+  box-shadow: 0 8px 40px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+.mock-bar-msgs {
+  max-height: 0; opacity: 0; overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px;
+  transition: all 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.mock-bar.expanded .mock-bar-msgs {
+  max-height: 220px; opacity: 1; padding: 10px 12px;
+}
+.mock-bubble {
+  font-family: var(--sans); font-size: 11px; line-height: 1.5;
+  padding: 5px 9px; border-radius: 8px; max-width: 82%;
+  opacity: 0; transform: translateY(4px);
+  animation: mock-bubble-in 0.3s ease forwards;
+}
+@keyframes mock-bubble-in { to { opacity: 1; transform: translateY(0); } }
+.mock-bubble.user {
+  align-self: flex-end;
+  background: rgba(10,10,10,0.08); color: #1a1a1a;
+}
+.mock-bubble.bot {
+  align-self: flex-start;
+  background: white; color: #1a1a1a;
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.mock-bar-input {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+}
+.mock-bar-pill {
+  flex: 1; padding: 8px 14px;
+  border: none; outline: none; background: transparent;
+  font-family: var(--sans); font-size: 12px; color: #1a1a1a;
+}
+.mock-bar-pill-placeholder { color: #999; }
+.mock-bar-send {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: rgba(10,10,10,0.06); border: 1px solid rgba(10,10,10,0.08);
   display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
 }
-.chat-demo-send svg { width: 14px; height: 14px; }
+.mock-bar-send svg { width: 12px; height: 12px; stroke: #666; }
 
 /* ─── Typing indicator ─── */
-.typing-dots { display: flex; gap: 4px; padding: 12px 16px; }
+.typing-dots { display: inline-flex; gap: 3px; padding: 5px 9px; }
 .typing-dots span {
-  width: 6px; height: 6px; border-radius: 50%; background: var(--text-3);
+  width: 5px; height: 5px; border-radius: 50%; background: #999;
   animation: typing-bounce 1.2s infinite;
 }
 .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
 .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes typing-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+@keyframes typing-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+
+.macbook-base {
+  height: 14px;
+  background: linear-gradient(180deg, #2a2a3e 0%, #1e1e30 100%);
+  border-radius: 0 0 6px 6px;
+  position: relative;
+}
+.macbook-base::before {
+  content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 80px; height: 4px; background: #3a3a4e; border-radius: 0 0 4px 4px;
+}
+.macbook-shadow {
+  height: 20px; margin: 0 20px;
+  background: radial-gradient(ellipse at center, rgba(59,130,246,0.08) 0%, transparent 70%);
+}
 
 /* ─── Onboarding strip ─── */
 .onboarding-strip {
@@ -443,18 +523,45 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
         <div class="signup-status" id="signup-status"></div>
       </div>
 
-      <!-- Animated chat demo -->
-      <div class="chat-demo reveal" style="transition-delay:0.3s">
-        <div class="chat-demo-header">
-          <div class="chat-demo-dot"></div>
-          Whisp
-          <div class="chat-demo-site">restauracja-sloik.pl</div>
+      <!-- MacBook mockup with fake site + widget -->
+      <div class="macbook reveal" style="transition-delay:0.3s">
+        <div class="macbook-screen">
+          <div class="macbook-topbar">
+            <div class="macbook-dot r"></div>
+            <div class="macbook-dot y"></div>
+            <div class="macbook-dot g"></div>
+            <div class="macbook-url"><span>https://</span>restauracja-sloik.pl</div>
+          </div>
+          <div class="fake-site">
+            <div class="fake-nav">
+              <div class="fake-logo"><div class="fake-logo-icon"></div> Restauracja Słoik</div>
+              <div class="fake-nav-links"><span>Menu</span><span>O nas</span><span>Kontakt</span><span>Rezerwacje</span></div>
+            </div>
+            <img class="fake-hero-img" src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600&q=70" alt="" loading="eager" />
+            <div class="fake-content">
+              <div class="fake-h1">Kuchnia polska z duszą</div>
+              <div class="fake-p">Odkryj nasze sezonowe menu, przygotowane z lokalnych składników. Rezerwacja stolika online lub telefonicznie.</div>
+              <div class="fake-cards">
+                <div class="fake-card"><div class="fake-card-icon">🍽</div><div class="fake-card-label">Menu</div></div>
+                <div class="fake-card"><div class="fake-card-icon">📅</div><div class="fake-card-label">Rezerwacja</div></div>
+                <div class="fake-card"><div class="fake-card-icon">📍</div><div class="fake-card-label">Lokalizacja</div></div>
+              </div>
+            </div>
+
+            <!-- Widget bar (real styles) -->
+            <div class="mock-widget">
+              <div class="mock-bar" id="mock-bar">
+                <div class="mock-bar-msgs" id="mock-bar-msgs"></div>
+                <div class="mock-bar-input">
+                  <div class="mock-bar-pill" id="mock-input"><span class="mock-bar-pill-placeholder">Ask anything about this site...</span></div>
+                  <div class="mock-bar-send"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="chat-demo-body" id="chat-demo-body"></div>
-        <div class="chat-demo-input">
-          <div class="chat-demo-input-pill" id="demo-input">Ask anything about this site...</div>
-          <button class="chat-demo-send"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg></button>
-        </div>
+        <div class="macbook-base"></div>
+        <div class="macbook-shadow"></div>
       </div>
     </div>
   </div>
@@ -794,77 +901,76 @@ function handleSignup(e) {
   setInterval(update, 30000);
 })();
 
-// ─── Animated chat demo ───
+// ─── Animated widget demo in MacBook ───
 (function() {
-  var body = document.getElementById('chat-demo-body');
-  var input = document.getElementById('demo-input');
+  var bar = document.getElementById('mock-bar');
+  var msgs = document.getElementById('mock-bar-msgs');
+  var input = document.getElementById('mock-input');
   var convo = [
-    { type: 'user', text: 'Do you have any vegetarian options?' },
-    { type: 'bot', text: 'Yes! We have several vegetarian dishes: Makaron Rustica with sun-dried tomatoes, Risotto with seasonal mushrooms, and a Mediterranean Veggie Bowl. Would you like to see the full menu?' },
-    { type: 'user', text: 'What time do you close on Saturday?' },
-    { type: 'bot', text: 'On Saturdays we\'re open 12:00 - 23:00. Kitchen closes at 22:00. Want me to help you make a reservation?' },
+    { type: 'user', text: 'Macie coś wegetariańskiego?' },
+    { type: 'bot', text: 'Tak! Mamy Makaron Rustica z suszonymi pomidorami, Risotto z grzybami i Sałatkę Śródziemnomorską. Pokazać pełne menu?' },
+    { type: 'user', text: 'Do której jesteście w sobotę?' },
+    { type: 'bot', text: 'W soboty 12:00–23:00, kuchnia do 22:00. Pomóc z rezerwacją?' },
   ];
   var i = 0;
-  var inputTexts = ['Do you have any vegetarian options?', 'What time do you close on Saturday?'];
 
-  function addMsg(msg) {
+  function addBubble(msg) {
     var el = document.createElement('div');
-    el.className = 'chat-msg ' + msg.type;
+    el.className = 'mock-bubble ' + msg.type;
     el.textContent = msg.text;
-    el.style.animationDelay = '0s';
-    body.appendChild(el);
-    body.scrollTop = body.scrollHeight;
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
   }
 
   function addTyping() {
     var el = document.createElement('div');
-    el.className = 'chat-msg bot typing-dots';
+    el.className = 'mock-bubble bot typing-dots';
     el.innerHTML = '<span></span><span></span><span></span>';
-    el.style.animationDelay = '0s';
-    body.appendChild(el);
-    body.scrollTop = body.scrollHeight;
+    msgs.appendChild(el);
     return el;
   }
 
   function typeInput(text, cb) {
-    input.textContent = '';
+    input.innerHTML = '';
     var j = 0;
     var iv = setInterval(function() {
       input.textContent = text.slice(0, ++j);
       if (j >= text.length) { clearInterval(iv); setTimeout(cb, 400); }
-    }, 35);
+    }, 40);
   }
 
   function runNext() {
     if (i >= convo.length) {
       setTimeout(function() {
-        body.innerHTML = '';
+        msgs.innerHTML = '';
+        bar.classList.remove('expanded');
         i = 0;
-        input.textContent = 'Ask anything about this site...';
-        setTimeout(runNext, 1500);
+        input.innerHTML = '<span class="mock-bar-pill-placeholder">Ask anything about this site...</span>';
+        setTimeout(runNext, 2000);
       }, 3000);
       return;
     }
     var msg = convo[i];
     if (msg.type === 'user') {
       typeInput(msg.text, function() {
-        input.textContent = 'Ask anything about this site...';
-        addMsg(msg);
+        input.innerHTML = '<span class="mock-bar-pill-placeholder">Ask anything about this site...</span>';
+        bar.classList.add('expanded');
+        addBubble(msg);
         i++;
         var dots = addTyping();
         setTimeout(function() {
           dots.remove();
           runNext();
-        }, 1200);
+        }, 1000);
       });
     } else {
-      addMsg(msg);
+      addBubble(msg);
       i++;
-      setTimeout(runNext, 2000);
+      setTimeout(runNext, 2200);
     }
   }
 
-  setTimeout(runNext, 1500);
+  setTimeout(runNext, 2000);
 })();
 </script>
 </body>
