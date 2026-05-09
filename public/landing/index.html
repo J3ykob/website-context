@@ -487,8 +487,18 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
   .features-grid { grid-template-columns: 1fr; }
   .testimonials-grid { grid-template-columns: 1fr; }
   .pricing-grid { grid-template-columns: 1fr; }
-  .nav-links a:not(.nav-cta) { display: none; }
+  .nav-links a:not(.nav-cta):not(.lang-toggle) { display: none; }
 }
+
+/* ─── Language toggle ─── */
+.lang-toggle {
+  font-size: 12px !important; font-weight: 600 !important;
+  color: var(--text-3) !important; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 4px 10px; border-radius: 8px;
+  transition: all 0.2s;
+}
+.lang-toggle:hover { color: var(--text) !important; border-color: var(--border-2); }
 </style>
 </head>
 <body>
@@ -498,11 +508,12 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 <nav id="nav">
   <a href="/" class="nav-logo"><svg class="nav-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1 -.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg> Whisp</a>
   <div class="nav-links">
-    <a href="#how">How it works</a>
-    <a href="#features">Features</a>
-    <a href="#pricing">Pricing</a>
-    <a href="#faq">FAQ</a>
-    <a href="#signup" class="nav-cta">Get started free</a>
+    <a href="#how" data-i18n="nav.how">How it works</a>
+    <a href="#features" data-i18n="nav.features">Features</a>
+    <a href="#pricing" data-i18n="nav.pricing">Pricing</a>
+    <a href="#faq" data-i18n="nav.faq">FAQ</a>
+    <a href="javascript:void(0)" class="lang-toggle" id="lang-toggle" onclick="toggleLang()">PL</a>
+    <a href="#signup" class="nav-cta" data-i18n="nav.cta">Get started free</a>
   </div>
 </nav>
 
@@ -511,15 +522,15 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
   <div class="container">
     <div class="hero-layout">
       <div class="hero-text">
-        <div class="hero-badge reveal">Free for every website</div>
-        <h1 class="reveal" style="transition-delay:0.1s">Your website,<br>but it <em>talks</em></h1>
-        <p class="hero-sub reveal" style="transition-delay:0.2s">Visitors ask questions, your site answers. The AI reads every page and becomes your 24/7 assistant. No setup, no code knowledge needed.</p>
+        <div class="hero-badge reveal" data-i18n="hero.badge">Free for every website</div>
+        <h1 class="reveal" style="transition-delay:0.1s" data-i18n="hero.h1" data-i18n-html="1">Your website,<br>but it <em>talks</em></h1>
+        <p class="hero-sub reveal" style="transition-delay:0.2s" data-i18n="hero.sub">Visitors ask questions, your site answers. The AI reads every page and becomes your 24/7 assistant. No setup, no code knowledge needed.</p>
         <form class="signup-form reveal" style="transition-delay:0.3s" id="signup-form">
           <input type="url" name="url" placeholder="https://your-site.com" required id="signup-url" />
           <input type="email" name="email" placeholder="email" required id="signup-email" />
-          <button type="submit" id="signup-btn">Start free</button>
+          <button type="submit" id="signup-btn" data-i18n="hero.btn">Start free</button>
         </form>
-        <p class="hero-note reveal" style="transition-delay:0.4s">No credit card. Live in under 5 minutes.</p>
+        <p class="hero-note reveal" style="transition-delay:0.4s" data-i18n="hero.note">No credit card. Live in under 5 minutes.</p>
         <div class="signup-status" id="signup-status"></div>
       </div>
 
@@ -573,7 +584,7 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
     <div class="onboarding-inner">
       <div class="onboarding-pulse"></div>
       <div class="onboarding-text">
-        <strong id="onboard-queued">0</strong> businesses onboarding right now
+        <strong id="onboard-queued">0</strong> <span data-i18n="onboard.text">businesses onboarding right now</span>
       </div>
       <div class="onboarding-bar-wrap">
         <div class="onboarding-bar-fill" id="onboard-bar" style="width:0%"></div>
@@ -586,23 +597,23 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 <!-- How it works -->
 <section id="how">
   <div class="container">
-    <div class="section-label reveal">How it works</div>
-    <div class="section-title reveal" style="transition-delay:0.1s">Three steps. Five minutes.</div>
+    <div class="section-label reveal" data-i18n="how.label">How it works</div>
+    <div class="section-title reveal" style="transition-delay:0.1s" data-i18n="how.title">Three steps. Five minutes.</div>
     <div class="steps reveal" style="transition-delay:0.2s">
       <div class="step">
         <div class="step-num">1</div>
-        <h3>Paste your URL</h3>
-        <p>Enter your website address. Our AI reads every page and builds a knowledge base automatically.</p>
+        <h3 data-i18n="how.s1.h">Paste your URL</h3>
+        <p data-i18n="how.s1.p">Enter your website address. Our AI reads every page and builds a knowledge base automatically.</p>
       </div>
       <div class="step">
         <div class="step-num">2</div>
-        <h3>We index everything</h3>
-        <p>AI processes your content into searchable context — pages, forms, services, all of it.</p>
+        <h3 data-i18n="how.s2.h">We index everything</h3>
+        <p data-i18n="how.s2.p">AI processes your content into searchable context — pages, forms, services, all of it.</p>
       </div>
       <div class="step">
         <div class="step-num">3</div>
-        <h3>Embed one line</h3>
-        <p>Add a script tag to your site. The chat widget appears instantly. Your website is now conversational.</p>
+        <h3 data-i18n="how.s3.h">Embed one line</h3>
+        <p data-i18n="how.s3.p">Add a script tag to your site. The chat widget appears instantly. Your website is now conversational.</p>
       </div>
     </div>
   </div>
@@ -611,28 +622,28 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 <!-- Features -->
 <section class="features-section" id="features">
   <div class="container">
-    <div class="section-label reveal">Features</div>
-    <div class="section-title reveal" style="transition-delay:0.1s">Not just a chatbot.<br>A better way to <em>browse</em>.</div>
+    <div class="section-label reveal" data-i18n="feat.label">Features</div>
+    <div class="section-title reveal" style="transition-delay:0.1s" data-i18n="feat.title" data-i18n-html="1">Not just a chatbot.<br>A better way to <em>browse</em>.</div>
     <div class="features-grid">
       <div class="feature-card reveal">
         <div class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
-        <h3>Conversational navigation</h3>
-        <p>Visitors chat with your website instead of clicking through menus. The AI knows every page, every product, every answer.</p>
+        <h3 data-i18n="feat.f1.h">Conversational navigation</h3>
+        <p data-i18n="feat.f1.p">Visitors chat with your website instead of clicking through menus. The AI knows every page, every product, every answer.</p>
       </div>
       <div class="feature-card reveal" style="transition-delay:0.1s">
         <div class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
-        <h3>Flow recording & replay</h3>
-        <p>Record any process — forms, orders, bookings. The AI replays it for visitors, filling forms on their behalf.</p>
+        <h3 data-i18n="feat.f2.h">Flow recording & replay</h3>
+        <p data-i18n="feat.f2.p">Record any process — forms, orders, bookings. The AI replays it for visitors, filling forms on their behalf.</p>
       </div>
       <div class="feature-card reveal" style="transition-delay:0.2s">
         <div class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
-        <h3>Knowledge gap detection</h3>
-        <p>See what questions your site can't answer. Fill the gaps and watch conversions grow.</p>
+        <h3 data-i18n="feat.f3.h">Knowledge gap detection</h3>
+        <p data-i18n="feat.f3.p">See what questions your site can't answer. Fill the gaps and watch conversions grow.</p>
       </div>
       <div class="feature-card reveal" style="transition-delay:0.3s">
         <div class="feature-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
-        <h3>Owner dashboard</h3>
-        <p>Manage knowledge, record flows, view conversations, and discover what your visitors really want.</p>
+        <h3 data-i18n="feat.f4.h">Owner dashboard</h3>
+        <p data-i18n="feat.f4.p">Manage knowledge, record flows, view conversations, and discover what your visitors really want.</p>
       </div>
     </div>
   </div>
@@ -641,12 +652,12 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 <!-- Testimonials -->
 <section class="testimonials-section">
   <div class="container">
-    <div class="section-label reveal">What business owners say</div>
-    <div class="section-title reveal" style="transition-delay:0.1s">Trusted by real businesses</div>
+    <div class="section-label reveal" data-i18n="test.label">What business owners say</div>
+    <div class="section-title reveal" style="transition-delay:0.1s" data-i18n="test.title">Trusted by real businesses</div>
     <div class="testimonials-grid">
       <div class="testimonial reveal">
         <div class="testimonial-stars">★★★★★</div>
-        <div class="testimonial-quote">"I set it up in 10 minutes. Now 40% of my customers use the chat instead of browsing the menu."</div>
+        <div class="testimonial-quote" data-i18n="test.t1">"I set it up in 10 minutes. Now 40% of my customers use the chat instead of browsing the menu."</div>
         <div class="testimonial-author">
           <img class="testimonial-avatar" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=88&q=80" alt="" />
           <div><div class="testimonial-name">Anna Kowalska</div><div class="testimonial-role">Sklep Internetowy Modna.pl</div></div>
@@ -654,7 +665,7 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
       </div>
       <div class="testimonial reveal" style="transition-delay:0.1s">
         <div class="testimonial-stars">★★★★★</div>
-        <div class="testimonial-quote">"Before, nobody used the booking form. Now the AI fills it for them — reservations are up 60%."</div>
+        <div class="testimonial-quote" data-i18n="test.t2">"Before, nobody used the booking form. Now the AI fills it for them — reservations are up 60%."</div>
         <div class="testimonial-author">
           <img class="testimonial-avatar" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=88&q=80" alt="" />
           <div><div class="testimonial-name">Tomasz Nowak</div><div class="testimonial-role">Restauracja Pod Lipą</div></div>
@@ -662,7 +673,7 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
       </div>
       <div class="testimonial reveal" style="transition-delay:0.2s">
         <div class="testimonial-stars">★★★★★</div>
-        <div class="testimonial-quote">"I discovered that 30% of visitors asked about pricing — and my site didn't mention it anywhere!"</div>
+        <div class="testimonial-quote" data-i18n="test.t3">"I discovered that 30% of visitors asked about pricing — and my site didn't mention it anywhere!"</div>
         <div class="testimonial-author">
           <img class="testimonial-avatar" src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=88&q=80" alt="" />
           <div><div class="testimonial-name">Marta Wiśniewska</div><div class="testimonial-role">Kancelaria Prawna MW</div></div>
@@ -687,8 +698,8 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 <!-- Pricing -->
 <section id="pricing">
   <div class="container">
-    <div class="section-label reveal">Pricing</div>
-    <div class="section-title reveal" style="transition-delay:0.1s">Free forever. Pay for insights.</div>
+    <div class="section-label reveal" data-i18n="price.label">Pricing</div>
+    <div class="section-title reveal" style="transition-delay:0.1s" data-i18n="price.title">Free forever. Pay for insights.</div>
     <div class="pricing-grid reveal" style="transition-delay:0.2s">
       <div class="price-card">
         <div class="price-name">Free</div>
@@ -741,15 +752,15 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 <!-- FAQ -->
 <section id="faq">
   <div class="container">
-    <div class="section-label reveal">FAQ</div>
-    <div class="section-title reveal" style="transition-delay:0.1s">Common questions</div>
+    <div class="section-label reveal" data-i18n="faq.label">FAQ</div>
+    <div class="section-title reveal" style="transition-delay:0.1s" data-i18n="faq.title">Common questions</div>
     <div class="faq-list reveal" style="transition-delay:0.2s">
-      <div class="faq-item"><button class="faq-q">How does it work with my existing website?</button><div class="faq-a"><p>You add one line of code before your closing &lt;/body&gt; tag. Works with any website: WordPress, Shopify, static HTML, anything. Zero impact on page speed.</p></div></div>
-      <div class="faq-item"><button class="faq-q">Is the free tier really free?</button><div class="faq-a"><p>Yes, completely. The chat widget, auto-scraping, and unlimited conversations are free forever. We charge for advanced analytics that help you understand your visitors better.</p></div></div>
-      <div class="faq-item"><button class="faq-q">What about data privacy and GDPR?</button><div class="faq-a"><p>All data stored in the EU. Each business gets isolated storage. We don't share visitor data between websites. GDPR-compliant by design.</p></div></div>
-      <div class="faq-item"><button class="faq-q">What is flow recording?</button><div class="faq-a"><p>You click through a process on your site (like filling a contact form). The AI learns the steps and replays them for visitors — filling the form on their behalf in their own browser.</p></div></div>
-      <div class="faq-item"><button class="faq-q">How accurate are the AI responses?</button><div class="faq-a"><p>The AI only uses information from YOUR website. It never makes things up. When it can't answer, it logs the question so you can add the missing info.</p></div></div>
-      <div class="faq-item"><button class="faq-q">Can I customize the appearance?</button><div class="faq-a"><p>The widget auto-adapts to your site's colors. You can set brand name and accent color. Analytics Pro plan includes full white-label customization.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q1">How does it work with my existing website?</button><div class="faq-a"><p data-i18n="faq.a1">You add one line of code before your closing &lt;/body&gt; tag. Works with any website: WordPress, Shopify, static HTML, anything. Zero impact on page speed.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q2">Is the free tier really free?</button><div class="faq-a"><p data-i18n="faq.a2">Yes, completely. The chat widget, auto-scraping, and unlimited conversations are free forever. We charge for advanced analytics that help you understand your visitors better.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q3">What about data privacy and GDPR?</button><div class="faq-a"><p data-i18n="faq.a3">All data stored in the EU. Each business gets isolated storage. We don't share visitor data between websites. GDPR-compliant by design.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q4">What is flow recording?</button><div class="faq-a"><p data-i18n="faq.a4">You click through a process on your site (like filling a contact form). The AI learns the steps and replays them for visitors — filling the form on their behalf in their own browser.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q5">How accurate are the AI responses?</button><div class="faq-a"><p data-i18n="faq.a5">The AI only uses information from YOUR website. It never makes things up. When it can't answer, it logs the question so you can add the missing info.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q6">Can I customize the appearance?</button><div class="faq-a"><p data-i18n="faq.a6">The widget auto-adapts to your site's colors. You can set brand name and accent color. Analytics Pro plan includes full white-label customization.</p></div></div>
     </div>
   </div>
 </section>
@@ -757,8 +768,8 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 <!-- CTA -->
 <section class="cta-section">
   <div class="container">
-    <h2 class="reveal">Ready to try it?</h2>
-    <p class="reveal" style="transition-delay:0.1s">Join hundreds of businesses that turned their websites into conversations.</p>
+    <h2 class="reveal" data-i18n="cta.h">Ready to try it?</h2>
+    <p class="reveal" style="transition-delay:0.1s" data-i18n="cta.p">Join hundreds of businesses that turned their websites into conversations.</p>
     <form class="signup-form reveal" style="transition-delay:0.2s;margin:0 auto;max-width:440px" onsubmit="handleSignup(event)">
       <input type="url" placeholder="https://your-site.com" required />
       <input type="email" placeholder="email" required />
@@ -778,6 +789,112 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 </footer>
 
 <script>
+// ─── i18n engine ───
+var i18n = {
+  en: {
+    "nav.how": "How it works", "nav.features": "Features", "nav.pricing": "Pricing", "nav.faq": "FAQ", "nav.cta": "Get started free",
+    "hero.badge": "Free for every website",
+    "hero.h1": 'Your website,<br>but it <em>talks</em>',
+    "hero.sub": "Visitors ask questions, your site answers. The AI reads every page and becomes your 24/7 assistant. No setup, no code knowledge needed.",
+    "hero.btn": "Start free", "hero.note": "No credit card. Live in under 5 minutes.",
+    "onboard.text": "businesses onboarding right now",
+    "how.label": "How it works", "how.title": "Three steps. Five minutes.",
+    "how.s1.h": "Paste your URL", "how.s1.p": "Enter your website address. Our AI reads every page and builds a knowledge base automatically.",
+    "how.s2.h": "We index everything", "how.s2.p": "AI processes your content into searchable context — pages, forms, services, all of it.",
+    "how.s3.h": "Embed one line", "how.s3.p": "Add a script tag to your site. The chat widget appears instantly. Your website is now conversational.",
+    "feat.label": "Features", "feat.title": 'Not just a chatbot.<br>A better way to <em>browse</em>.',
+    "feat.f1.h": "Conversational navigation", "feat.f1.p": "Visitors chat with your website instead of clicking through menus. The AI knows every page, every product, every answer.",
+    "feat.f2.h": "Flow recording & replay", "feat.f2.p": "Record any process — forms, orders, bookings. The AI replays it for visitors, filling forms on their behalf.",
+    "feat.f3.h": "Knowledge gap detection", "feat.f3.p": "See what questions your site can’t answer. Fill the gaps and watch conversions grow.",
+    "feat.f4.h": "Owner dashboard", "feat.f4.p": "Manage knowledge, record flows, view conversations, and discover what your visitors really want.",
+    "test.label": "What business owners say", "test.title": "Trusted by real businesses",
+    "test.t1": "“I set it up in 10 minutes. Now 40% of my customers use the chat instead of browsing the menu.”",
+    "test.t2": "“Before, nobody used the booking form. Now the AI fills it for them — reservations are up 60%.”",
+    "test.t3": "“I discovered that 30% of visitors asked about pricing — and my site didn’t mention it anywhere!”",
+    "price.label": "Pricing", "price.title": "Free forever. Pay for insights.",
+    "faq.label": "FAQ", "faq.title": "Common questions",
+    "faq.q1": "How does it work with my existing website?", "faq.a1": "You add one line of code before your closing </body> tag. Works with any website: WordPress, Shopify, static HTML, anything. Zero impact on page speed.",
+    "faq.q2": "Is the free tier really free?", "faq.a2": "Yes, completely. The chat widget, auto-scraping, and unlimited conversations are free forever. We charge for advanced analytics that help you understand your visitors better.",
+    "faq.q3": "What about data privacy and GDPR?", "faq.a3": "All data stored in the EU. Each business gets isolated storage. We don’t share visitor data between websites. GDPR-compliant by design.",
+    "faq.q4": "What is flow recording?", "faq.a4": "You click through a process on your site (like filling a contact form). The AI learns the steps and replays them for visitors — filling the form on their behalf in their own browser.",
+    "faq.q5": "How accurate are the AI responses?", "faq.a5": "The AI only uses information from YOUR website. It never makes things up. When it can’t answer, it logs the question so you can add the missing info.",
+    "faq.q6": "Can I customize the appearance?", "faq.a6": "The widget auto-adapts to your site’s colors. You can set brand name and accent color. Analytics Pro plan includes full white-label customization.",
+    "cta.h": "Ready to try it?", "cta.p": "Join hundreds of businesses that turned their websites into conversations.",
+    "demo.convo": [
+      { type: "user", text: "How much for same-day to Kraków?" },
+      { type: "bot", text: "Same-day to Kraków starts at 89 PLN for parcels up to 5kg. Express (before 12:00) is 129 PLN. Want me to start a shipment?" },
+      { type: "user", text: "Do you handle pallets?" },
+      { type: "bot", text: "Yes! Pallet shipping across Poland, next-day guaranteed. Standard pallet (120×80) from 249 PLN. I can generate a quote if you share dimensions." }
+    ]
+  },
+  pl: {
+    "nav.how": "Jak to działa", "nav.features": "Funkcje", "nav.pricing": "Cennik", "nav.faq": "FAQ", "nav.cta": "Zacznij za darmo",
+    "hero.badge": "Darmowy dla każdej strony",
+    "hero.h1": 'Twoja strona,<br>ale <em>mówi</em>',
+    "hero.sub": "Klienci zadają pytania, Twoja strona odpowiada. AI czyta każdą podstronę i staje się Twoim asystentem 24/7. Bez konfiguracji, bez wiedzy technicznej.",
+    "hero.btn": "Zacznij za darmo", "hero.note": "Bez karty kredytowej. Działa w 5 minut.",
+    "onboard.text": "firm w trakcie wdrażania",
+    "how.label": "Jak to działa", "how.title": "Trzy kroki. Pięć minut.",
+    "how.s1.h": "Wklej swój URL", "how.s1.p": "Podaj adres swojej strony. Nasze AI przeczyta każdą podstronę i automatycznie zbuduje bazę wiedzy.",
+    "how.s2.h": "Indeksujemy wszystko", "how.s2.p": "AI przetwarza treść na przeszukiwalny kontekst — strony, formularze, usługi, wszystko.",
+    "how.s3.h": "Wklej jedną linijkę", "how.s3.p": "Dodaj tag script na stronę. Widget czatu pojawi się natychmiast. Twoja strona właśnie zaczęła rozmawiać.",
+    "feat.label": "Funkcje", "feat.title": 'Nie tylko chatbot.<br>Lepszy sposób na <em>przeglądanie</em>.',
+    "feat.f1.h": "Nawigacja przez rozmowę", "feat.f1.p": "Klienci rozmawiają z Twoją stroną zamiast klikania w menu. AI zna każdą podstronę, każdy produkt, każdą odpowiedź.",
+    "feat.f2.h": "Nagrywanie i odtwarzanie procesów", "feat.f2.p": "Nagraj dowolny proces — formularze, zamówienia, rezerwacje. AI odtwarza go dla klientów, wypełniając formularze za nich.",
+    "feat.f3.h": "Wykrywanie luk w wiedzy", "feat.f3.p": "Zobacz, na jakie pytania Twoja strona nie potrafi odpowiedzieć. Uzupełnij luki i obserwuj wzrost konwersji.",
+    "feat.f4.h": "Panel właściciela", "feat.f4.p": "Zarządzaj wiedzą, nagrywaj procesy, przeglądaj rozmowy i odkrywaj, czego naprawdę szukają Twoi klienci.",
+    "test.label": "Co mówią właściciele firm", "test.title": "Zaufali nam prawdziwe firmy",
+    "test.t1": "„Skonfigurowałam to w 10 minut. Teraz 40% moich klientów używa czatu zamiast przeglądania menu.”",
+    "test.t2": "„Wcześniej nikt nie używał formularza rezerwacji. Teraz AI wypełnia go za nich — rezerwacje wzrosły o 60%.”",
+    "test.t3": "„Odkryłam, że 30% odwiedzających pytało o cennik — a moja strona w ogóle go nie miała!”",
+    "price.label": "Cennik", "price.title": "Na zawsze za darmo. Płać za analitykę.",
+    "faq.label": "FAQ", "faq.title": "Częste pytania",
+    "faq.q1": "Jak to działa z moją istniejącą stroną?", "faq.a1": "Dodajesz jedną linijkę kodu przed zamykającym tagiem </body>. Działa z każdą stroną: WordPress, Shopify, HTML, cokolwiek. Zero wpływu na szybkość.",
+    "faq.q2": "Czy darmowy plan jest naprawdę darmowy?", "faq.a2": "Tak, w pełni. Widget czatu, automatyczne skanowanie i nielimitowane rozmowy są darmowe na zawsze. Pobieramy opłaty za zaawansowaną analitykę.",
+    "faq.q3": "A co z prywatną danych i RODO?", "faq.a3": "Wszystkie dane przechowywane w UE. Każda firma ma izolowane dane. Nie udostępniamy danych między stronami. Zgodne z RODO z założenia.",
+    "faq.q4": "Czym jest nagrywanie procesów?", "faq.a4": "Klikasz przez proces na swojej stronie (np. wypełnianie formularza). AI uczy się kroków i odtwarza je dla klientów — wypełniając formularz w ich przeglądarce.",
+    "faq.q5": "Jak dokładne są odpowiedzi AI?", "faq.a5": "AI korzysta wyłącznie z informacji z TWOJEJ strony. Nigdy nie wymyśla odpowiedzi. Gdy nie może odpowiedzieć, zapisuje pytanie, żebyś mógł uzupełnić brakujące info.",
+    "faq.q6": "Czy mogę dostosować wygląd?", "faq.a6": "Widget automatycznie dopasowuje się do kolorów Twojej strony. Możesz ustawić nazwę marki i kolor akcentu. Plan Pro zawiera pełną personalizację.",
+    "cta.h": "Gotowy, żeby spróbować?", "cta.p": "Dołącz do setek firm, które zamieniły swoje strony w rozmowy.",
+    "demo.convo": [
+      { type: "user", text: "Ile kosztuje przesyłka same-day do Krakowa?" },
+      { type: "bot", text: "Same-day do Krakowa od 89 PLN za paczki do 5kg. Express (przed 12:00) to 129 PLN. Mam zacząć wysyłkę?" },
+      { type: "user", text: "Czy obsługujecie palety?" },
+      { type: "bot", text: "Tak! Palety w całej Polsce, następnego dnia. Paleta standardowa (120×80) od 249 PLN. Mogę przygotować wycenę." }
+    ]
+  }
+};
+
+var currentLang = (function() {
+  var saved = localStorage.getItem('whisp-lang');
+  if (saved) return saved;
+  var nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+  return nav.startsWith('pl') ? 'pl' : 'en';
+})();
+
+function applyLang(lang) {
+  currentLang = lang;
+  localStorage.setItem('whisp-lang', lang);
+  var dict = i18n[lang] || i18n.en;
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n');
+    if (dict[key] !== undefined) {
+      if (el.getAttribute('data-i18n-html')) el.innerHTML = dict[key];
+      else el.textContent = dict[key];
+    }
+  });
+  document.getElementById('lang-toggle').textContent = lang === 'en' ? 'PL' : 'EN';
+  document.documentElement.lang = lang;
+  if (typeof restartDemo === 'function') restartDemo(dict['demo.convo']);
+}
+
+function toggleLang() {
+  applyLang(currentLang === 'en' ? 'pl' : 'en');
+}
+
+// Apply on load
+applyLang(currentLang);
+
 // ─── Whisp widget on whisp.so (eating our own dog food) ───
 window.addEventListener("load", function() {
   window.__wctx = { tenantId: "whisp_so", apiHost: window.location.origin, brandName: "Whisp" };
@@ -911,17 +1028,14 @@ function handleSignup(e) {
 })();
 
 // ─── Animated widget demo in MacBook ───
+var restartDemo;
 (function() {
   var bar = document.getElementById('mock-bar');
   var msgs = document.getElementById('mock-bar-msgs');
   var input = document.getElementById('mock-input');
-  var convo = [
-    { type: 'user', text: 'How much for same-day to Kraków?' },
-    { type: 'bot', text: 'Same-day to Kraków starts at 89 PLN for parcels up to 5kg. Express (before 12:00) is 129 PLN. Want me to start a shipment?' },
-    { type: 'user', text: 'Do you handle pallets?' },
-    { type: 'bot', text: 'Yes! Pallet shipping across Poland, next-day guaranteed. Standard pallet (120×80) from 249 PLN. I can generate a quote if you share dimensions.' },
-  ];
+  var convo = (i18n[currentLang] || i18n.en)['demo.convo'];
   var i = 0;
+  var running = null;
 
   function addBubble(msg) {
     var el = document.createElement('div');
@@ -950,12 +1064,12 @@ function handleSignup(e) {
 
   function runNext() {
     if (i >= convo.length) {
-      setTimeout(function() {
+      running = setTimeout(function() {
         msgs.innerHTML = '';
         bar.classList.remove('expanded');
         i = 0;
         input.innerHTML = '<span class="mock-bar-pill-placeholder">Ask anything about this site...</span>';
-        setTimeout(runNext, 2000);
+        running = setTimeout(runNext, 2000);
       }, 3000);
       return;
     }
@@ -967,7 +1081,7 @@ function handleSignup(e) {
         addBubble(msg);
         i++;
         var dots = addTyping();
-        setTimeout(function() {
+        running = setTimeout(function() {
           dots.remove();
           runNext();
         }, 1000);
@@ -975,9 +1089,19 @@ function handleSignup(e) {
     } else {
       addBubble(msg);
       i++;
-      setTimeout(runNext, 2200);
+      running = setTimeout(runNext, 2200);
     }
   }
+
+  restartDemo = function(newConvo) {
+    if (running) clearTimeout(running);
+    convo = newConvo || convo;
+    i = 0;
+    msgs.innerHTML = '';
+    bar.classList.remove('expanded');
+    input.innerHTML = '<span class="mock-bar-pill-placeholder">Ask anything about this site...</span>';
+    running = setTimeout(runNext, 1000);
+  };
 
   setTimeout(runNext, 2000);
 })();
