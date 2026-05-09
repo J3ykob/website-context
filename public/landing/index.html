@@ -162,7 +162,8 @@ nav.scrolled {
 
 /* ─── MacBook mockup ─── */
 .macbook {
-  width: 100%; max-width: 960px; margin: 48px auto 0;
+  width: calc(100% + 120px); max-width: 1200px; margin: 48px auto 0;
+  margin-left: -60px;
   perspective: 1200px;
 }
 .macbook-screen {
@@ -481,7 +482,7 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 /* ─── Mobile ─── */
 @media(max-width:768px) {
   .hero-text { max-width: 100%; }
-  .macbook { margin-top: 32px; }
+  .macbook { margin-top: 32px; width: 100%; margin-left: 0; }
   .steps { grid-template-columns: 1fr; }
   .features-grid { grid-template-columns: 1fr; }
   .testimonials-grid { grid-template-columns: 1fr; }
