@@ -530,21 +530,21 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
             <div class="macbook-dot r"></div>
             <div class="macbook-dot y"></div>
             <div class="macbook-dot g"></div>
-            <div class="macbook-url"><span>https://</span>restauracja-sloik.pl</div>
+            <div class="macbook-url"><span>https://</span>swiftcargo.pl</div>
           </div>
           <div class="fake-site">
             <div class="fake-nav">
-              <div class="fake-logo"><div class="fake-logo-icon"></div> Restauracja Słoik</div>
-              <div class="fake-nav-links"><span>Menu</span><span>O nas</span><span>Kontakt</span><span>Rezerwacje</span></div>
+              <div class="fake-logo"><div class="fake-logo-icon" style="background:#1e40af"></div> SwiftCargo</div>
+              <div class="fake-nav-links"><span>Services</span><span>Fleet</span><span>Tracking</span><span>Contact</span></div>
             </div>
-            <img class="fake-hero-img" src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600&q=70" alt="" loading="eager" />
+            <img class="fake-hero-img" src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=600&q=70" alt="" loading="eager" />
             <div class="fake-content">
-              <div class="fake-h1">Kuchnia polska z duszą</div>
-              <div class="fake-p">Odkryj nasze sezonowe menu, przygotowane z lokalnych składników. Rezerwacja stolika online lub telefonicznie.</div>
+              <div class="fake-h1">Same-day delivery across Poland</div>
+              <div class="fake-p">Express logistics for businesses. Real-time tracking, dedicated fleet, guaranteed delivery windows.</div>
               <div class="fake-cards">
-                <div class="fake-card"><div class="fake-card-icon">🍽</div><div class="fake-card-label">Menu</div></div>
-                <div class="fake-card"><div class="fake-card-icon">📅</div><div class="fake-card-label">Rezerwacja</div></div>
-                <div class="fake-card"><div class="fake-card-icon">📍</div><div class="fake-card-label">Lokalizacja</div></div>
+                <div class="fake-card"><div class="fake-card-icon">📦</div><div class="fake-card-label">Ship now</div></div>
+                <div class="fake-card"><div class="fake-card-icon">🚛</div><div class="fake-card-label">Fleet</div></div>
+                <div class="fake-card"><div class="fake-card-icon">📊</div><div class="fake-card-label">Tracking</div></div>
               </div>
             </div>
 
@@ -778,6 +778,15 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 </footer>
 
 <script>
+// ─── Whisp widget on whisp.so (eating our own dog food) ───
+window.addEventListener("load", function() {
+  window.__wctx = { tenantId: "whisp_so", apiHost: window.location.origin, brandName: "Whisp" };
+  var s = document.createElement("script");
+  s.src = "/widget.js";
+  s.async = true;
+  document.head.appendChild(s);
+});
+
 // ─── Reveal on scroll ───
 var reveals = document.querySelectorAll('.reveal');
 var observer = new IntersectionObserver(function(entries) {
@@ -907,10 +916,10 @@ function handleSignup(e) {
   var msgs = document.getElementById('mock-bar-msgs');
   var input = document.getElementById('mock-input');
   var convo = [
-    { type: 'user', text: 'Macie coś wegetariańskiego?' },
-    { type: 'bot', text: 'Tak! Mamy Makaron Rustica z suszonymi pomidorami, Risotto z grzybami i Sałatkę Śródziemnomorską. Pokazać pełne menu?' },
-    { type: 'user', text: 'Do której jesteście w sobotę?' },
-    { type: 'bot', text: 'W soboty 12:00–23:00, kuchnia do 22:00. Pomóc z rezerwacją?' },
+    { type: 'user', text: 'How much for same-day to Kraków?' },
+    { type: 'bot', text: 'Same-day to Kraków starts at 89 PLN for parcels up to 5kg. Express (before 12:00) is 129 PLN. Want me to start a shipment?' },
+    { type: 'user', text: 'Do you handle pallets?' },
+    { type: 'bot', text: 'Yes! Pallet shipping across Poland, next-day guaranteed. Standard pallet (120×80) from 249 PLN. I can generate a quote if you share dimensions.' },
   ];
   var i = 0;
 
