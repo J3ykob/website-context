@@ -200,56 +200,66 @@ app.get("/demo/:tenantId", (req, res) => {
 <head>\
 <meta charset="UTF-8">\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">\
-<title>' + brand + ' — AI Assistant</title>\
+<title>' + brand + ' — AI Assistant by Whisp</title>\
+<link rel="icon" type="image/svg+xml" href="/logo.svg">\
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">\
 <style>\
 * { margin:0; padding:0; box-sizing:border-box; }\
-body { font-family:"Archivo",sans-serif; background:#fafaf8; min-height:100vh; display:flex; flex-direction:column; }\
+body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; display:flex; flex-direction:column; color:#f1f5f9; }\
 .demo-header {\
-  padding:16px 28px; display:flex; align-items:center; justify-content:space-between;\
-  border-bottom:1px solid #e7e5e4; background:#fff;\
+  padding:14px 28px; display:flex; align-items:center; justify-content:space-between;\
+  border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(10,14,26,0.9);\
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);\
 }\
-.demo-brand { display:flex; align-items:center; gap:12px; }\
-.demo-mark { width:28px; height:28px; background:#ea580c; border-radius:8px; position:relative; }\
-.demo-mark::before { content:""; position:absolute; inset:5px; border:2px solid #fff; border-radius:4px; }\
-.demo-name { font-size:15px; font-weight:700; color:#1c1917; }\
-.demo-badge { font-size:11px; font-weight:600; color:#ea580c; background:#fff7ed; border:1px solid #fed7aa; padding:4px 12px; border-radius:12px; }\
+.demo-brand { display:flex; align-items:center; gap:10px; }\
+.demo-mark { width:24px; height:24px; }\
+.demo-name { font-size:14px; font-weight:700; color:#f1f5f9; }\
+.demo-badge { font-size:10px; font-weight:600; color:#3b82f6; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); padding:3px 10px; border-radius:10px; }\
 .demo-cta {\
-  padding:10px 20px; background:#ea580c; color:#fff; border:none; border-radius:12px;\
-  font-family:inherit; font-size:13px; font-weight:700; cursor:pointer; text-decoration:none;\
+  padding:8px 18px; background:#3b82f6; color:#fff; border:none; border-radius:10px;\
+  font-family:inherit; font-size:12px; font-weight:700; cursor:pointer; text-decoration:none;\
   transition: all 0.2s;\
 }\
-.demo-cta:hover { background:#c2410c; transform:translateY(-1px); }\
+.demo-cta:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.3); }\
 .demo-body { flex:1; position:relative; overflow-y:auto; }\
 .demo-bg { position:relative; z-index:0; }\
 .demo-bg img { width:100%; display:block; }\
+.demo-bg-fallback {\
+  min-height:60vh; display:flex; align-items:center; justify-content:center;\
+  background:linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);\
+}\
+.demo-bg-fallback .domain {\
+  font-family:"DM Serif Display",serif; font-size:clamp(28px,5vw,48px); color:rgba(255,255,255,0.06);\
+  letter-spacing:0.02em;\
+}\
 .demo-info {\
   position:fixed; bottom:100px; left:50%; transform:translateX(-50%);\
-  background:#fff; border:1px solid #e7e5e4; border-radius:16px; padding:20px 28px;\
-  box-shadow:0 4px 24px rgba(0,0,0,0.08); z-index:10; text-align:center;\
+  background:rgba(15,23,42,0.9); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:20px 28px;\
+  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);\
+  box-shadow:0 4px 32px rgba(0,0,0,0.3); z-index:10; text-align:center;\
   max-width:400px; width:calc(100% - 40px); animation: fadeUp 0.5s ease 1s both;\
 }\
 @keyframes fadeUp { from{opacity:0;transform:translateX(-50%) translateY(10px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }\
-.demo-info h3 { font-family:"DM Serif Display",serif; font-size:20px; margin-bottom:6px; color:#1c1917; }\
-.demo-info p { font-size:14px; color:#57534e; line-height:1.6; margin-bottom:16px; }\
-.demo-info .arrow { font-size:20px; color:#a8a29e; animation:bounce 1.5s ease infinite; }\
+.demo-info h3 { font-family:"DM Serif Display",serif; font-size:20px; margin-bottom:6px; color:#f1f5f9; }\
+.demo-info p { font-size:14px; color:#94a3b8; line-height:1.6; margin-bottom:16px; }\
+.demo-info .arrow { font-size:20px; color:#64748b; animation:bounce 1.5s ease infinite; }\
 @keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(6px)} }\
-.demo-dismiss { font-size:12px; color:#a8a29e; cursor:pointer; border:none; background:none; font-family:inherit; }\
-.demo-dismiss:hover { color:#1c1917; }\
+.demo-dismiss { font-size:12px; color:#64748b; cursor:pointer; border:none; background:none; font-family:inherit; }\
+.demo-dismiss:hover { color:#f1f5f9; }\
 @media(max-width:600px) { .demo-cta { display:none; } }\
 </style>\
 </head>\
 <body>\
 <div class="demo-header">\
   <div class="demo-brand">\
-    <span class="demo-mark"></span>\
+    <svg class="demo-mark" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1-.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg>\
     <span class="demo-name">' + brand + '</span>\
-    <span class="demo-badge">AI Assistant</span>\
+    <span class="demo-badge">Whisp AI</span>\
   </div>\
-  <a class="demo-cta" href="/">Get this for your website — free</a>\
+  <a class="demo-cta" href="/">Get Whisp for your website</a>\
 </div>\
 <div class="demo-body">\
-  <div class="demo-bg"><img src="' + baseUrl + '/api/screenshot/' + tenant.id + '" alt="" loading="eager" onerror="this.parentElement.style.display=\'none\'" /></div>\
+  <div class="demo-bg"><img src="' + baseUrl + '/api/screenshot/' + tenant.id + '" alt="" loading="eager" onerror="this.parentElement.innerHTML=\'<div class=demo-bg-fallback><span class=domain>' + tenant.domain + '</span></div>\'" /></div>\
   <div class="demo-info" id="demo-info">\
     <h3>Try it out!</h3>\
     <p>This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.</p>\
