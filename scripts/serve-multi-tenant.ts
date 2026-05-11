@@ -361,10 +361,10 @@ app.get("/api/tenants/:id/status", (req, res) => {
   });
 });
 
-// Chat endpoint
+// Chat endpoint — supports SSE streaming for preview+complete pattern
 app.post("/api/chat", async (req, res) => {
   try {
-    const { messages, sessionId, tenantId } = req.body;
+    const { messages, sessionId, tenantId, stream } = req.body;
     if (!messages || !Array.isArray(messages)) {
       res.status(400).json({ error: "messages required" });
       return;
@@ -374,7 +374,6 @@ app.post("/api/chat", async (req, res) => {
       return;
     }
 
-    // Verify tenant exists and is active
     const tenant = getTenant(tenantId);
     if (!tenant) {
       res.status(404).json({ error: "Tenant not found" });
@@ -385,7 +384,6 @@ app.post("/api/chat", async (req, res) => {
       return;
     }
 
-    // Rate limit per session
     const sessionKey = sessionId || `${tenantId}_default`;
     const rc = checkChatRate(sessionKey);
     if (!rc.ok) {
@@ -393,25 +391,55 @@ app.post("/api/chat", async (req, res) => {
       return;
     }
 
-    // Get chat instance for tenant
     const chat = await tenantManager.getChatForTenant(tenantId);
-
     console.log(`[chat:${tenantId}] "${(messages[messages.length - 1]?.content || "").slice(0, 60)}"`);
-    const response = await chat.chat(messages, sessionKey);
 
-    // Log each message individually to Qdrant (enables per-message analytics)
-    const lastUserContent = messages[messages.length - 1]?.content || "";
-    logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
-    logMessage(tenantId, sessionKey, "assistant", response.message, {
-      flowInvoked: response.flowSession?.flowId || null,
-      navigatedTo: response.navigateTo || null,
-      hadToolCall: !!(response.flowSession || response.navigateTo),
-    }).catch(() => {});
+    if (stream) {
+      // SSE mode: send preview from Haiku, then full response
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
 
-    res.json(response);
+      // Fire Haiku preview (fast, ~300ms)
+      const preview = await chat.generatePreview(messages);
+      if (preview) {
+        res.write(`data: ${JSON.stringify({ type: "preview", text: preview })}\n\n`);
+      }
+
+      // Fire main model with preview sentence instruction
+      const response = await chat.chat(messages, sessionKey, preview || undefined);
+
+      res.write(`data: ${JSON.stringify({ type: "complete", ...response })}\n\n`);
+      res.end();
+
+      // Log asynchronously
+      const lastUserContent = messages[messages.length - 1]?.content || "";
+      logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
+      logMessage(tenantId, sessionKey, "assistant", response.message, {
+        flowInvoked: response.flowSession?.flowId || null,
+        navigatedTo: response.navigateTo || null,
+        hadToolCall: !!(response.flowSession || response.navigateTo),
+      }).catch(() => {});
+    } else {
+      // Classic JSON mode (backward compatible)
+      const response = await chat.chat(messages, sessionKey);
+
+      const lastUserContent = messages[messages.length - 1]?.content || "";
+      logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
+      logMessage(tenantId, sessionKey, "assistant", response.message, {
+        flowInvoked: response.flowSession?.flowId || null,
+        navigatedTo: response.navigateTo || null,
+        hadToolCall: !!(response.flowSession || response.navigateTo),
+      }).catch(() => {});
+
+      res.json(response);
+    }
   } catch (error: any) {
     console.error("[chat error]", error.message);
-    res.status(500).json({ error: "Chat failed" });
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Chat failed" });
+    }
   }
 });
 
