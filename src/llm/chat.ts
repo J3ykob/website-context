@@ -377,9 +377,34 @@ export class WebsiteChat {
       };
     }
 
-    const retrievedChunks = await searchContext(lastUserMessage, this.embeddingProvider, this.store, {
+    // Dual-language retrieval: if query language differs from site content,
+    // search with both original and translated query for better recall
+    let retrievedChunks = await searchContext(lastUserMessage, this.embeddingProvider, this.store, {
       topK: this.topK,
     });
+
+    // Detect language mismatch: if query looks English but site has Polish content (or vice versa)
+    const isQueryEnglish = /^[a-z\s,.?!'"]+$/i.test(lastUserMessage.replace(/[0-9]/g, ""));
+    const hasMostlyPolishContent = this.context.pages.some(p =>
+      /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(p.title || "")
+    );
+    if (isQueryEnglish && hasMostlyPolishContent && retrievedChunks.length > 0) {
+      // Also search with key terms that might exist in Polish content
+      const keyTerms = lastUserMessage.toLowerCase()
+        .replace(/what|is|your|the|do|you|have|any|can|i|get|how|much/g, "")
+        .trim();
+      if (keyTerms.length > 2) {
+        const extraChunks = await searchContext(keyTerms, this.embeddingProvider, this.store, {
+          topK: Math.floor(this.topK / 2),
+        });
+        const existingIds = new Set(retrievedChunks.map(c => c.content.slice(0, 50)));
+        for (const chunk of extraChunks) {
+          if (!existingIds.has(chunk.content.slice(0, 50))) {
+            retrievedChunks.push(chunk);
+          }
+        }
+      }
+    }
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
     const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage, previewSentence);
