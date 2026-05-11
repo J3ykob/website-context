@@ -82,12 +82,10 @@ export class ScrapeWorker {
     ensureMigrated();
     const stuck = listTenants().filter((t) => t.status === "scraping");
     for (const tenant of stuck) {
-      console.log(`[worker] Recovering stuck tenant: ${tenant.id}`);
       updateTenant(tenant.id, { status: "pending" });
-      this.enqueue(tenant.id, tenant.siteUrl, 20);
     }
     if (stuck.length > 0) {
-      console.log(`[worker] Recovered ${stuck.length} stuck tenant(s)`);
+      console.log(`[worker] Reset ${stuck.length} stuck tenant(s) to pending (use /api/admin/rescrape to re-queue)`);
     }
   }
 
