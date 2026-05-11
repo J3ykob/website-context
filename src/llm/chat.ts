@@ -546,6 +546,14 @@ export class WebsiteChat {
       }
     } catch {}
 
+    // Strip any raw tool call syntax that leaked into the response
+    responseText = responseText
+      .replace(/\[\[?navigate_to_page[^\]]*\]\]?/g, "")
+      .replace(/\[\[?flow_start[^\]]*\]\]?/g, "")
+      .replace(/\[\[?log_unknown[^\]]*\]\]?/g, "")
+      .replace(/```json[\s\S]*?```/g, "")
+      .trim();
+
     const plainOutputCheck = validateOutput(responseText, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
     return { message: plainOutputCheck.sanitized, sources };
@@ -573,7 +581,11 @@ export class WebsiteChat {
         // Filter out privacy/policy pages unless the user is asking about privacy
         if (isPrivacyQuery) return true;
         const title = ((c.metadata.title as string) || "").toLowerCase();
-        return !title.includes("privacy") && !title.includes("polityka");
+        const url = ((c.metadata.url as string) || "").toLowerCase();
+        const content = c.content.toLowerCase().slice(0, 200);
+        return !title.includes("privacy") && !title.includes("polityka") && !title.includes("prywatno")
+          && !url.includes("privacy") && !url.includes("polityka") && !url.includes("prywatno")
+          && !content.includes("polityka prywatności") && !content.includes("privacy policy");
       })
       .map((c, i) => {
         const heading = (c.metadata.headingHierarchy as string[])?.join(" > ") || "";
