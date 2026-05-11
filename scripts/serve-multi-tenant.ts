@@ -401,8 +401,10 @@ app.post("/api/chat", async (req, res) => {
       res.setHeader("Connection", "keep-alive");
       res.flushHeaders();
 
-      // Fire Haiku preview (fast, ~300ms)
+      // Fire preview (fast model, ~300ms)
+      const previewStart = Date.now();
       const preview = await chat.generatePreview(messages);
+      console.log(`[preview] ${tenantId}: ${preview ? preview.slice(0, 50) : "NULL"} (${Date.now() - previewStart}ms)`);
       if (preview) {
         res.write(`data: ${JSON.stringify({ type: "preview", text: preview })}\n\n`);
       }
