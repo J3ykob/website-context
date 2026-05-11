@@ -298,7 +298,7 @@ export class WebsiteChat {
     if (!lastUserMessage || lastUserMessage.length < 5) return null;
 
     const siteDomain = this.getAllowedDomain() || "this website";
-    const previewPrompt = `You are a helpful assistant for ${siteDomain}. Give a brief, natural first sentence to start answering this question. One sentence only, in the same language as the question.`;
+    const previewPrompt = `You are a helpful assistant for ${siteDomain}. Give a brief, natural first sentence to start answering this question. One sentence only. CRITICAL: Reply in the EXACT same language the user wrote in. If they wrote in English, reply in English. If in Polish, reply in Polish.`;
 
     try {
       const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
