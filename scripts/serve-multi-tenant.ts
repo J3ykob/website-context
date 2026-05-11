@@ -221,9 +221,9 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
   transition: all 0.2s;\
 }\
 .demo-cta:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.3); }\
-.demo-body { flex:1; position:relative; overflow-y:auto; }\
-.demo-bg { position:relative; z-index:0; }\
-.demo-bg img { width:100%; display:block; }\
+.demo-body { flex:1; position:relative; overflow:hidden; }\
+.demo-bg { position:absolute; inset:0; z-index:0; }\
+.demo-bg img { width:100%; height:100%; object-fit:cover; object-position:top; display:block; }\
 .demo-bg-fallback {\
   min-height:60vh; display:flex; align-items:center; justify-content:center;\
   background:linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);\
