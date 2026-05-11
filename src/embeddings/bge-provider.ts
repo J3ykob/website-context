@@ -38,6 +38,7 @@ export class BGEEmbeddingProvider implements EmbeddingProvider {
         method: "POST",
         headers,
         body: JSON.stringify({ texts: batch }),
+        signal: AbortSignal.timeout(30000),
       });
 
       if (!response.ok) {

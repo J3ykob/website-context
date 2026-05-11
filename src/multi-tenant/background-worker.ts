@@ -154,6 +154,9 @@ export class ScrapeWorker {
       if (result.pages === 0) {
         throw new Error("Scraped 0 pages — site may be unreachable or blocking crawlers");
       }
+      if (result.chunks === 0 && result.pages > 0) {
+        throw new Error(`Scraped ${result.pages} pages but 0 chunks embedded — embedding likely failed`);
+      }
 
       updateTenant(job.tenantId, {
         status: "active",

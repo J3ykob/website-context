@@ -88,6 +88,10 @@ export async function scrapeTenant(
   const embedResult = await embedChunks(context.chunks, provider, store);
   console.log(`[scrape-pipeline] ${embedResult.embeddedChunks} chunks embedded`);
 
+  if (context.chunks.length > 0 && embedResult.embeddedChunks < Math.min(3, context.chunks.length)) {
+    throw new Error(`Embedding failed: only ${embedResult.embeddedChunks}/${context.chunks.length} chunks embedded`);
+  }
+
   // Save context metadata (siteMap, flows, page list — NOT chunks)
   const tenantDir = resolve(DATA_ROOT, tenantId);
   if (!existsSync(tenantDir)) {

@@ -367,7 +367,7 @@ export class WebsiteChat {
       const result = await this.backend.generateWithTools!(systemPrompt, sanitizedMessages, this.maxTokens, mcpConfig);
 
       // Validate LLM output
-      const outputCheck = validateOutput(result.text, systemPrompt, this.getAllowedDomain());
+      const outputCheck = validateOutput(result.text, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
       const safeText = outputCheck.sanitized;
 
       // Process tool results from MCP
@@ -441,7 +441,7 @@ export class WebsiteChat {
       const result = await this.backend.generateStructured(systemPrompt, sanitizedMessages, this.maxTokens, STRUCTURED_SCHEMA);
 
       // Validate output
-      const structuredOutputCheck = validateOutput(result.message, systemPrompt, this.getAllowedDomain());
+      const structuredOutputCheck = validateOutput(result.message, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
       const safeMessage = structuredOutputCheck.sanitized;
 
       if (result.action?.type === "invoke_flow" && result.action.flow_id) {
@@ -505,10 +505,17 @@ export class WebsiteChat {
     }
 
     // Fallback: plain text generation (no flows active or backend doesn't support tools)
-    const responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
+    let responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
 
-    // Validate output
-    const plainOutputCheck = validateOutput(responseText, systemPrompt, this.getAllowedDomain());
+    // Sanitize: if LLM returned JSON instead of plain text, extract the message
+    try {
+      const parsed = JSON.parse(responseText);
+      if (typeof parsed === "object" && (parsed.message || parsed.reply)) {
+        responseText = parsed.message || parsed.reply;
+      }
+    } catch {}
+
+    const plainOutputCheck = validateOutput(responseText, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
     return { message: plainOutputCheck.sanitized, sources };
   }
@@ -588,7 +595,8 @@ ${contextBlocks}
 - If no matching skill/flow exists for a user's request, DO NOT output any flow-related text, IDs, or function names. Simply tell the user how to accomplish their goal manually (e.g., provide a phone number or link).
 - NEVER output text like 'flow_start_...' or any internal identifiers in your response.
 - IMPORTANT: Your context may contain PARTIAL information. When listing items (menu, services, products), the context might only show SOME of the items. If the user asks to "list all" or "show everything", present what you have from the context AND explicitly say "these are the items I found in my context — the full list may include more items. I recommend checking the website directly for the complete list." NEVER claim a partial list is complete.
-- When answering about specific items, always check ALL provided context chunks — information may be spread across multiple sources.`
+- When answering about specific items, always check ALL provided context chunks — information may be spread across multiple sources.
+- When a user wants to take an action (book, reserve, order, contact, schedule, apply), ALWAYS provide the business's contact information (phone, email, booking URL) if available in context. Format contact info prominently so the user can act immediately.`
     + (recentlyCompletedFlowId ? `\n\n## IMPORTANT: Flow "${recentlyCompletedFlowId}" was JUST completed in this conversation. Do NOT invoke it again unless the user explicitly asks to submit a NEW one.` : "");
 
     if (this.systemPromptExtra) {
@@ -603,6 +611,11 @@ ${contextBlocks}
     }
 
     return prompt;
+  }
+
+  private getInstructionsOnly(systemPrompt: string): string {
+    const contextStart = systemPrompt.indexOf("## Relevant Context:");
+    return contextStart > 0 ? systemPrompt.slice(0, contextStart) : systemPrompt;
   }
 
   private logUnknownQuestion(question: string, rawMessage: string): void {

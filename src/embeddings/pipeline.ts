@@ -19,31 +19,44 @@ export async function embedChunks(
   let embeddedCount = 0;
   let failedCount = 0;
 
+  const MAX_RETRIES = 3;
+
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize);
     const texts = batch.map((chunk) => prepareChunkForEmbedding(chunk));
+    let success = false;
 
-    try {
-      const embeddings = await provider.embed(texts);
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const embeddings = await provider.embed(texts);
 
-      const entries: VectorEntry[] = batch.map((chunk, idx) => ({
-        id: chunk.id,
-        vector: embeddings[idx],
-        content: chunk.content,
-        metadata: {
-          pageId: chunk.pageId,
-          url: chunk.metadata.url,
-          title: chunk.metadata.title,
-          type: chunk.metadata.type,
-          headingHierarchy: chunk.metadata.headingHierarchy,
-        },
-      }));
+        const entries: VectorEntry[] = batch.map((chunk, idx) => ({
+          id: chunk.id,
+          vector: embeddings[idx],
+          content: chunk.content,
+          metadata: {
+            pageId: chunk.pageId,
+            url: chunk.metadata.url,
+            title: chunk.metadata.title,
+            type: chunk.metadata.type,
+            headingHierarchy: chunk.metadata.headingHierarchy,
+          },
+        }));
 
-      await store.upsert(entries);
-      embeddedCount += batch.length;
-    } catch (error) {
-      console.error(`Failed to embed batch starting at index ${i}:`, error);
-      failedCount += batch.length;
+        await store.upsert(entries);
+        embeddedCount += batch.length;
+        success = true;
+        break;
+      } catch (error) {
+        if (attempt < MAX_RETRIES) {
+          const delay = attempt * 2000;
+          console.warn(`Embed batch ${i} failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${delay}ms...`);
+          await new Promise((r) => setTimeout(r, delay));
+        } else {
+          console.error(`Failed to embed batch starting at index ${i} after ${MAX_RETRIES} attempts:`, error);
+          failedCount += batch.length;
+        }
+      }
     }
 
     onProgress?.(Math.min(i + batchSize, chunks.length), chunks.length);
