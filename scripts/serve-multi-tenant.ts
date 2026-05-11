@@ -445,32 +445,6 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Debug preview endpoint
-app.get("/api/debug/preview", async (_, res) => {
-  try {
-    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.0-flash-lite-001",
-        messages: [
-          { role: "system", content: "Reply with one short sentence." },
-          { role: "user", content: "Jakie macie desery?" },
-        ],
-        max_tokens: 80,
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-    const data = await resp.json();
-    res.json({ ok: true, data });
-  } catch (err: any) {
-    res.json({ ok: false, error: err.message, code: err.cause?.code });
-  }
-});
-
 // Global health check (for Render)
 app.get("/api/health", (_, res) => {
   const tenants = listTenants();
