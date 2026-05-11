@@ -308,19 +308,25 @@ export class WebsiteChat {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "anthropic/claude-haiku-4-5-20251001",
+          model: "anthropic/claude-haiku-4.5",
           messages: [
             { role: "system", content: previewPrompt },
             { role: "user", content: lastUserMessage },
           ],
           max_tokens: 80,
         }),
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(5000),
       });
       const data = await resp.json() as any;
       const sentence = data.choices?.[0]?.message?.content?.trim();
-      if (sentence && sentence.length > 10) return sentence;
-    } catch {}
+      if (sentence && sentence.length > 10) {
+        console.log(`[preview] Haiku response in ${Date.now()}ms: "${sentence.slice(0, 60)}..."`);
+        return sentence;
+      }
+      console.log(`[preview] Haiku returned empty or short response:`, JSON.stringify(data).slice(0, 200));
+    } catch (err: any) {
+      console.log(`[preview] Haiku failed: ${err.message}`);
+    }
     return null;
   }
 
