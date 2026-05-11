@@ -308,7 +308,7 @@ export class WebsiteChat {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "anthropic/claude-haiku-4.5",
+          model: "google/gemini-2.0-flash-lite-001",
           messages: [
             { role: "system", content: previewPrompt },
             { role: "user", content: lastUserMessage },
