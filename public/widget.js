@@ -159,7 +159,6 @@
     inputZone: overlay.querySelector(".wctx-input-zone"),
     footnote: overlay.querySelector(".wctx-idle-footnote"),
     msgs:    overlay.querySelector(".wctx-messages"),
-    typing:  overlay.querySelector(".wctx-typing"),
     input:   overlay.querySelector(".wctx-chat-input"),
     send:    overlay.querySelector(".wctx-send-btn"),
     browse:  overlay.querySelector(".wctx-browse-btn"),
@@ -770,7 +769,18 @@
       var reader = r.body.getReader();
       var decoder = new TextDecoder();
       var previewEl = null;
+      var typewriterTimer = null;
       var buffer = "";
+
+      function typeWriter(el, text, cb) {
+        var i = 0;
+        el.innerHTML = "";
+        typewriterTimer = setInterval(function() {
+          el.innerHTML = md(text.slice(0, ++i));
+          els.msgs.scrollTop = els.msgs.scrollHeight;
+          if (i >= text.length) { clearInterval(typewriterTimer); typewriterTimer = null; if (cb) cb(); }
+        }, 25);
+      }
 
       function processChunk(chunk) {
         buffer += decoder.decode(chunk, { stream: true });
@@ -784,8 +794,12 @@
             var evt = JSON.parse(line.slice(6));
             if (evt.type === "preview") {
               setLoading(false);
-              previewEl = appendMsg("assistant", evt.text);
+              previewEl = document.createElement("div");
+              previewEl.className = "wctx-msg wctx-msg-assistant";
+              els.msgs.appendChild(previewEl);
+              typeWriter(previewEl, evt.text);
             } else if (evt.type === "complete") {
+              if (typewriterTimer) { clearInterval(typewriterTimer); typewriterTimer = null; }
               setLoading(false);
               if (previewEl) previewEl.remove();
               messages.push({ role: "assistant", content: evt.message }); persistMessages();
@@ -894,11 +908,22 @@
     }
   });
 
+  var typingEl = null;
   function setLoading(on) {
     isLoading = on;
-    els.typing.style.display = on ? "flex" : "none";
     els.send.disabled = on;
-    if (on) els.msgs.scrollTop = els.msgs.scrollHeight;
+    if (on) {
+      if (!typingEl) {
+        typingEl = document.createElement("div");
+        typingEl.className = "wctx-typing";
+        typingEl.style.display = "flex";
+        typingEl.innerHTML = '<span class="wctx-typing-dot"></span><span class="wctx-typing-dot"></span><span class="wctx-typing-dot"></span>';
+        els.msgs.appendChild(typingEl);
+      }
+      els.msgs.scrollTop = els.msgs.scrollHeight;
+    } else {
+      if (typingEl) { typingEl.remove(); typingEl = null; }
+    }
   }
 
   function appendMsg(role, content, sources) {
@@ -1348,30 +1373,23 @@
 \
 .wctx-typing {\
   display:none;\
-  align-self:flex-start;\
   align-items:center;\
-  gap:8px;\
-  font-size:11px;\
-  text-transform:uppercase;\
-  letter-spacing:0.1em;\
-  font-weight:600;\
-  color:rgba(10,10,10,0.4);\
-  background:rgba(255,255,255,0.25);\
-  padding:10px 16px;\
-  border-radius:14px;\
-  border:1px solid rgba(255,255,255,0.2);\
+  gap:5px;\
+  padding:12px 16px;\
+  border-radius:16px 16px 16px 4px;\
+  background:rgba(10,10,10,0.04);\
+  border:1px solid rgba(10,10,10,0.06);\
+  max-width:80px;\
+  margin:4px 0;\
 }\
-.wctx-typing::before {\
-  content:"";\
-  width:6px; height:6px;\
-  border-radius:50%;\
-  background:rgba(10,10,10,0.4);\
-  animation:wctx-loadBlink 1s ease-in-out infinite;\
+.wctx-typing-dot {\
+  width:6px; height:6px; border-radius:50%;\
+  background:rgba(10,10,10,0.3);\
+  animation:wctx-dot-bounce 1.2s infinite;\
 }\
-@keyframes wctx-loadBlink {\
-  0%,100%{opacity:1}\
-  50%{opacity:0.2}\
-}\
+.wctx-typing-dot:nth-child(2) { animation-delay:0.2s; }\
+.wctx-typing-dot:nth-child(3) { animation-delay:0.4s; }\
+@keyframes wctx-dot-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }\
 \
 @media(max-width:768px){\
   .wctx-shell{inset:8px;border-radius:16px}\
@@ -1446,11 +1464,10 @@
 #wctx-overlay.wctx-dark .wctx-msg-assistant a.wctx-page-link:hover { background:rgba(255,255,255,0.15); color:rgba(255,255,255,0.9); border-color:rgba(255,255,255,0.25); }\
 #wctx-overlay.wctx-dark .wctx-sources { color:rgba(255,255,255,0.3); border-top-color:rgba(255,255,255,0.08); }\
 #wctx-overlay.wctx-dark .wctx-typing {\
-  color:rgba(255,255,255,0.4);\
   background:rgba(255,255,255,0.06);\
-  border-color:rgba(255,255,255,0.1);\
+  border-color:rgba(255,255,255,0.08);\
 }\
-#wctx-overlay.wctx-dark .wctx-typing::before { background:rgba(255,255,255,0.4); }\
+#wctx-overlay.wctx-dark .wctx-typing-dot { background:rgba(255,255,255,0.3); }\
 #wctx-overlay.wctx-dark .wctx-owner-panel {\
   background:rgba(255,255,255,0.08);\
   border-color:rgba(255,255,255,0.12);\
@@ -1547,7 +1564,6 @@
   <div class="wctx-main wctx-state-idle">\
     <div class="wctx-idle-prompt">What can I help you with?</div>\
     <div class="wctx-messages"></div>\
-    <div class="wctx-typing">Thinking</div>\
     <div class="wctx-input-zone">\
       <div class="wctx-input-frame">\
         <div class="wctx-input-icon">\
