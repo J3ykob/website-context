@@ -716,10 +716,10 @@ app.get("/api/tenants/:id/status", (req, res) => {
   });
 });
 
-// Chat endpoint — supports SSE streaming for preview+complete pattern
+// Chat endpoint
 app.post("/api/chat", async (req, res) => {
   try {
-    const { messages, sessionId, tenantId, stream } = req.body;
+    const { messages, sessionId, tenantId } = req.body;
     if (!messages || !Array.isArray(messages)) {
       res.status(400).json({ error: "messages required" });
       return;
@@ -749,37 +749,7 @@ app.post("/api/chat", async (req, res) => {
     const chat = await tenantManager.getChatForTenant(tenantId);
     console.log(`[chat:${tenantId}] "${(messages[messages.length - 1]?.content || "").slice(0, 60)}"`);
 
-    if (stream) {
-      // SSE mode: send preview from Haiku, then full response
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.flushHeaders();
-
-      // Fire preview (fast model, ~300ms)
-      const previewStart = Date.now();
-      const preview = await chat.generatePreview(messages);
-      console.log(`[preview] ${tenantId}: ${preview ? preview.slice(0, 50) : "NULL"} (${Date.now() - previewStart}ms)`);
-      if (preview) {
-        res.write(`data: ${JSON.stringify({ type: "preview", text: preview })}\n\n`);
-      }
-
-      // Fire main model with preview sentence instruction
-      const response = await chat.chat(messages, sessionKey, preview || undefined);
-
-      res.write(`data: ${JSON.stringify({ type: "complete", ...response })}\n\n`);
-      res.end();
-
-      // Log asynchronously
-      const lastUserContent = messages[messages.length - 1]?.content || "";
-      logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
-      logMessage(tenantId, sessionKey, "assistant", response.message, {
-        flowInvoked: response.flowSession?.flowId || null,
-        navigatedTo: response.navigateTo || null,
-        hadToolCall: !!(response.flowSession || response.navigateTo),
-      }).catch(() => {});
-    } else {
-      // Classic JSON mode (backward compatible)
+    {
       const response = await chat.chat(messages, sessionKey);
 
       const lastUserContent = messages[messages.length - 1]?.content || "";

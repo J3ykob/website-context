@@ -362,42 +362,23 @@
     fetch(API_HOST + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: messages, tenantId: TENANT_ID, sessionId: sessionId, stream: true }),
+      body: JSON.stringify({ messages: messages, tenantId: TENANT_ID, sessionId: sessionId }),
     })
-    .then(function(r) {
-      var reader = r.body.getReader();
-      var decoder = new TextDecoder();
-      var buf = "";
-      function process(chunk) {
-        buf += decoder.decode(chunk, { stream: true });
-        var lines = buf.split("\n"); buf = lines.pop() || "";
-        for (var i = 0; i < lines.length; i++) {
-          if (!lines[i].startsWith("data: ")) continue;
-          try {
-            var evt = JSON.parse(lines[i].slice(6));
-            if (evt.type === "preview") {
-              var t = document.getElementById("wctx-bar-thinking");
-              if (t) t.textContent = evt.text;
-            } else if (evt.type === "complete") {
-              var t2 = document.getElementById("wctx-bar-thinking");
-              if (t2) t2.remove();
-              messages.push({ role: "assistant", content: evt.message }); persistMessages();
-              appendMsg("assistant", evt.message, evt.sources);
-              syncBarMessages();
-              if (evt.navigateTo) {
-                setTimeout(function() { navigateToPage(evt.navigateTo, ""); }, 1000);
-              }
-              if (evt.flowSession && evt.flowSession.guidedSteps && evt.flowSession.guidedSteps.length > 0) {
-                setTimeout(function() { launchGuidedExecution(evt.flowSession.guidedSteps, evt.flowSession.guidedInputs || {}); }, 800);
-              } else if (evt.flowSession && evt.flowSession.active) {
-                barInput.placeholder = "Provide the requested info...";
-              }
-            }
-          } catch(e) {}
-        }
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var t = document.getElementById("wctx-bar-thinking");
+      if (t) t.remove();
+      messages.push({ role: "assistant", content: data.message }); persistMessages();
+      appendMsg("assistant", data.message, data.sources);
+      syncBarMessages();
+      if (data.navigateTo) {
+        setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
       }
-      function read() { return reader.read().then(function(r) { if (r.done) return; process(r.value); return read(); }); }
-      return read();
+      if (data.flowSession && data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
+        setTimeout(function() { launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}); }, 800);
+      } else if (data.flowSession && data.flowSession.active) {
+        barInput.placeholder = "Provide the requested info...";
+      }
     })
     .catch(function() {
       var t = document.getElementById("wctx-bar-thinking");
@@ -763,79 +744,31 @@
     fetch(API_HOST + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: messages, tenantId: TENANT_ID, sessionId: sessionId, stream: true }),
+      body: JSON.stringify({ messages: messages, tenantId: TENANT_ID, sessionId: sessionId }),
     })
-    .then(function(r) {
-      var reader = r.body.getReader();
-      var decoder = new TextDecoder();
-      var previewEl = null;
-      var typewriterTimer = null;
-      var buffer = "";
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      messages.push({ role: "assistant", content: data.message }); persistMessages();
+      appendMsg("assistant", data.message, data.sources);
 
-      function typeWriter(el, text, cb) {
-        var i = 0;
-        el.innerHTML = "";
-        typewriterTimer = setInterval(function() {
-          el.innerHTML = md(text.slice(0, ++i));
-          els.msgs.scrollTop = els.msgs.scrollHeight;
-          if (i >= text.length) { clearInterval(typewriterTimer); typewriterTimer = null; if (cb) cb(); }
-        }, 25);
+      if (data.navigateTo) {
+        setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
       }
-
-      function processChunk(chunk) {
-        buffer += decoder.decode(chunk, { stream: true });
-        var lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i];
-          if (!line.startsWith("data: ")) continue;
-          try {
-            var evt = JSON.parse(line.slice(6));
-            if (evt.type === "preview") {
-              setLoading(false);
-              previewEl = document.createElement("div");
-              previewEl.className = "wctx-msg wctx-msg-assistant";
-              els.msgs.appendChild(previewEl);
-              typeWriter(previewEl, evt.text);
-            } else if (evt.type === "complete") {
-              if (typewriterTimer) { clearInterval(typewriterTimer); typewriterTimer = null; }
-              setLoading(false);
-              if (previewEl) previewEl.remove();
-              messages.push({ role: "assistant", content: evt.message }); persistMessages();
-              appendMsg("assistant", evt.message, evt.sources);
-
-              if (evt.navigateTo) {
-                setTimeout(function() { navigateToPage(evt.navigateTo, ""); }, 1000);
-              }
-              if (evt.flowSession) {
-                activeFlowSession = evt.flowSession;
-                if (evt.flowSession.guidedSteps && evt.flowSession.guidedSteps.length > 0) {
-                  setTimeout(function() {
-                    launchGuidedExecution(evt.flowSession.guidedSteps, evt.flowSession.guidedInputs || {});
-                  }, 800);
-                  activeFlowSession = null;
-                } else if (evt.flowSession.active) {
-                  els.input.placeholder = "Provide the requested info...";
-                }
-                if (evt.flowSession.complete && !evt.flowSession.guidedSteps) {
-                  activeFlowSession = null;
-                  els.input.placeholder = "Tell me what you need…";
-                }
-              }
-            }
-          } catch(e) {}
+      if (data.flowSession) {
+        activeFlowSession = data.flowSession;
+        if (data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
+          setTimeout(function() {
+            launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {});
+          }, 800);
+          activeFlowSession = null;
+        } else if (data.flowSession.active) {
+          els.input.placeholder = "Provide the requested info...";
+        }
+        if (data.flowSession.complete && !data.flowSession.guidedSteps) {
+          activeFlowSession = null;
+          els.input.placeholder = "Tell me what you need…";
         }
       }
-
-      function read() {
-        return reader.read().then(function(result) {
-          if (result.done) return;
-          processChunk(result.value);
-          return read();
-        });
-      }
-      return read();
     })
     .catch(function() {
       appendMsg("assistant", "Something went wrong. Please try again.");

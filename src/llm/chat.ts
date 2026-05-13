@@ -293,44 +293,7 @@ export class WebsiteChat {
     }
   }
 
-  async generatePreview(messages: ChatMessage[]): Promise<string | null> {
-    const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
-    if (!lastUserMessage || lastUserMessage.length < 5) return null;
-
-    const siteDomain = this.getAllowedDomain() || "this website";
-    const previewPrompt = `You are a helpful assistant for ${siteDomain}. Give a brief, natural first sentence to start answering this question. One sentence only. CRITICAL: Reply in the EXACT same language the user wrote in. If they wrote in English, reply in English. If in Polish, reply in Polish.`;
-
-    try {
-      const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.0-flash-lite-001",
-          messages: [
-            { role: "system", content: previewPrompt },
-            { role: "user", content: lastUserMessage },
-          ],
-          max_tokens: 80,
-        }),
-        signal: AbortSignal.timeout(5000),
-      });
-      const data = await resp.json() as any;
-      const sentence = data.choices?.[0]?.message?.content?.trim();
-      if (sentence && sentence.length > 10) {
-        console.log(`[preview] Haiku response in ${Date.now()}ms: "${sentence.slice(0, 60)}..."`);
-        return sentence;
-      }
-      console.log(`[preview] Haiku returned empty or short response:`, JSON.stringify(data).slice(0, 200));
-    } catch (err: any) {
-      console.log(`[preview] Haiku failed: ${err.message}`);
-    }
-    return null;
-  }
-
-  async chat(messages: ChatMessage[], sessionKey?: string, previewSentence?: string): Promise<ChatResponse> {
+  async chat(messages: ChatMessage[], sessionKey?: string): Promise<ChatResponse> {
     const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
     const effectiveSessionKey = sessionKey || "default";
 
@@ -407,7 +370,7 @@ export class WebsiteChat {
     }
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
-    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage, previewSentence);
+    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage);
 
     const sources = [...new Map(
       retrievedChunks.map((c) => [
@@ -593,8 +556,7 @@ export class WebsiteChat {
   private buildSystemPrompt(
     chunks: { content: string; metadata: Record<string, unknown>; score: number }[],
     recentlyCompletedFlowId?: string,
-    userQuery?: string,
-    previewSentence?: string
+    userQuery?: string
   ): string {
     const siteInfo = this.context.siteMap
       .slice(0, 20)
@@ -683,10 +645,6 @@ ${contextBlocks}
         .map((n) => `Q: ${n.question}\nA: ${n.answer}`)
         .join("\n\n");
       prompt += `\n\n## Additional Context (from site owner):\n${notesBlock}`;
-    }
-
-    if (previewSentence) {
-      prompt += `\n\n## IMPORTANT: Start your response with this EXACT sentence (already shown to the user): "${previewSentence}"\nThen continue naturally with the full answer.`;
     }
 
     return prompt;
