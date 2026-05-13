@@ -154,6 +154,11 @@ app.get("/", (_, res) => {
   }
 });
 
+// Claim page — "Your website already has a chatbot"
+app.get("/claim", (_, res) => {
+  res.sendFile(resolve(__dirname, "../public/claim/index.html"));
+});
+
 // Widget JS
 app.get("/widget.js", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/widget.js"));

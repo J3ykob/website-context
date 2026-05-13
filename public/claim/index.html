@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whisp — Your website already has a chatbot</title>
+<meta name="description" content="Paste your URL and see your AI chatbot working in seconds. No signup, no setup.">
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height: 100%; }
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background: #0a0e1a;
+  color: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
+}
+
+.claim-page {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 40px 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.glow {
+  position: absolute; top: 15%; left: 50%; transform: translateX(-50%);
+  width: 800px; height: 500px;
+  background: radial-gradient(ellipse, rgba(59,130,246,0.1) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.claim-content {
+  position: relative; z-index: 1;
+  text-align: center; max-width: 600px; width: 100%;
+}
+
+.claim-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: #3b82f6;
+  background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2);
+  padding: 6px 16px; border-radius: 20px; margin-bottom: 28px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.claim-badge::before {
+  content: ""; width: 6px; height: 6px;
+  background: #34d399; border-radius: 50%;
+}
+
+h1 {
+  font-family: "DM Serif Display", Georgia, serif;
+  font-size: clamp(32px, 5vw, 52px);
+  font-weight: 400; line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+}
+h1 em { font-style: italic; color: #3b82f6; }
+
+.subtitle {
+  font-size: 17px; color: #94a3b8;
+  line-height: 1.7; margin-bottom: 40px;
+}
+
+/* URL input */
+.url-form {
+  display: flex; gap: 0;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px; overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.url-form:focus-within {
+  border-color: rgba(59,130,246,0.4);
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.1);
+}
+.url-input {
+  flex: 1; padding: 18px 20px;
+  background: transparent; border: none; outline: none;
+  font-family: inherit; font-size: 16px; color: #f1f5f9;
+}
+.url-input::placeholder { color: #475569; }
+.url-btn {
+  padding: 18px 28px; background: #3b82f6;
+  color: white; border: none; font-family: inherit;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+  white-space: nowrap; transition: background 0.2s;
+}
+.url-btn:hover { background: #2563eb; }
+.url-btn:disabled { opacity: 0.5; cursor: default; }
+
+.claim-note {
+  font-size: 12px; color: #475569; margin-top: 12px;
+}
+
+/* Progress states */
+.claim-progress {
+  display: none; margin-top: 32px; text-align: center;
+}
+.claim-progress.active { display: block; }
+
+.progress-step {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 0; font-size: 14px; color: #64748b;
+  justify-content: center;
+}
+.progress-step.done { color: #34d399; }
+.progress-step.active { color: #f1f5f9; }
+.progress-step .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #334155;
+}
+.progress-step.done .dot { background: #34d399; }
+.progress-step.active .dot {
+  background: #3b82f6;
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(59,130,246,0.4)} 50%{box-shadow:0 0 0 8px rgba(59,130,246,0)} }
+
+/* Result */
+.claim-result {
+  display: none; margin-top: 32px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px; padding: 28px;
+  text-align: center;
+}
+.claim-result.active { display: block; }
+.claim-result h3 {
+  font-family: "DM Serif Display", serif;
+  font-size: 24px; margin-bottom: 8px;
+}
+.claim-result p { font-size: 14px; color: #94a3b8; margin-bottom: 20px; }
+.claim-result .stats {
+  display: flex; gap: 24px; justify-content: center;
+  margin-bottom: 24px;
+}
+.claim-result .stat {
+  text-align: center;
+}
+.claim-result .stat-num {
+  font-family: "DM Serif Display", serif;
+  font-size: 28px; color: #3b82f6;
+}
+.claim-result .stat-label {
+  font-size: 11px; color: #64748b; text-transform: uppercase;
+  letter-spacing: 0.06em; font-weight: 600;
+}
+.claim-result .demo-btn {
+  display: inline-block; padding: 14px 28px;
+  background: #3b82f6; color: white; border-radius: 12px;
+  font-weight: 700; font-size: 15px; text-decoration: none;
+  transition: all 0.2s; margin: 4px;
+}
+.claim-result .demo-btn:hover { background: #2563eb; transform: translateY(-1px); }
+.claim-result .demo-btn.secondary {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #94a3b8;
+}
+.claim-result .demo-btn.secondary:hover {
+  background: rgba(255,255,255,0.1);
+  color: #f1f5f9;
+}
+
+.claim-error {
+  display: none; margin-top: 20px;
+  padding: 14px 20px; border-radius: 12px;
+  background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2);
+  color: #ef4444; font-size: 14px;
+}
+.claim-error.active { display: block; }
+
+/* Examples */
+.examples {
+  margin-top: 48px; padding-top: 32px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.examples-label {
+  font-size: 11px; color: #475569; text-transform: uppercase;
+  letter-spacing: 0.1em; font-weight: 600; margin-bottom: 16px;
+}
+.examples-grid {
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+}
+.example-chip {
+  padding: 8px 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px; font-size: 13px; color: #64748b;
+  cursor: pointer; transition: all 0.2s;
+}
+.example-chip:hover {
+  background: rgba(255,255,255,0.08);
+  color: #f1f5f9; border-color: rgba(59,130,246,0.3);
+}
+
+footer {
+  position: relative; z-index: 1;
+  padding: 24px; text-align: center;
+  font-size: 12px; color: #334155;
+}
+footer a { color: #475569; text-decoration: none; }
+footer a:hover { color: #3b82f6; }
+
+@media(max-width:600px) {
+  .url-form { flex-direction: column; }
+  .url-btn { padding: 16px; }
+  .claim-result .stats { flex-direction: column; gap: 12px; }
+}
+</style>
+</head>
+<body>
+
+<div class="claim-page">
+  <div class="glow"></div>
+  <div class="claim-content">
+    <div class="claim-badge">Takes 60 seconds</div>
+    <h1>Your website already<br>has a <em>chatbot</em></h1>
+    <p class="subtitle">Paste any URL. We'll read your site and show you a working AI chatbot in seconds. No signup needed.</p>
+
+    <form class="url-form" id="claim-form" onsubmit="return handleClaim(event)">
+      <input class="url-input" id="url-input" type="url" placeholder="https://your-website.com" required autofocus />
+      <button class="url-btn" id="claim-btn" type="submit">See your chatbot</button>
+    </form>
+    <p class="claim-note">Free forever. No credit card. Works with any website.</p>
+
+    <div class="claim-error" id="claim-error"></div>
+
+    <div class="claim-progress" id="progress">
+      <div class="progress-step" id="step-read"><span class="dot"></span> Reading your website...</div>
+      <div class="progress-step" id="step-learn"><span class="dot"></span> Learning your content...</div>
+      <div class="progress-step" id="step-build"><span class="dot"></span> Building your chatbot...</div>
+    </div>
+
+    <div class="claim-result" id="result">
+      <h3>Your chatbot is ready!</h3>
+      <p id="result-domain"></p>
+      <div class="stats">
+        <div class="stat"><div class="stat-num" id="stat-pages">0</div><div class="stat-label">Pages read</div></div>
+        <div class="stat"><div class="stat-num" id="stat-chunks">0</div><div class="stat-label">Knowledge items</div></div>
+      </div>
+      <a class="demo-btn" id="demo-link" href="#" target="_blank">Try your chatbot</a>
+      <a class="demo-btn secondary" id="site-link" href="#" target="_blank">Conversational page</a>
+    </div>
+
+    <div class="examples">
+      <div class="examples-label">Try these examples</div>
+      <div class="examples-grid">
+        <div class="example-chip" onclick="tryExample('hubfootwear.com')">hubfootwear.com</div>
+        <div class="example-chip" onclick="tryExample('restauracjasloik.pl')">restauracjasloik.pl</div>
+        <div class="example-chip" onclick="tryExample('steclegal.pl')">steclegal.pl</div>
+        <div class="example-chip" onclick="tryExample('cleanex.com.pl')">cleanex.com.pl</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <a href="/">Whisp</a> · <a href="mailto:jakub@whisp.so">Contact</a>
+</footer>
+
+<script>
+var API = window.location.origin;
+
+function tryExample(domain) {
+  document.getElementById("url-input").value = "https://" + domain;
+  handleClaim(new Event("submit"));
+}
+
+function setStep(id, state) {
+  var el = document.getElementById(id);
+  el.className = "progress-step " + state;
+}
+
+function handleClaim(e) {
+  if (e.preventDefault) e.preventDefault();
+
+  var urlInput = document.getElementById("url-input");
+  var btn = document.getElementById("claim-btn");
+  var progress = document.getElementById("progress");
+  var result = document.getElementById("result");
+  var errorEl = document.getElementById("claim-error");
+
+  var url = urlInput.value.trim();
+  if (!url) return false;
+  if (!url.startsWith("http")) url = "https://" + url;
+
+  // Extract domain
+  var domain;
+  try { domain = new URL(url).hostname; } catch(e) { return false; }
+
+  btn.disabled = true;
+  btn.textContent = "Working...";
+  errorEl.className = "claim-error";
+  result.className = "claim-result";
+  progress.className = "claim-progress active";
+
+  setStep("step-read", "active");
+  setStep("step-learn", "");
+  setStep("step-build", "");
+
+  var tenantId = domain.replace(/\./g, "_").replace(/-/g, "_");
+
+  // Check if already exists
+  fetch(API + "/api/tenants/" + tenantId + "/status")
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === "active" && data.chunksCount > 0) {
+        // Already ready
+        setStep("step-read", "done");
+        setStep("step-learn", "done");
+        setStep("step-build", "done");
+        showResult(domain, tenantId, data.pagesCount, data.chunksCount);
+        return;
+      }
+
+      // Register
+      return fetch(API + "/api/tenants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "claim@whisp.so", siteUrl: url }),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(reg) {
+        if (reg.error && reg.error.indexOf("already exists") === -1) {
+          throw new Error(reg.error);
+        }
+
+        setStep("step-read", "done");
+        setStep("step-learn", "active");
+
+        // Poll for completion
+        var attempts = 0;
+        var maxAttempts = 60; // 5 minutes
+        var poll = setInterval(function() {
+          attempts++;
+          fetch(API + "/api/tenants/" + tenantId + "/status")
+            .then(function(r) { return r.json(); })
+            .then(function(s) {
+              if (s.status === "active" && s.chunksCount > 0) {
+                clearInterval(poll);
+                setStep("step-learn", "done");
+                setStep("step-build", "done");
+                showResult(domain, tenantId, s.pagesCount, s.chunksCount);
+              } else if (s.status === "active" && s.pagesCount > 0) {
+                setStep("step-learn", "done");
+                setStep("step-build", "active");
+              } else if (s.status === "error") {
+                clearInterval(poll);
+                showError("We couldn't read this website. It may be blocking automated access.");
+              } else if (attempts >= maxAttempts) {
+                clearInterval(poll);
+                showError("This is taking longer than usual. Try again in a few minutes.");
+              }
+            });
+        }, 5000);
+      });
+    })
+    .catch(function(err) {
+      showError(err.message || "Something went wrong. Please try again.");
+    });
+
+  return false;
+}
+
+function showResult(domain, tenantId, pages, chunks) {
+  var btn = document.getElementById("claim-btn");
+  btn.disabled = false;
+  btn.textContent = "See your chatbot";
+
+  document.getElementById("result-domain").textContent = "AI chatbot for " + domain;
+  document.getElementById("stat-pages").textContent = pages;
+  document.getElementById("stat-chunks").textContent = chunks;
+  document.getElementById("demo-link").href = "/demo/" + tenantId;
+  document.getElementById("site-link").href = "/site/" + tenantId;
+  document.getElementById("result").className = "claim-result active";
+}
+
+function showError(msg) {
+  var btn = document.getElementById("claim-btn");
+  btn.disabled = false;
+  btn.textContent = "See your chatbot";
+
+  var el = document.getElementById("claim-error");
+  el.textContent = msg;
+  el.className = "claim-error active";
+  document.getElementById("progress").className = "claim-progress";
+}
+</script>
+</body>
+</html>
