@@ -600,34 +600,13 @@ body {
     fetch(API + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: messages, tenantId: TENANT, sessionId: SESSION, stream: true }),
+      body: JSON.stringify({ messages: messages, tenantId: TENANT, sessionId: SESSION }),
     })
-    .then(function(r) {
-      var reader = r.body.getReader();
-      var decoder = new TextDecoder();
-      var previewEl = null;
-      var buf = "";
-      function process(chunk) {
-        buf += decoder.decode(chunk, { stream: true });
-        var lines = buf.split("\\n"); buf = lines.pop() || "";
-        for (var i = 0; i < lines.length; i++) {
-          if (!lines[i].startsWith("data: ")) continue;
-          try {
-            var evt = JSON.parse(lines[i].slice(6));
-            if (evt.type === "preview") {
-              typing.remove();
-              previewEl = addMsg("bot", evt.text);
-            } else if (evt.type === "complete") {
-              typing.remove();
-              if (previewEl) previewEl.remove();
-              messages.push({ role: "assistant", content: evt.message });
-              addMsg("bot", evt.message);
-            }
-          } catch(e) {}
-        }
-      }
-      function read() { return reader.read().then(function(r) { if (r.done) return; process(r.value); return read(); }); }
-      return read();
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      typing.remove();
+      messages.push({ role: "assistant", content: data.message });
+      addMsg("bot", data.message);
     })
     .catch(function() {
       typing.remove();
