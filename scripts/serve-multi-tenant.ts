@@ -281,6 +281,377 @@ window.addEventListener("load", function(){\
 </html>');
 });
 
+// Conversational website — chat-first page for a business
+app.get("/site/:tenantId", (req, res) => {
+  const tenant = getTenant(req.params.tenantId);
+  if (!tenant) {
+    res.status(404).send("<!DOCTYPE html><html><body style='font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#94a3b8'><p>Site not found.</p></body></html>");
+    return;
+  }
+
+  const host = req.get("host") || "whisp.so";
+  const baseUrl = process.env.BASE_URL || "https://" + host;
+  const brand = tenant.brandName || tenant.domain;
+  const settings = tenant.settings || {};
+  const tagline = settings.tagline || "Ask me anything";
+  const accentColor = settings.accentColor || "#3b82f6";
+  const theme = settings.siteTheme || "dark";
+  const bgDark = theme === "dark";
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${brand}</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background: ${bgDark ? '#0a0e1a' : '#fafafa'};
+  color: ${bgDark ? '#f1f5f9' : '#1a1a1a'};
+  display: flex; flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+}
+
+.site-header {
+  padding: 16px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid ${bgDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'};
+  background: ${bgDark ? 'rgba(10,14,26,0.8)' : 'rgba(255,255,255,0.8)'};
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  position: fixed; top:0; left:0; right:0; z-index: 100;
+}
+.site-brand {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 16px; font-weight: 700;
+}
+.site-brand-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: ${accentColor};
+  box-shadow: 0 0 8px ${accentColor}44;
+}
+.site-nav {
+  display: flex; gap: 16px; align-items: center;
+}
+.site-nav a {
+  font-size: 13px; color: ${bgDark ? '#94a3b8' : '#6b7280'};
+  text-decoration: none; font-weight: 500;
+  transition: color 0.2s;
+}
+.site-nav a:hover { color: ${bgDark ? '#f1f5f9' : '#1a1a1a'}; }
+
+.site-hero {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; padding: 120px 24px 40px;
+  position: relative;
+}
+.site-glow {
+  position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
+  width: 600px; height: 400px;
+  background: radial-gradient(ellipse, ${accentColor}15 0%, transparent 70%);
+  pointer-events: none;
+}
+.site-title {
+  font-family: "DM Serif Display", Georgia, serif;
+  font-size: clamp(36px, 6vw, 64px);
+  font-weight: 400; line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+  position: relative;
+}
+.site-tagline {
+  font-size: 18px;
+  color: ${bgDark ? '#94a3b8' : '#6b7280'};
+  margin-bottom: 40px;
+  max-width: 400px;
+}
+
+.site-chat-prompt {
+  width: 100%; max-width: 560px;
+  position: relative;
+}
+.site-chat-input {
+  width: 100%; padding: 18px 60px 18px 24px;
+  background: ${bgDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'};
+  border: 1px solid ${bgDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'};
+  border-radius: 20px; outline: none;
+  font-family: inherit; font-size: 16px;
+  color: ${bgDark ? '#f1f5f9' : '#1a1a1a'};
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.site-chat-input::placeholder {
+  color: ${bgDark ? '#64748b' : '#9ca3af'};
+}
+.site-chat-input:focus {
+  border-color: ${accentColor}66;
+  box-shadow: 0 0 0 4px ${accentColor}15;
+}
+.site-chat-send {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 40px; height: 40px; border-radius: 14px;
+  background: ${accentColor}; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.15s;
+}
+.site-chat-send:hover { transform: translateY(-50%) scale(1.05); }
+.site-chat-send svg { width: 16px; height: 16px; }
+
+.site-suggestions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  justify-content: center; margin-top: 16px;
+  max-width: 560px;
+}
+.site-suggestion {
+  padding: 8px 16px;
+  background: ${bgDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'};
+  border: 1px solid ${bgDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};
+  border-radius: 12px; font-size: 13px;
+  color: ${bgDark ? '#94a3b8' : '#6b7280'};
+  cursor: pointer; transition: all 0.2s;
+}
+.site-suggestion:hover {
+  background: ${bgDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};
+  color: ${bgDark ? '#f1f5f9' : '#1a1a1a'};
+  border-color: ${accentColor}44;
+}
+
+/* Chat messages area - appears when conversation starts */
+.site-messages {
+  display: none; width: 100%; max-width: 560px;
+  margin: 0 auto; flex: 1;
+  overflow-y: auto; padding: 16px 0;
+}
+.site-messages.active { display: flex; flex-direction: column; gap: 12px; }
+.site-msg {
+  max-width: 85%; padding: 14px 18px;
+  border-radius: 18px; font-size: 15px; line-height: 1.6;
+  animation: msgIn 0.3s ease;
+}
+@keyframes msgIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+.site-msg.user {
+  align-self: flex-end;
+  background: ${accentColor}; color: white;
+  border-bottom-right-radius: 4px;
+}
+.site-msg.bot {
+  align-self: flex-start;
+  background: ${bgDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'};
+  border: 1px solid ${bgDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};
+  border-bottom-left-radius: 4px;
+}
+.site-msg.bot a { color: ${accentColor}; }
+.site-msg.bot strong { font-weight: 600; }
+.site-typing {
+  display: flex; gap: 4px; padding: 14px 18px;
+  align-self: flex-start;
+  background: ${bgDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'};
+  border-radius: 18px 18px 18px 4px;
+}
+.site-typing span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: ${bgDark ? '#64748b' : '#9ca3af'};
+  animation: dotBounce 1.2s infinite;
+}
+.site-typing span:nth-child(2) { animation-delay: 0.2s; }
+.site-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotBounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+
+/* Input bar fixed at bottom in chat mode */
+.site-input-bar {
+  display: none; padding: 16px 24px;
+  border-top: 1px solid ${bgDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'};
+  background: ${bgDark ? 'rgba(10,14,26,0.9)' : 'rgba(255,255,255,0.9)'};
+  backdrop-filter: blur(20px);
+}
+.site-input-bar.active { display: block; }
+.site-input-bar .site-chat-prompt { max-width: 560px; margin: 0 auto; }
+
+.site-footer {
+  padding: 16px 24px; text-align: center;
+  font-size: 12px; color: ${bgDark ? '#475569' : '#9ca3af'};
+}
+.site-footer a { color: ${bgDark ? '#64748b' : '#6b7280'}; text-decoration: none; }
+.site-footer a:hover { color: ${accentColor}; }
+
+.site-powered {
+  font-size: 11px; color: ${bgDark ? '#334155' : '#d1d5db'};
+  margin-top: 24px;
+}
+.site-powered a { color: ${bgDark ? '#475569' : '#9ca3af'}; text-decoration: none; }
+
+@media(max-width:600px) {
+  .site-title { font-size: 32px; }
+  .site-nav a:not(:last-child) { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-brand">
+    <div class="site-brand-dot"></div>
+    ${brand}
+  </div>
+  <nav class="site-nav">
+    <a href="https://${tenant.domain}" target="_blank">Website</a>
+  </nav>
+</header>
+
+<main class="site-hero" id="hero">
+  <div class="site-glow"></div>
+  <h1 class="site-title">${brand}</h1>
+  <p class="site-tagline">${tagline}</p>
+
+  <div class="site-chat-prompt" id="hero-prompt">
+    <input class="site-chat-input" id="chat-input" type="text" placeholder="Ask me anything about ${brand}..." autocomplete="off" autofocus />
+    <button class="site-chat-send" id="chat-send">
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+    </button>
+  </div>
+
+  <div class="site-suggestions" id="suggestions">
+    <div class="site-suggestion">What services do you offer?</div>
+    <div class="site-suggestion">What are your hours?</div>
+    <div class="site-suggestion">How can I contact you?</div>
+  </div>
+</main>
+
+<div class="site-messages" id="messages"></div>
+
+<div class="site-input-bar" id="input-bar">
+  <div class="site-chat-prompt">
+    <input class="site-chat-input" id="chat-input-bar" type="text" placeholder="Type a message..." autocomplete="off" />
+    <button class="site-chat-send" id="chat-send-bar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+    </button>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div class="site-powered">Powered by <a href="https://whisp.so">Whisp</a></div>
+</footer>
+
+<script>
+(function() {
+  var API = "${baseUrl}";
+  var TENANT = "${tenant.id}";
+  var SESSION = "site-" + Math.random().toString(36).slice(2);
+  var messages = [];
+  var hero = document.getElementById("hero");
+  var msgsEl = document.getElementById("messages");
+  var inputBar = document.getElementById("input-bar");
+  var heroInput = document.getElementById("chat-input");
+  var barInput = document.getElementById("chat-input-bar");
+  var suggestions = document.getElementById("suggestions");
+  var chatMode = false;
+
+  function md(t) {
+    return t
+      .replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>")
+      .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank">$1</a>')
+      .replace(/\\n\\n/g, "</p><p>")
+      .replace(/\\n/g, "<br>")
+      .replace(/^/, "<p>").replace(/$/, "</p>");
+  }
+
+  function enterChatMode() {
+    if (chatMode) return;
+    chatMode = true;
+    hero.style.flex = "0";
+    hero.style.paddingBottom = "0";
+    suggestions.style.display = "none";
+    document.getElementById("hero-prompt").style.display = "none";
+    msgsEl.classList.add("active");
+    inputBar.classList.add("active");
+    barInput.focus();
+  }
+
+  function addMsg(role, text) {
+    var div = document.createElement("div");
+    div.className = "site-msg " + role;
+    if (role === "bot") div.innerHTML = md(text);
+    else div.textContent = text;
+    msgsEl.appendChild(div);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+    return div;
+  }
+
+  function showTyping() {
+    var div = document.createElement("div");
+    div.className = "site-typing";
+    div.innerHTML = "<span></span><span></span><span></span>";
+    msgsEl.appendChild(div);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+    return div;
+  }
+
+  function send(text) {
+    if (!text.trim()) return;
+    enterChatMode();
+    messages.push({ role: "user", content: text });
+    addMsg("user", text);
+    var typing = showTyping();
+
+    fetch(API + "/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: messages, tenantId: TENANT, sessionId: SESSION, stream: true }),
+    })
+    .then(function(r) {
+      var reader = r.body.getReader();
+      var decoder = new TextDecoder();
+      var previewEl = null;
+      var buf = "";
+      function process(chunk) {
+        buf += decoder.decode(chunk, { stream: true });
+        var lines = buf.split("\\n"); buf = lines.pop() || "";
+        for (var i = 0; i < lines.length; i++) {
+          if (!lines[i].startsWith("data: ")) continue;
+          try {
+            var evt = JSON.parse(lines[i].slice(6));
+            if (evt.type === "preview") {
+              typing.remove();
+              previewEl = addMsg("bot", evt.text);
+            } else if (evt.type === "complete") {
+              typing.remove();
+              if (previewEl) previewEl.remove();
+              messages.push({ role: "assistant", content: evt.message });
+              addMsg("bot", evt.message);
+            }
+          } catch(e) {}
+        }
+      }
+      function read() { return reader.read().then(function(r) { if (r.done) return; process(r.value); return read(); }); }
+      return read();
+    })
+    .catch(function() {
+      typing.remove();
+      addMsg("bot", "Something went wrong. Please try again.");
+    });
+
+    heroInput.value = "";
+    barInput.value = "";
+  }
+
+  heroInput.addEventListener("keydown", function(e) { if (e.key === "Enter") send(this.value); });
+  barInput.addEventListener("keydown", function(e) { if (e.key === "Enter") send(this.value); });
+  document.getElementById("chat-send").addEventListener("click", function() { send(heroInput.value); });
+  document.getElementById("chat-send-bar").addEventListener("click", function() { send(barInput.value); });
+
+  document.querySelectorAll(".site-suggestion").forEach(function(el) {
+    el.addEventListener("click", function() { send(this.textContent); });
+  });
+})();
+</script>
+</body>
+</html>`);
+});
+
 // Create tenant
 app.post("/api/tenants", (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
