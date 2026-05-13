@@ -178,9 +178,11 @@ export class ScrapeWorker {
 
       try {
         const tenant = getTenant(job.tenantId);
-        if (tenant) {
+        if (tenant && result.chunks > 0) {
           const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3211}`;
           await sendBotReadyEmail(tenant.email, tenant.id, tenant.domain, baseUrl);
+        } else if (tenant && result.chunks === 0) {
+          console.log(`[worker] Skipping bot-ready email for ${job.tenantId} — 0 chunks, demo won't work`);
         }
       } catch (emailErr: any) {
         console.error(`[worker] Email failed for ${job.tenantId}:`, emailErr.message);
