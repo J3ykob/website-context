@@ -985,14 +985,14 @@
 #wctx-overlay > * { pointer-events:auto; }\
 \
 .wctx-shell {\
-  position:fixed; inset:12px;\
+  position:fixed; inset:0;\
   font-family:"Archivo",-apple-system,BlinkMacSystemFont,sans-serif;\
-  background:rgba(255,255,255,0.2);\
-  backdrop-filter:blur(8px) saturate(1.2);\
-  -webkit-backdrop-filter:blur(8px) saturate(1.2);\
-  border-radius:20px;\
-  border:1px solid rgba(255,255,255,0.3);\
-  box-shadow:0 8px 32px rgba(0,0,0,0.08), inset 0 0 20px -5px rgba(255,255,255,0.4);\
+  background:rgba(255,255,255,0.35);\
+  backdrop-filter:blur(12px) saturate(1.3);\
+  -webkit-backdrop-filter:blur(12px) saturate(1.3);\
+  border-radius:0;\
+  border:none;\
+  box-shadow:none;\
   color:#0a0a0a;\
   font-size:14px;\
   line-height:1.5;\
@@ -1392,7 +1392,7 @@
 @keyframes wctx-dot-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }\
 \
 @media(max-width:768px){\
-  .wctx-shell{inset:8px;border-radius:16px}\
+  .wctx-shell{inset:0;border-radius:0}\
   .wctx-topbar{padding:16px 20px;gap:14px}\
   .wctx-state-idle .wctx-input-zone{padding:0 20px}\
   .wctx-state-chat .wctx-input-zone{padding:12px 16px 16px}\
@@ -1403,9 +1403,9 @@
 }\
 \
 #wctx-overlay.wctx-dark .wctx-shell {\
-  background:rgba(255,255,255,0.06);\
-  border-color:rgba(255,255,255,0.1);\
-  box-shadow:0 8px 32px rgba(0,0,0,0.3), inset 0 0 20px -5px rgba(255,255,255,0.05);\
+  background:rgba(10,10,20,0.85);\
+  border:none;\
+  box-shadow:none;\
   color:rgba(255,255,255,0.9);\
 }\
 #wctx-overlay.wctx-dark .wctx-topbar {\
