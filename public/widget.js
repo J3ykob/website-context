@@ -479,7 +479,6 @@
   }
 
   function openFullChat() {
-    // FLIP: measure bar position, then animate shell FROM bar TO full
     var barRect = fab.getBoundingClientRect();
     var barCX = barRect.left + barRect.width / 2;
     var barCY = barRect.top + barRect.height / 2;
@@ -488,7 +487,6 @@
     fab.style.display = "none";
     var shell = els.shell;
 
-    // Measure shell's final position
     shell.style.transition = "none";
     shell.style.transform = "none";
     shell.style.opacity = "1";
@@ -496,40 +494,36 @@
     var shellCX = shellRect.left + shellRect.width / 2;
     var shellCY = shellRect.top + shellRect.height / 2;
 
-    // Calculate transform to make shell look like it's at the bar position
     var scaleX = barRect.width / shellRect.width;
     var scaleY = barRect.height / shellRect.height;
     var dx = barCX - shellCX;
     var dy = barCY - shellCY;
 
-    // Set initial state (at bar position)
     shell.style.transform = "translate(" + dx + "px, " + dy + "px) scale(" + scaleX + ", " + scaleY + ")";
-    shell.style.borderRadius = "24px";
-    shell.style.opacity = "0.6";
-    shell.offsetHeight; // force reflow
+    shell.style.borderRadius = "28px";
+    shell.style.opacity = "0";
+    shell.offsetHeight;
 
-    // Animate to final position
-    shell.style.transition = "transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease, border-radius 0.4s ease";
+    shell.style.transition = "transform 0.5s cubic-bezier(0.16,1,0.3,1), opacity 0.25s ease, border-radius 0.5s cubic-bezier(0.16,1,0.3,1)";
     shell.style.transform = "translate(0,0) scale(1,1)";
     shell.style.opacity = "1";
-    shell.style.borderRadius = "";
+    shell.style.borderRadius = "0";
 
     document.body.style.overflow = "hidden";
     setTimeout(function() {
       shell.style.transition = "";
       shell.style.transform = "";
+      shell.style.borderRadius = "";
       els.input.focus();
-    }, 500);
+    }, 550);
   }
 
   function minimizeToBar() {
-    // FLIP: animate shell TO bar position, then show bar
     var shell = els.shell;
     var shellRect = shell.getBoundingClientRect();
     var shellCX = shellRect.left + shellRect.width / 2;
     var shellCY = shellRect.top + shellRect.height / 2;
 
-    // Where the bar will be
     var barW = Math.min(520, window.innerWidth - 32);
     var barH = 52;
     var barCX = window.innerWidth / 2;
@@ -540,10 +534,13 @@
     var dx = barCX - shellCX;
     var dy = barCY - shellCY;
 
-    shell.style.transition = "transform 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.35s ease, border-radius 0.35s ease";
-    shell.style.transform = "translate(" + dx + "px, " + dy + "px) scale(" + scaleX + ", " + scaleY + ")";
-    shell.style.opacity = "0.4";
-    shell.style.borderRadius = "24px";
+    shell.style.transition = "transform 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.4s ease, border-radius 0.3s cubic-bezier(0.4,0,0.2,1)";
+    shell.style.borderRadius = "28px";
+
+    requestAnimationFrame(function() {
+      shell.style.transform = "translate(" + dx + "px, " + dy + "px) scale(" + scaleX + ", " + scaleY + ")";
+      shell.style.opacity = "0";
+    });
 
     setTimeout(function() {
       overlay.style.display = "none";
@@ -554,7 +551,7 @@
       fab.style.display = "block";
       document.body.style.overflow = "";
       syncBarMessages();
-    }, 420);
+    }, 480);
   }
 
   els.browse.addEventListener("click", minimizeToBar);
