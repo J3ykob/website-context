@@ -182,11 +182,11 @@
   display:flex;\
   flex-direction:column;\
   border-radius:20px;\
-  background:rgba(255,255,255,0.35);\
-  backdrop-filter:blur(12px) saturate(1.3);\
-  -webkit-backdrop-filter:blur(12px) saturate(1.3);\
-  border:1px solid rgba(255,255,255,0.35);\
-  box-shadow:0 6px 24px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.4);\
+  background:rgba(200,200,210,0.55);\
+  backdrop-filter:blur(40px) saturate(1.5);\
+  -webkit-backdrop-filter:blur(40px) saturate(1.5);\
+  border:1px solid rgba(255,255,255,0.2);\
+  box-shadow:0 6px 24px rgba(0,0,0,0.12);\
   transition:all 0.35s cubic-bezier(0.4,0,0.2,1);\
   overflow:hidden;\
   max-height:52px;\
@@ -271,10 +271,10 @@
 #wctx-fab .wctx-bar-expand:hover { color:rgba(10,10,10,0.7); }\
 \
 #wctx-fab.wctx-dark .wctx-bar-wrap {\
-  background:rgba(15,15,25,0.92);\
-  border-color:rgba(255,255,255,0.1);\
-  box-shadow:0 6px 24px rgba(0,0,0,0.4);\
-  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);\
+  background:rgba(20,20,35,0.6);\
+  border-color:rgba(255,255,255,0.08);\
+  box-shadow:0 6px 24px rgba(0,0,0,0.3);\
+  backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-wrap:hover,\
 #wctx-fab.wctx-dark .wctx-bar-wrap.pinned {\
@@ -484,7 +484,8 @@
     var barCY = barRect.top + barRect.height / 2;
 
     overlay.style.display = "";
-    fab.style.display = "none";
+    fab.style.transition = "opacity 0.2s ease";
+    fab.style.opacity = "0";
     var shell = els.shell;
 
     shell.style.transition = "none";
@@ -514,6 +515,9 @@
       shell.style.transition = "";
       shell.style.transform = "";
       shell.style.borderRadius = "";
+      fab.style.display = "none";
+      fab.style.opacity = "";
+      fab.style.transition = "";
       els.input.focus();
     }, 550);
   }
@@ -534,12 +538,19 @@
     var dx = barCX - shellCX;
     var dy = barCY - shellCY;
 
-    shell.style.transition = "transform 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.4s ease, border-radius 0.3s cubic-bezier(0.4,0,0.2,1)";
+    // Show bar immediately with fade-in, while shell collapses
+    syncBarMessages();
+    fab.style.display = "block";
+    fab.style.opacity = "0";
+    fab.style.transition = "opacity 0.35s ease";
+
+    shell.style.transition = "transform 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.35s ease, border-radius 0.3s cubic-bezier(0.4,0,0.2,1)";
     shell.style.borderRadius = "28px";
 
     requestAnimationFrame(function() {
       shell.style.transform = "translate(" + dx + "px, " + dy + "px) scale(" + scaleX + ", " + scaleY + ")";
       shell.style.opacity = "0";
+      fab.style.opacity = "1";
     });
 
     setTimeout(function() {
@@ -548,9 +559,8 @@
       shell.style.transform = "";
       shell.style.opacity = "";
       shell.style.borderRadius = "";
-      fab.style.display = "block";
+      fab.style.transition = "";
       document.body.style.overflow = "";
-      syncBarMessages();
     }, 480);
   }
 
