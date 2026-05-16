@@ -132,7 +132,7 @@ export async function scrapeTenant(
             args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
             executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
           });
-      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
       await page.goto(siteUrl, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
       await page.waitForTimeout(3000);
 
@@ -140,7 +140,7 @@ export async function scrapeTenant(
       if (!existsSync(screenshotDir)) mkdirSync(screenshotDir, { recursive: true });
       await page.screenshot({
         path: screenshotPath,
-        fullPage: true,
+        fullPage: false,
       });
       console.log(`[scrape-pipeline] Screenshot saved for ${tenantId}`);
       await browser.close();

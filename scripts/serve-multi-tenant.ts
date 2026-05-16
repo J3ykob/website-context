@@ -229,7 +229,7 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 .demo-body { flex:1; position:relative; overflow:hidden; }\
 .demo-bg { position:absolute; inset:0; z-index:0; }\
 .demo-bg iframe { width:100%; height:100%; border:none; display:block; pointer-events:none; }\
-.demo-bg img { width:100%; height:100%; object-fit:cover; object-position:top; display:block; }\
+.demo-bg img { width:100%; height:100%; object-fit:fill; display:block; }\
 .demo-bg-fallback {\
   min-height:60vh; display:flex; align-items:center; justify-content:center;\
   background:linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);\
