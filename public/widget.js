@@ -958,6 +958,11 @@
   color:rgba(10,10,10,0.5);\
   border-bottom:none;\
   flex-shrink:0;\
+  animation:wctx-fadeDown 0.4s cubic-bezier(0.16,1,0.3,1) 0.15s both;\
+}\
+@keyframes wctx-fadeDown {\
+  from{opacity:0;transform:translateY(-8px)}\
+  to{opacity:1;transform:translateY(0)}\
 }\
 .wctx-logo {\
   display:flex;\
@@ -994,8 +999,8 @@
   animation:wctx-blink 2.8s ease-in-out infinite;\
 }\
 @keyframes wctx-blink {\
-  0%,100%{opacity:1}\
-  50%{opacity:0.3}\
+  0%,100%{opacity:1;transform:scale(1)}\
+  50%{opacity:0.3;transform:scale(0.85)}\
 }\
 .wctx-browse-btn {\
   font-family:"Archivo",sans-serif;\
@@ -1013,7 +1018,7 @@
   backdrop-filter:blur(4px);\
   -webkit-backdrop-filter:blur(4px);\
 }\
-.wctx-browse-btn:hover { background:rgba(255,255,255,0.45); color:rgba(10,10,10,0.7); border-color:rgba(255,255,255,0.5); }\
+.wctx-browse-btn:hover { background:rgba(255,255,255,0.45); color:rgba(10,10,10,0.7); border-color:rgba(255,255,255,0.5); transform:translateY(-1px); }\
 \
 .wctx-owner-btn {\
   font-family:"Archivo",sans-serif;\
@@ -1094,6 +1099,7 @@
   justify-content:center;\
   align-items:center;\
   padding-bottom:10vh;\
+  transition:all 0.5s cubic-bezier(0.16,1,0.3,1);\
 }\
 \
 .wctx-idle-prompt {\
@@ -1106,6 +1112,7 @@
   display:flex;\
   align-items:center;\
   gap:12px;\
+  transition:opacity 0.3s ease, transform 0.3s ease;\
 }\
 .wctx-idle-prompt::before {\
   content:"";\
@@ -1185,7 +1192,7 @@
   transition:all 0.2s;\
   border-radius:0 16px 16px 0;\
 }\
-.wctx-send-btn:hover { color:rgba(10,10,10,0.8); }\
+.wctx-send-btn:hover { color:rgba(10,10,10,0.8); transform:scale(1.05); }\
 .wctx-send-btn:disabled { opacity:0.2; }\
 .wctx-state-chat .wctx-send-btn { padding:16px 22px; }\
 \
@@ -1226,10 +1233,11 @@
 \
 .wctx-msg {\
   max-width:82%;\
-  animation:wctx-msgIn 0.35s cubic-bezier(0.4,0,0.2,1);\
+  opacity:0;\
+  transform:translateY(12px);\
+  animation:wctx-msgIn 0.5s cubic-bezier(0.16,1,0.3,1) forwards;\
 }\
 @keyframes wctx-msgIn {\
-  from{opacity:0;transform:translateY(8px)}\
   to{opacity:1;transform:translateY(0)}\
 }\
 .wctx-msg-user {\
@@ -1241,6 +1249,7 @@
   line-height:1.6;\
   font-weight:500;\
   text-align:right;\
+  animation-duration:0.3s;\
 }\
 .wctx-msg-assistant {\
   align-self:flex-start;\
@@ -1249,6 +1258,7 @@
   color:rgba(10,10,10,0.85);\
   background:none;\
   padding:0;\
+  animation-duration:0.6s;\
 }\
 .wctx-msg-assistant p { margin-bottom:10px; }\
 .wctx-msg-assistant p:last-child { margin-bottom:0; }\
