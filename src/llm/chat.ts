@@ -546,6 +546,10 @@ export class WebsiteChat {
       .replace(/\[\[?flow_start[^\]]*\]\]?/g, "")
       .replace(/\[\[?log_unknown[^\]]*\]\]?/g, "")
       .replace(/```json[\s\S]*?```/g, "")
+      .replace(/\[Action:.*?\]/gi, "")
+      .replace(/\[Tool:.*?\]/gi, "")
+      .replace(/\{action:.*?\}/gi, "")
+      .replace(/One moment,? please!?\s*/gi, "")
       .trim();
 
     const plainOutputCheck = validateOutput(responseText, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
@@ -612,10 +616,9 @@ Answer visitor questions using the context below. You have tools available for n
 - NEVER output raw HTML, script tags, or executable code in your responses
 
 ## Guidelines:
-- Use the navigate_to_page tool to show the user a page when relevant. Prefer navigating over giving links.
-- Use the flow tools (flow_*) when the user clearly wants you to DO something (submit, send, apply), not when they're just asking about it. Extract as many input values as possible from the full conversation history.
+- When a user wants to see a specific page, provide a direct markdown link like [Page Name](https://domain.com/page). Do NOT output action tags, tool calls, or placeholders like [Action: Navigate] — just give the link.
 - Use log_unknown_question when the user asks something you genuinely cannot answer from the context. Still give your best response, but this logs the gap for the site owner to address.
-- Do NOT invoke a flow and navigate in the same response.
+- Do NOT output any text that looks like a tool call, action tag, or function name. No [Action:...], no {action:...}, no [[tool_name...]]. Just respond naturally with links when relevant.
 - After a flow completes, do NOT re-invoke unless the user explicitly asks again.
 
 ## Website Pages:

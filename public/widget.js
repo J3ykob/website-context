@@ -902,13 +902,16 @@
     // Resolve relative URLs
     try { url = new URL(url, window.location.origin).href; } catch(e) {}
 
-    appendMsg("system", "Showing you: " + (label || url));
-
-    // Hide chat overlay, navigate the actual page
-    minimizeToBar();
-
-    // Navigate the host page
-    window.location.href = url;
+    // On demo/site pages (whisp.so), open in new tab instead of navigating
+    var isDemo = window.location.hostname === "whisp.so" || window.location.pathname.indexOf("/demo/") === 0 || window.location.pathname.indexOf("/site/") === 0;
+    if (isDemo) {
+      appendMsg("system", "Opening: " + (label || url));
+      window.open(url, "_blank");
+    } else {
+      appendMsg("system", "Showing you: " + (label || url));
+      minimizeToBar();
+      window.location.href = url;
+    }
   }
 
   function md(t) {
