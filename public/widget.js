@@ -920,9 +920,9 @@
 .wctx-shell {\
   position:fixed; inset:0;\
   font-family:"Archivo",-apple-system,BlinkMacSystemFont,sans-serif;\
-  background:rgba(255,255,255,0.92);\
-  backdrop-filter:blur(16px) saturate(1.3);\
-  -webkit-backdrop-filter:blur(16px) saturate(1.3);\
+  background:rgba(200,200,210,0.55);\
+  backdrop-filter:blur(40px) saturate(1.5);\
+  -webkit-backdrop-filter:blur(40px) saturate(1.5);\
   border-radius:0;\
   border:none;\
   box-shadow:none;\
@@ -1328,7 +1328,9 @@
 }\
 \
 #wctx-overlay.wctx-dark .wctx-shell {\
-  background:rgba(10,10,20,0.95);\
+  background:rgba(20,20,35,0.6);\
+  backdrop-filter:blur(40px) saturate(1.5);\
+  -webkit-backdrop-filter:blur(40px) saturate(1.5);\
   border:none;\
   box-shadow:none;\
   color:rgba(255,255,255,0.9);\
