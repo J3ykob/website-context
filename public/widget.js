@@ -271,13 +271,14 @@
 #wctx-fab .wctx-bar-expand:hover { color:rgba(10,10,10,0.7); }\
 \
 #wctx-fab.wctx-dark .wctx-bar-wrap {\
-  background:rgba(255,255,255,0.08);\
-  border-color:rgba(255,255,255,0.12);\
-  box-shadow:0 6px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);\
+  background:rgba(15,15,25,0.92);\
+  border-color:rgba(255,255,255,0.1);\
+  box-shadow:0 6px 24px rgba(0,0,0,0.4);\
+  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-wrap:hover,\
 #wctx-fab.wctx-dark .wctx-bar-wrap.pinned {\
-  box-shadow:0 12px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);\
+  box-shadow:0 12px 48px rgba(0,0,0,0.5);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-bubble.user {\
   background:rgba(80,80,80,0.7);\

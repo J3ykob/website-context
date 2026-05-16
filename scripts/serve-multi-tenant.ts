@@ -274,7 +274,7 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 </div>\
 <script>\
 window.addEventListener("load", function(){\
-  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark","startExpanded":' + (tenant.settings?.startExpanded ? 'true' : 'false') + '};\
+  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark","startExpanded":true};\
   window.__wctx=c;\
   var s=document.createElement("script");\
   s.src=c.apiHost+"/widget.js";\
