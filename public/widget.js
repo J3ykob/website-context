@@ -568,6 +568,8 @@
 
   var startExpanded = config.startExpanded === true;
   if (startExpanded) {
+    overlay.style.display = "";
+    fab.style.display = "none";
     document.body.style.overflow = "hidden";
     els.input.focus();
   } else {
