@@ -949,7 +949,7 @@
   letter-spacing:0.1em;\
   font-weight:500;\
   color:rgba(10,10,10,0.5);\
-  border-bottom:1px solid rgba(255,255,255,0.25);\
+  border-bottom:none;\
   flex-shrink:0;\
 }\
 .wctx-logo {\
@@ -1120,7 +1120,7 @@
   bottom:0; left:0; right:0;\
   max-width:none;\
   padding:16px 32px 20px;\
-  border-top:1px solid rgba(255,255,255,0.2);\
+  border-top:none;\
 }\
 \
 .wctx-input-frame {\
@@ -1346,7 +1346,7 @@
 }\
 #wctx-overlay.wctx-dark .wctx-topbar {\
   color:rgba(255,255,255,0.5);\
-  border-bottom-color:rgba(255,255,255,0.1);\
+  border-bottom:none;\
 }\
 #wctx-overlay.wctx-dark .wctx-logo { color:rgba(255,255,255,0.9); }\
 #wctx-overlay.wctx-dark .wctx-logo-mark { background:rgba(255,255,255,0.8); }\
@@ -1379,7 +1379,7 @@
   border-color:rgba(255,255,255,0.12);\
   color:rgba(255,255,255,0.4);\
 }\
-#wctx-overlay.wctx-dark .wctx-state-chat .wctx-input-zone { border-top-color:rgba(255,255,255,0.08); }\
+#wctx-overlay.wctx-dark .wctx-state-chat .wctx-input-zone { border-top:none; }\
 #wctx-overlay.wctx-dark .wctx-msg-user {\
   background:rgba(80,80,80,0.6);\
   color:#fff;\
