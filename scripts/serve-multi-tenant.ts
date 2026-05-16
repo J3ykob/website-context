@@ -240,7 +240,7 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 }\
 .demo-info {\
   position:fixed; bottom:100px; left:50%; transform:translateX(-50%);\
-  background:rgba(200,200,210,0.25); border:1px solid rgba(255,255,255,0.12); border-radius:20px; padding:24px 32px;\
+  background:rgba(20,20,35,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:24px 32px;\
   backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
   box-shadow:0 8px 40px rgba(0,0,0,0.15); z-index:10; text-align:center;\
   max-width:400px; width:calc(100% - 40px); animation: fadeUp 0.5s ease 1s both;\
