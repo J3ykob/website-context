@@ -14,7 +14,7 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL
-        value: google/gemini-2.5-flash
+        value: google/gemini-2.0-flash-001
       - key: BGE_HOST
         value: 176.9.1.133
       - key: BGE_PORT
