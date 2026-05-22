@@ -67,11 +67,25 @@ import type { MetaChannelConfig } from "../src/channels/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "3211");
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "whisp-admin-2026";
 
 if (!process.env.OPENROUTER_API_KEY) {
   console.error("OPENROUTER_API_KEY environment variable is required");
   process.exit(1);
 }
+
+const LOG_RING: { ts: string; level: string; msg: string }[] = [];
+const LOG_MAX = 500;
+function pushLog(level: string, msg: string) {
+  LOG_RING.push({ ts: new Date().toISOString(), level, msg });
+  if (LOG_RING.length > LOG_MAX) LOG_RING.shift();
+}
+const origLog = console.log;
+const origErr = console.error;
+const origWarn = console.warn;
+console.log = (...args: unknown[]) => { pushLog("info", args.map(String).join(" ")); origLog(...args); };
+console.error = (...args: unknown[]) => { pushLog("error", args.map(String).join(" ")); origErr(...args); };
+console.warn = (...args: unknown[]) => { pushLog("warn", args.map(String).join(" ")); origWarn(...args); };
 
 // Initialize database
 runMigrations();
@@ -1478,6 +1492,18 @@ function redactChannelConfig(config: MetaChannelConfig): any {
 
   return result;
 }
+
+// Admin logs endpoint
+app.get("/api/admin/logs", (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const level = req.query.level as string | undefined;
+  const n = Math.min(parseInt(req.query.n as string) || 100, LOG_MAX);
+  const search = (req.query.q as string || "").toLowerCase();
+  let logs = LOG_RING;
+  if (level) logs = logs.filter(l => l.level === level);
+  if (search) logs = logs.filter(l => l.msg.toLowerCase().includes(search));
+  res.json(logs.slice(-n));
+});
 
 // Static assets
 app.use(express.static(resolve(__dirname, "../public")));
