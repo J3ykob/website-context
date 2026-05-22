@@ -920,6 +920,13 @@
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="wctx-page-link">$1 →</a>')
+      // Action buttons: phone numbers become call buttons
+      .replace(/(?:tel:|phone:|zadzwoń:?\s*)?(\+?\d[\d\s-]{7,}\d)/g, function(m, num) {
+        var clean = num.replace(/\s/g, "");
+        return '<a href="tel:' + clean + '" class="wctx-action-btn">📞 ' + num.trim() + '</a>';
+      })
+      // Action buttons: email addresses become mailto buttons
+      .replace(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, '<a href="mailto:$1" class="wctx-action-btn">✉ $1</a>')
       .replace(/\n\n/g, "</p><p>")
       .replace(/\n/g, "<br>")
       .replace(/^/, "<p>").replace(/$/, "</p>");
@@ -1306,6 +1313,17 @@
   background:rgba(255,255,255,0.6);\
   color:rgba(10,10,10,0.9);\
   border-color:rgba(0,0,0,0.15);\
+}\
+.wctx-action-btn {\
+  display:inline-flex; align-items:center; gap:6px;\
+  background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.2);\
+  border-radius:10px; padding:8px 16px; margin:4px 2px;\
+  font-size:14px; font-weight:600; color:#3b82f6;\
+  text-decoration:none; cursor:pointer; transition:all 0.2s;\
+}\
+.wctx-action-btn:hover {\
+  background:rgba(59,130,246,0.2); border-color:rgba(59,130,246,0.35);\
+  transform:translateY(-1px);\
 }\
 \
 .wctx-sources {\

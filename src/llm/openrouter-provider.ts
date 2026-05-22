@@ -22,7 +22,7 @@ export class OpenRouterProvider {
 
   constructor(config: OpenRouterConfig = {}) {
     this.apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
-    this.model = config.model || "deepseek/deepseek-chat-v3";
+    this.model = config.model || process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-001";
     this.maxTokens = config.maxTokens || 1024;
     this.temperature = config.temperature || 0.7;
     this.siteUrl = config.siteUrl || process.env.SITE_URL || "";

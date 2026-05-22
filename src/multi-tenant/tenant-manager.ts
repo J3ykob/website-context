@@ -99,21 +99,29 @@ export class TenantManager {
       llmProvider: "openrouter",
       openRouter: {
         apiKey: process.env.OPENROUTER_API_KEY!,
-        model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat-v3",
+        model: process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-001",
         siteUrl: meta.siteUrl,
       },
       systemPromptExtra: `This assistant is deployed on ${new URL(meta.siteUrl).hostname}. Never reference or provide information about any other website or domain.`,
     });
 
     // Load context notes if they exist
+    const allNotes: { question: string; answer: string }[] = [];
     const notesPath = resolve(DATA_ROOT, tenantId, "context_notes.json");
     if (existsSync(notesPath)) {
       try {
-        const notes = JSON.parse(await readFile(notesPath, "utf-8"));
-        chat.setContextNotes(notes);
-      } catch {
-        // Ignore corrupt notes file
-      }
+        allNotes.push(...JSON.parse(await readFile(notesPath, "utf-8")));
+      } catch {}
+    }
+    // Load auto-extracted business info notes
+    const autoNotesPath = resolve(DATA_ROOT, tenantId, "auto-context-notes.json");
+    if (existsSync(autoNotesPath)) {
+      try {
+        allNotes.push(...JSON.parse(await readFile(autoNotesPath, "utf-8")));
+      } catch {}
+    }
+    if (allNotes.length > 0) {
+      chat.setContextNotes(allNotes.map(n => ({ ...n, addedAt: (n as any).addedAt || new Date().toISOString() })));
     }
 
     // Cache the instance

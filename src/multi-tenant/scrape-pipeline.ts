@@ -13,6 +13,7 @@ import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { QdrantVectorStore } from "../embeddings/qdrant-store.js";
 import { embedChunks } from "../embeddings/pipeline.js";
 import { scrapeGooglePlaces, placesToChunks } from "../scraper/google-places.js";
+import { auditBusinessInfo, businessInfoToNotes } from "./business-audit.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -118,6 +119,25 @@ export async function scrapeTenant(
     resolve(tenantDir, "context-meta.json"),
     JSON.stringify(contextMeta, null, 2)
   );
+
+  // Auto-extract business info and save as context notes + gap report
+  try {
+    const bizInfo = auditBusinessInfo(context.chunks);
+    const autoNotes = businessInfoToNotes(bizInfo);
+    await writeFile(
+      resolve(tenantDir, "business-info.json"),
+      JSON.stringify({ ...bizInfo, autoNotes, auditedAt: new Date().toISOString() }, null, 2)
+    );
+    if (autoNotes.length > 0) {
+      await writeFile(
+        resolve(tenantDir, "auto-context-notes.json"),
+        JSON.stringify(autoNotes, null, 2)
+      );
+    }
+    console.log(`[scrape-pipeline] Business audit: ${autoNotes.length} facts found, ${bizInfo.gaps.length} gaps`);
+  } catch (err) {
+    console.log(`[scrape-pipeline] Business audit skipped: ${(err as Error).message}`);
+  }
 
   // Take screenshot only if one doesn't already exist (saves memory on re-scrapes)
   const screenshotPath = resolve(DATA_ROOT, tenantId, "screenshot.png");
