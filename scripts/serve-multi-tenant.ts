@@ -855,7 +855,10 @@ app.post("/api/admin/rescrape-all", (req, res) => {
 // Run business audit on all tenants + optionally send insight emails
 app.post("/api/admin/audit", async (req, res) => {
   const sendEmails = req.query.send === "true";
-  const tenants = listTenants().filter(t => t.status === "active" && t.chunksCount > 0);
+  const limit = parseInt(req.query.limit as string) || 20;
+  const allTenants = listTenants().filter(t => t.status === "active" && t.chunksCount > 0);
+  // Only process tenants that haven't been audited yet, up to limit
+  const tenants = allTenants.filter(t => !existsSync(resolve(__dirname, `../data/${t.id}/business-info.json`))).slice(0, limit);
 
   const qdrantHost = process.env.QDRANT_HOST || "152.53.243.28";
   const qdrantPort = process.env.QDRANT_PORT || "6333";
