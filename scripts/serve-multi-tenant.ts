@@ -1493,6 +1493,15 @@ function redactChannelConfig(config: MetaChannelConfig): any {
   return result;
 }
 
+// Admin tenants list
+app.get("/api/admin/tenants", (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const tenants = listTenants().map((t: any) => ({
+    id: t.id, domain: t.domain, email: t.email, status: t.status, chunksCount: t.chunksCount,
+  }));
+  res.json(tenants);
+});
+
 // Admin logs endpoint
 app.get("/api/admin/logs", (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
