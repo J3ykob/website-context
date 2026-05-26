@@ -574,6 +574,7 @@
   }
 
   var startExpanded = config.startExpanded === true;
+  if (config.demoMode) overlay.classList.add("wctx-demo");
   if (startExpanded) {
     overlay.style.display = "";
     fab.style.display = "none";
@@ -1375,6 +1376,11 @@
   border:none;\
   box-shadow:none;\
   color:rgba(255,255,255,0.9);\
+}\
+#wctx-overlay.wctx-demo .wctx-shell {\
+  background:#0d1117;\
+  backdrop-filter:none;\
+  -webkit-backdrop-filter:none;\
 }\
 #wctx-overlay.wctx-dark .wctx-topbar {\
   color:rgba(255,255,255,0.5);\
