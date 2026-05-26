@@ -296,14 +296,16 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 <script>\
 (function(){\
   var bg=document.getElementById("demo-bg");\
-  var iframe=document.createElement("iframe");\
-  iframe.src="https://' + tenant.domain + '";\
-  iframe.setAttribute("sandbox","allow-same-origin allow-scripts");\
-  var loaded=false;\
-  iframe.onload=function(){loaded=true;};\
-  iframe.onerror=function(){fallback();};\
-  bg.appendChild(iframe);\
-  setTimeout(function(){if(!loaded)fallback();},4000);\
+  function loadBg(){\
+    var iframe=document.createElement("iframe");\
+    iframe.src="https://' + tenant.domain + '";\
+    iframe.setAttribute("sandbox","allow-same-origin allow-scripts");\
+    var loaded=false;\
+    iframe.onload=function(){loaded=true;};\
+    iframe.onerror=function(){fallback();};\
+    bg.appendChild(iframe);\
+    setTimeout(function(){if(!loaded)fallback();},4000);\
+  }\
   function fallback(){\
     bg.innerHTML="";\
     var img=document.createElement("img");\
@@ -311,6 +313,7 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
     img.onerror=function(){bg.innerHTML=\'<div class="demo-bg-fallback"><span class="domain">' + tenant.domain + '</span></div>\';};\
     bg.appendChild(img);\
   }\
+  setTimeout(loadBg, 1500);\
 })();\
 </script>\
   <div class="demo-info" id="demo-info">\

@@ -1377,11 +1377,6 @@
   box-shadow:none;\
   color:rgba(255,255,255,0.9);\
 }\
-#wctx-overlay.wctx-demo .wctx-shell {\
-  background:#0d1117;\
-  backdrop-filter:none;\
-  -webkit-backdrop-filter:none;\
-}\
 #wctx-overlay.wctx-dark .wctx-topbar {\
   color:rgba(255,255,255,0.5);\
   border-bottom:none;\
