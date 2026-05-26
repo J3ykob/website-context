@@ -255,7 +255,6 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 .demo-cta:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.3); }\
 .demo-body { flex:1; position:relative; overflow:hidden; }\
 .demo-bg { position:absolute; inset:0; z-index:0; }\
-.demo-bg iframe { width:100%; height:100%; border:none; display:block; pointer-events:none; }\
 .demo-bg img { width:100%; height:100%; object-fit:fill; display:block; }\
 .demo-bg-fallback {\
   min-height:60vh; display:flex; align-items:center; justify-content:center;\
@@ -296,24 +295,10 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 <script>\
 (function(){\
   var bg=document.getElementById("demo-bg");\
-  function loadBg(){\
-    var iframe=document.createElement("iframe");\
-    iframe.src="https://' + tenant.domain + '";\
-    iframe.setAttribute("sandbox","allow-same-origin allow-scripts");\
-    var loaded=false;\
-    iframe.onload=function(){loaded=true;};\
-    iframe.onerror=function(){fallback();};\
-    bg.appendChild(iframe);\
-    setTimeout(function(){if(!loaded)fallback();},4000);\
-  }\
-  function fallback(){\
-    bg.innerHTML="";\
-    var img=document.createElement("img");\
-    img.src="' + baseUrl + '/api/screenshot/' + tenant.id + '";\
-    img.onerror=function(){bg.innerHTML=\'<div class="demo-bg-fallback"><span class="domain">' + tenant.domain + '</span></div>\';};\
-    bg.appendChild(img);\
-  }\
-  setTimeout(loadBg, 1500);\
+  var img=document.createElement("img");\
+  img.src="' + baseUrl + '/api/screenshot/' + tenant.id + '";\
+  img.onerror=function(){bg.innerHTML=\'<div class="demo-bg-fallback"><span class="domain">' + tenant.domain + '</span></div>\';};\
+  bg.appendChild(img);\
 })();\
 </script>\
   <div class="demo-info" id="demo-info">\
