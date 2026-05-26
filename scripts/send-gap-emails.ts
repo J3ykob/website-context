@@ -65,6 +65,7 @@ async function main() {
     <a href="${demoUrl}" style="display:inline-block;background:#3b82f6;color:#fff;font-size:14px;font-weight:600;padding:12px 24px;border-radius:10px;text-decoration:none;">Try your AI assistant</a>
     <p style="color:#64748b;font-size:13px;margin-top:20px;">Free — no signup needed. One line of code to add to your site.</p>
     <p style="color:#334155;font-size:11px;margin-top:28px;">Jakub — <a href="https://whisp.so" style="color:#475569;">whisp.so</a></p>
+    <p style="color:#1e293b;font-size:10px;margin-top:16px;"><a href="${BASE_URL}/unsubscribe?email=${encodeURIComponent(tenant.email)}" style="color:#334155;">Unsubscribe</a></p>
   </div>
 </div>`;
 
@@ -74,6 +75,20 @@ async function main() {
       continue;
     }
 
+    // Check unsubscribe list
+    try {
+      const unsubResp = await fetch(`${BASE_URL}/api/admin/unsubscribed?secret=${ADMIN_SECRET}`);
+      if (unsubResp.ok) {
+        const unsubs = (await unsubResp.json()) as string[];
+        if (unsubs.includes(tenant.email.toLowerCase())) {
+          console.log(`  UNSUB ${domain} — ${tenant.email}`);
+          skipped++;
+          continue;
+        }
+      }
+    } catch {}
+
+    const unsubUrl = `${BASE_URL}/unsubscribe?email=${encodeURIComponent(tenant.email)}`;
     try {
       const emailResp = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -84,6 +99,10 @@ async function main() {
           subject,
           html,
           reply_to: "jakub@whisp.so",
+          headers: {
+            "List-Unsubscribe": `<${unsubUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
         }),
       });
       if (emailResp.ok) {

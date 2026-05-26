@@ -1538,6 +1538,36 @@ app.get("/api/admin/logs", (req, res) => {
   res.json(logs.slice(-n));
 });
 
+// Email unsubscribe (one-click POST + GET confirmation page)
+const UNSUBSCRIBED = new Set<string>();
+const unsubPath = resolve(__dirname, "../data/unsubscribed.json");
+try { const saved = JSON.parse(require("fs").readFileSync(unsubPath, "utf-8")); saved.forEach((e: string) => UNSUBSCRIBED.add(e)); } catch {}
+
+app.post("/unsubscribe", async (req, res) => {
+  const email = (req.query.email as string || req.body?.email || "").toLowerCase().trim();
+  if (email) {
+    UNSUBSCRIBED.add(email);
+    await writeFile(unsubPath, JSON.stringify([...UNSUBSCRIBED], null, 2));
+    console.log(`[unsubscribe] ${email}`);
+  }
+  res.status(200).send("OK");
+});
+
+app.get("/unsubscribe", async (req, res) => {
+  const email = (req.query.email as string || "").toLowerCase().trim();
+  if (email) {
+    UNSUBSCRIBED.add(email);
+    await writeFile(unsubPath, JSON.stringify([...UNSUBSCRIBED], null, 2));
+    console.log(`[unsubscribe] ${email}`);
+  }
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribed</title></head><body style="font-family:system-ui;background:#0a0e1a;color:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;max-width:400px;padding:40px;"><h2 style="margin:0 0 12px;">You've been unsubscribed</h2><p style="color:#94a3b8;font-size:15px;">You won't receive any more emails from Whisp. Sorry for the bother.</p></div></body></html>`);
+});
+
+app.get("/api/admin/unsubscribed", (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  res.json([...UNSUBSCRIBED]);
+});
+
 // Static assets
 app.use(express.static(resolve(__dirname, "../public")));
 
