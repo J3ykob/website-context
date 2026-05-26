@@ -400,7 +400,7 @@
       var bubble = document.createElement("div");
       bubble.className = "wctx-bar-bubble" + (m.role === "user" ? " user" : " assistant");
       bubble.style.animationDelay = (i * 60) + "ms";
-      var text = m.content.slice(0, 100) + (m.content.length > 100 ? "…" : "");
+      var text = m.content;
       // Simple markdown for bold
       text = text.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
       bubble.innerHTML = text;
