@@ -76,8 +76,19 @@ if (!process.env.OPENROUTER_API_KEY) {
 
 const LOG_RING: { ts: string; level: string; msg: string }[] = [];
 const LOG_MAX = 500;
-const DEMO_VISITS: { ts: string; tenantId: string; domain: string; ip: string; ref: string; ua: string }[] = [];
+
+const DATA_DIR = resolve(__dirname, "../data");
+const DEMO_VISITS_PATH = resolve(DATA_DIR, "demo-visits.json");
 const DEMO_VISITS_MAX = 2000;
+let DEMO_VISITS: { ts: string; tenantId: string; domain: string; ip: string; ref: string; ua: string }[] = [];
+try { DEMO_VISITS = JSON.parse(require("fs").readFileSync(DEMO_VISITS_PATH, "utf-8")); } catch {}
+
+let demoVisitsDirty = false;
+setInterval(async () => {
+  if (!demoVisitsDirty) return;
+  demoVisitsDirty = false;
+  await writeFile(DEMO_VISITS_PATH, JSON.stringify(DEMO_VISITS, null, 2)).catch(() => {});
+}, 5000);
 function pushLog(level: string, msg: string) {
   LOG_RING.push({ ts: new Date().toISOString(), level, msg });
   if (LOG_RING.length > LOG_MAX) LOG_RING.shift();
@@ -220,6 +231,7 @@ app.get("/demo/:tenantId", (req, res) => {
     ua: (req.headers["user-agent"] || "").slice(0, 120),
   });
   if (DEMO_VISITS.length > DEMO_VISITS_MAX) DEMO_VISITS.shift();
+  demoVisitsDirty = true;
   console.log(`[demo-visit] ${tenant.domain} from ${(req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim()}`);
 
   // Always use HTTPS in production (Render terminates TLS at the proxy)
