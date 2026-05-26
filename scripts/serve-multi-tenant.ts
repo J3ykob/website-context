@@ -1506,6 +1506,31 @@ function redactChannelConfig(config: MetaChannelConfig): any {
   return result;
 }
 
+// Admin conversations — view chats across all or specific tenants
+app.get("/api/admin/conversations", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const tenantId = req.query.tenant as string | undefined;
+  const limit = Math.min(parseInt(req.query.n as string) || 20, 100);
+
+  if (tenantId) {
+    const convos = await getConversations(tenantId, limit);
+    res.json({ tenant: tenantId, conversations: convos });
+    return;
+  }
+
+  // Recent conversations across all tenants
+  const tenants = listTenants().filter((t: any) => t.status === "active" && t.chunksCount > 0);
+  const all: any[] = [];
+  for (const t of tenants) {
+    try {
+      const convos = await getConversations(t.id, 5);
+      for (const c of convos) all.push({ ...c, tenantId: t.id, domain: t.domain });
+    } catch {}
+  }
+  all.sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime());
+  res.json({ total: all.length, conversations: all.slice(0, limit) });
+});
+
 // Admin tenants list
 app.get("/api/admin/tenants", (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
