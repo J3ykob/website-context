@@ -296,21 +296,15 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 <script>\
 (function(){\
   var bg=document.getElementById("demo-bg");\
+  var img=document.createElement("img");\
+  img.src="' + baseUrl + '/api/screenshot/' + tenant.id + '";\
+  img.onerror=function(){bg.innerHTML=\'<div class="demo-bg-fallback"><span class="domain">' + tenant.domain + '</span></div>\';};\
+  bg.appendChild(img);\
   var iframe=document.createElement("iframe");\
   iframe.src="https://' + tenant.domain + '";\
   iframe.setAttribute("sandbox","allow-same-origin");\
-  var loaded=false;\
-  iframe.onload=function(){loaded=true;};\
-  iframe.onerror=function(){fallback();};\
+  iframe.style.cssText="position:absolute;inset:0;width:100%;height:100%;border:none;pointer-events:none;z-index:1;";\
   bg.appendChild(iframe);\
-  setTimeout(function(){if(!loaded)fallback();},5000);\
-  function fallback(){\
-    bg.innerHTML="";\
-    var img=document.createElement("img");\
-    img.src="' + baseUrl + '/api/screenshot/' + tenant.id + '";\
-    img.onerror=function(){bg.innerHTML=\'<div class="demo-bg-fallback"><span class="domain">' + tenant.domain + '</span></div>\';};\
-    bg.appendChild(img);\
-  }\
 })();\
 </script>\
   <div class="demo-info" id="demo-info">\
