@@ -1544,6 +1544,22 @@ app.get("/api/admin/conversations", async (req, res) => {
   res.json({ total: all.length, conversations: all.slice(0, limit) });
 });
 
+// Admin full conversation messages
+app.get("/api/admin/messages", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const tenantId = req.query.tenant as string;
+  const sessionId = req.query.session as string | undefined;
+  const limit = Math.min(parseInt(req.query.n as string) || 200, 1000);
+  if (!tenantId) return res.status(400).json({ error: "tenant required" });
+
+  const messages = await getMessages(tenantId, { limit });
+  if (sessionId) {
+    res.json(messages.filter((m: any) => m.sessionId === sessionId));
+  } else {
+    res.json(messages);
+  }
+});
+
 // Admin tenants list
 app.get("/api/admin/tenants", (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
