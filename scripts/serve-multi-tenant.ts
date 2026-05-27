@@ -213,6 +213,107 @@ app.get("/api/screenshot/:tenantId", (req, res) => {
   }
 });
 
+// Personalized landing page — showcases the AI assistant for a prospect
+app.get("/for/:tenantId", async (req, res) => {
+  const tenant = getTenant(req.params.tenantId);
+  if (!tenant || tenant.status !== "active") {
+    res.status(404).send("Not ready yet.");
+    return;
+  }
+
+  const host = req.get("host") || "whisp.so";
+  const baseUrl = process.env.BASE_URL || "https://" + host;
+  const brand = tenant.brandName || tenant.domain;
+  const demoUrl = `${baseUrl}/demo/${tenant.id}`;
+  const screenshotUrl = `${baseUrl}/api/screenshot/${tenant.id}`;
+
+  // Generate sample Q&As on the fly
+  const questions = [
+    "What do you do?",
+    "How can I contact you?",
+    "Where are you located?",
+  ];
+
+  const qas: { q: string; a: string }[] = [];
+  const chat = await tenantManager.getChatForTenant(tenant.id);
+  for (const q of questions) {
+    try {
+      const resp = await chat.chat([{ role: "user", content: q }], `landing_${tenant.id}_${Date.now()}`);
+      qas.push({ q, a: resp.message.slice(0, 300) + (resp.message.length > 300 ? "..." : "") });
+    } catch {
+      // skip failed questions
+    }
+  }
+
+  const qaHtml = qas.map(({ q, a }) => `
+    <div class="qa">
+      <div class="qa-q">${q}</div>
+      <div class="qa-a">${a.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")}</div>
+    </div>
+  `).join("");
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Assistant for ${brand}</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:"Archivo",sans-serif; background:#0a0e1a; color:#f1f5f9; min-height:100vh; }
+.container { max-width:720px; margin:0 auto; padding:40px 24px 80px; }
+.badge { display:inline-block; font-size:11px; font-weight:600; color:#3b82f6; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); padding:4px 12px; border-radius:10px; margin-bottom:24px; }
+h1 { font-family:"DM Serif Display",serif; font-size:clamp(28px,4vw,40px); line-height:1.2; margin-bottom:12px; }
+h1 em { color:#3b82f6; font-style:italic; }
+.sub { color:#94a3b8; font-size:16px; line-height:1.6; margin-bottom:40px; }
+.screenshot-wrap { border-radius:16px; overflow:hidden; border:1px solid rgba(255,255,255,0.08); margin-bottom:48px; position:relative; }
+.screenshot-wrap img { width:100%; display:block; }
+.screenshot-overlay { position:absolute; inset:0; background:linear-gradient(transparent 60%, #0a0e1a 100%); }
+.section-label { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.1em; color:#64748b; margin-bottom:20px; }
+.qa { margin-bottom:24px; }
+.qa-q { font-size:14px; font-weight:600; color:#3b82f6; margin-bottom:8px; padding-left:16px; border-left:2px solid #3b82f6; }
+.qa-a { font-size:14px; color:#cbd5e1; line-height:1.7; padding-left:16px; }
+.cta-section { text-align:center; margin-top:48px; padding-top:40px; border-top:1px solid rgba(255,255,255,0.06); }
+.cta-section h2 { font-family:"DM Serif Display",serif; font-size:24px; margin-bottom:12px; }
+.cta-section p { color:#94a3b8; font-size:15px; margin-bottom:28px; }
+.cta-btn { display:inline-block; background:#3b82f6; color:#fff; font-size:15px; font-weight:700; padding:14px 32px; border-radius:12px; text-decoration:none; transition:all 0.2s; }
+.cta-btn:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.3); }
+.note { color:#64748b; font-size:13px; margin-top:16px; }
+.footer { text-align:center; margin-top:48px; color:#334155; font-size:12px; }
+.footer a { color:#475569; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="badge">Whisp AI</div>
+  <h1>I built an AI assistant<br>for <em>${brand}</em></h1>
+  <p class="sub">It read your entire website and can answer visitor questions 24/7 - services, pricing, contact info, anything on your site.</p>
+
+  <div class="screenshot-wrap">
+    <img src="${screenshotUrl}" alt="${brand}">
+    <div class="screenshot-overlay"></div>
+  </div>
+
+  <div class="section-label">Here's what it knows</div>
+  ${qaHtml}
+
+  <div class="cta-section">
+    <h2>Try it yourself</h2>
+    <p>Ask it anything about ${brand} - it already knows your website.</p>
+    <a class="cta-btn" href="${demoUrl}">Open the AI assistant</a>
+    <p class="note">Free - no signup, no credit card. One line of code to add to your site.</p>
+  </div>
+
+  <div class="footer">
+    <p>Jakub - <a href="https://whisp.so">whisp.so</a></p>
+  </div>
+</div>
+</body>
+</html>`);
+});
+
 // Demo page — standalone chat for a tenant (no embed needed)
 app.get("/demo/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
