@@ -77,7 +77,7 @@ interface Prospect {
 }
 
 async function searchApollo(keywords: string[], countries: string[], page: number): Promise<any> {
-  const resp = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
+  const resp = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": APOLLO_KEY },
     body: JSON.stringify({
