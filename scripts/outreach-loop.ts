@@ -346,7 +346,7 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
 
   // 4. Wait for scrape
   console.log(`  [scrape] Waiting for ${domain} to finish...`);
-  const { ready, tenantId } = await waitForScrape(domain, 300000);
+  const { ready, tenantId } = await waitForScrape(domain, 480000);
   if (!ready) { console.log(`\n  Skip - scrape timeout for ${domain}`); return "skip"; }
 
   // 5. Check unsub
