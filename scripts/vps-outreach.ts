@@ -211,10 +211,10 @@ async function registerOnRender(domain: string): Promise<string | null> {
       const text = await resp.text();
       if (text.startsWith("<")) { await new Promise(r => setTimeout(r, 10000)); continue; }
       const data = JSON.parse(text);
-      return data.tenantId || (data.error?.includes("already exists") ? data.tenantId || domain.replace(/[^a-zA-Z0-9]/g, "_") : null);
+      return data.tenantId || (data.error?.includes("already exists") ? data.tenantId || domain.replace(/\./g, "_") : null);
     } catch { if (attempt < 2) await new Promise(r => setTimeout(r, 10000)); }
   }
-  return domain.replace(/[^a-zA-Z0-9]/g, "_");
+  return domain.replace(/\./g, "_");
 }
 
 // --- Email ---
@@ -293,7 +293,7 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
 
     const country = ep.country || "Unknown";
     const lang = detectLang(country, domain);
-    const tenantId = domain.replace(/[^a-zA-Z0-9]/g, "_");
+    const tenantId = domain.replace(/\./g, "_");
 
     console.log(`  Found: ${ep.first_name} <${email}> @ ${domain} [${lang}]`);
 
