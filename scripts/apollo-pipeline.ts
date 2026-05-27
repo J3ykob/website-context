@@ -102,18 +102,19 @@ interface Prospect {
 }
 
 async function searchApollo(keywords: string[], countries: string[], page: number): Promise<any> {
+  const body: any = {
+    organization_locations: countries,
+    organization_num_employees_ranges: ["1,50"],
+    person_seniorities: ["owner", "founder", "c_suite"],
+    contact_email_status: ["verified"],
+    page,
+    per_page: 100,
+  };
+  if (keywords.length > 0) body.q_organization_keyword_tags = keywords;
   const resp = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": APOLLO_KEY },
-    body: JSON.stringify({
-      q_organization_keyword_tags: keywords,
-      organization_locations: countries,
-      organization_num_employees_ranges: ["1,50"],
-      person_seniorities: ["owner", "founder", "c_suite"],
-      contact_email_status: ["verified"],
-      page,
-      per_page: 100,
-    }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(15000),
   });
   if (!resp.ok) {
@@ -234,11 +235,13 @@ async function sendEmail(p: Prospect, demoUrl: string, template: string): Promis
 }
 
 async function main() {
-  const allIndustries = INDUSTRY === "all" ? Object.keys(INDUSTRY_KEYWORDS) : [INDUSTRY];
-  const keywords = allIndustries.flatMap(i => INDUSTRY_KEYWORDS[i] || [i]);
-  console.log(`Apollo pipeline: ${allIndustries.join(", ")} in ${COUNTRIES.join(", ")}`);
+  const noFilter = INDUSTRY === "any";
+  const allIndustries = INDUSTRY === "all" ? Object.keys(INDUSTRY_KEYWORDS) : noFilter ? [] : [INDUSTRY];
+  const keywords = noFilter ? [] : allIndustries.flatMap(i => INDUSTRY_KEYWORDS[i] || [i]);
+  console.log(`Apollo pipeline: ${noFilter ? "ANY industry" : allIndustries.join(", ")} in ${COUNTRIES.join(", ")}`);
   console.log(`Limit: ${LIMIT} | ${SEND ? "SENDING" : "DRY RUN"}`);
-  console.log(`Keywords: ${keywords.slice(0, 10).join(", ")}${keywords.length > 10 ? ` (+${keywords.length - 10} more)` : ""}\n`);
+  if (keywords.length) console.log(`Keywords: ${keywords.slice(0, 10).join(", ")}${keywords.length > 10 ? ` (+${keywords.length - 10} more)` : ""}`);
+  console.log();
 
   // Load existing state
   const existingDomains = await getExistingTenantDomains();
