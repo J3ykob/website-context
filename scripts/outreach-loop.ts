@@ -223,9 +223,9 @@ async function registerTenant(domain: string, retries = 3): Promise<string | nul
   return null;
 }
 
-async function waitForScrape(domain: string, maxWaitMs: number = 300000): Promise<{ ready: boolean; tenantId?: string }> {
+async function waitForScrape(domain: string): Promise<{ ready: boolean; tenantId?: string }> {
   const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
+  while (true) {
     try {
       const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`, { signal: AbortSignal.timeout(10000) });
       if (!resp.ok) { await new Promise(r => setTimeout(r, 5000)); continue; }
@@ -234,15 +234,18 @@ async function waitForScrape(domain: string, maxWaitMs: number = 300000): Promis
       const tenants = JSON.parse(text) as any[];
       const t = tenants.find((x: any) => x.domain === domain);
       if (t && t.status === "active" && t.chunksCount > 0) {
+        console.log();
         return { ready: true, tenantId: t.id };
+      }
+      if (t && (t.status === "error" || t.status === "failed")) {
+        console.log();
+        return { ready: false };
       }
       const elapsed = Math.round((Date.now() - start) / 1000);
       process.stdout.write(`\r  [scrape] Waiting for ${domain}... ${elapsed}s`);
     } catch {}
     await new Promise(r => setTimeout(r, 10000));
   }
-  console.log();
-  return { ready: false };
 }
 
 async function getUnsubSet(): Promise<Set<string>> {
@@ -346,8 +349,8 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
 
   // 4. Wait for scrape
   console.log(`  [scrape] Waiting for ${domain} to finish...`);
-  const { ready, tenantId } = await waitForScrape(domain, 480000);
-  if (!ready) { console.log(`\n  Skip - scrape timeout for ${domain}`); return "skip"; }
+  const { ready, tenantId } = await waitForScrape(domain);
+  if (!ready) { console.log(`\n  Skip - scrape failed for ${domain}`); return "skip"; }
 
   // 5. Check unsub
   const unsubSet = await getUnsubSet();
