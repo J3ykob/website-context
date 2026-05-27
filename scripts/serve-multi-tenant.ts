@@ -1586,12 +1586,22 @@ app.post("/unsubscribe", async (req, res) => {
 
 app.get("/unsubscribe", async (req, res) => {
   const email = (req.query.email as string || "").toLowerCase().trim();
-  if (email) {
+  const confirmed = req.query.confirmed === "1";
+  if (email && confirmed) {
     UNSUBSCRIBED.add(email);
     await writeFile(unsubPath, JSON.stringify([...UNSUBSCRIBED], null, 2));
     console.log(`[unsubscribe] ${email}`);
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribed</title></head><body style="font-family:system-ui;background:#0a0e1a;color:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;max-width:400px;padding:40px;"><h2 style="margin:0 0 12px;">You've been unsubscribed</h2><p style="color:#94a3b8;font-size:15px;">You won't receive any more emails from Whisp. Sorry for the bother.</p></div></body></html>`);
+  } else {
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe</title></head><body style="font-family:system-ui;background:#0a0e1a;color:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;max-width:400px;padding:40px;"><h2 style="margin:0 0 12px;">Unsubscribe from Whisp</h2><p style="color:#94a3b8;font-size:15px;margin-bottom:24px;">Click the button below to stop receiving emails from us.</p><a href="/unsubscribe?email=${encodeURIComponent(email)}&confirmed=1" style="display:inline-block;background:#3b82f6;color:#fff;font-size:14px;font-weight:600;padding:12px 24px;border-radius:10px;text-decoration:none;">Unsubscribe</a></div></body></html>`);
   }
-  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribed</title></head><body style="font-family:system-ui;background:#0a0e1a;color:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;max-width:400px;padding:40px;"><h2 style="margin:0 0 12px;">You've been unsubscribed</h2><p style="color:#94a3b8;font-size:15px;">You won't receive any more emails from Whisp. Sorry for the bother.</p></div></body></html>`);
+});
+
+app.delete("/api/admin/unsubscribed", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  UNSUBSCRIBED.clear();
+  await writeFile(unsubPath, JSON.stringify([], null, 2));
+  res.json({ ok: true, cleared: true });
 });
 
 app.get("/api/admin/unsubscribed", (req, res) => {
