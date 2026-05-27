@@ -149,7 +149,7 @@ async function enrichPerson(id: string): Promise<any> {
 
 async function registerTenant(domain: string): Promise<string | null> {
   try {
-    const resp = await fetch(`${BASE_URL}/api/tenants?secret=${ADMIN_SECRET}`, {
+    const resp = await fetch(`${BASE_URL}/api/tenants?secret=${ADMIN_SECRET}&priority=1`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ siteUrl: `https://${domain}`, email: `info@${domain}` }),

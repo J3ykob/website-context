@@ -733,8 +733,12 @@ app.post("/api/tenants", (req, res) => {
     const setupToken = randomBytes(32).toString("hex");
     updateTenant(tenant.id, { apiKey, setupToken });
 
-    // Enqueue scrape job
-    worker.enqueue(tenant.id, siteUrl);
+    // Enqueue scrape job (priority if admin)
+    if (isAdmin && req.query.priority === "1") {
+      worker.enqueuePriority(tenant.id, siteUrl);
+    } else {
+      worker.enqueue(tenant.id, siteUrl);
+    }
 
     // Send welcome email with setup link
     const protocol = req.protocol || "http";

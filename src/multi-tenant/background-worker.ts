@@ -70,6 +70,29 @@ export class ScrapeWorker {
     this.kick();
   }
 
+  enqueuePriority(tenantId: string, siteUrl: string, maxPages: number = 20): void {
+    ensureMigrated();
+    const db = getDb();
+
+    const alreadyQueued = this.queue.some((j) => j.tenantId === tenantId) ||
+      this.retryQueue.some((j) => j.tenantId === tenantId);
+    if (alreadyQueued) {
+      // Move to front if already in queue
+      this.queue = this.queue.filter((j) => j.tenantId !== tenantId);
+      this.queue.unshift({ tenantId, siteUrl, maxPages, attempt: 1 });
+      console.log(`[worker] ${tenantId} moved to front of queue`);
+      return;
+    }
+
+    db.prepare(`
+      INSERT INTO scrape_jobs (tenant_id, status)
+      VALUES (?, 'queued')
+    `).run(tenantId);
+
+    this.queue.unshift({ tenantId, siteUrl, maxPages, attempt: 1 });
+    this.kick();
+  }
+
   isProcessing(): boolean {
     return this.processing;
   }
