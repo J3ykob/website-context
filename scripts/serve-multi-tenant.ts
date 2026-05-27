@@ -871,7 +871,12 @@ app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
   const maxPages = parseInt(req.query.maxPages as string) || 20;
-  worker.enqueue(tenant.id, tenant.siteUrl, maxPages);
+  const priority = req.query.priority === "1" || req.query.secret === ADMIN_SECRET;
+  if (priority) {
+    worker.enqueuePriority(tenant.id, tenant.siteUrl, maxPages);
+  } else {
+    worker.enqueue(tenant.id, tenant.siteUrl, maxPages);
+  }
   updateTenant(tenant.id, { status: "scraping" });
   tenantManager.evictTenant(tenant.id);
   res.json({ ok: true, status: "scraping", maxPages });

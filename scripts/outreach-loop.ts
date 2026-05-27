@@ -207,7 +207,7 @@ async function registerTenant(domain: string, retries = 3): Promise<string | nul
       if (data.tenantId) return data.tenantId;
       if (data.error?.includes("already exists")) {
         const tid = data.tenantId || domain.replace(/[^a-zA-Z0-9]/g, "_");
-        await fetch(`${BASE_URL}/api/admin/rescrape/${tid}?secret=${ADMIN_SECRET}`, {
+        await fetch(`${BASE_URL}/api/admin/rescrape/${tid}?secret=${ADMIN_SECRET}&priority=1`, {
           method: "POST", signal: AbortSignal.timeout(5000),
         }).catch(() => {});
         return tid;
