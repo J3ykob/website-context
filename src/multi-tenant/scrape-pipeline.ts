@@ -70,7 +70,15 @@ export async function scrapeTenant(
   try {
     const domain = new URL(siteUrl).hostname;
     const businessName = domain.replace(/^www\./, "").split(".")[0];
-    const location = "Warszawa Poland"; // TODO: detect from site content
+    const tld = domain.split(".").pop() || "";
+    const tldToCountry: Record<string, string> = {
+      pl: "Poland", uk: "United Kingdom", de: "Germany", fr: "France",
+      it: "Italy", es: "Spain", nl: "Netherlands", se: "Sweden",
+      pt: "Portugal", be: "Belgium", at: "Austria", cz: "Czech Republic",
+      dk: "Denmark", no: "Norway", ie: "Ireland", ch: "Switzerland",
+      fi: "Finland", hu: "Hungary", ro: "Romania", gr: "Greece",
+    };
+    const location = tldToCountry[tld] || "";
     console.log(`[scrape-pipeline] Scraping Google Maps for "${businessName} ${location}"...`);
 
     const placesData = await Promise.race([
