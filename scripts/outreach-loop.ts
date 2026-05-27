@@ -1,16 +1,14 @@
 /**
- * Outreach loop - two interleaved phases every cycle:
+ * Synchronous outreach loop - one prospect at a time, no waste.
  *
- *   Phase 1: SEND - check all pending prospects, send to any that are scraped
- *   Phase 2: FIND - enrich a few new prospects, register with priority
+ * 1. First: drain any pending prospects (send those already scraped)
+ * 2. Then: find one -> enrich -> register -> wait for scrape -> send -> repeat
  *
- * This way we're always sending to freshly scraped domains AND finding new ones.
- * No blocking waits. No timeouts. Just check and send what's ready.
+ * Every Apollo credit = one email sent. No queue buildup.
  *
  * Usage:
  *   APOLLO_API_KEY=xxx RESEND_API_KEY=xxx npx tsx scripts/outreach-loop.ts
  *   APOLLO_API_KEY=xxx RESEND_API_KEY=xxx npx tsx scripts/outreach-loop.ts --dry-run
- *   APOLLO_API_KEY=xxx RESEND_API_KEY=xxx npx tsx scripts/outreach-loop.ts --find=10 --pause=60
  */
 
 import { readFileSync, writeFileSync } from "fs";
@@ -24,8 +22,6 @@ const RESEND_KEY = process.env.RESEND_API_KEY || "";
 const APOLLO_KEY = process.env.APOLLO_API_KEY || "";
 const FROM = "Jakub <jakub@whisp.so>";
 const SEND = !process.argv.includes("--dry-run");
-const FIND_PER_CYCLE = parseInt(process.argv.find(a => a.startsWith("--find="))?.split("=")[1] || "5");
-const PAUSE_SECONDS = parseInt(process.argv.find(a => a.startsWith("--pause="))?.split("=")[1] || "60");
 
 if (!APOLLO_KEY) { console.error("APOLLO_API_KEY required"); process.exit(1); }
 if (!RESEND_KEY && SEND) { console.error("RESEND_API_KEY required"); process.exit(1); }
@@ -77,15 +73,7 @@ const STATE_PATH = resolve(__dirname, "../data/outreach-state.json");
 let sentLog: Record<string, { sentAt: string; template: string }> = {};
 try { sentLog = JSON.parse(readFileSync(SENT_LOG_PATH, "utf-8")); } catch {}
 
-interface Prospect {
-  firstName: string;
-  email: string;
-  domain: string;
-  orgName: string;
-  title: string;
-  country: string;
-  lang: "pl" | "en";
-}
+interface Prospect { firstName: string; email: string; domain: string; orgName: string; title: string; country: string; lang: "pl" | "en"; }
 
 interface LoopState {
   apolloPage: number;
@@ -103,17 +91,11 @@ try { const s = JSON.parse(readFileSync(STATE_PATH, "utf-8")); state = { ...stat
 function saveState() { writeFileSync(STATE_PATH, JSON.stringify(state, null, 2)); }
 function saveSentLog() { writeFileSync(SENT_LOG_PATH, JSON.stringify(sentLog, null, 2)); }
 function alreadySent(email: string): boolean { return email.toLowerCase() in sentLog; }
-function domainSent(domain: string): boolean {
-  return Object.keys(sentLog).some(e => e.endsWith("@" + domain) || e.endsWith("." + domain));
-}
-function markSent(email: string, template: string) {
-  sentLog[email.toLowerCase()] = { sentAt: new Date().toISOString(), template };
-  saveSentLog();
-}
+function domainSent(domain: string): boolean { return Object.keys(sentLog).some(e => e.endsWith("@" + domain) || e.endsWith("." + domain)); }
+function markSent(email: string, template: string) { sentLog[email.toLowerCase()] = { sentAt: new Date().toISOString(), template }; saveSentLog(); }
 
 function detectLang(country: string, domain: string): "pl" | "en" {
-  const lower = (country + " " + domain).toLowerCase();
-  return lower.includes("poland") || lower.includes(".pl") ? "pl" : "en";
+  return (country + " " + domain).toLowerCase().includes("poland") || domain.endsWith(".pl") ? "pl" : "en";
 }
 
 function getKeywords(): string[] {
@@ -142,14 +124,9 @@ async function fetchPage(): Promise<any[]> {
     }),
     signal: AbortSignal.timeout(15000),
   });
-  if (resp.status === 429) {
-    console.log("  [apollo] Rate limited - waiting 60s");
-    await new Promise(r => setTimeout(r, 60000));
-    return fetchPage();
-  }
+  if (resp.status === 429) { console.log("  [apollo] Rate limited - 60s"); await new Promise(r => setTimeout(r, 60000)); return fetchPage(); }
   if (!resp.ok) throw new Error(`Apollo ${resp.status}`);
   const data = await resp.json();
-  console.log(`  [apollo] ${data.people?.length || 0} results (${data.total_entries} total)`);
   return data.people || [];
 }
 
@@ -161,17 +138,12 @@ async function getNextCandidate(): Promise<any | null> {
     if (cachedPage.length === 0) {
       state.keywordOffset++;
       state.apolloPage = 1;
-      console.log(`  [apollo] Rotating keywords (offset ${state.keywordOffset})`);
-      if (state.keywordOffset > ALL_KEYWORDS.length / 15) {
-        state.keywordOffset = 0;
-      }
+      if (state.keywordOffset > ALL_KEYWORDS.length / 15) state.keywordOffset = 0;
       cachedPage = await fetchPage();
       if (cachedPage.length === 0) return null;
     }
   }
-  const person = cachedPage[state.apolloIndex];
-  state.apolloIndex++;
-  return person;
+  return cachedPage[state.apolloIndex++];
 }
 
 async function enrichPerson(id: string): Promise<any> {
@@ -181,26 +153,12 @@ async function enrichPerson(id: string): Promise<any> {
     body: JSON.stringify({ id }),
     signal: AbortSignal.timeout(10000),
   });
-  if (resp.status === 429) {
-    console.log("  [apollo] Rate limited - waiting 60s");
-    await new Promise(r => setTimeout(r, 60000));
-    return enrichPerson(id);
-  }
+  if (resp.status === 429) { console.log("  [apollo] Rate limited - 60s"); await new Promise(r => setTimeout(r, 60000)); return enrichPerson(id); }
   if (!resp.ok) return { person: null };
   return resp.json();
 }
 
 // --- Whisp ---
-async function fetchTenantsMap(): Promise<Map<string, any>> {
-  try {
-    const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`, { signal: AbortSignal.timeout(10000) });
-    if (!resp.ok) return new Map();
-    const text = await resp.text();
-    if (text.startsWith("<")) return new Map();
-    return new Map((JSON.parse(text) as any[]).map(t => [t.domain, t]));
-  } catch { return new Map(); }
-}
-
 async function registerTenant(domain: string): Promise<string | null> {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -211,10 +169,7 @@ async function registerTenant(domain: string): Promise<string | null> {
         signal: AbortSignal.timeout(10000),
       });
       const text = await resp.text();
-      if (text.startsWith("<")) {
-        await new Promise(r => setTimeout(r, 15000));
-        continue;
-      }
+      if (text.startsWith("<")) { await new Promise(r => setTimeout(r, 15000)); continue; }
       const data = JSON.parse(text);
       if (data.tenantId) return data.tenantId;
       if (data.error?.includes("already exists")) {
@@ -225,11 +180,27 @@ async function registerTenant(domain: string): Promise<string | null> {
         return tid;
       }
       return null;
-    } catch {
-      if (attempt < 3) await new Promise(r => setTimeout(r, 15000));
-    }
+    } catch { if (attempt < 3) await new Promise(r => setTimeout(r, 15000)); }
   }
   return null;
+}
+
+async function waitForScrape(domain: string): Promise<{ ready: boolean; tenantId?: string }> {
+  const start = Date.now();
+  while (true) {
+    try {
+      const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`, { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) { await new Promise(r => setTimeout(r, 5000)); continue; }
+      const text = await resp.text();
+      if (text.startsWith("<")) { await new Promise(r => setTimeout(r, 5000)); continue; }
+      const tenants = JSON.parse(text) as any[];
+      const t = tenants.find((x: any) => x.domain === domain);
+      if (t && t.status === "active" && t.chunksCount > 0) { console.log(); return { ready: true, tenantId: t.id }; }
+      if (t && (t.status === "error" || t.status === "failed")) { console.log(); return { ready: false }; }
+      process.stdout.write(`\r  [scrape] Waiting for ${domain}... ${Math.round((Date.now() - start) / 1000)}s`);
+    } catch {}
+    await new Promise(r => setTimeout(r, 10000));
+  }
 }
 
 async function getUnsubSet(): Promise<Set<string>> {
@@ -241,7 +212,7 @@ async function getUnsubSet(): Promise<Set<string>> {
 }
 
 // --- Email ---
-const templates = ["clean", "gaps", "personal"];
+const tpls = ["clean", "gaps", "personal"];
 
 function buildEmail(p: Prospect, demoUrl: string, template: string): { subject: string; html: string } {
   const unsub = `<p style="font-size:11px;color:#999;"><a href="${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}" style="color:#999;">${p.lang === "pl" ? "Wypisz się" : "Unsubscribe"}</a></p>`;
@@ -251,31 +222,31 @@ function buildEmail(p: Prospect, demoUrl: string, template: string): { subject: 
     : `<p>I can have this running on your site by tomorrow - you can reply here or <a href="https://cal.com/whisp/15min">book a call</a> with me to discuss it in details.</p>`;
   const hi = p.lang === "pl" ? `Cześć ${p.firstName},` : `Hi ${p.firstName},`;
 
-  if (template === "clean") {
-    return {
-      subject: p.lang === "pl" ? `Zbudowałem darmowego asystenta AI dla ${p.domain}` : `I built a free AI assistant for ${p.domain}`,
-      html: p.lang === "pl"
-        ? `<p>${hi}</p><p>Zbudowałem asystenta AI, który czyta ${p.domain} i odpowiada na pytania odwiedzających - usługi, cennik, lokalizacja, godziny otwarcia, wszystko co jest na stronie.</p><p>Już zna Twoją stronę. Możesz go wypróbować tutaj:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
-        : `<p>${hi}</p><p>I built an AI assistant that reads ${p.domain} and answers visitor questions - pricing, services, location, hours, anything on your site.</p><p>It already knows your website. You can try it here:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-    };
-  } else if (template === "gaps") {
-    return {
-      subject: p.lang === "pl" ? `Przetestowałem ${p.domain} z perspektywy klienta` : `I tested ${p.domain} from a customer's perspective`,
-      html: p.lang === "pl"
-        ? `<p>${hi}</p><p>Zbudowałem AI, który czyta Twoją stronę i odpowiada na pytania odwiedzających. Przetestowałem go na ${p.domain} - większość odpowiedzi była dobra, ale kilka typowych pytań zostawiło odwiedzających bez jasnej odpowiedzi.</p><p>Zobacz co wie i czego mu brakuje:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
-        : `<p>${hi}</p><p>I built an AI that reads your website and answers visitor questions. I tested it on ${p.domain} - most questions got good answers, but a few common ones left visitors without a clear next step.</p><p>You can see exactly what it knows and what's missing:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-    };
-  } else {
-    return {
-      subject: p.lang === "pl" ? `Mogę pomóc ${p.domain} z AI?` : `Can I help ${p.domain} with AI?`,
-      html: p.lang === "pl"
-        ? `<p>${hi}</p><p>Jestem Jakub, studiuję informatykę w Polsce i pomagam firmom wdrażać AI żeby rosły. Zbudowałem asystenta AI, który czyta Twoją stronę i odpowiada na pytania klientów 24/7.</p><p>Już zrobiłem jednego dla ${p.domain} - zna Twoje usługi, cennik i wszystko co jest na stronie:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
-        : `<p>${hi}</p><p>I'm Jakub, I study Computer Science in Poland and I'm helping businesses onboard AI to grow. I built an AI assistant that reads your website and can answer customer questions 24/7.</p><p>I already made one for ${p.domain} - it knows your services, pricing, and everything on your site:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-    };
-  }
+  const subjects: Record<string, Record<string, string>> = {
+    clean: { pl: `Zbudowałem darmowego asystenta AI dla ${p.domain}`, en: `I built a free AI assistant for ${p.domain}` },
+    gaps: { pl: `Przetestowałem ${p.domain} z perspektywy klienta`, en: `I tested ${p.domain} from a customer's perspective` },
+    personal: { pl: `Mogę pomóc ${p.domain} z AI?`, en: `Can I help ${p.domain} with AI?` },
+  };
+
+  const bodies: Record<string, Record<string, string>> = {
+    clean: {
+      pl: `<p>${hi}</p><p>Zbudowałem asystenta AI, który czyta ${p.domain} i odpowiada na pytania odwiedzających - usługi, cennik, lokalizacja, godziny otwarcia, wszystko co jest na stronie.</p><p>Już zna Twoją stronę. Możesz go wypróbować tutaj:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+      en: `<p>${hi}</p><p>I built an AI assistant that reads ${p.domain} and answers visitor questions - pricing, services, location, hours, anything on your site.</p><p>It already knows your website. You can try it here:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+    },
+    gaps: {
+      pl: `<p>${hi}</p><p>Zbudowałem AI, który czyta Twoją stronę i odpowiada na pytania odwiedzających. Przetestowałem go na ${p.domain} - większość odpowiedzi była dobra, ale kilka typowych pytań zostawiło odwiedzających bez jasnej odpowiedzi.</p><p>Zobacz co wie i czego mu brakuje:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+      en: `<p>${hi}</p><p>I built an AI that reads your website and answers visitor questions. I tested it on ${p.domain} - most questions got good answers, but a few common ones left visitors without a clear next step.</p><p>You can see exactly what it knows and what's missing:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+    },
+    personal: {
+      pl: `<p>${hi}</p><p>Jestem Jakub, studiuję informatykę w Polsce i pomagam firmom wdrażać AI żeby rosły. Zbudowałem asystenta AI, który czyta Twoją stronę i odpowiada na pytania klientów 24/7.</p><p>Już zrobiłem jednego dla ${p.domain} - zna Twoje usługi, cennik i wszystko co jest na stronie:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+      en: `<p>${hi}</p><p>I'm Jakub, I study Computer Science in Poland and I'm helping businesses onboard AI to grow. I built an AI assistant that reads your website and can answer customer questions 24/7.</p><p>I already made one for ${p.domain} - it knows your services, pricing, and everything on your site:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+    },
+  };
+
+  return { subject: subjects[template][p.lang], html: bodies[template][p.lang] };
 }
 
-async function sendOne(p: Prospect, demoUrl: string, template: string): Promise<"sent" | "quota" | "fail"> {
+async function sendEmail(p: Prospect, demoUrl: string, template: string): Promise<"sent" | "quota" | "fail"> {
   const { subject, html } = buildEmail(p, demoUrl, template);
   const unsubUrl = `${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}`;
   try {
@@ -294,158 +265,129 @@ async function sendOne(p: Prospect, demoUrl: string, template: string): Promise<
   } catch { return "fail"; }
 }
 
-// --- Main loop ---
-async function cycle() {
-  const now = new Date();
-  console.log(`\n--- CYCLE @ ${now.toISOString().slice(11, 19)} | sent=${state.totalSent} enriched=${state.totalEnriched} pending=${state.pending.length} ---`);
+async function sendToProspect(p: Prospect): Promise<"sent" | "quota" | "skip"> {
+  if (alreadySent(p.email) || domainSent(p.domain)) return "skip";
+  const unsubSet = await getUnsubSet();
+  if (unsubSet.has(p.email.toLowerCase())) return "skip";
 
-  // Check quota reset
-  if (state.quotaHitAt) {
-    if (new Date(state.quotaHitAt).toDateString() === now.toDateString()) {
-      console.log("  Quota hit today - waiting");
-      return;
-    }
-    state.quotaHitAt = null;
-    console.log("  New day - quota reset!");
+  // Register + priority scrape
+  console.log(`  [register] ${p.domain}...`);
+  const tid = await registerTenant(p.domain);
+  if (!tid) { console.log("  Skip - registration failed"); return "skip"; }
+
+  // Wait for scrape - no timeout
+  console.log(`  [scrape] Waiting for ${p.domain}...`);
+  const { ready, tenantId } = await waitForScrape(p.domain);
+  if (!ready) { console.log(`  Skip - scrape failed for ${p.domain}`); return "skip"; }
+
+  // Send
+  const template = tpls[state.totalSent % 3];
+  const demoUrl = `${BASE_URL}/demo/${tenantId}`;
+
+  if (!SEND) {
+    console.log(`  [DRY] [${template}] [${p.lang}] ${p.firstName} <${p.email}> @ ${p.domain}`);
+    state.totalSent++;
+    saveState();
+    return "sent";
   }
 
-  const tenantMap = await fetchTenantsMap();
-  const unsubSet = await getUnsubSet();
-  let quotaHit = false;
+  const result = await sendEmail(p, demoUrl, template);
+  if (result === "sent") {
+    markSent(p.email, template);
+    state.totalSent++;
+    saveState();
+    console.log(`  ✉️  [${template}] [${p.lang}] ${p.firstName} <${p.email}> @ ${p.domain}`);
+    return "sent";
+  } else if (result === "quota") {
+    state.quotaHitAt = new Date().toISOString();
+    saveState();
+    console.log("  QUOTA HIT");
+    return "quota";
+  }
+  return "skip";
+}
 
-  // PHASE 1: Send to any pending prospects that are now ready
+// --- Main ---
+async function main() {
+  console.log("=== SYNCHRONOUS OUTREACH LOOP ===");
+  console.log(`${SEND ? "SENDING" : "DRY RUN"} | Sent: ${state.totalSent} | Enriched: ${state.totalEnriched} | Pending: ${state.pending.length}\n`);
+
+  // Reset quota if new day
+  if (state.quotaHitAt && new Date(state.quotaHitAt).toDateString() !== new Date().toDateString()) {
+    state.quotaHitAt = null;
+    saveState();
+    console.log("New day - quota reset!\n");
+  }
+
+  // Phase 1: Drain pending queue (from previous hybrid runs)
   if (state.pending.length > 0) {
+    console.log(`--- DRAINING ${state.pending.length} PENDING ---`);
     const stillPending: Prospect[] = [];
-    let sentThisPhase = 0;
 
     for (const p of state.pending) {
-      if (quotaHit) { stillPending.push(p); continue; }
-      if (alreadySent(p.email) || domainSent(p.domain)) continue;
-      if (unsubSet.has(p.email.toLowerCase())) continue;
-
-      const tenant = tenantMap.get(p.domain);
-      if (!tenant || tenant.status !== "active" || !tenant.chunksCount) {
-        stillPending.push(p);
-        continue;
-      }
-
-      const template = templates[state.totalSent % 3];
-      const demoUrl = `${BASE_URL}/demo/${tenant.id}`;
-
-      if (!SEND) {
-        console.log(`  [DRY] [${template}] [${p.lang}] ${p.firstName} <${p.email}> @ ${p.domain}`);
-        state.totalSent++;
-        sentThisPhase++;
-        continue;
-      }
-
-      const result = await sendOne(p, demoUrl, template);
-      if (result === "sent") {
-        markSent(p.email, template);
-        state.totalSent++;
-        sentThisPhase++;
-        console.log(`  ✉️  [${template}] [${p.lang}] ${p.firstName} <${p.email}> @ ${p.domain}`);
-      } else if (result === "quota") {
-        quotaHit = true;
-        state.quotaHitAt = now.toISOString();
-        stillPending.push(p);
-        console.log("  QUOTA HIT");
-      }
-      await new Promise(r => setTimeout(r, 1000));
+      if (state.quotaHitAt) { stillPending.push(p); continue; }
+      const result = await sendToProspect(p);
+      if (result === "quota") { stillPending.push(p); }
     }
 
     state.pending = stillPending;
-    if (sentThisPhase > 0) console.log(`  Sent ${sentThisPhase} pending`);
+    saveState();
+    console.log(`Done draining. ${stillPending.length} still pending.\n`);
   }
 
-  // PHASE 2: Find new prospects (skip if quota hit)
-  if (!quotaHit) {
-    let found = 0;
-    const seenDomains = new Set(state.pending.map(p => p.domain));
+  // Phase 2: Synchronous find-enrich-scrape-send loop
+  console.log("--- SYNCHRONOUS LOOP ---");
+  while (true) {
+    // Quota check
+    if (state.quotaHitAt) {
+      if (new Date(state.quotaHitAt).toDateString() === new Date().toDateString()) {
+        console.log("\nQuota hit today. Waiting 1 hour...");
+        await new Promise(r => setTimeout(r, 3600000));
+        if (new Date(state.quotaHitAt!).toDateString() !== new Date().toDateString()) {
+          state.quotaHitAt = null;
+          saveState();
+          console.log("New day - resuming!\n");
+        }
+        continue;
+      }
+      state.quotaHitAt = null;
+      saveState();
+    }
 
-    for (let i = 0; i < FIND_PER_CYCLE * 3 && found < FIND_PER_CYCLE; i++) {
+    // Find next valid prospect
+    let prospect: Prospect | null = null;
+    for (let attempts = 0; attempts < 50; attempts++) {
       const candidate = await getNextCandidate();
-      if (!candidate) break;
+      if (!candidate) { state.keywordOffset++; state.apolloPage = 1; state.apolloIndex = 0; cachedPage = []; saveState(); continue; }
       if (!candidate.has_email || !candidate.organization?.name) continue;
 
+      console.log(`\n[${state.totalSent + 1}] Enriching ${candidate.first_name} @ ${candidate.organization.name}...`);
       const enriched = await enrichPerson(candidate.id);
       state.totalEnriched++;
       const ep = enriched.person;
-      if (!ep?.email || !ep?.organization?.primary_domain) continue;
+      if (!ep?.email || !ep?.organization?.primary_domain) { console.log("  Skip - no email/domain"); continue; }
 
       const domain = ep.organization.primary_domain;
-      const email = ep.email;
-      if (alreadySent(email) || domainSent(domain)) continue;
-      if (seenDomains.has(domain)) continue;
+      if (alreadySent(ep.email) || domainSent(domain)) { console.log(`  Skip - already contacted ${domain}`); continue; }
       if (domain.includes("linkedin.com") || domain.includes("facebook.com")) continue;
-      seenDomains.add(domain);
 
-      const country = ep.country || "Unknown";
-      const prospect: Prospect = {
-        firstName: ep.first_name,
-        email,
-        domain,
-        orgName: ep.organization.name,
-        title: ep.title,
-        country,
-        lang: detectLang(country, domain),
+      prospect = {
+        firstName: ep.first_name, email: ep.email, domain,
+        orgName: ep.organization.name, title: ep.title,
+        country: ep.country || "Unknown",
+        lang: detectLang(ep.country || "", domain),
       };
-
-      // Register with priority
-      const tid = await registerTenant(domain);
-
-      // Check if already scraped - send immediately
-      const tenant = tenantMap.get(domain);
-      if (tenant && tenant.status === "active" && tenant.chunksCount > 0 && !quotaHit) {
-        const template = templates[state.totalSent % 3];
-        const demoUrl = `${BASE_URL}/demo/${tenant.id}`;
-        if (!SEND) {
-          console.log(`  [DRY] [${template}] [${prospect.lang}] ${prospect.firstName} <${email}> @ ${domain}`);
-          state.totalSent++;
-        } else {
-          const result = await sendOne(prospect, demoUrl, template);
-          if (result === "sent") {
-            markSent(email, template);
-            state.totalSent++;
-            console.log(`  ✉️  [${template}] [${prospect.lang}] ${prospect.firstName} <${email}> @ ${domain}`);
-          } else if (result === "quota") {
-            quotaHit = true;
-            state.quotaHitAt = now.toISOString();
-            state.pending.push(prospect);
-          }
-        }
-      } else {
-        state.pending.push(prospect);
-        console.log(`  ⏳ ${prospect.firstName} <${email}> @ ${domain} (queued)`);
-      }
-
-      found++;
-      await new Promise(r => setTimeout(r, 300));
+      console.log(`  Found: ${prospect.firstName} <${prospect.email}> @ ${domain} [${prospect.lang}]`);
+      break;
     }
 
-    if (found > 0) console.log(`  Found ${found} new prospects`);
-  }
+    if (!prospect) { console.log("No more prospects found. Rotating keywords..."); continue; }
 
-  saveState();
-}
+    // Register, scrape, send - all synchronous
+    const result = await sendToProspect(prospect);
+    if (result === "quota") continue;
 
-async function main() {
-  console.log("=== OUTREACH LOOP ===");
-  console.log(`${SEND ? "SENDING" : "DRY RUN"} | Find ${FIND_PER_CYCLE}/cycle | Pause ${PAUSE_SECONDS}s`);
-  console.log(`Sent log: ${Object.keys(sentLog).length} | Pending: ${state.pending.length}\n`);
-
-  while (true) {
-    try {
-      await cycle();
-    } catch (err) {
-      console.error(`Cycle error: ${err}`);
-    }
-
-    const pauseMs = (state.quotaHitAt && new Date(state.quotaHitAt).toDateString() === new Date().toDateString())
-      ? 3600000
-      : PAUSE_SECONDS * 1000;
-
-    await new Promise(r => setTimeout(r, pauseMs));
+    await new Promise(r => setTimeout(r, 2000));
   }
 }
 

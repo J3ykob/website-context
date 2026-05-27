@@ -884,6 +884,18 @@ app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   res.json({ ok: true, status: "scraping", maxPages });
 });
 
+// Admin flush queue — stop scraping pending domains so only priority ones get scraped
+app.post("/api/admin/flush-queue", (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const tenants = listTenants();
+  const pending = tenants.filter(t => t.status === "pending");
+  for (const t of pending) {
+    updateTenant(t.id, { status: "paused" });
+  }
+  worker.clearQueue();
+  res.json({ ok: true, paused: pending.length });
+});
+
 // Admin bulk rescrape — re-enqueue all pending/error tenants
 app.post("/api/admin/rescrape-all", (req, res) => {
   const tenants = listTenants();

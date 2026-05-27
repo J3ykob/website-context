@@ -97,6 +97,12 @@ export class ScrapeWorker {
     return this.processing;
   }
 
+  clearQueue(): void {
+    this.queue = [];
+    this.retryQueue = [];
+    console.log("[worker] Queue cleared");
+  }
+
   getQueueLength(): number {
     return this.queue.length + this.retryQueue.length;
   }
@@ -114,7 +120,7 @@ export class ScrapeWorker {
       console.log(`[worker] Reset ${stuck.length} stuck tenant(s) to pending`);
     }
 
-    // Auto-enqueue all pending tenants on startup
+    // Auto-enqueue pending tenants on startup (skip "paused" ones)
     const pending = listTenants().filter((t) => t.status === "pending" && t.siteUrl);
     if (pending.length > 0) {
       console.log(`[worker] Auto-enqueuing ${pending.length} pending tenant(s)`);
