@@ -180,6 +180,16 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
       body: JSON.stringify({ status: "active", chunksCount: result.chunks, pagesCount: result.pages, domain, siteUrl }),
       signal: AbortSignal.timeout(5000),
     }).catch(() => {});
+    // Upload screenshot to Render
+    const screenshotPath = resolve(__dirname, `../data/${tenantId}/screenshot.png`);
+    if (existsSync(screenshotPath)) {
+      const screenshotData = readFileSync(screenshotPath);
+      await fetch(`${BASE_URL}/api/admin/screenshot/${tenantId}?secret=${ADMIN_SECRET}`, {
+        method: "POST",
+        body: screenshotData,
+        signal: AbortSignal.timeout(15000),
+      }).catch(() => {});
+    }
     return { success: true, chunks: result.chunks };
   } catch (err: any) {
     await closeBrowser();

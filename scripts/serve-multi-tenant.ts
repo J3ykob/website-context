@@ -1701,6 +1701,21 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
   res.json({ ok: true, tenantId: tenant.id });
 });
 
+// Admin upload screenshot (from VPS scraper)
+app.post("/api/admin/screenshot/:tenantId", (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const tenantDir = resolve(__dirname, `../data/${req.params.tenantId}`);
+  if (!existsSync(tenantDir)) mkdirSync(tenantDir, { recursive: true });
+  const screenshotPath = resolve(tenantDir, "screenshot.png");
+  const chunks: Buffer[] = [];
+  req.on("data", (chunk: Buffer) => chunks.push(chunk));
+  req.on("end", () => {
+    const buffer = Buffer.concat(chunks);
+    require("fs").writeFileSync(screenshotPath, buffer);
+    res.json({ ok: true, size: buffer.length });
+  });
+});
+
 // Admin tenants list
 app.get("/api/admin/tenants", (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
