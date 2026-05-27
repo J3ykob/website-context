@@ -352,18 +352,22 @@ app.get("/demo/:tenantId", (req, res) => {
 * { margin:0; padding:0; box-sizing:border-box; }\
 body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; display:flex; flex-direction:column; color:#f1f5f9; }\
 .demo-header {\
-  padding:14px 28px; display:flex; align-items:center; justify-content:space-between;\
-  border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(10,14,26,0.9);\
-  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);\
+  position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:50;\
+  padding:10px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px;\
+  background:rgba(20,20,35,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:16px;\
+  backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
+  box-shadow:0 8px 32px rgba(0,0,0,0.2);\
+  animation:fadeDown 0.5s ease 0.3s both;\
 }\
+@keyframes fadeDown { from{opacity:0;transform:translateX(-50%) translateY(-10px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }\
 .demo-brand { display:flex; align-items:center; gap:10px; }\
-.demo-mark { width:24px; height:24px; }\
-.demo-name { font-size:14px; font-weight:700; color:#f1f5f9; }\
-.demo-badge { font-size:10px; font-weight:600; color:#3b82f6; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); padding:3px 10px; border-radius:10px; }\
+.demo-mark { width:22px; height:22px; }\
+.demo-name { font-size:13px; font-weight:700; color:#f1f5f9; }\
+.demo-badge { font-size:9px; font-weight:600; color:#3b82f6; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); padding:3px 8px; border-radius:8px; }\
 .demo-cta {\
-  padding:8px 18px; background:#3b82f6; color:#fff; border:none; border-radius:10px;\
-  font-family:inherit; font-size:12px; font-weight:700; cursor:pointer; text-decoration:none;\
-  transition: all 0.2s;\
+  padding:7px 14px; background:#3b82f6; color:#fff; border:none; border-radius:10px;\
+  font-family:inherit; font-size:11px; font-weight:700; cursor:pointer; text-decoration:none;\
+  transition: all 0.2s; white-space:nowrap;\
 }\
 .demo-cta:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.3); }\
 .demo-body { flex:1; position:relative; overflow:hidden; }\
