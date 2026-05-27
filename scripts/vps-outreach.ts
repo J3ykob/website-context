@@ -102,9 +102,9 @@ function detectLang(country: string, domain: string): "pl" | "en" {
 }
 
 function getKeywords(): string[] {
-  const size = 15;
-  const start = (state.keywordOffset * size) % ALL_KEYWORDS.length;
-  return ALL_KEYWORDS.slice(start, start + size);
+  // Pick 15 random keywords each time for maximum diversity
+  const shuffled = [...ALL_KEYWORDS].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, 15);
 }
 
 // --- Apollo ---
