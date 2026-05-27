@@ -32,7 +32,7 @@ const GROUP_B = readIds("/tmp/group-b-filtered.txt");
 const GROUP_C = readIds("/tmp/group-c-timeouts.txt");
 
 const UNSUB = (email: string) => `<p style="font-size:11px;color:#999;"><a href="${BASE_URL}/unsubscribe?email=${encodeURIComponent(email)}" style="color:#999;">Unsubscribe</a></p>`;
-const SIG = `<p>Jakub Maliszewski<br>CS student, Poland<br><a href="https://whisp.so">whisp.so</a></p>`;
+const SIG = `<p>Jakub<br>whisp.so</p>`;
 
 function emailClean(domain: string, demoUrl: string, email: string): { subject: string; html: string } {
   return {
@@ -40,9 +40,7 @@ function emailClean(domain: string, demoUrl: string, email: string): { subject: 
     html: `<p>Hi,</p>
 <p>I built an AI assistant that reads ${domain} and answers visitor questions - pricing, services, location, hours, anything on your site.</p>
 <p>It already knows your website. You can try it here:<br><a href="${demoUrl}">${demoUrl}</a></p>
-<p>If you like it, I can help you set it up - takes 5 minutes:<br>
-→ <a href="${demoUrl}">Try the demo</a><br>
-→ <a href="https://cal.com/whisp/15min">Book a quick call</a></p>
+<p>If you like it, I can set it up for you in 5 minutes - just reply to this email or <a href="https://cal.com/whisp/15min">book a quick call</a>.</p>
 ${SIG}
 ${UNSUB(email)}`,
   };
@@ -54,9 +52,7 @@ function emailGaps(domain: string, demoUrl: string, email: string): { subject: s
     html: `<p>Hi,</p>
 <p>I built an AI that reads your website and answers visitor questions. I tested it on ${domain} - most questions got good answers, but a few common ones left visitors without a clear next step.</p>
 <p>You can see exactly what it knows and what's missing:<br><a href="${demoUrl}">${demoUrl}</a></p>
-<p>If you want to fix the gaps or add the widget to your site:<br>
-→ <a href="${demoUrl}">Try the demo</a><br>
-→ <a href="https://cal.com/whisp/15min">Book a quick call</a></p>
+<p>Want to fix the gaps? Reply here or <a href="https://cal.com/whisp/15min">book a quick call</a> - I'll set it up for free.</p>
 ${SIG}
 ${UNSUB(email)}`,
   };
@@ -66,11 +62,9 @@ function emailPersonal(domain: string, demoUrl: string, email: string): { subjec
   return {
     subject: `Can I help ${domain} with AI?`,
     html: `<p>Hi,</p>
-<p>I'm Jakub - I study Computer Science in Poland and I'm helping businesses onboard AI to grow. I built an AI assistant that reads your website and can answer customer questions 24/7.</p>
-<p>I already made one for ${domain} - it knows your services, pricing, and everything on your site. Try it:<br><a href="${demoUrl}">${demoUrl}</a></p>
-<p>If it's useful, I'll set it up for you for free. Takes 5 minutes:<br>
-→ <a href="${demoUrl}">See your AI assistant</a><br>
-→ <a href="https://cal.com/whisp/15min">Book a 15-min call</a></p>
+<p>I'm Jakub, I study Computer Science in Poland and I'm helping businesses onboard AI to grow. I built an AI assistant that reads your website and can answer customer questions 24/7.</p>
+<p>I already made one for ${domain} - it knows your services, pricing, and everything on your site:<br><a href="${demoUrl}">${demoUrl}</a></p>
+<p>If it's useful, I'll set it up for you for free - just reply or <a href="https://cal.com/whisp/15min">book a 15-min call</a>.</p>
 ${SIG}
 ${UNSUB(email)}`,
   };
