@@ -1,27 +1,37 @@
 /**
  * Apollo → Whisp pipeline: find prospects, enrich, register, send.
  *
- * Searches Apollo for business owners/directors by industry + country,
- * enriches contacts to get verified emails + domains, registers on Whisp,
- * waits for scraping, then sends A/B/C emails.
- *
  * Usage:
  *   npx tsx scripts/apollo-pipeline.ts --industry=hotel --country=Poland --limit=30 --dry-run
- *   RESEND_API_KEY=re_xxx npx tsx scripts/apollo-pipeline.ts --industry=restaurant --country=Netherlands --limit=50 --send
- *   npx tsx scripts/apollo-pipeline.ts --industry=dental --country="United Kingdom" --limit=100 --send
+ *   npx tsx scripts/apollo-pipeline.ts --industry=restaurant --country="United Kingdom,Netherlands" --limit=50 --send
+ *   npx tsx scripts/apollo-pipeline.ts --industry=dental --country=all-eu --limit=100 --send
  *
  * Industries: hotel, restaurant, law, realestate, salon, dental, fitness, auto, education, wedding, tattoo
+ * Countries: any Apollo location string, comma-separated, or "all-eu" for all European
  */
 
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_URL = process.env.BASE_URL || "https://whisp.so";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "whisp-admin-2026";
 const RESEND_KEY = process.env.RESEND_API_KEY || "";
-const APOLLO_KEY = process.env.APOLLO_API_KEY || "pE5gk8pup_3dk6a55bpFSg";
+const APOLLO_KEY = process.env.APOLLO_API_KEY || "";
 const FROM = "Jakub <jakub@whisp.so>";
 const SEND = process.argv.includes("--send");
 const LIMIT = parseInt(process.argv.find(a => a.startsWith("--limit="))?.split("=")[1] || "30");
 const INDUSTRY = process.argv.find(a => a.startsWith("--industry="))?.split("=")[1] || "hotel";
-const COUNTRY = process.argv.find(a => a.startsWith("--country="))?.split("=")[1] || "Poland";
+const COUNTRY_ARG = process.argv.find(a => a.startsWith("--country="))?.split("=")[1] || "Poland";
+
+if (!APOLLO_KEY) {
+  console.error("APOLLO_API_KEY env var required");
+  process.exit(1);
+}
+
+const EU_COUNTRIES = ["Poland", "United Kingdom", "Germany", "France", "Italy", "Spain", "Netherlands", "Sweden", "Portugal", "Belgium", "Austria", "Czech Republic", "Denmark", "Norway", "Ireland"];
+const COUNTRIES = COUNTRY_ARG === "all-eu" ? EU_COUNTRIES : COUNTRY_ARG.split(",").map(c => c.trim());
 
 const INDUSTRY_KEYWORDS: Record<string, string[]> = {
   hotel: ["hotel", "boutique hotel", "bed and breakfast", "guesthouse"],
@@ -37,9 +47,22 @@ const INDUSTRY_KEYWORDS: Record<string, string[]> = {
   tattoo: ["tattoo studio", "tattoo", "piercing"],
 };
 
-const PL_COUNTRIES = ["Poland"];
-function isPolish(country: string): boolean {
-  return PL_COUNTRIES.some(c => country.toLowerCase().includes(c.toLowerCase()));
+const PL_PATTERNS = ["poland", ".pl"];
+function detectLang(country: string, domain: string): "pl" | "en" {
+  const lower = country.toLowerCase() + " " + domain.toLowerCase();
+  return PL_PATTERNS.some(p => lower.includes(p)) ? "pl" : "en";
+}
+
+// --- Sent log: tracks every email we've ever sent to avoid duplicates ---
+const SENT_LOG_PATH = resolve(__dirname, "../data/pipeline-sent.json");
+let sentLog: Record<string, { sentAt: string; template: string; industry: string }> = {};
+try { sentLog = JSON.parse(readFileSync(SENT_LOG_PATH, "utf-8")); } catch {}
+function markSent(email: string, template: string) {
+  sentLog[email.toLowerCase()] = { sentAt: new Date().toISOString(), template, industry: INDUSTRY };
+  writeFileSync(SENT_LOG_PATH, JSON.stringify(sentLog, null, 2));
+}
+function alreadySent(email: string): boolean {
+  return email.toLowerCase() in sentLog;
 }
 
 interface Prospect {
@@ -53,20 +76,30 @@ interface Prospect {
   lang: "pl" | "en";
 }
 
-async function searchApollo(keywords: string[], country: string, page: number): Promise<any> {
+async function searchApollo(keywords: string[], countries: string[], page: number): Promise<any> {
   const resp = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": APOLLO_KEY },
     body: JSON.stringify({
       q_organization_keyword_tags: keywords,
-      organization_locations: [country],
+      organization_locations: countries,
       organization_num_employees_ranges: ["1,50"],
-      person_seniorities: ["owner", "founder", "c_suite", "director"],
+      person_seniorities: ["owner", "founder", "c_suite"],
       contact_email_status: ["verified"],
       page,
-      per_page: 25,
+      per_page: 100,
     }),
+    signal: AbortSignal.timeout(15000),
   });
+  if (!resp.ok) {
+    const err = await resp.text();
+    if (resp.status === 429) {
+      console.log("  Apollo rate limit — waiting 60s");
+      await new Promise(r => setTimeout(r, 60000));
+      return searchApollo(keywords, countries, page);
+    }
+    throw new Error(`Apollo search failed (${resp.status}): ${err.slice(0, 100)}`);
+  }
   return resp.json();
 }
 
@@ -75,7 +108,16 @@ async function enrichPerson(id: string): Promise<any> {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": APOLLO_KEY },
     body: JSON.stringify({ id }),
+    signal: AbortSignal.timeout(10000),
   });
+  if (!resp.ok) {
+    if (resp.status === 429) {
+      console.log("    Apollo rate limit — waiting 60s");
+      await new Promise(r => setTimeout(r, 60000));
+      return enrichPerson(id);
+    }
+    return { person: null };
+  }
   return resp.json();
 }
 
@@ -88,10 +130,16 @@ async function registerTenant(domain: string): Promise<string | null> {
       signal: AbortSignal.timeout(10000),
     });
     const data = await resp.json() as any;
-    if (data.tenantId) return data.tenantId;
-    if (data.error?.includes("already exists")) return data.tenantId || domain.replace(/[^a-zA-Z0-9]/g, "_");
-    return null;
+    return data.tenantId || (data.error?.includes("already exists") ? domain.replace(/[^a-zA-Z0-9]/g, "_") : null);
   } catch { return null; }
+}
+
+async function getExistingTenantDomains(): Promise<Set<string>> {
+  try {
+    const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`);
+    const tenants = (await resp.json()) as any[];
+    return new Set(tenants.map((t: any) => t.domain));
+  } catch { return new Set(); }
 }
 
 function getEmailHtml(p: Prospect, demoUrl: string, template: string): { subject: string; html: string } {
@@ -126,7 +174,7 @@ function getEmailHtml(p: Prospect, demoUrl: string, template: string): { subject
   }
 }
 
-async function sendEmail(p: Prospect, demoUrl: string, template: string): Promise<boolean> {
+async function sendEmail(p: Prospect, demoUrl: string, template: string): Promise<"sent" | "quota" | "fail"> {
   const { subject, html } = getEmailHtml(p, demoUrl, template);
   const unsubUrl = `${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}`;
   try {
@@ -138,81 +186,119 @@ async function sendEmail(p: Prospect, demoUrl: string, template: string): Promis
         headers: { "List-Unsubscribe": `<${unsubUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
       }),
     });
-    if (!resp.ok) {
-      const err = await resp.text();
-      if (err.includes("429") || err.includes("quota")) { console.log("  QUOTA HIT"); return false; }
-      console.log(`  FAIL: ${err.slice(0, 80)}`);
-    }
-    return resp.ok;
-  } catch { return false; }
+    if (resp.ok) return "sent";
+    const err = await resp.text();
+    if (err.includes("429") || err.includes("quota")) return "quota";
+    console.log(`  FAIL: ${err.slice(0, 80)}`);
+    return "fail";
+  } catch { return "fail"; }
 }
 
 async function main() {
   const keywords = INDUSTRY_KEYWORDS[INDUSTRY] || [INDUSTRY];
-  console.log(`Apollo pipeline: ${INDUSTRY} in ${COUNTRY}, limit ${LIMIT}${SEND ? "" : " (DRY RUN)"}`);
+  console.log(`Apollo pipeline: ${INDUSTRY} in ${COUNTRIES.join(", ")}`);
+  console.log(`Limit: ${LIMIT} | ${SEND ? "SENDING" : "DRY RUN"}`);
   console.log(`Keywords: ${keywords.join(", ")}\n`);
 
-  // Step 1: Search Apollo
-  console.log("=== SEARCHING APOLLO ===");
-  const seenDomains = new Set<string>();
-  const prospects: Prospect[] = [];
-  let page = 1;
+  // Load existing state
+  const existingDomains = await getExistingTenantDomains();
+  console.log(`Existing tenants: ${existingDomains.size}`);
+  console.log(`Previously sent emails: ${Object.keys(sentLog).length}\n`);
 
-  while (prospects.length < LIMIT) {
-    const result = await searchApollo(keywords, COUNTRY, page);
+  // Step 1: Search Apollo — collect candidates WITHOUT enriching yet
+  console.log("=== SEARCHING APOLLO ===");
+  const candidates: { id: string; firstName: string; orgName: string; orgDomain?: string }[] = [];
+  const seenOrgs = new Set<string>();
+  let page = 1;
+  let totalCreditsNeeded = 0;
+
+  while (candidates.length < LIMIT * 2) { // overfetch since some will be dupes
+    const result = await searchApollo(keywords, COUNTRIES, page);
     if (!result.people || result.people.length === 0) break;
 
-    console.log(`  Page ${page}: ${result.people.length} results (${result.total_entries} total)`);
+    console.log(`  Page ${page}: ${result.people.length} results (${result.total_entries} total in Apollo)`);
 
     for (const person of result.people) {
-      if (prospects.length >= LIMIT) break;
       if (!person.has_email) continue;
+      const orgName = person.organization?.name;
+      if (!orgName || seenOrgs.has(orgName)) continue;
+      seenOrgs.add(orgName);
 
-      // Enrich to get email + domain
-      console.log(`  Enriching ${person.first_name} @ ${person.organization?.name}...`);
-      const enriched = await enrichPerson(person.id);
-      const ep = enriched.person;
-      if (!ep?.email || !ep?.organization?.primary_domain) {
-        console.log(`    Skip - no email or domain`);
-        continue;
-      }
-
-      const domain = ep.organization.primary_domain;
-      if (seenDomains.has(domain)) continue;
-      seenDomains.add(domain);
-
-      const country = ep.country || COUNTRY;
-      prospects.push({
-        apolloId: ep.id,
-        firstName: ep.first_name,
-        email: ep.email,
-        domain,
-        orgName: ep.organization.name,
-        title: ep.title,
-        country,
-        lang: isPolish(country) ? "pl" : "en",
+      candidates.push({
+        id: person.id,
+        firstName: person.first_name,
+        orgName,
       });
-
-      console.log(`    ✓ ${ep.first_name} <${ep.email}> @ ${domain}`);
-      await new Promise(r => setTimeout(r, 500));
     }
 
     page++;
-    await new Promise(r => setTimeout(r, 1000));
+    if (page > 10) break; // safety: max 1000 results
+    await new Promise(r => setTimeout(r, 500));
   }
 
-  console.log(`\nFound ${prospects.length} unique prospects\n`);
+  console.log(`\nCandidates found: ${candidates.length}`);
 
+  // Step 2: Enrich only what we need — skip already-sent, skip existing tenants
+  console.log("\n=== ENRICHING (1 credit each) ===");
+  const prospects: Prospect[] = [];
+  let creditsUsed = 0;
+  let skippedDupe = 0;
+
+  for (const c of candidates) {
+    if (prospects.length >= LIMIT) break;
+
+    const enriched = await enrichPerson(c.id);
+    creditsUsed++;
+    const ep = enriched.person;
+
+    if (!ep?.email || !ep?.organization?.primary_domain) {
+      console.log(`  ✗ ${c.orgName} — no email or domain`);
+      continue;
+    }
+
+    const domain = ep.organization.primary_domain;
+    const email = ep.email;
+
+    // Skip if we already emailed this person
+    if (alreadySent(email)) {
+      console.log(`  SKIP ${domain} — already emailed ${email}`);
+      skippedDupe++;
+      continue;
+    }
+
+    // Skip consultancies/agencies (no real business website)
+    if (domain.includes("linkedin.com") || domain.includes("facebook.com")) continue;
+
+    const country = ep.country || COUNTRIES[0];
+    const lang = detectLang(country, domain);
+
+    prospects.push({
+      apolloId: ep.id,
+      firstName: ep.first_name,
+      email,
+      domain,
+      orgName: ep.organization.name,
+      title: ep.title,
+      country,
+      lang,
+    });
+
+    console.log(`  ✓ ${ep.first_name} <${email}> @ ${domain} [${lang}]`);
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  console.log(`\nProspects: ${prospects.length} | Credits used: ${creditsUsed} | Skipped dupes: ${skippedDupe}\n`);
   if (prospects.length === 0) return;
 
-  // Step 2: Register domains on Whisp
+  // Step 3: Register new domains (skip already existing)
   console.log("=== REGISTERING DOMAINS ===");
-  const registered: { prospect: Prospect; tenantId: string }[] = [];
+  const toRegister = prospects.filter(p => !existingDomains.has(p.domain));
+  const alreadyRegistered = prospects.length - toRegister.length;
+  console.log(`  ${alreadyRegistered} already registered, ${toRegister.length} new`);
 
-  for (const p of prospects) {
+  for (const p of toRegister) {
     const tid = await registerTenant(p.domain);
     if (tid) {
-      registered.push({ prospect: p, tenantId: tid });
       console.log(`  ✓ ${p.domain}`);
     } else {
       console.log(`  ✗ ${p.domain}`);
@@ -220,40 +306,20 @@ async function main() {
     await new Promise(r => setTimeout(r, 300));
   }
 
-  console.log(`\nRegistered: ${registered.length}\n`);
+  // Step 4: Send emails to ready tenants, queue the rest
+  // Don't wait for scraping — send what's ready now, log the rest for next run
+  console.log("\n=== SENDING EMAILS ===");
 
-  // Step 3: Wait for scraping (up to 15 min)
-  console.log("=== WAITING FOR SCRAPING ===");
-  const maxWait = 15 * 60 * 1000;
-  const start = Date.now();
-
-  while (Date.now() - start < maxWait) {
-    const tenantsResp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`);
-    const allTenants = (await tenantsResp.json()) as any[];
-    const tenantMap = new Map(allTenants.map((t: any) => [t.id, t]));
-
-    let readyCount = 0;
-    for (const r of registered) {
-      const t = tenantMap.get(r.tenantId);
-      if (t && t.status === "active" && t.chunksCount > 0) readyCount++;
-    }
-
-    console.log(`  ${readyCount}/${registered.length} ready (${Math.round((Date.now() - start) / 1000)}s)`);
-    if (readyCount >= registered.length * 0.5 || readyCount >= 20) break;
+  // Give new registrations a moment to start scraping
+  if (toRegister.length > 0) {
+    console.log("  Waiting 30s for scraper to start...");
     await new Promise(r => setTimeout(r, 30000));
   }
 
-  // Step 4: Send emails
-  console.log("\n=== SENDING EMAILS ===");
-  const templates = ["clean", "gaps", "personal"];
-  let sent = 0, skipped = 0;
-
-  // Get current tenant state
   const tenantsResp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`);
   const allTenants = (await tenantsResp.json()) as any[];
-  const tenantMap = new Map(allTenants.map((t: any) => [t.id, t]));
+  const tenantMap = new Map(allTenants.map((t: any) => [t.domain, t]));
 
-  // Get unsub list
   let unsubs: string[] = [];
   try {
     const unsubResp = await fetch(`${BASE_URL}/api/admin/unsubscribed?secret=${ADMIN_SECRET}`);
@@ -261,36 +327,45 @@ async function main() {
   } catch {}
   const unsubSet = new Set(unsubs.map(e => e.toLowerCase()));
 
-  for (let i = 0; i < registered.length; i++) {
-    const { prospect, tenantId } = registered[i];
-    const tenant = tenantMap.get(tenantId);
+  const templates = ["clean", "gaps", "personal"];
+  let sent = 0, skipped = 0, notReady = 0;
 
-    if (!tenant || tenant.status !== "active" || tenant.chunksCount === 0) {
-      console.log(`  SKIP ${prospect.domain} (not ready)`);
+  for (let i = 0; i < prospects.length; i++) {
+    const p = prospects[i];
+    const tenant = tenantMap.get(p.domain);
+
+    if (!tenant || tenant.status !== "active" || !tenant.chunksCount) {
+      notReady++;
+      continue;
+    }
+    if (unsubSet.has(p.email.toLowerCase())) {
+      console.log(`  UNSUB ${p.domain}`);
       skipped++;
       continue;
     }
-    if (unsubSet.has(prospect.email.toLowerCase())) {
-      console.log(`  UNSUB ${prospect.domain}`);
+    if (alreadySent(p.email)) {
       skipped++;
       continue;
     }
 
     const template = templates[i % 3];
-    const demoUrl = `${BASE_URL}/demo/${tenantId}`;
+    const demoUrl = `${BASE_URL}/demo/${tenant.id}`;
 
     if (!SEND) {
-      console.log(`  [DRY] [${template}] [${prospect.lang}] ${prospect.firstName} <${prospect.email}> @ ${prospect.domain}`);
+      console.log(`  [DRY] [${template}] [${p.lang}] ${p.firstName} <${p.email}> @ ${p.domain}`);
       sent++;
       continue;
     }
 
-    const ok = await sendEmail(prospect, demoUrl, template);
-    if (ok) {
+    const result = await sendEmail(p, demoUrl, template);
+    if (result === "sent") {
       sent++;
-      console.log(`  ✉️  [${template}] [${prospect.lang}] ${prospect.firstName} <${prospect.email}> @ ${prospect.domain}`);
+      markSent(p.email, template);
+      console.log(`  ✉️  [${template}] [${p.lang}] ${p.firstName} <${p.email}> @ ${p.domain}`);
+    } else if (result === "quota") {
+      console.log("  QUOTA HIT — stopping. Run again tomorrow for the rest.");
+      break;
     } else {
-      if (sent > 0) { console.log("  Stopping (quota or error)"); break; }
       skipped++;
     }
 
@@ -298,11 +373,14 @@ async function main() {
   }
 
   console.log(`\n=== DONE ===`);
+  console.log(`Apollo credits used: ${creditsUsed}`);
   console.log(`Prospects found: ${prospects.length}`);
-  console.log(`Domains registered: ${registered.length}`);
   console.log(`Emails sent: ${sent}`);
+  console.log(`Not ready (will be sent next run): ${notReady}`);
   console.log(`Skipped: ${skipped}`);
-  console.log(`Apollo credits used: ~${prospects.length} (enrichment)`);
+  if (notReady > 0) {
+    console.log(`\nTip: Run again in 30 min to send to newly scraped tenants.`);
+  }
 }
 
 main().catch(console.error);
