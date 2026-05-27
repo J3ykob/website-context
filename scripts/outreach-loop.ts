@@ -1,19 +1,16 @@
 /**
- * Synchronous outreach loop — one prospect at a time, start to finish.
+ * Outreach loop - two interleaved phases every cycle:
  *
- * For each prospect:
- *   1. Search Apollo → pick next candidate
- *   2. Enrich → get verified email + domain
- *   3. Register domain with priority scraping
- *   4. Wait for scrape to complete (~1-2 min)
- *   5. Send email
- *   6. Next prospect
+ *   Phase 1: SEND - check all pending prospects, send to any that are scraped
+ *   Phase 2: FIND - enrich a few new prospects, register with priority
  *
- * Stops at Resend daily quota, resumes next day.
+ * This way we're always sending to freshly scraped domains AND finding new ones.
+ * No blocking waits. No timeouts. Just check and send what's ready.
  *
  * Usage:
  *   APOLLO_API_KEY=xxx RESEND_API_KEY=xxx npx tsx scripts/outreach-loop.ts
  *   APOLLO_API_KEY=xxx RESEND_API_KEY=xxx npx tsx scripts/outreach-loop.ts --dry-run
+ *   APOLLO_API_KEY=xxx RESEND_API_KEY=xxx npx tsx scripts/outreach-loop.ts --find=10 --pause=60
  */
 
 import { readFileSync, writeFileSync } from "fs";
@@ -27,6 +24,8 @@ const RESEND_KEY = process.env.RESEND_API_KEY || "";
 const APOLLO_KEY = process.env.APOLLO_API_KEY || "";
 const FROM = "Jakub <jakub@whisp.so>";
 const SEND = !process.argv.includes("--dry-run");
+const FIND_PER_CYCLE = parseInt(process.argv.find(a => a.startsWith("--find="))?.split("=")[1] || "5");
+const PAUSE_SECONDS = parseInt(process.argv.find(a => a.startsWith("--pause="))?.split("=")[1] || "60");
 
 if (!APOLLO_KEY) { console.error("APOLLO_API_KEY required"); process.exit(1); }
 if (!RESEND_KEY && SEND) { console.error("RESEND_API_KEY required"); process.exit(1); }
@@ -78,6 +77,16 @@ const STATE_PATH = resolve(__dirname, "../data/outreach-state.json");
 let sentLog: Record<string, { sentAt: string; template: string }> = {};
 try { sentLog = JSON.parse(readFileSync(SENT_LOG_PATH, "utf-8")); } catch {}
 
+interface Prospect {
+  firstName: string;
+  email: string;
+  domain: string;
+  orgName: string;
+  title: string;
+  country: string;
+  lang: "pl" | "en";
+}
+
 interface LoopState {
   apolloPage: number;
   apolloIndex: number;
@@ -85,14 +94,18 @@ interface LoopState {
   totalEnriched: number;
   totalSent: number;
   quotaHitAt: string | null;
+  pending: Prospect[];
 }
 
-let state: LoopState = { apolloPage: 1, apolloIndex: 0, keywordOffset: 0, totalEnriched: 0, totalSent: 0, quotaHitAt: null };
+let state: LoopState = { apolloPage: 1, apolloIndex: 0, keywordOffset: 0, totalEnriched: 0, totalSent: 0, quotaHitAt: null, pending: [] };
 try { const s = JSON.parse(readFileSync(STATE_PATH, "utf-8")); state = { ...state, ...s }; } catch {}
 
 function saveState() { writeFileSync(STATE_PATH, JSON.stringify(state, null, 2)); }
 function saveSentLog() { writeFileSync(SENT_LOG_PATH, JSON.stringify(sentLog, null, 2)); }
 function alreadySent(email: string): boolean { return email.toLowerCase() in sentLog; }
+function domainSent(domain: string): boolean {
+  return Object.keys(sentLog).some(e => e.endsWith("@" + domain) || e.endsWith("." + domain));
+}
 function markSent(email: string, template: string) {
   sentLog[email.toLowerCase()] = { sentAt: new Date().toISOString(), template };
   saveSentLog();
@@ -114,7 +127,7 @@ let cachedPage: any[] = [];
 
 async function fetchPage(): Promise<any[]> {
   const keywords = getKeywords();
-  console.log(`  [apollo] Searching page ${state.apolloPage}, keywords: ${keywords.slice(0, 4).join(", ")}...`);
+  console.log(`  [apollo] Page ${state.apolloPage}, keywords: ${keywords.slice(0, 4).join(", ")}...`);
   const resp = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": APOLLO_KEY },
@@ -130,7 +143,7 @@ async function fetchPage(): Promise<any[]> {
     signal: AbortSignal.timeout(15000),
   });
   if (resp.status === 429) {
-    console.log("  [apollo] Rate limited — waiting 60s");
+    console.log("  [apollo] Rate limited - waiting 60s");
     await new Promise(r => setTimeout(r, 60000));
     return fetchPage();
   }
@@ -141,34 +154,24 @@ async function fetchPage(): Promise<any[]> {
 }
 
 async function getNextCandidate(): Promise<any | null> {
-  while (true) {
-    if (state.apolloIndex >= cachedPage.length) {
-      cachedPage = await fetchPage();
-      state.apolloIndex = 0;
-      if (cachedPage.length === 0) {
-        // Move to next keyword set
-        state.keywordOffset++;
-        state.apolloPage = 1;
-        saveState();
-        console.log(`  [apollo] No results, rotating keywords (offset ${state.keywordOffset})`);
-        if (state.keywordOffset > ALL_KEYWORDS.length / 15) {
-          console.log("  [apollo] All keywords exhausted, wrapping around");
-          state.keywordOffset = 0;
-          state.apolloPage = 1;
-        }
-        cachedPage = await fetchPage();
-        if (cachedPage.length === 0) return null;
+  if (state.apolloIndex >= cachedPage.length) {
+    state.apolloPage++;
+    cachedPage = await fetchPage();
+    state.apolloIndex = 0;
+    if (cachedPage.length === 0) {
+      state.keywordOffset++;
+      state.apolloPage = 1;
+      console.log(`  [apollo] Rotating keywords (offset ${state.keywordOffset})`);
+      if (state.keywordOffset > ALL_KEYWORDS.length / 15) {
+        state.keywordOffset = 0;
       }
+      cachedPage = await fetchPage();
+      if (cachedPage.length === 0) return null;
     }
-
-    const person = cachedPage[state.apolloIndex];
-    state.apolloIndex++;
-
-    if (!person.has_email) continue;
-    if (!person.organization?.name) continue;
-
-    return person;
   }
+  const person = cachedPage[state.apolloIndex];
+  state.apolloIndex++;
+  return person;
 }
 
 async function enrichPerson(id: string): Promise<any> {
@@ -179,7 +182,7 @@ async function enrichPerson(id: string): Promise<any> {
     signal: AbortSignal.timeout(10000),
   });
   if (resp.status === 429) {
-    console.log("  [apollo] Rate limited — waiting 60s");
+    console.log("  [apollo] Rate limited - waiting 60s");
     await new Promise(r => setTimeout(r, 60000));
     return enrichPerson(id);
   }
@@ -188,8 +191,18 @@ async function enrichPerson(id: string): Promise<any> {
 }
 
 // --- Whisp ---
-async function registerTenant(domain: string, retries = 3): Promise<string | null> {
-  for (let attempt = 1; attempt <= retries; attempt++) {
+async function fetchTenantsMap(): Promise<Map<string, any>> {
+  try {
+    const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) return new Map();
+    const text = await resp.text();
+    if (text.startsWith("<")) return new Map();
+    return new Map((JSON.parse(text) as any[]).map(t => [t.domain, t]));
+  } catch { return new Map(); }
+}
+
+async function registerTenant(domain: string): Promise<string | null> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const resp = await fetch(`${BASE_URL}/api/tenants?secret=${ADMIN_SECRET}&priority=1`, {
         method: "POST",
@@ -199,7 +212,6 @@ async function registerTenant(domain: string, retries = 3): Promise<string | nul
       });
       const text = await resp.text();
       if (text.startsWith("<")) {
-        console.log(`  [register] Server not ready (attempt ${attempt}/${retries})`);
         await new Promise(r => setTimeout(r, 15000));
         continue;
       }
@@ -214,38 +226,10 @@ async function registerTenant(domain: string, retries = 3): Promise<string | nul
       }
       return null;
     } catch {
-      if (attempt < retries) {
-        console.log(`  [register] Error (attempt ${attempt}/${retries}), retrying in 15s...`);
-        await new Promise(r => setTimeout(r, 15000));
-      }
+      if (attempt < 3) await new Promise(r => setTimeout(r, 15000));
     }
   }
   return null;
-}
-
-async function waitForScrape(domain: string): Promise<{ ready: boolean; tenantId?: string }> {
-  const start = Date.now();
-  while (true) {
-    try {
-      const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`, { signal: AbortSignal.timeout(10000) });
-      if (!resp.ok) { await new Promise(r => setTimeout(r, 5000)); continue; }
-      const text = await resp.text();
-      if (text.startsWith("<")) { await new Promise(r => setTimeout(r, 5000)); continue; }
-      const tenants = JSON.parse(text) as any[];
-      const t = tenants.find((x: any) => x.domain === domain);
-      if (t && t.status === "active" && t.chunksCount > 0) {
-        console.log();
-        return { ready: true, tenantId: t.id };
-      }
-      if (t && (t.status === "error" || t.status === "failed")) {
-        console.log();
-        return { ready: false };
-      }
-      const elapsed = Math.round((Date.now() - start) / 1000);
-      process.stdout.write(`\r  [scrape] Waiting for ${domain}... ${elapsed}s`);
-    } catch {}
-    await new Promise(r => setTimeout(r, 10000));
-  }
 }
 
 async function getUnsubSet(): Promise<Set<string>> {
@@ -257,175 +241,211 @@ async function getUnsubSet(): Promise<Set<string>> {
 }
 
 // --- Email ---
-function buildEmail(firstName: string, email: string, domain: string, lang: "pl" | "en", demoUrl: string, template: string): { subject: string; html: string } {
-  const unsub = `<p style="font-size:11px;color:#999;"><a href="${BASE_URL}/unsubscribe?email=${encodeURIComponent(email)}" style="color:#999;">${lang === "pl" ? "Wypisz się" : "Unsubscribe"}</a></p>`;
+const templates = ["clean", "gaps", "personal"];
+
+function buildEmail(p: Prospect, demoUrl: string, template: string): { subject: string; html: string } {
+  const unsub = `<p style="font-size:11px;color:#999;"><a href="${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}" style="color:#999;">${p.lang === "pl" ? "Wypisz się" : "Unsubscribe"}</a></p>`;
   const sig = `<p>Jakub<br>whisp.so</p>`;
-  const cta = lang === "pl"
+  const cta = p.lang === "pl"
     ? `<p>Mogę to uruchomić na Twojej stronie do jutra - wystarczy odpowiedzieć na tego maila lub <a href="https://cal.com/whisp/15min">umówić się na rozmowę</a>.</p>`
     : `<p>I can have this running on your site by tomorrow - you can reply here or <a href="https://cal.com/whisp/15min">book a call</a> with me to discuss it in details.</p>`;
-  const hi = lang === "pl" ? `Cześć ${firstName},` : `Hi ${firstName},`;
+  const hi = p.lang === "pl" ? `Cześć ${p.firstName},` : `Hi ${p.firstName},`;
 
   if (template === "clean") {
     return {
-      subject: lang === "pl" ? `Zbudowałem darmowego asystenta AI dla ${domain}` : `I built a free AI assistant for ${domain}`,
-      html: lang === "pl"
-        ? `<p>${hi}</p><p>Zbudowałem asystenta AI, który czyta ${domain} i odpowiada na pytania odwiedzających - usługi, cennik, lokalizacja, godziny otwarcia, wszystko co jest na stronie.</p><p>Już zna Twoją stronę. Możesz go wypróbować tutaj:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
-        : `<p>${hi}</p><p>I built an AI assistant that reads ${domain} and answers visitor questions - pricing, services, location, hours, anything on your site.</p><p>It already knows your website. You can try it here:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+      subject: p.lang === "pl" ? `Zbudowałem darmowego asystenta AI dla ${p.domain}` : `I built a free AI assistant for ${p.domain}`,
+      html: p.lang === "pl"
+        ? `<p>${hi}</p><p>Zbudowałem asystenta AI, który czyta ${p.domain} i odpowiada na pytania odwiedzających - usługi, cennik, lokalizacja, godziny otwarcia, wszystko co jest na stronie.</p><p>Już zna Twoją stronę. Możesz go wypróbować tutaj:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
+        : `<p>${hi}</p><p>I built an AI assistant that reads ${p.domain} and answers visitor questions - pricing, services, location, hours, anything on your site.</p><p>It already knows your website. You can try it here:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
     };
   } else if (template === "gaps") {
     return {
-      subject: lang === "pl" ? `Przetestowałem ${domain} z perspektywy klienta` : `I tested ${domain} from a customer's perspective`,
-      html: lang === "pl"
-        ? `<p>${hi}</p><p>Zbudowałem AI, który czyta Twoją stronę i odpowiada na pytania odwiedzających. Przetestowałem go na ${domain} - większość odpowiedzi była dobra, ale kilka typowych pytań zostawiło odwiedzających bez jasnej odpowiedzi.</p><p>Zobacz co wie i czego mu brakuje:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
-        : `<p>${hi}</p><p>I built an AI that reads your website and answers visitor questions. I tested it on ${domain} - most questions got good answers, but a few common ones left visitors without a clear next step.</p><p>You can see exactly what it knows and what's missing:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+      subject: p.lang === "pl" ? `Przetestowałem ${p.domain} z perspektywy klienta` : `I tested ${p.domain} from a customer's perspective`,
+      html: p.lang === "pl"
+        ? `<p>${hi}</p><p>Zbudowałem AI, który czyta Twoją stronę i odpowiada na pytania odwiedzających. Przetestowałem go na ${p.domain} - większość odpowiedzi była dobra, ale kilka typowych pytań zostawiło odwiedzających bez jasnej odpowiedzi.</p><p>Zobacz co wie i czego mu brakuje:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
+        : `<p>${hi}</p><p>I built an AI that reads your website and answers visitor questions. I tested it on ${p.domain} - most questions got good answers, but a few common ones left visitors without a clear next step.</p><p>You can see exactly what it knows and what's missing:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
     };
   } else {
     return {
-      subject: lang === "pl" ? `Mogę pomóc ${domain} z AI?` : `Can I help ${domain} with AI?`,
-      html: lang === "pl"
-        ? `<p>${hi}</p><p>Jestem Jakub, studiuję informatykę w Polsce i pomagam firmom wdrażać AI żeby rosły. Zbudowałem asystenta AI, który czyta Twoją stronę i odpowiada na pytania klientów 24/7.</p><p>Już zrobiłem jednego dla ${domain} - zna Twoje usługi, cennik i wszystko co jest na stronie:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
-        : `<p>${hi}</p><p>I'm Jakub, I study Computer Science in Poland and I'm helping businesses onboard AI to grow. I built an AI assistant that reads your website and can answer customer questions 24/7.</p><p>I already made one for ${domain} - it knows your services, pricing, and everything on your site:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
+      subject: p.lang === "pl" ? `Mogę pomóc ${p.domain} z AI?` : `Can I help ${p.domain} with AI?`,
+      html: p.lang === "pl"
+        ? `<p>${hi}</p><p>Jestem Jakub, studiuję informatykę w Polsce i pomagam firmom wdrażać AI żeby rosły. Zbudowałem asystenta AI, który czyta Twoją stronę i odpowiada na pytania klientów 24/7.</p><p>Już zrobiłem jednego dla ${p.domain} - zna Twoje usługi, cennik i wszystko co jest na stronie:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`
+        : `<p>${hi}</p><p>I'm Jakub, I study Computer Science in Poland and I'm helping businesses onboard AI to grow. I built an AI assistant that reads your website and can answer customer questions 24/7.</p><p>I already made one for ${p.domain} - it knows your services, pricing, and everything on your site:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
     };
   }
 }
 
-async function sendEmail(firstName: string, email: string, domain: string, lang: "pl" | "en", demoUrl: string, template: string): Promise<"sent" | "quota" | "fail"> {
-  const { subject, html } = buildEmail(firstName, email, domain, lang, demoUrl, template);
-  const unsubUrl = `${BASE_URL}/unsubscribe?email=${encodeURIComponent(email)}`;
+async function sendOne(p: Prospect, demoUrl: string, template: string): Promise<"sent" | "quota" | "fail"> {
+  const { subject, html } = buildEmail(p, demoUrl, template);
+  const unsubUrl = `${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}`;
   try {
     const resp = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: FROM, to: [email], subject, html, reply_to: "jakub@whisp.so",
+        from: FROM, to: [p.email], subject, html, reply_to: "jakub@whisp.so",
         headers: { "List-Unsubscribe": `<${unsubUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
       }),
     });
     if (resp.ok) return "sent";
     const err = await resp.text();
     if (err.includes("429") || err.includes("quota")) return "quota";
-    console.log(`  [resend] FAIL: ${err.slice(0, 80)}`);
     return "fail";
   } catch { return "fail"; }
 }
 
 // --- Main loop ---
-const templates = ["clean", "gaps", "personal"];
+async function cycle() {
+  const now = new Date();
+  console.log(`\n--- CYCLE @ ${now.toISOString().slice(11, 19)} | sent=${state.totalSent} enriched=${state.totalEnriched} pending=${state.pending.length} ---`);
 
-async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
-  // 1. Find next candidate
-  const candidate = await getNextCandidate();
-  if (!candidate) return "done";
-
-  // 2. Enrich
-  console.log(`\n[${state.totalSent + 1}] Enriching ${candidate.first_name} @ ${candidate.organization?.name}...`);
-  const enriched = await enrichPerson(candidate.id);
-  state.totalEnriched++;
-  const ep = enriched.person;
-
-  if (!ep?.email || !ep?.organization?.primary_domain) {
-    console.log("  Skip - no email or domain");
-    return "skip";
+  // Check quota reset
+  if (state.quotaHitAt) {
+    if (new Date(state.quotaHitAt).toDateString() === now.toDateString()) {
+      console.log("  Quota hit today - waiting");
+      return;
+    }
+    state.quotaHitAt = null;
+    console.log("  New day - quota reset!");
   }
 
-  const domain = ep.organization.primary_domain;
-  const email = ep.email;
-  const firstName = ep.first_name;
-
-  if (alreadySent(email)) { console.log(`  Skip - already emailed ${email}`); return "skip"; }
-  // Check if we already emailed someone at this domain
-  const domainEmailed = Object.entries(sentLog).some(([e, _]) => e.endsWith("@" + domain) || e.endsWith("." + domain));
-  if (domainEmailed) { console.log(`  Skip - already emailed someone at ${domain}`); return "skip"; }
-  if (domain.includes("linkedin.com") || domain.includes("facebook.com")) { console.log("  Skip - social domain"); return "skip"; }
-
-  const country = ep.country || "Unknown";
-  const lang = detectLang(country, domain);
-  console.log(`  Found: ${firstName} <${email}> @ ${domain} [${lang}] (${ep.title})`);
-
-  // 3. Register with priority
-  console.log(`  [register] ${domain}...`);
-  const tid = await registerTenant(domain);
-  if (!tid) { console.log("  Skip - registration failed"); return "skip"; }
-
-  // 4. Wait for scrape
-  console.log(`  [scrape] Waiting for ${domain} to finish...`);
-  const { ready, tenantId } = await waitForScrape(domain);
-  if (!ready) { console.log(`\n  Skip - scrape failed for ${domain}`); return "skip"; }
-
-  // 5. Check unsub
+  const tenantMap = await fetchTenantsMap();
   const unsubSet = await getUnsubSet();
-  if (unsubSet.has(email.toLowerCase())) { console.log("  Skip - unsubscribed"); return "skip"; }
+  let quotaHit = false;
 
-  // 6. Send email
-  const template = templates[state.totalSent % 3];
-  const demoUrl = `${BASE_URL}/demo/${tenantId}`;
+  // PHASE 1: Send to any pending prospects that are now ready
+  if (state.pending.length > 0) {
+    const stillPending: Prospect[] = [];
+    let sentThisPhase = 0;
 
-  if (!SEND) {
-    console.log(`  [DRY] Would send [${template}] [${lang}] to ${firstName} <${email}>`);
-    state.totalSent++;
-    saveState();
-    return "sent";
+    for (const p of state.pending) {
+      if (quotaHit) { stillPending.push(p); continue; }
+      if (alreadySent(p.email) || domainSent(p.domain)) continue;
+      if (unsubSet.has(p.email.toLowerCase())) continue;
+
+      const tenant = tenantMap.get(p.domain);
+      if (!tenant || tenant.status !== "active" || !tenant.chunksCount) {
+        stillPending.push(p);
+        continue;
+      }
+
+      const template = templates[state.totalSent % 3];
+      const demoUrl = `${BASE_URL}/demo/${tenant.id}`;
+
+      if (!SEND) {
+        console.log(`  [DRY] [${template}] [${p.lang}] ${p.firstName} <${p.email}> @ ${p.domain}`);
+        state.totalSent++;
+        sentThisPhase++;
+        continue;
+      }
+
+      const result = await sendOne(p, demoUrl, template);
+      if (result === "sent") {
+        markSent(p.email, template);
+        state.totalSent++;
+        sentThisPhase++;
+        console.log(`  ✉️  [${template}] [${p.lang}] ${p.firstName} <${p.email}> @ ${p.domain}`);
+      } else if (result === "quota") {
+        quotaHit = true;
+        state.quotaHitAt = now.toISOString();
+        stillPending.push(p);
+        console.log("  QUOTA HIT");
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    state.pending = stillPending;
+    if (sentThisPhase > 0) console.log(`  Sent ${sentThisPhase} pending`);
   }
 
-  const result = await sendEmail(firstName, email, domain, lang, demoUrl, template);
-  if (result === "sent") {
-    markSent(email, template);
-    state.totalSent++;
-    saveState();
-    console.log(`  ✉️  [${template}] [${lang}] ${firstName} <${email}> @ ${domain}`);
-    return "sent";
-  } else if (result === "quota") {
-    console.log("  QUOTA HIT - stopping for today");
-    state.quotaHitAt = new Date().toISOString();
-    saveState();
-    return "quota";
+  // PHASE 2: Find new prospects (skip if quota hit)
+  if (!quotaHit) {
+    let found = 0;
+    const seenDomains = new Set(state.pending.map(p => p.domain));
+
+    for (let i = 0; i < FIND_PER_CYCLE * 3 && found < FIND_PER_CYCLE; i++) {
+      const candidate = await getNextCandidate();
+      if (!candidate) break;
+      if (!candidate.has_email || !candidate.organization?.name) continue;
+
+      const enriched = await enrichPerson(candidate.id);
+      state.totalEnriched++;
+      const ep = enriched.person;
+      if (!ep?.email || !ep?.organization?.primary_domain) continue;
+
+      const domain = ep.organization.primary_domain;
+      const email = ep.email;
+      if (alreadySent(email) || domainSent(domain)) continue;
+      if (seenDomains.has(domain)) continue;
+      if (domain.includes("linkedin.com") || domain.includes("facebook.com")) continue;
+      seenDomains.add(domain);
+
+      const country = ep.country || "Unknown";
+      const prospect: Prospect = {
+        firstName: ep.first_name,
+        email,
+        domain,
+        orgName: ep.organization.name,
+        title: ep.title,
+        country,
+        lang: detectLang(country, domain),
+      };
+
+      // Register with priority
+      const tid = await registerTenant(domain);
+
+      // Check if already scraped - send immediately
+      const tenant = tenantMap.get(domain);
+      if (tenant && tenant.status === "active" && tenant.chunksCount > 0 && !quotaHit) {
+        const template = templates[state.totalSent % 3];
+        const demoUrl = `${BASE_URL}/demo/${tenant.id}`;
+        if (!SEND) {
+          console.log(`  [DRY] [${template}] [${prospect.lang}] ${prospect.firstName} <${email}> @ ${domain}`);
+          state.totalSent++;
+        } else {
+          const result = await sendOne(prospect, demoUrl, template);
+          if (result === "sent") {
+            markSent(email, template);
+            state.totalSent++;
+            console.log(`  ✉️  [${template}] [${prospect.lang}] ${prospect.firstName} <${email}> @ ${domain}`);
+          } else if (result === "quota") {
+            quotaHit = true;
+            state.quotaHitAt = now.toISOString();
+            state.pending.push(prospect);
+          }
+        }
+      } else {
+        state.pending.push(prospect);
+        console.log(`  ⏳ ${prospect.firstName} <${email}> @ ${domain} (queued)`);
+      }
+
+      found++;
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    if (found > 0) console.log(`  Found ${found} new prospects`);
   }
-  return "skip";
+
+  saveState();
 }
 
 async function main() {
-  console.log("=== SYNCHRONOUS OUTREACH LOOP ===");
-  console.log(`${SEND ? "SENDING" : "DRY RUN"} | Sent log: ${Object.keys(sentLog).length} previous`);
-  console.log(`State: page=${state.apolloPage} enriched=${state.totalEnriched} sent=${state.totalSent}\n`);
-
-  // Reset quota if new day
-  if (state.quotaHitAt) {
-    const hitDate = new Date(state.quotaHitAt).toDateString();
-    if (hitDate !== new Date().toDateString()) {
-      console.log("New day - resetting quota flag\n");
-      state.quotaHitAt = null;
-      saveState();
-    }
-  }
+  console.log("=== OUTREACH LOOP ===");
+  console.log(`${SEND ? "SENDING" : "DRY RUN"} | Find ${FIND_PER_CYCLE}/cycle | Pause ${PAUSE_SECONDS}s`);
+  console.log(`Sent log: ${Object.keys(sentLog).length} | Pending: ${state.pending.length}\n`);
 
   while (true) {
-    // Check quota
-    if (state.quotaHitAt && new Date(state.quotaHitAt).toDateString() === new Date().toDateString()) {
-      console.log("\nQuota hit today. Waiting 1 hour...");
-      await new Promise(r => setTimeout(r, 3600000));
-      if (new Date(state.quotaHitAt!).toDateString() !== new Date().toDateString()) {
-        state.quotaHitAt = null;
-        saveState();
-        console.log("New day - resuming!\n");
-      }
-      continue;
+    try {
+      await cycle();
+    } catch (err) {
+      console.error(`Cycle error: ${err}`);
     }
 
-    const result = await processOne();
+    const pauseMs = (state.quotaHitAt && new Date(state.quotaHitAt).toDateString() === new Date().toDateString())
+      ? 3600000
+      : PAUSE_SECONDS * 1000;
 
-    if (result === "quota") continue;
-    if (result === "done") {
-      // Advance to next keyword set
-      state.keywordOffset++;
-      state.apolloPage = 1;
-      state.apolloIndex = 0;
-      cachedPage = [];
-      saveState();
-      console.log("Advancing to next keyword set...\n");
-    }
-
-    // Small pause between prospects
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, pauseMs));
   }
 }
 
