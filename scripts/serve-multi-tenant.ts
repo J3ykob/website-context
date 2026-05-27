@@ -316,7 +316,18 @@ h1 em { color:#3b82f6; font-style:italic; }
 
 // Demo page — standalone chat for a tenant (no embed needed)
 app.get("/demo/:tenantId", (req, res) => {
-  const tenant = getTenant(req.params.tenantId);
+  let tenant = getTenant(req.params.tenantId);
+  // Fallback: if not found, try all tenants matching this domain pattern
+  // Handles underscore/hyphen mismatch from old VPS outreach
+  if (!tenant) {
+    const allTenants = listTenants();
+    const normalized = req.params.tenantId.replace(/[-_]/g, "").toLowerCase();
+    tenant = allTenants.find((t: any) => t.id.replace(/[-_]/g, "").toLowerCase() === normalized) || null;
+    if (tenant) {
+      res.redirect(301, `/demo/${tenant.id}`);
+      return;
+    }
+  }
   if (!tenant || tenant.status !== "active") {
     res.status(404).send("<!DOCTYPE html><html><body style='font-family:Archivo,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#57534e'><p>This bot is not ready yet. Check back soon.</p></body></html>");
     return;
