@@ -188,26 +188,39 @@ async function enrichPerson(id: string): Promise<any> {
 }
 
 // --- Whisp ---
-async function registerTenant(domain: string): Promise<string | null> {
-  try {
-    const resp = await fetch(`${BASE_URL}/api/tenants?secret=${ADMIN_SECRET}&priority=1`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteUrl: `https://${domain}`, email: `info@${domain}` }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const data = await resp.json() as any;
-    if (data.tenantId) return data.tenantId;
-    if (data.error?.includes("already exists")) {
-      const tid = data.tenantId || domain.replace(/[^a-zA-Z0-9]/g, "_");
-      // Trigger priority rescrape if not yet active
-      await fetch(`${BASE_URL}/api/admin/rescrape/${tid}?secret=${ADMIN_SECRET}`, {
-        method: "POST", signal: AbortSignal.timeout(5000),
-      }).catch(() => {});
-      return tid;
+async function registerTenant(domain: string, retries = 3): Promise<string | null> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const resp = await fetch(`${BASE_URL}/api/tenants?secret=${ADMIN_SECRET}&priority=1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteUrl: `https://${domain}`, email: `info@${domain}` }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const text = await resp.text();
+      if (text.startsWith("<")) {
+        console.log(`  [register] Server not ready (attempt ${attempt}/${retries})`);
+        await new Promise(r => setTimeout(r, 15000));
+        continue;
+      }
+      const data = JSON.parse(text);
+      if (data.tenantId) return data.tenantId;
+      if (data.error?.includes("already exists")) {
+        const tid = data.tenantId || domain.replace(/[^a-zA-Z0-9]/g, "_");
+        await fetch(`${BASE_URL}/api/admin/rescrape/${tid}?secret=${ADMIN_SECRET}`, {
+          method: "POST", signal: AbortSignal.timeout(5000),
+        }).catch(() => {});
+        return tid;
+      }
+      return null;
+    } catch {
+      if (attempt < retries) {
+        console.log(`  [register] Error (attempt ${attempt}/${retries}), retrying in 15s...`);
+        await new Promise(r => setTimeout(r, 15000));
+      }
     }
-    return null;
-  } catch { return null; }
+  }
+  return null;
 }
 
 async function waitForScrape(domain: string, maxWaitMs: number = 300000): Promise<{ ready: boolean; tenantId?: string }> {
