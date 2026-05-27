@@ -174,9 +174,11 @@ async function registerTenant(domain: string): Promise<string | null> {
       if (data.tenantId) return data.tenantId;
       if (data.error?.includes("already exists")) {
         const tid = data.tenantId || domain.replace(/[^a-zA-Z0-9]/g, "_");
-        await fetch(`${BASE_URL}/api/admin/rescrape/${tid}?secret=${ADMIN_SECRET}&priority=1&siteUrl=${encodeURIComponent("https://" + domain)}`, {
+        // Force rescrape - works even if paused, sets status to scraping + fills siteUrl
+        const rr = await fetch(`${BASE_URL}/api/admin/rescrape/${tid}?secret=${ADMIN_SECRET}&priority=1&siteUrl=${encodeURIComponent("https://" + domain)}`, {
           method: "POST", signal: AbortSignal.timeout(5000),
-        }).catch(() => {});
+        }).catch(() => null);
+        if (rr) console.log(`  [rescrape] ${tid} triggered`);
         return tid;
       }
       return null;
@@ -197,6 +199,12 @@ async function waitForScrape(domain: string): Promise<{ ready: boolean; tenantId
       const t = tenants.find((x: any) => x.domain === domain);
       if (t && t.status === "active" && t.chunksCount > 0) { console.log(); return { ready: true, tenantId: t.id }; }
       if (t && (t.status === "error" || t.status === "failed")) { console.log(); return { ready: false }; }
+      // If still paused, re-trigger rescrape
+      if (t && t.status === "paused") {
+        await fetch(`${BASE_URL}/api/admin/rescrape/${t.id}?secret=${ADMIN_SECRET}&priority=1&siteUrl=${encodeURIComponent("https://" + domain)}`, {
+          method: "POST", signal: AbortSignal.timeout(5000),
+        }).catch(() => {});
+      }
       process.stdout.write(`\r  [scrape] Waiting for ${domain}... ${Math.round((Date.now() - start) / 1000)}s`);
     } catch {}
     await new Promise(r => setTimeout(r, 10000));
