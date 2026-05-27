@@ -136,10 +136,24 @@ async function registerTenant(domain: string): Promise<string | null> {
 
 async function getExistingTenantDomains(): Promise<Set<string>> {
   try {
-    const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`);
-    const tenants = (await resp.json()) as any[];
+    const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) return new Set();
+    const text = await resp.text();
+    if (text.startsWith("<")) return new Set(); // HTML error page
+    const tenants = JSON.parse(text) as any[];
     return new Set(tenants.map((t: any) => t.domain));
   } catch { return new Set(); }
+}
+
+async function fetchTenantsMap(): Promise<Map<string, any>> {
+  try {
+    const resp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) return new Map();
+    const text = await resp.text();
+    if (text.startsWith("<")) return new Map();
+    const tenants = JSON.parse(text) as any[];
+    return new Map(tenants.map((t: any) => [t.domain, t]));
+  } catch { return new Map(); }
 }
 
 function getEmailHtml(p: Prospect, demoUrl: string, template: string): { subject: string; html: string } {
@@ -195,10 +209,11 @@ async function sendEmail(p: Prospect, demoUrl: string, template: string): Promis
 }
 
 async function main() {
-  const keywords = INDUSTRY_KEYWORDS[INDUSTRY] || [INDUSTRY];
-  console.log(`Apollo pipeline: ${INDUSTRY} in ${COUNTRIES.join(", ")}`);
+  const allIndustries = INDUSTRY === "all" ? Object.keys(INDUSTRY_KEYWORDS) : [INDUSTRY];
+  const keywords = allIndustries.flatMap(i => INDUSTRY_KEYWORDS[i] || [i]);
+  console.log(`Apollo pipeline: ${allIndustries.join(", ")} in ${COUNTRIES.join(", ")}`);
   console.log(`Limit: ${LIMIT} | ${SEND ? "SENDING" : "DRY RUN"}`);
-  console.log(`Keywords: ${keywords.join(", ")}\n`);
+  console.log(`Keywords: ${keywords.slice(0, 10).join(", ")}${keywords.length > 10 ? ` (+${keywords.length - 10} more)` : ""}\n`);
 
   // Load existing state
   const existingDomains = await getExistingTenantDomains();
@@ -316,9 +331,7 @@ async function main() {
     await new Promise(r => setTimeout(r, 30000));
   }
 
-  const tenantsResp = await fetch(`${BASE_URL}/api/admin/tenants?secret=${ADMIN_SECRET}`);
-  const allTenants = (await tenantsResp.json()) as any[];
-  const tenantMap = new Map(allTenants.map((t: any) => [t.domain, t]));
+  const tenantMap = await fetchTenantsMap();
 
   let unsubs: string[] = [];
   try {
