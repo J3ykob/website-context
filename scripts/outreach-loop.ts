@@ -197,7 +197,16 @@ async function registerTenant(domain: string): Promise<string | null> {
       signal: AbortSignal.timeout(10000),
     });
     const data = await resp.json() as any;
-    return data.tenantId || (data.error?.includes("already exists") ? data.tenantId || domain.replace(/[^a-zA-Z0-9]/g, "_") : null);
+    if (data.tenantId) return data.tenantId;
+    if (data.error?.includes("already exists")) {
+      const tid = data.tenantId || domain.replace(/[^a-zA-Z0-9]/g, "_");
+      // Trigger priority rescrape if not yet active
+      await fetch(`${BASE_URL}/api/admin/rescrape/${tid}?secret=${ADMIN_SECRET}`, {
+        method: "POST", signal: AbortSignal.timeout(5000),
+      }).catch(() => {});
+      return tid;
+    }
+    return null;
   } catch { return null; }
 }
 
@@ -308,6 +317,9 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
   const firstName = ep.first_name;
 
   if (alreadySent(email)) { console.log(`  Skip - already emailed ${email}`); return "skip"; }
+  // Check if we already emailed someone at this domain
+  const domainEmailed = Object.entries(sentLog).some(([e, _]) => e.endsWith("@" + domain) || e.endsWith("." + domain));
+  if (domainEmailed) { console.log(`  Skip - already emailed someone at ${domain}`); return "skip"; }
   if (domain.includes("linkedin.com") || domain.includes("facebook.com")) { console.log("  Skip - social domain"); return "skip"; }
 
   const country = ep.country || "Unknown";
