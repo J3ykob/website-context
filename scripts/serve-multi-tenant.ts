@@ -692,10 +692,13 @@ body {
 
 // Create tenant
 app.post("/api/tenants", (req, res) => {
-  const ip = req.ip || req.socket.remoteAddress || "unknown";
-  if (!checkSignupRate(ip)) {
-    res.status(429).json({ error: "Too many signups. Try again later." });
-    return;
+  const isAdmin = req.query.secret === ADMIN_SECRET;
+  if (!isAdmin) {
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    if (!checkSignupRate(ip)) {
+      res.status(429).json({ error: "Too many signups. Try again later." });
+      return;
+    }
   }
 
   const { email, siteUrl } = req.body;
