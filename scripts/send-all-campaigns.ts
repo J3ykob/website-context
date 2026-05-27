@@ -40,7 +40,7 @@ function emailClean(domain: string, demoUrl: string, email: string): { subject: 
     html: `<p>Hi,</p>
 <p>I built an AI assistant that reads ${domain} and answers visitor questions - pricing, services, location, hours, anything on your site.</p>
 <p>It already knows your website. You can try it here:<br><a href="${demoUrl}">${demoUrl}</a></p>
-<p>If you like it, I can set it up for you in 5 minutes - just reply to this email or <a href="https://cal.com/whisp/15min">book a quick call</a>.</p>
+<p>I can have this running on your site by tomorrow - you can reply here or <a href="https://cal.com/whisp/15min">book a call</a> with me to discuss it in details.</p>
 ${SIG}
 ${UNSUB(email)}`,
   };
@@ -52,7 +52,7 @@ function emailGaps(domain: string, demoUrl: string, email: string): { subject: s
     html: `<p>Hi,</p>
 <p>I built an AI that reads your website and answers visitor questions. I tested it on ${domain} - most questions got good answers, but a few common ones left visitors without a clear next step.</p>
 <p>You can see exactly what it knows and what's missing:<br><a href="${demoUrl}">${demoUrl}</a></p>
-<p>Want to fix the gaps? Reply here or <a href="https://cal.com/whisp/15min">book a quick call</a> - I'll set it up for free.</p>
+<p>I can have this running on your site by tomorrow - you can reply here or <a href="https://cal.com/whisp/15min">book a call</a> with me to discuss it in details.</p>
 ${SIG}
 ${UNSUB(email)}`,
   };
@@ -64,7 +64,7 @@ function emailPersonal(domain: string, demoUrl: string, email: string): { subjec
     html: `<p>Hi,</p>
 <p>I'm Jakub, I study Computer Science in Poland and I'm helping businesses onboard AI to grow. I built an AI assistant that reads your website and can answer customer questions 24/7.</p>
 <p>I already made one for ${domain} - it knows your services, pricing, and everything on your site:<br><a href="${demoUrl}">${demoUrl}</a></p>
-<p>If it's useful, I'll set it up for you for free - just reply or <a href="https://cal.com/whisp/15min">book a 15-min call</a>.</p>
+<p>I can have this running on your site by tomorrow - you can reply here or <a href="https://cal.com/whisp/15min">book a call</a> with me to discuss it in details.</p>
 ${SIG}
 ${UNSUB(email)}`,
   };
