@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { scrapeTenant } from "../src/multi-tenant/scrape-pipeline.js";
-import { forceCleanupBrowser } from "../src/scraper/crawler.js";
+import { closeBrowser } from "../src/scraper/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_URL = process.env.BASE_URL || "https://whisp.so";
@@ -167,7 +167,7 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
   try {
     console.log(`  [scrape] Scraping ${domain} locally...`);
     const result = await scrapeTenant(tenantId, siteUrl, 20);
-    await forceCleanupBrowser();
+    await closeBrowser();
     if (result.chunks === 0) {
       console.log(`  [scrape] 0 chunks - site might be JS-rendered or empty`);
       return { success: false, chunks: 0 };
@@ -175,7 +175,7 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
     console.log(`  [scrape] Done: ${result.pages} pages, ${result.chunks} chunks`);
     return { success: true, chunks: result.chunks };
   } catch (err: any) {
-    await forceCleanupBrowser();
+    await closeBrowser();
     console.log(`  [scrape] Failed: ${err.message}`);
     return { success: false, chunks: 0 };
   }
