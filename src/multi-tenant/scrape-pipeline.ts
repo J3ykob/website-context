@@ -73,7 +73,10 @@ export async function scrapeTenant(
     const location = "Warszawa Poland"; // TODO: detect from site content
     console.log(`[scrape-pipeline] Scraping Google Maps for "${businessName} ${location}"...`);
 
-    const placesData = await scrapeGooglePlaces(businessName, location);
+    const placesData = await Promise.race([
+      scrapeGooglePlaces(businessName, location),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Google Maps timeout (30s)")), 30000)),
+    ]);
     if (placesData && placesData.name) {
       const placesChunks = placesToChunks(placesData, tenantId);
       context.chunks.push(...placesChunks);
