@@ -103,12 +103,28 @@ export class ScrapeWorker {
 
   recoverStuckJobs(): void {
     ensureMigrated();
-    const stuck = listTenants().filter((t) => t.status === "scraping");
+    const allTenants = listTenants();
+
+    // Reset any stuck "scraping" to pending
+    const stuck = allTenants.filter((t) => t.status === "scraping");
     for (const tenant of stuck) {
       updateTenant(tenant.id, { status: "pending" });
     }
     if (stuck.length > 0) {
-      console.log(`[worker] Reset ${stuck.length} stuck tenant(s) to pending (use /api/admin/rescrape to re-queue)`);
+      console.log(`[worker] Reset ${stuck.length} stuck tenant(s) to pending`);
+    }
+
+    // Auto-enqueue all pending tenants on startup
+    const pending = listTenants().filter((t) => t.status === "pending" && t.siteUrl);
+    if (pending.length > 0) {
+      console.log(`[worker] Auto-enqueuing ${pending.length} pending tenant(s)`);
+      for (const tenant of pending) {
+        const alreadyQueued = this.queue.some((j) => j.tenantId === tenant.id);
+        if (!alreadyQueued) {
+          this.queue.push({ tenantId: tenant.id, siteUrl: tenant.siteUrl, maxPages: 20, attempt: 1 });
+        }
+      }
+      this.kick();
     }
   }
 
@@ -122,27 +138,37 @@ export class ScrapeWorker {
     if (this.processing) return;
     this.processing = true;
 
-    while (this.queue.length > 0) {
-      const job = this.queue.shift()!;
-      await this.runJob(job);
-      if (this.queue.length > 0) {
-        console.log(`[worker] Cooldown ${COOLDOWN_MS / 1000}s before next job (${this.queue.length} remaining)`);
-        await new Promise((r) => setTimeout(r, COOLDOWN_MS));
+    try {
+      while (this.queue.length > 0) {
+        const job = this.queue.shift()!;
+        try {
+          await this.runJob(job);
+        } catch (err: any) {
+          console.error(`[worker] Unhandled error in job ${job.tenantId}: ${err.message}`);
+        }
+        if (this.queue.length > 0) {
+          console.log(`[worker] Cooldown ${COOLDOWN_MS / 1000}s before next job (${this.queue.length} remaining)`);
+          await new Promise((r) => setTimeout(r, COOLDOWN_MS));
+        }
       }
-    }
 
-    // After primary queue is drained, process retries
-    if (this.retryQueue.length > 0) {
-      console.log(`[worker] Processing ${this.retryQueue.length} retry job(s)`);
-      const retries = [...this.retryQueue];
-      this.retryQueue = [];
-      for (const job of retries) {
-        await new Promise((r) => setTimeout(r, COOLDOWN_MS));
-        await this.runJob(job);
+      // After primary queue is drained, process retries
+      if (this.retryQueue.length > 0) {
+        console.log(`[worker] Processing ${this.retryQueue.length} retry job(s)`);
+        const retries = [...this.retryQueue];
+        this.retryQueue = [];
+        for (const job of retries) {
+          await new Promise((r) => setTimeout(r, COOLDOWN_MS));
+          try {
+            await this.runJob(job);
+          } catch (err: any) {
+            console.error(`[worker] Unhandled error in retry ${job.tenantId}: ${err.message}`);
+          }
+        }
       }
+    } finally {
+      this.processing = false;
     }
-
-    this.processing = false;
 
     // Check if new jobs arrived while we were finishing
     if (this.queue.length > 0 || this.retryQueue.length > 0) {
