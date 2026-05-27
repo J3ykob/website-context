@@ -38,6 +38,50 @@ if (!RESEND_KEY && SEND) { console.error("RESEND_API_KEY required for sending");
 const EU_COUNTRIES = ["Poland", "United Kingdom", "Germany", "France", "Italy", "Spain", "Netherlands", "Sweden", "Portugal", "Belgium", "Austria", "Czech Republic", "Denmark", "Norway", "Ireland"];
 const PL_PATTERNS = ["poland", ".pl"];
 
+const ALL_KEYWORDS = [
+  "hotel", "boutique hotel", "bed and breakfast", "guesthouse",
+  "restaurant", "cafe", "bistro", "catering",
+  "law firm", "legal services", "solicitors", "notary",
+  "real estate", "property management", "letting agent", "estate agent",
+  "hair salon", "barbershop", "beauty salon", "nail salon",
+  "dental", "dentist", "orthodontist", "dental clinic",
+  "gym", "fitness center", "crossfit", "yoga studio", "pilates",
+  "auto repair", "car service", "car dealership", "garage", "body shop",
+  "school", "language school", "tutoring", "driving school",
+  "wedding venue", "event venue", "event planning",
+  "tattoo studio", "piercing studio",
+  "spa", "massage", "physiotherapy", "wellness center", "chiropractic",
+  "veterinary", "vet clinic", "animal hospital",
+  "accounting", "bookkeeper", "tax advisor",
+  "photographer", "photo studio", "videographer",
+  "online shop", "retail store", "boutique",
+  "contractor", "renovation", "construction company", "builder", "roofing",
+  "cleaning service", "janitorial",
+  "carpenter", "joinery", "woodworking", "furniture maker",
+  "plumber", "plumbing", "heating engineer", "hvac",
+  "electrician", "electrical contractor",
+  "landscaping", "garden design", "lawn care",
+  "moving company", "removals", "relocation",
+  "insurance broker", "insurance agency",
+  "travel agency", "tour operator",
+  "printing", "print shop", "signage",
+  "florist", "flower shop",
+  "bakery", "patisserie", "confectionery",
+  "pharmacy", "optician", "eye care",
+  "pet shop", "pet grooming", "dog training",
+  "tailor", "alterations", "dressmaker",
+  "jewelry", "jeweller", "watchmaker",
+  "music school", "recording studio",
+  "therapy", "counseling", "psychologist",
+  "coworking", "serviced office",
+];
+
+function getKeywordBatch(cycleIndex: number): string[] {
+  const chunkSize = 15;
+  const start = (cycleIndex * chunkSize) % ALL_KEYWORDS.length;
+  return ALL_KEYWORDS.slice(start, start + chunkSize);
+}
+
 // --- Persistent state ---
 const SENT_LOG_PATH = resolve(__dirname, "../data/pipeline-sent.json");
 const STATE_PATH = resolve(__dirname, "../data/outreach-state.json");
@@ -83,11 +127,15 @@ interface Prospect {
 }
 
 // --- Apollo ---
+let cycleCount = 0;
+
 async function searchApollo(page: number): Promise<{ people: any[]; total: number }> {
+  const keywords = getKeywordBatch(cycleCount);
   const resp = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Key": APOLLO_KEY },
     body: JSON.stringify({
+      q_organization_keyword_tags: keywords,
       organization_locations: EU_COUNTRIES,
       organization_num_employees_ranges: ["1,50"],
       person_seniorities: ["owner", "founder", "c_suite"],
@@ -279,7 +327,8 @@ async function cycle() {
 
   // Phase 2: Find new prospects (skip if quota hit)
   if (!quotaHit && !state.quotaHitAt) {
-    console.log(`\n--- Finding ${BATCH_SIZE} new prospects (Apollo page ${state.apolloPage}) ---`);
+    const kw = getKeywordBatch(cycleCount);
+    console.log(`\n--- Finding ${BATCH_SIZE} new prospects (page ${state.apolloPage}, keywords: ${kw.slice(0, 5).join(", ")}...) ---`);
     const seenDomains = new Set([...tenantMap.keys(), ...state.pendingProspects.map(p => p.domain)]);
     const seenOrgs = new Set<string>();
     let found = 0;
@@ -381,6 +430,7 @@ async function loop() {
       ? 3600000  // quota hit: check every hour for new day
       : PAUSE_SECONDS * 1000;
 
+    cycleCount++;
     console.log(`Sleeping ${Math.round(pauseMs / 1000)}s...`);
     await new Promise(r => setTimeout(r, pauseMs));
   }
