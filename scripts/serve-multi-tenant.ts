@@ -1687,9 +1687,12 @@ app.get("/api/admin/messages", async (req, res) => {
 // Admin update tenant (used by VPS outreach to mark tenants as active after remote scraping)
 app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
-  const tenant = getTenant(req.params.tenantId);
-  if (!tenant) return res.status(404).json({ error: "Not found" });
-  const { status, chunksCount, pagesCount } = req.body;
+  let tenant = getTenant(req.params.tenantId);
+  const { status, chunksCount, pagesCount, domain, siteUrl } = req.body;
+  if (!tenant && domain) {
+    tenant = createTenant(`info@${domain}`, siteUrl || `https://${domain}`);
+  }
+  if (!tenant) return res.status(404).json({ error: "Not found and no domain to create" });
   const updates: any = {};
   if (status) updates.status = status;
   if (chunksCount !== undefined) updates.chunksCount = chunksCount;

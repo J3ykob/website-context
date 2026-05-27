@@ -173,11 +173,11 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
       return { success: false, chunks: 0 };
     }
     console.log(`  [scrape] Done: ${result.pages} pages, ${result.chunks} chunks`);
-    // Update Render tenant status so demo page works
+    // Update Render tenant status so demo page works (creates if missing)
     await fetch(`${BASE_URL}/api/admin/update-tenant/${tenantId}?secret=${ADMIN_SECRET}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "active", chunksCount: result.chunks, pagesCount: result.pages }),
+      body: JSON.stringify({ status: "active", chunksCount: result.chunks, pagesCount: result.pages, domain, siteUrl }),
       signal: AbortSignal.timeout(5000),
     }).catch(() => {});
     return { success: true, chunks: result.chunks };
