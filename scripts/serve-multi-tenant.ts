@@ -1651,6 +1651,11 @@ app.get("/api/admin/unsubscribed", (req, res) => {
   res.json([...UNSUBSCRIBED]);
 });
 
+// Booking redirect - keeps all email links on whisp.so domain
+app.get("/book", (_, res) => {
+  res.redirect("https://cal.com/whisp/15min");
+});
+
 // Static assets
 app.use(express.static(resolve(__dirname, "../public")));
 

@@ -226,8 +226,8 @@ function buildEmail(p: Prospect, demoUrl: string, template: string): { subject: 
   const unsub = `<p style="font-size:11px;color:#999;"><a href="${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}" style="color:#999;">${p.lang === "pl" ? "Wypisz się" : "Unsubscribe"}</a></p>`;
   const sig = `<p>Jakub<br>whisp.so</p>`;
   const cta = p.lang === "pl"
-    ? `<p>Mogę to uruchomić na Twojej stronie do jutra - wystarczy odpowiedzieć na tego maila lub odpowiedzieć na tego maila.</p>`
-    : `<p>I can have this running on your site by tomorrow - you can reply here or reply to this email and I will take care of everything.</p>`;
+    ? `<p>Widget można ustawić na Twojej stronie w jeden dzień - wrzucam link do <a href="${BASE_URL}/book">kalendarza</a>.</p>`
+    : `<p>I can have this running on your site by tomorrow - you can reply here or <a href="${BASE_URL}/book">book a call</a> with me to discuss it in details.</p>`;
   const hi = p.lang === "pl" ? `Cześć ${p.firstName},` : `Hi ${p.firstName},`;
 
   const subjects: Record<string, Record<string, string>> = {
