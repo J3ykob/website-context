@@ -4,7 +4,7 @@
  */
 
 import { existsSync } from "fs";
-import { readFile } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
