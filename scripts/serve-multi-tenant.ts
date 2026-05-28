@@ -205,7 +205,17 @@ app.get("/api/widget-config/:tenantId", (req, res) => {
 
 // Tenant screenshot (for demo background)
 app.get("/api/screenshot/:tenantId", (req, res) => {
-  const screenshotPath = resolve(__dirname, `../data/${req.params.tenantId}/screenshot.png`);
+  let screenshotPath = resolve(__dirname, `../data/${req.params.tenantId}/screenshot.png`);
+  if (!existsSync(screenshotPath)) {
+    // Try underscore variant (VPS uploads with underscores, Render uses hyphens)
+    const altId = req.params.tenantId.replace(/-/g, "_");
+    screenshotPath = resolve(__dirname, `../data/${altId}/screenshot.png`);
+  }
+  if (!existsSync(screenshotPath)) {
+    // Try hyphen variant
+    const altId = req.params.tenantId.replace(/_(?=[^_]*_)/g, "-");
+    screenshotPath = resolve(__dirname, `../data/${altId}/screenshot.png`);
+  }
   if (existsSync(screenshotPath)) {
     res.sendFile(screenshotPath);
   } else {
