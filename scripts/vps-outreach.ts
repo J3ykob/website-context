@@ -182,7 +182,7 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
     }).catch(() => {});
     // Upload all tenant data to Render (screenshot, context, business info)
     const tenantDir = resolve(__dirname, `../data/${tenantId}`);
-    const filesToSync = ["screenshot.png", "context.json", "business-info.json", "auto-context-notes.json"];
+    const filesToSync = ["screenshot.png", "context-meta.json", "business-info.json", "auto-context-notes.json"];
     for (const file of filesToSync) {
       const filePath = resolve(tenantDir, file);
       if (existsSync(filePath)) {

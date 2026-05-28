@@ -1740,7 +1740,7 @@ app.post("/api/admin/screenshot/:tenantId", (req, res) => {
 // Admin upload file for tenant (from VPS scraper)
 app.post("/api/admin/upload-file/:tenantId/:filename", (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
-  const allowed = ["context.json", "business-info.json", "auto-context-notes.json"];
+  const allowed = ["context-meta.json", "business-info.json", "auto-context-notes.json"];
   if (!allowed.includes(req.params.filename)) return res.status(400).json({ error: "Not allowed" });
   const tenantDir = resolve(__dirname, `../data/${req.params.tenantId}`);
   if (!existsSync(tenantDir)) mkdirSync(tenantDir, { recursive: true });
