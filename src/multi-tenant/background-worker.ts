@@ -120,17 +120,10 @@ export class ScrapeWorker {
       console.log(`[worker] Reset ${stuck.length} stuck tenant(s) to pending`);
     }
 
-    // Auto-enqueue pending tenants on startup (skip "paused" ones)
+    // Scraping is handled by VPS now - don't auto-enqueue on startup
     const pending = listTenants().filter((t) => t.status === "pending" && t.siteUrl);
     if (pending.length > 0) {
-      console.log(`[worker] Auto-enqueuing ${pending.length} pending tenant(s)`);
-      for (const tenant of pending) {
-        const alreadyQueued = this.queue.some((j) => j.tenantId === tenant.id);
-        if (!alreadyQueued) {
-          this.queue.push({ tenantId: tenant.id, siteUrl: tenant.siteUrl, maxPages: 20, attempt: 1 });
-        }
-      }
-      this.kick();
+      console.log(`[worker] ${pending.length} pending tenant(s) - skipping auto-enqueue (VPS handles scraping)`);
     }
   }
 
