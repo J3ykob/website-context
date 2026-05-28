@@ -97,8 +97,8 @@ export async function getFunnel(): Promise<any> {
   const rows = await d1Query(`
     SELECT
       COUNT(DISTINCT p.email) as total_sent,
-      COUNT(DISTINCT CASE WHEN ee.resend_event = 'delivered' THEN p.email END) as delivered,
-      COUNT(DISTINCT CASE WHEN ee.resend_event = 'opened' THEN p.email END) as opened,
+      COUNT(DISTINCT CASE WHEN ee.resend_event IN ('delivered','email.delivered') THEN p.email END) as delivered,
+      COUNT(DISTINCT CASE WHEN ee.resend_event IN ('opened','email.opened') THEN p.email END) as opened,
       COUNT(DISTINCT CASE WHEN ev.event_type = 'demo_visit' THEN p.email END) as visited,
       COUNT(DISTINCT CASE WHEN ev.event_type = 'chat_start' THEN p.email END) as chatted,
       COUNT(DISTINCT CASE WHEN ev.event_type = 'unsubscribe' THEN p.email END) as unsubbed
