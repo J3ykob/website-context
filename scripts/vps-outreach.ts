@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import { scrapeTenant } from "../src/multi-tenant/scrape-pipeline.js";
 import { closeBrowser } from "../src/scraper/index.js";
 import { uploadTenantFiles } from "../src/storage/r2.js";
+import { recordProspect } from "../src/analytics/d1.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_URL = process.env.BASE_URL || "https://whisp.so";
@@ -163,7 +164,7 @@ async function enrichPerson(id: string): Promise<any> {
 }
 
 // --- Local scraping ---
-async function scrapeLocally(tenantId: string, domain: string): Promise<{ success: boolean; chunks: number }> {
+async function scrapeLocally(tenantId: string, domain: string): Promise<{ success: boolean; chunks: number; pages: number }> {
   const siteUrl = `https://${domain}`;
   try {
     console.log(`  [scrape] Scraping ${domain} locally...`);
@@ -171,7 +172,7 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
     await closeBrowser();
     if (result.chunks === 0) {
       console.log(`  [scrape] 0 chunks - site might be JS-rendered or empty`);
-      return { success: false, chunks: 0 };
+      return { success: false, chunks: 0, pages: 0 };
     }
     console.log(`  [scrape] Done: ${result.pages} pages, ${result.chunks} chunks`);
     // Upload to R2 + update Render tenant status
@@ -188,7 +189,7 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
         signal: AbortSignal.timeout(10000),
       });
     } catch (e: any) { console.log(`  [sync] Render update failed: ${e.message}`); }
-    return { success: true, chunks: result.chunks };
+    return { success: true, chunks: result.chunks, pages: result.pages };
   } catch (err: any) {
     await closeBrowser();
     console.log(`  [scrape] Failed: ${err.message}`);
@@ -300,7 +301,7 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
     await registerOnRender(domain);
 
     // Scrape locally on VPS
-    const { success, chunks } = await scrapeLocally(tenantId, domain);
+    const { success, chunks, pages: scrapePages } = await scrapeLocally(tenantId, domain);
     if (!success) { console.log(`  Skip - scrape failed`); continue; }
 
     // Send email
@@ -324,6 +325,14 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
       state.totalSent++;
       saveState();
       console.log(`  ✉️  [${template}] [${lang}] ${ep.first_name} <${email}> @ ${domain}`);
+      // Record to D1 analytics
+      recordProspect({
+        email, firstName: ep.first_name, domain, orgName: ep.organization.name,
+        title: ep.title, country, industry: ep.organization.industry || "unknown",
+        lang, template, tenantId, sentAt: new Date().toISOString(),
+        scrapePages, scrapeChunks: chunks,
+        screenshot: existsSync(resolve(__dirname, `../data/${tenantId}/screenshot.png`)),
+      }).catch(() => {});
       return "sent";
     } else if (result === "quota") {
       state.quotaHitAt = new Date().toISOString();

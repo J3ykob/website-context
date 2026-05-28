@@ -18,6 +18,7 @@ import { readFile, writeFile, appendFile } from "fs/promises";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
+import { recordEvent, getEmailForTenant, getTemplateStats, getCountryBreakdown, getIndustryBreakdown, getFunnel, getDailyStats, recordEmailEvent } from "../src/analytics/d1.js";
 import {
   logMessage,
   getConversations,
@@ -359,6 +360,9 @@ app.get("/demo/:tenantId", (req, res) => {
   if (DEMO_VISITS.length > DEMO_VISITS_MAX) DEMO_VISITS.shift();
   demoVisitsDirty = true;
   console.log(`[demo-visit] ${tenant.domain} from ${(req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim()}`);
+  getEmailForTenant(tenant.id).then(email => {
+    if (email) recordEvent(email, "demo_visit", { ip: (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim() });
+  }).catch(() => {});
 
   // Always use HTTPS in production (Render terminates TLS at the proxy)
   const host = req.get("host") || "website-context-dwoj.onrender.com";
@@ -991,6 +995,11 @@ app.post("/api/chat", async (req, res) => {
 
       const lastUserContent = messages[messages.length - 1]?.content || "";
       logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
+      if (messages.length <= 1) {
+        getEmailForTenant(tenantId).then(email => {
+          if (email) recordEvent(email, "chat_start", { sessionId: sessionKey, firstMessage: lastUserContent.slice(0, 100) });
+        }).catch(() => {});
+      }
       logMessage(tenantId, sessionKey, "assistant", response.message, {
         flowInvoked: response.flowSession?.flowId || null,
         navigatedTo: response.navigateTo || null,
@@ -1810,6 +1819,35 @@ app.post("/api/admin/upload-file/:tenantId/:filename", (req, res) => {
   });
 });
 
+// Resend webhook (delivery, open, click, bounce events)
+app.post("/api/webhooks/resend", async (req, res) => {
+  const { type, data } = req.body || {};
+  const email = data?.to?.[0] || data?.email;
+  if (email && type) {
+    recordEmailEvent(email, type, data?.email_id).catch(() => {});
+  }
+  res.status(200).send("OK");
+});
+
+// Analytics endpoints
+app.get("/api/admin/analytics/overview", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const [templates, funnel] = await Promise.all([getTemplateStats(), getFunnel()]);
+  res.json({ templates, funnel });
+});
+
+app.get("/api/admin/analytics/breakdown", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const [byCountry, byIndustry] = await Promise.all([getCountryBreakdown(), getIndustryBreakdown()]);
+  res.json({ byCountry, byIndustry });
+});
+
+app.get("/api/admin/analytics/daily", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const days = parseInt(req.query.days as string) || 7;
+  res.json(await getDailyStats(days));
+});
+
 // Admin tenants list
 app.get("/api/admin/tenants", (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
@@ -1853,6 +1891,7 @@ app.post("/unsubscribe", async (req, res) => {
     UNSUBSCRIBED.add(email);
     await writeFile(unsubPath, JSON.stringify([...UNSUBSCRIBED], null, 2));
     console.log(`[unsubscribe] ${email}`);
+    recordEvent(email, "unsubscribe").catch(() => {});
   }
   res.status(200).send("OK");
 });
