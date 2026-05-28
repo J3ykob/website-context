@@ -1722,7 +1722,7 @@ app.post("/api/admin/screenshot/:tenantId", (req, res) => {
   req.on("data", (chunk: Buffer) => chunks.push(chunk));
   req.on("end", () => {
     const buffer = Buffer.concat(chunks);
-    require("fs").writeFileSync(screenshotPath, buffer);
+    writeFile(screenshotPath, buffer).then(() => {}).catch(() => {});
     res.json({ ok: true, size: buffer.length });
   });
 });
