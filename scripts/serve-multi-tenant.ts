@@ -361,9 +361,10 @@ app.get("/demo/:tenantId", async (req, res) => {
   demoVisitsDirty = true;
   console.log(`[demo-visit] ${tenant.domain} from ${(req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim()}`);
   const visitIp = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
-  // Filter scanner IPs (AWS, Azure, Google Cloud)
+  // Filter scanner IPs (AWS, Azure, Google Cloud) and internal IPs
   const isScanner = /^(18\.|52\.|54\.|35\.|4\.|13\.|34\.|20\.|40\.|48\.|72\.14[45]|85\.210|135\.225|155\.117|164\.132|172\.186|217\.182)/.test(visitIp);
-  if (!isScanner) {
+  const isInternal = visitIp === "79.184.118.71" || visitIp === "176.9.1.133" || visitIp.startsWith("127.");
+  if (!isScanner && !isInternal) {
     getEmailForTenant(tenant.id).then(email => {
       if (email) recordEvent(email, "demo_visit", { ip: visitIp });
     }).catch(() => {});
@@ -1017,9 +1018,13 @@ app.post("/api/chat", async (req, res) => {
 
       const lastUserContent = messages[messages.length - 1]?.content || "";
       logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
-      // Log both user and bot to D1 for cross-tenant analytics
-      logChatMessage(tenantId, sessionKey, "user", lastUserContent, tenant.domain).catch(() => {});
-      logChatMessage(tenantId, sessionKey, "assistant", response.message, tenant.domain).catch(() => {});
+      // Log both user and bot to D1 for cross-tenant analytics (skip internal IPs)
+      const chatIpRaw = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+      const isSelfChat = chatIpRaw === "79.184.118.71" || chatIpRaw === "176.9.1.133" || chatIpRaw.startsWith("127.");
+      if (!isSelfChat) {
+        logChatMessage(tenantId, sessionKey, "user", lastUserContent, tenant.domain).catch(() => {});
+        logChatMessage(tenantId, sessionKey, "assistant", response.message, tenant.domain).catch(() => {});
+      }
       if (messages.length <= 1) {
         getEmailForTenant(tenantId).then(email => {
           if (email) recordEvent(email, "chat_start", { sessionId: sessionKey, firstMessage: lastUserContent.slice(0, 100) });
