@@ -22,10 +22,7 @@ services:
       - key: BGE_API_KEY
         sync: false
       - key: QDRANT_HOST
-        fromService:
-          name: qdrant
-          type: pserv
-          property: host
+        value: "152.53.243.28"
       - key: QDRANT_PORT
         value: "6333"
       - key: PORT
