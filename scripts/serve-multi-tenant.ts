@@ -981,7 +981,13 @@ app.post("/api/chat", async (req, res) => {
       return;
     }
 
-    const tenant = getTenant(tenantId);
+    let tenant = getTenant(tenantId);
+    // Fallback: try normalized ID (underscore/hyphen mismatch between VPS and Render)
+    if (!tenant) {
+      const allTenants = listTenants();
+      const normalized = tenantId.replace(/[-_]/g, "").toLowerCase();
+      tenant = allTenants.find((t: any) => t.id.replace(/[-_]/g, "").toLowerCase() === normalized) || null;
+    }
     if (!tenant) {
       res.status(404).json({ error: "Tenant not found" });
       return;
