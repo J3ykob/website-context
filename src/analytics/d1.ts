@@ -140,6 +140,49 @@ export async function getEmailForTenant(tenantId: string): Promise<string | null
   return tenantEmailCache.get(tenantId) || null;
 }
 
+// --- Conversation logging ---
+
+export async function logChatMessage(tenantId: string, sessionId: string, role: string, content: string, domain?: string): Promise<void> {
+  try {
+    await d1Query(
+      `INSERT INTO chat_messages (tenant_id, session_id, role, content, domain) VALUES (?, ?, ?, ?, ?)`,
+      [tenantId, sessionId, role, content.slice(0, 5000), domain || ""]
+    );
+  } catch (e: any) { console.error(`[d1] logChatMessage failed: ${e.message}`); }
+}
+
+export async function getRecentConversations(limit: number = 20): Promise<any[]> {
+  return d1Query(`
+    SELECT tenant_id, session_id, domain, role, content, created_at
+    FROM chat_messages
+    ORDER BY created_at DESC
+    LIMIT ?
+  `, [limit * 2]) || [];
+}
+
+export async function getConversation(tenantId: string, sessionId: string): Promise<any[]> {
+  return d1Query(`
+    SELECT role, content, created_at
+    FROM chat_messages
+    WHERE tenant_id = ? AND session_id = ?
+    ORDER BY created_at ASC
+  `, [tenantId, sessionId]) || [];
+}
+
+export async function getConversationSummary(limit: number = 50): Promise<any[]> {
+  return d1Query(`
+    SELECT tenant_id, domain, session_id,
+      MIN(created_at) as started_at,
+      COUNT(*) as message_count,
+      SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) as user_messages,
+      GROUP_CONCAT(CASE WHEN role = 'user' THEN content ELSE NULL END, ' | ') as user_texts
+    FROM chat_messages
+    GROUP BY tenant_id, session_id
+    ORDER BY started_at DESC
+    LIMIT ?
+  `, [limit]) || [];
+}
+
 // --- Website experiments ---
 
 export interface Experiment {

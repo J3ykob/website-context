@@ -18,7 +18,7 @@ import { readFile, writeFile, appendFile } from "fs/promises";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
-import { recordEvent, getEmailForTenant, getTemplateStats, getCountryBreakdown, getIndustryBreakdown, getFunnel, getDailyStats, recordEmailEvent, assignVariant, recordExperimentEvent, getExperimentResults } from "../src/analytics/d1.js";
+import { recordEvent, getEmailForTenant, getTemplateStats, getCountryBreakdown, getIndustryBreakdown, getFunnel, getDailyStats, recordEmailEvent, assignVariant, recordExperimentEvent, getExperimentResults, logChatMessage, getConversationSummary, getConversation } from "../src/analytics/d1.js";
 import {
   logMessage,
   getConversations,
@@ -360,9 +360,14 @@ app.get("/demo/:tenantId", async (req, res) => {
   if (DEMO_VISITS.length > DEMO_VISITS_MAX) DEMO_VISITS.shift();
   demoVisitsDirty = true;
   console.log(`[demo-visit] ${tenant.domain} from ${(req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim()}`);
-  getEmailForTenant(tenant.id).then(email => {
-    if (email) recordEvent(email, "demo_visit", { ip: (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim() });
-  }).catch(() => {});
+  const visitIp = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+  // Filter scanner IPs (AWS, Azure, Google Cloud)
+  const isScanner = /^(18\.|52\.|54\.|35\.|4\.|13\.|34\.|20\.|40\.|48\.|72\.14[45]|85\.210|135\.225|155\.117|164\.132|172\.186|217\.182)/.test(visitIp);
+  if (!isScanner) {
+    getEmailForTenant(tenant.id).then(email => {
+      if (email) recordEvent(email, "demo_visit", { ip: visitIp });
+    }).catch(() => {});
+  }
 
   // Always use HTTPS in production (Render terminates TLS at the proxy)
   const host = req.get("host") || "website-context-dwoj.onrender.com";
@@ -1012,6 +1017,9 @@ app.post("/api/chat", async (req, res) => {
 
       const lastUserContent = messages[messages.length - 1]?.content || "";
       logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
+      // Log both user and bot to D1 for cross-tenant analytics
+      logChatMessage(tenantId, sessionKey, "user", lastUserContent, tenant.domain).catch(() => {});
+      logChatMessage(tenantId, sessionKey, "assistant", response.message, tenant.domain).catch(() => {});
       if (messages.length <= 1) {
         getEmailForTenant(tenantId).then(email => {
           if (email) recordEvent(email, "chat_start", { sessionId: sessionKey, firstMessage: lastUserContent.slice(0, 100) });
@@ -1867,6 +1875,20 @@ app.get("/api/admin/analytics/daily", async (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
   const days = parseInt(req.query.days as string) || 7;
   res.json(await getDailyStats(days));
+});
+
+// Conversation analytics
+app.get("/api/admin/analytics/conversations", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const limit = Math.min(parseInt(req.query.n as string) || 50, 200);
+  const summary = await getConversationSummary(limit);
+  res.json(summary);
+});
+
+app.get("/api/admin/analytics/conversation/:tenantId/:sessionId", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const messages = await getConversation(req.params.tenantId, req.params.sessionId);
+  res.json(messages);
 });
 
 // Experiment results
