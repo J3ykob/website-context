@@ -1711,7 +1711,13 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
   let tenant = getTenant(req.params.tenantId);
   const { status, chunksCount, pagesCount, domain, siteUrl } = req.body;
   if (!tenant && domain) {
-    tenant = createTenant(`info@${domain}`, siteUrl || `https://${domain}`);
+    tenant = getTenantByDomain(domain) || null;
+    if (!tenant) {
+      try { tenant = createTenant(`info@${domain}`, siteUrl || `https://${domain}`); } catch {}
+    }
+  }
+  if (!tenant && domain) {
+    tenant = getTenantByDomain(domain) || null;
   }
   if (!tenant) return res.status(404).json({ error: "Not found and no domain to create" });
   const updates: any = {};
