@@ -421,6 +421,29 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 @keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(6px)} }\
 .demo-dismiss { font-size:12px; color:#64748b; cursor:pointer; border:none; background:none; font-family:inherit; }\
 .demo-dismiss:hover { color:#f1f5f9; }\
+.scroll-modal {\
+  display:none; position:fixed; inset:0; z-index:100000;\
+  background:rgba(0,0,0,0.7); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);\
+  align-items:center; justify-content:center;\
+}\
+.scroll-modal.show { display:flex; }\
+.scroll-modal-box {\
+  background:#111827; border:1px solid rgba(255,255,255,0.08); border-radius:20px;\
+  padding:36px 32px; max-width:420px; width:calc(100% - 40px); text-align:center;\
+  animation:fadeUp 0.3s ease both;\
+}\
+.scroll-modal-box h3 { font-family:"DM Serif Display",serif; font-size:22px; color:#f1f5f9; margin-bottom:10px; }\
+.scroll-modal-box p { font-size:14px; color:#94a3b8; line-height:1.6; margin-bottom:24px; }\
+.scroll-modal-cta {\
+  display:inline-block; background:#3b82f6; color:#fff; font-size:14px; font-weight:700;\
+  padding:12px 28px; border-radius:12px; text-decoration:none; transition:all 0.2s;\
+}\
+.scroll-modal-cta:hover { background:#2563eb; transform:translateY(-1px); }\
+.scroll-modal-close {\
+  display:block; margin-top:14px; font-size:12px; color:#64748b; cursor:pointer;\
+  border:none; background:none; font-family:inherit;\
+}\
+.scroll-modal-close:hover { color:#f1f5f9; }\
 @media(max-width:600px) { .demo-cta { display:none; } }\
 </style>\
 </head>\
@@ -456,7 +479,30 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
     <button class="demo-dismiss" onclick="document.getElementById(\'demo-info\').style.display=\'none\'">Dismiss</button>\
   </div>\
 </div>\
+<div class="scroll-modal" id="scroll-modal">\
+  <div class="scroll-modal-box">\
+    <h3>This is a preview</h3>\
+    <p>You are viewing a screenshot of <strong>' + brand + '</strong> with an AI chat widget. To get this widget on your actual website, sign up below - it takes one line of code.</p>\
+    <a class="scroll-modal-cta" href="/">Get Whisp for your website</a>\
+    <button class="scroll-modal-close" onclick="document.getElementById(\'scroll-modal\').classList.remove(\'show\')">Close and keep chatting</button>\
+  </div>\
+</div>\
 <script>\
+(function(){\
+  var shown=false;\
+  window.addEventListener("wheel",function(e){\
+    if(!shown && Math.abs(e.deltaY)>30){\
+      shown=true;\
+      document.getElementById("scroll-modal").classList.add("show");\
+    }\
+  },{passive:true});\
+  window.addEventListener("touchmove",function(){\
+    if(!shown){\
+      shown=true;\
+      document.getElementById("scroll-modal").classList.add("show");\
+    }\
+  },{passive:true});\
+})();\
 window.addEventListener("load", function(){\
   var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark","startExpanded":true,"demoMode":true};\
   window.__wctx=c;\
