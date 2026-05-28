@@ -930,12 +930,8 @@ app.post("/api/tenants", (req, res) => {
     const setupToken = randomBytes(32).toString("hex");
     updateTenant(tenant.id, { apiKey, setupToken });
 
-    // Enqueue scrape job (priority if admin)
-    if (isAdmin && req.query.priority === "1") {
-      worker.enqueuePriority(tenant.id, siteUrl);
-    } else {
-      worker.enqueue(tenant.id, siteUrl);
-    }
+    // Scraping is handled by VPS - don't enqueue on Render
+    // worker.enqueue(tenant.id, siteUrl);
 
     // Send welcome email with setup link
     const protocol = req.protocol || "http";
@@ -1092,13 +1088,8 @@ app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   const maxPages = parseInt(req.query.maxPages as string) || 20;
   const siteUrl = (req.query.siteUrl as string) || tenant.siteUrl || `https://${tenant.domain}`;
   if (!tenant.siteUrl && siteUrl) updateTenant(tenant.id, { siteUrl });
-  const priority = req.query.priority === "1" || req.query.secret === ADMIN_SECRET;
-  if (priority) {
-    worker.enqueuePriority(tenant.id, siteUrl, maxPages);
-  } else {
-    worker.enqueue(tenant.id, siteUrl, maxPages);
-  }
-  updateTenant(tenant.id, { status: "scraping" });
+  // Scraping handled by VPS - just update status
+  updateTenant(tenant.id, { status: "active" });
   tenantManager.evictTenant(tenant.id);
   res.json({ ok: true, status: "scraping", maxPages });
 });
