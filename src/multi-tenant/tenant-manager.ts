@@ -53,17 +53,23 @@ export class TenantManager {
       metaRaw = await readFile(metaPath, "utf-8");
     } else {
       // Try R2
-      const { downloadTenantFile } = await import("../storage/r2.js");
-      const r2Data = await downloadTenantFile(tenantId, "context-meta.json");
-      if (!r2Data) {
-        throw new Error(`No context metadata found for tenant ${tenantId}. Has the site been scraped?`);
+      try {
+        const { downloadTenantFile } = await import("../storage/r2.js");
+        console.log(`[tenant-manager] Fetching context-meta from R2 for ${tenantId}`);
+        const r2Data = await downloadTenantFile(tenantId, "context-meta.json");
+        if (!r2Data) {
+          throw new Error(`No context metadata found for tenant ${tenantId} in R2 or disk.`);
+        }
+        metaRaw = r2Data.toString("utf-8");
+        // Cache locally for next time
+        const { mkdirSync } = await import("fs");
+        const dir = resolve(DATA_ROOT, tenantId);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        await writeFile(metaPath, metaRaw);
+        console.log(`[tenant-manager] Cached ${tenantId} context-meta from R2`);
+      } catch (r2err: any) {
+        throw new Error(`Failed to load context for ${tenantId}: ${r2err.message}`);
       }
-      metaRaw = r2Data.toString("utf-8");
-      // Cache locally for next time
-      const { mkdirSync } = await import("fs");
-      const dir = resolve(DATA_ROOT, tenantId);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      await writeFile(metaPath, metaRaw);
     }
     const meta = JSON.parse(metaRaw) as {
       tenantId: string;
