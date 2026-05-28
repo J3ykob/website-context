@@ -203,24 +203,28 @@ app.get("/api/widget-config/:tenantId", (req, res) => {
   });
 });
 
-// Tenant screenshot (for demo background)
-app.get("/api/screenshot/:tenantId", (req, res) => {
-  let screenshotPath = resolve(__dirname, `../data/${req.params.tenantId}/screenshot.png`);
-  if (!existsSync(screenshotPath)) {
-    // Try underscore variant (VPS uploads with underscores, Render uses hyphens)
-    const altId = req.params.tenantId.replace(/-/g, "_");
-    screenshotPath = resolve(__dirname, `../data/${altId}/screenshot.png`);
+// Tenant screenshot (for demo background) - local disk, then R2
+app.get("/api/screenshot/:tenantId", async (req, res) => {
+  const tid = req.params.tenantId;
+  // Try local disk first
+  for (const id of [tid, tid.replace(/-/g, "_"), tid.replace(/_/g, "-")]) {
+    const p = resolve(__dirname, `../data/${id}/screenshot.png`);
+    if (existsSync(p)) { res.sendFile(p); return; }
   }
-  if (!existsSync(screenshotPath)) {
-    // Try hyphen variant
-    const altId = req.params.tenantId.replace(/_(?=[^_]*_)/g, "-");
-    screenshotPath = resolve(__dirname, `../data/${altId}/screenshot.png`);
-  }
-  if (existsSync(screenshotPath)) {
-    res.sendFile(screenshotPath);
-  } else {
-    res.status(404).json({ error: "No screenshot available" });
-  }
+  // Try R2
+  try {
+    const { downloadTenantFile } = await import("../src/storage/r2.js");
+    const data = await downloadTenantFile(tid, "screenshot.png") || await downloadTenantFile(tid.replace(/-/g, "_"), "screenshot.png");
+    if (data) {
+      // Cache locally
+      const dir = resolve(__dirname, `../data/${tid}`);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      await writeFile(resolve(dir, "screenshot.png"), data);
+      res.type("image/png").send(data);
+      return;
+    }
+  } catch {}
+  res.status(404).json({ error: "No screenshot available" });
 });
 
 // Personalized landing page — showcases the AI assistant for a prospect

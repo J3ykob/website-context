@@ -46,13 +46,25 @@ export class TenantManager {
       return cached.chat;
     }
 
-    // Load context metadata from disk
+    // Load context metadata from disk or R2
     const metaPath = resolve(DATA_ROOT, tenantId, "context-meta.json");
-    if (!existsSync(metaPath)) {
-      throw new Error(`No context metadata found for tenant ${tenantId}. Has the site been scraped?`);
+    let metaRaw: string;
+    if (existsSync(metaPath)) {
+      metaRaw = await readFile(metaPath, "utf-8");
+    } else {
+      // Try R2
+      const { downloadTenantFile } = await import("../storage/r2.js");
+      const r2Data = await downloadTenantFile(tenantId, "context-meta.json");
+      if (!r2Data) {
+        throw new Error(`No context metadata found for tenant ${tenantId}. Has the site been scraped?`);
+      }
+      metaRaw = r2Data.toString("utf-8");
+      // Cache locally for next time
+      const { mkdirSync } = await import("fs");
+      const dir = resolve(DATA_ROOT, tenantId);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      await writeFile(metaPath, metaRaw);
     }
-
-    const metaRaw = await readFile(metaPath, "utf-8");
     const meta = JSON.parse(metaRaw) as {
       tenantId: string;
       siteUrl: string;
@@ -113,8 +125,13 @@ export class TenantManager {
         allNotes.push(...JSON.parse(await readFile(notesPath, "utf-8")));
       } catch {}
     }
-    // Load auto-extracted business info notes
-    const autoNotesPath = resolve(DATA_ROOT, tenantId, "auto-context-notes.json");
+    // Load auto-extracted business info notes (disk or R2)
+    let autoNotesPath = resolve(DATA_ROOT, tenantId, "auto-context-notes.json");
+    if (!existsSync(autoNotesPath)) {
+      const { downloadTenantFile } = await import("../storage/r2.js");
+      const r2Notes = await downloadTenantFile(tenantId, "auto-context-notes.json");
+      if (r2Notes) await writeFile(autoNotesPath, r2Notes);
+    }
     if (existsSync(autoNotesPath)) {
       try {
         allNotes.push(...JSON.parse(await readFile(autoNotesPath, "utf-8")));

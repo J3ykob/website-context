@@ -15,6 +15,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { scrapeTenant } from "../src/multi-tenant/scrape-pipeline.js";
 import { closeBrowser } from "../src/scraper/index.js";
+import { uploadTenantFiles } from "../src/storage/r2.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_URL = process.env.BASE_URL || "https://whisp.so";
@@ -173,43 +174,20 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
       return { success: false, chunks: 0 };
     }
     console.log(`  [scrape] Done: ${result.pages} pages, ${result.chunks} chunks`);
-    // Sync to Render so demo pages work
-    console.log(`  [sync] Syncing ${domain} to Render...`);
-    let syncOk = 0;
-    let syncFail = 0;
+    // Upload to R2 + update Render tenant status
+    console.log(`  [r2] Uploading to R2...`);
+    const uploaded = await uploadTenantFiles(tenantId, resolve(__dirname, "../data"));
+    console.log(`  [r2] ${uploaded} files uploaded`);
 
-    // Update tenant status
+    // Update tenant status on Render (lightweight - no file uploads)
     try {
-      const r = await fetch(`${BASE_URL}/api/admin/update-tenant/${tenantId}?secret=${ADMIN_SECRET}`, {
+      await fetch(`${BASE_URL}/api/admin/update-tenant/${tenantId}?secret=${ADMIN_SECRET}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "active", chunksCount: result.chunks, pagesCount: result.pages, domain, siteUrl }),
         signal: AbortSignal.timeout(10000),
       });
-      if (r.ok) syncOk++; else { syncFail++; console.log(`  [sync] update-tenant failed: ${r.status}`); }
-    } catch (e: any) { syncFail++; console.log(`  [sync] update-tenant error: ${e.message}`); }
-
-    // Upload files
-    const tenantDir = resolve(__dirname, `../data/${tenantId}`);
-    const filesToSync = ["context-meta.json", "business-info.json", "auto-context-notes.json", "screenshot.png"];
-    for (const file of filesToSync) {
-      const filePath = resolve(tenantDir, file);
-      if (!existsSync(filePath)) continue;
-      try {
-        const data = readFileSync(filePath);
-        const endpoint = file === "screenshot.png"
-          ? `${BASE_URL}/api/admin/screenshot/${tenantId}?secret=${ADMIN_SECRET}`
-          : `${BASE_URL}/api/admin/upload-file/${tenantId}/${file}?secret=${ADMIN_SECRET}`;
-        const r = await fetch(endpoint, {
-          method: "POST",
-          body: data,
-          headers: file.endsWith(".json") ? { "Content-Type": "application/json" } : {},
-          signal: AbortSignal.timeout(15000),
-        });
-        if (r.ok) syncOk++; else { syncFail++; console.log(`  [sync] ${file} failed: ${r.status}`); }
-      } catch (e: any) { syncFail++; console.log(`  [sync] ${file} error: ${e.message}`); }
-    }
-    console.log(`  [sync] Done: ${syncOk} ok, ${syncFail} failed`);
+    } catch (e: any) { console.log(`  [sync] Render update failed: ${e.message}`); }
     return { success: true, chunks: result.chunks };
   } catch (err: any) {
     await closeBrowser();
