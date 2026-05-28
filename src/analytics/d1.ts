@@ -139,3 +139,73 @@ export async function getEmailForTenant(tenantId: string): Promise<string | null
   }
   return tenantEmailCache.get(tenantId) || null;
 }
+
+// --- Website experiments ---
+
+export interface Experiment {
+  id: string;
+  name: string;
+  variants: string[];
+  active: boolean;
+}
+
+let experimentsCache: Experiment[] = [];
+let experimentsCacheAge = 0;
+
+export async function getActiveExperiments(): Promise<Experiment[]> {
+  if (Date.now() - experimentsCacheAge > 60000) {
+    const rows = await d1Query(`SELECT * FROM experiments WHERE active = 1`);
+    experimentsCache = (rows || []).map((r: any) => ({
+      id: r.id, name: r.name, variants: r.variants.split(","), active: !!r.active,
+    }));
+    experimentsCacheAge = Date.now();
+  }
+  return experimentsCache;
+}
+
+export async function assignVariant(experimentId: string, visitorId: string, tenantId?: string): Promise<string> {
+  // Check existing assignment
+  const existing = await d1Query(
+    `SELECT variant FROM experiment_assignments WHERE experiment_id = ? AND visitor_id = ?`,
+    [experimentId, visitorId]
+  );
+  if (existing?.length > 0) return existing[0].variant;
+
+  // Get experiment variants
+  const experiments = await getActiveExperiments();
+  const exp = experiments.find(e => e.id === experimentId);
+  if (!exp) return "control";
+
+  // Random assignment
+  const variant = exp.variants[Math.floor(Math.random() * exp.variants.length)];
+
+  await d1Query(
+    `INSERT INTO experiment_assignments (experiment_id, visitor_id, variant, tenant_id) VALUES (?, ?, ?, ?)`,
+    [experimentId, visitorId, variant, tenantId || ""]
+  ).catch(() => {});
+
+  return variant;
+}
+
+export async function recordExperimentEvent(experimentId: string, visitorId: string, variant: string, eventType: string, metadata?: object): Promise<void> {
+  try {
+    await d1Query(
+      `INSERT INTO experiment_events (experiment_id, visitor_id, variant, event_type, metadata_json) VALUES (?, ?, ?, ?, ?)`,
+      [experimentId, visitorId, variant, eventType, JSON.stringify(metadata || {})]
+    );
+  } catch (e: any) { console.error(`[d1] experiment event failed: ${e.message}`); }
+}
+
+export async function getExperimentResults(experimentId: string): Promise<any[]> {
+  return d1Query(`
+    SELECT a.variant,
+      COUNT(DISTINCT a.visitor_id) as visitors,
+      COUNT(DISTINCT CASE WHEN e.event_type = 'chat_start' THEN a.visitor_id END) as chats,
+      COUNT(DISTINCT CASE WHEN e.event_type = 'chat_message' THEN a.visitor_id END) as messaged,
+      COUNT(DISTINCT CASE WHEN e.event_type = 'cta_click' THEN a.visitor_id END) as cta_clicks
+    FROM experiment_assignments a
+    LEFT JOIN experiment_events e ON a.experiment_id = e.experiment_id AND a.visitor_id = e.visitor_id
+    WHERE a.experiment_id = ?
+    GROUP BY a.variant
+  `, [experimentId]);
+}

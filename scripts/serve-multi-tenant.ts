@@ -18,7 +18,7 @@ import { readFile, writeFile, appendFile } from "fs/promises";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
-import { recordEvent, getEmailForTenant, getTemplateStats, getCountryBreakdown, getIndustryBreakdown, getFunnel, getDailyStats, recordEmailEvent } from "../src/analytics/d1.js";
+import { recordEvent, getEmailForTenant, getTemplateStats, getCountryBreakdown, getIndustryBreakdown, getFunnel, getDailyStats, recordEmailEvent, assignVariant, recordExperimentEvent, getExperimentResults } from "../src/analytics/d1.js";
 import {
   logMessage,
   getConversations,
@@ -330,7 +330,7 @@ h1 em { color:#3b82f6; font-style:italic; }
 });
 
 // Demo page — standalone chat for a tenant (no embed needed)
-app.get("/demo/:tenantId", (req, res) => {
+app.get("/demo/:tenantId", async (req, res) => {
   let tenant = getTenant(req.params.tenantId);
   // Fallback: if not found, try all tenants matching this domain pattern
   // Handles underscore/hyphen mismatch from old VPS outreach
@@ -368,6 +368,15 @@ app.get("/demo/:tenantId", (req, res) => {
   const host = req.get("host") || "website-context-dwoj.onrender.com";
   const baseUrl = process.env.BASE_URL || "https://" + host;
   const brand = tenant.brandName || tenant.domain;
+
+  // A/B experiment: widget start state
+  const visitorIp = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+  const visitorId = `${visitorIp}_${tenant.id}`;
+  let startExpanded = true;
+  try {
+    const variant = await assignVariant("widget-start-state", visitorId, tenant.id);
+    startExpanded = variant === "expanded";
+  } catch {}
 
   res.send('<!DOCTYPE html>\
 <html lang="en">\
@@ -507,8 +516,10 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
     }\
   },{passive:true});\
 })();\
+window.__experimentVariant="' + (startExpanded ? 'expanded' : 'collapsed') + '";\
+window.__visitorId="' + visitorId.replace(/"/g, '') + '";\
 window.addEventListener("load", function(){\
-  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark","startExpanded":true,"demoMode":true};\
+  var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark","startExpanded":' + startExpanded + ',"demoMode":true,"experimentVariant":"' + (startExpanded ? 'expanded' : 'collapsed') + '"};\
   window.__wctx=c;\
   var s=document.createElement("script");\
   s.src=c.apiHost+"/widget.js";\
@@ -999,6 +1010,10 @@ app.post("/api/chat", async (req, res) => {
         getEmailForTenant(tenantId).then(email => {
           if (email) recordEvent(email, "chat_start", { sessionId: sessionKey, firstMessage: lastUserContent.slice(0, 100) });
         }).catch(() => {});
+        // Record experiment event
+        const chatIp = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+        const chatVisitorId = `${chatIp}_${tenantId}`;
+        recordExperimentEvent("widget-start-state", chatVisitorId, "", "chat_start", { tenantId }).catch(() => {});
       }
       logMessage(tenantId, sessionKey, "assistant", response.message, {
         flowInvoked: response.flowSession?.flowId || null,
@@ -1846,6 +1861,14 @@ app.get("/api/admin/analytics/daily", async (req, res) => {
   if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
   const days = parseInt(req.query.days as string) || 7;
   res.json(await getDailyStats(days));
+});
+
+// Experiment results
+app.get("/api/admin/analytics/experiments", async (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const expId = (req.query.id as string) || "widget-start-state";
+  const results = await getExperimentResults(expId);
+  res.json({ experiment: expId, results });
 });
 
 // Admin tenants list
