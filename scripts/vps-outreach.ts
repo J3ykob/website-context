@@ -216,42 +216,101 @@ async function registerOnRender(domain: string): Promise<string | null> {
   return domain.replace(/[^a-zA-Z0-9]/g, "_");
 }
 
-// --- Email ---
-const tpls = ["clean", "gaps", "personal"];
+// --- Email templates ---
+// All new strategies: curiosity, problem, niche, pricing, warm
+const NEW_TEMPLATES = [
+  "curiosity",      // Quick question about {domain}
+  "problem",        // Your visitors have questions
+  "niche_hotel",    // Guests asking at 2am
+  "niche_restaurant", // Visitors want to book
+  "niche_law",      // Potential clients leave without calling
+  "pricing",        // $14.99 one-time
+  "warm",           // Love what you're doing
+];
 
-function buildEmail(p: Prospect, demoUrl: string, template: string): { subject: string; html: string } {
-  const unsub = `<p style="font-size:11px;color:#999;"><a href="${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}" style="color:#999;">${p.lang === "pl" ? "Wypisz się" : "Unsubscribe"}</a></p>`;
-  const sig = `<p>Jakub<br>whisp.so</p>`;
-  const cta = p.lang === "pl"
-    ? `<p>Widget można ustawić na Twojej stronie w jeden dzień - wrzucam link do <a href="${BASE_URL}/book">kalendarza</a>.</p>`
-    : `<p>I can have this running on your site by tomorrow - you can reply here or <a href="${BASE_URL}/book">book a call</a> with me to discuss it in details.</p>`;
-  const hi = p.lang === "pl" ? `Cześć ${p.firstName},` : `Hi ${p.firstName},`;
+const NICHE_MAP: Record<string, string> = {
+  hotel: "niche_hotel", hospitality: "niche_hotel", "bed and breakfast": "niche_hotel",
+  restaurant: "niche_restaurant", cafe: "niche_restaurant", dining: "niche_restaurant", catering: "niche_restaurant",
+  "law firm": "niche_law", "legal services": "niche_law", solicitors: "niche_law", law: "niche_law",
+};
 
-  const subjects: Record<string, Record<string, string>> = {
-    clean: { pl: `Zbudowałem darmowego asystenta AI dla ${p.domain}`, en: `I built a free AI assistant for ${p.domain}` },
-    gaps: { pl: `Przetestowałem ${p.domain} z perspektywy klienta`, en: `I tested ${p.domain} from a customer's perspective` },
-    personal: { pl: `Mogę pomóc ${p.domain} z AI?`, en: `Can I help ${p.domain} with AI?` },
-  };
+function pickTemplate(industry: string): string {
+  // Check if there's a niche template for this industry
+  const niche = NICHE_MAP[industry?.toLowerCase() || ""];
+  if (niche && Math.random() < 0.3) return niche; // 30% chance of niche template
 
-  const bodies: Record<string, Record<string, string>> = {
-    clean: {
-      pl: `<p>${hi}</p><p>Zbudowałem asystenta AI, który czyta ${p.domain} i odpowiada na pytania odwiedzających - usługi, cennik, lokalizacja, godziny otwarcia, wszystko co jest na stronie.</p><p>Już zna Twoją stronę. Możesz go wypróbować tutaj:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-      en: `<p>${hi}</p><p>I built an AI assistant that reads ${p.domain} and answers visitor questions - pricing, services, location, hours, anything on your site.</p><p>It already knows your website. You can try it here:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-    },
-    gaps: {
-      pl: `<p>${hi}</p><p>Zbudowałem AI, który czyta Twoją stronę i odpowiada na pytania odwiedzających. Przetestowałem go na ${p.domain} - większość odpowiedzi była dobra, ale kilka typowych pytań zostawiło odwiedzających bez jasnej odpowiedzi.</p><p>Zobacz co wie i czego mu brakuje:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-      en: `<p>${hi}</p><p>I built an AI that reads your website and answers visitor questions. I tested it on ${p.domain} - most questions got good answers, but a few common ones left visitors without a clear next step.</p><p>You can see exactly what it knows and what's missing:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-    },
-    personal: {
-      pl: `<p>${hi}</p><p>Jestem Jakub, studiuję informatykę w Polsce i pomagam firmom wdrażać AI żeby rosły. Zbudowałem asystenta AI, który czyta Twoją stronę i odpowiada na pytania klientów 24/7.</p><p>Już zrobiłem jednego dla ${p.domain} - zna Twoje usługi, cennik i wszystko co jest na stronie:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-      en: `<p>${hi}</p><p>I'm Jakub, I study Computer Science in Poland and I'm helping businesses onboard AI to grow. I built an AI assistant that reads your website and can answer customer questions 24/7.</p><p>I already made one for ${p.domain} - it knows your services, pricing, and everything on your site:<br><a href="${demoUrl}">${demoUrl}</a></p>${cta}${sig}${unsub}`,
-    },
-  };
-
-  return { subject: subjects[template][p.lang], html: bodies[template][p.lang] };
+  // Otherwise rotate through general templates
+  const general = ["curiosity", "problem", "pricing", "warm"];
+  return general[Math.floor(Math.random() * general.length)];
 }
 
-async function sendEmail(p: Prospect, demoUrl: string, template: string): Promise<"sent" | "quota" | "fail"> {
+function buildEmail(p: Prospect & { industry?: string }, demoUrl: string, template: string): { subject: string; html: string } {
+  const unsub = `<p style="font-size:11px;color:#999;"><a href="${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}" style="color:#999;">${p.lang === "pl" ? "Wypisz sie" : "Unsubscribe"}</a></p>`;
+  const sig = `<p>Jakub<br>whisp.so</p>`;
+  const hi = `Hi ${p.firstName},`;
+  const link = `<a href="${demoUrl}">${demoUrl}</a>`;
+
+  const templates: Record<string, { subject: string; body: string }> = {
+    curiosity: {
+      subject: `Quick question about ${p.domain}`,
+      body: `<p>${hi}</p><p>I was looking at ${p.domain} and had a question - do your visitors ever leave without finding what they need?</p><p>I built something that might help. It's an AI that reads your entire website and answers visitor questions 24/7:</p><p>${link}</p><p>It's $14.99 one-time to set it up on your site. No subscription, no hidden fees.</p>${sig}${unsub}`,
+    },
+    problem: {
+      subject: `${p.firstName}, your website visitors have questions`,
+      body: `<p>${hi}</p><p>Most websites lose visitors who can't find answers fast enough. Phone's not always available, contact forms take days.</p><p>I built an AI assistant for ${p.domain} that answers instantly - pricing, services, hours, anything on your site:</p><p>${link}</p><p>$14.99 one-time setup. No subscription, no monthly fees.</p>${sig}${unsub}`,
+    },
+    pricing: {
+      subject: `AI assistant for ${p.domain} - $14.99 one-time`,
+      body: `<p>${hi}</p><p>I built an AI assistant that reads ${p.domain} and answers your visitors' questions 24/7 - services, pricing, hours, anything on your site.</p><p>You can try it right now:</p><p>${link}</p><p>$14.99 one-time setup. No subscription, no monthly fees. Can be live on your site in one day.</p>${sig}${unsub}`,
+    },
+    warm: {
+      subject: `Love what you're doing at ${p.domain}`,
+      body: `<p>${hi}</p><p>I came across ${p.orgName} and thought it was really cool what you're building.</p><p>I make AI assistants for websites like yours - it reads your site and answers visitor questions 24/7. I already made one for you:</p><p>${link}</p><p>$14.99 one-time if you want it on your site. No subscription.</p>${sig}${unsub}`,
+    },
+    niche_hotel: {
+      subject: `Your guests are asking questions at 2am`,
+      body: `<p>${hi}</p><p>Travelers browse hotels late at night. They want to know about rooms, availability, check-in times - but nobody's at the front desk to answer.</p><p>I built an AI concierge for ${p.domain} that knows your hotel and answers 24/7:</p><p>${link}</p><p>$14.99 one-time setup. No subscription.</p>${sig}${unsub}`,
+    },
+    niche_restaurant: {
+      subject: `Visitors want to book at ${p.domain} but can't figure out how`,
+      body: `<p>${hi}</p><p>I checked ${p.domain} from a customer's perspective. The menu looks great, but when I tried to book a table or ask about dietary options, I couldn't get an instant answer.</p><p>So I built this:</p><p>${link}</p><p>It knows your menu, hours, and can guide visitors to book. $14.99 one-time.</p>${sig}${unsub}`,
+    },
+    niche_law: {
+      subject: `Potential clients leave ${p.domain} without calling`,
+      body: `<p>${hi}</p><p>Most people looking for legal help check 3-4 firm websites before picking one. The firm that answers their question first usually wins.</p><p>I built an AI assistant for ${p.domain} that answers practice area questions instantly:</p><p>${link}</p><p>$14.99 one-time setup. Can be live on your site tomorrow.</p>${sig}${unsub}`,
+    },
+  };
+
+  const t = templates[template] || templates.curiosity;
+
+  // Polish override for PL domains
+  if (p.lang === "pl") {
+    const plTemplates: Record<string, { subject: string; body: string }> = {
+      curiosity: {
+        subject: `Szybkie pytanie o ${p.domain}`,
+        body: `<p>Czesc ${p.firstName},</p><p>Przegladajac ${p.domain} zainteresowalem sie - czy Twoi odwiedzajacy czasem nie odchodza bez znalezienia tego czego szukaja?</p><p>Zbudowalem cos co moze pomoc. To AI ktore czyta cala Twoja strone i odpowiada na pytania odwiedzajacych 24/7:</p><p>${link}</p><p>$14.99 jednorazowo za instalacje. Bez subskrypcji, bez ukrytych oplat.</p>${sig}${unsub}`,
+      },
+      problem: {
+        subject: `${p.firstName}, odwiedzajacy Twoja strone maja pytania`,
+        body: `<p>Czesc ${p.firstName},</p><p>Wiekszosc stron traci odwiedzajacych bo nie moga szybko znalezc odpowiedzi. Telefon nie zawsze dostepny, formularze kontaktowe - odpowiedz po dniach.</p><p>Zbudowalem asystenta AI dla ${p.domain} ktory odpowiada natychmiast - cennik, uslugi, godziny, wszystko co jest na stronie:</p><p>${link}</p><p>$14.99 jednorazowo. Bez subskrypcji.</p>${sig}${unsub}`,
+      },
+      pricing: {
+        subject: `Asystent AI dla ${p.domain} - $14.99 jednorazowo`,
+        body: `<p>Czesc ${p.firstName},</p><p>Zbudowalem asystenta AI ktory czyta ${p.domain} i odpowiada na pytania odwiedzajacych 24/7 - uslugi, cennik, godziny, wszystko co jest na stronie.</p><p>Mozesz wyprobowac teraz:</p><p>${link}</p><p>$14.99 jednorazowo za instalacje. Bez subskrypcji. Moze byc na Twojej stronie w jeden dzien.</p>${sig}${unsub}`,
+      },
+      warm: {
+        subject: `Podoba mi sie to co robicie na ${p.domain}`,
+        body: `<p>Czesc ${p.firstName},</p><p>Trafilem na ${p.orgName} i spodobalo mi sie to co budujecie.</p><p>Robie asystentow AI dla stron takich jak Twoja - czyta strone i odpowiada na pytania odwiedzajacych 24/7. Juz zrobilem jednego dla Was:</p><p>${link}</p><p>$14.99 jednorazowo jesli chcesz go na swojej stronie. Bez subskrypcji.</p>${sig}${unsub}`,
+      },
+    };
+    const plt = plTemplates[template] || plTemplates.curiosity || t;
+    return { subject: plt.subject, html: plt.body };
+  }
+
+  return { subject: t.subject, html: t.body };
+}
+
+async function sendEmail(p: Prospect & { industry?: string }, demoUrl: string, template: string): Promise<"sent" | "quota" | "fail"> {
   const { subject, html } = buildEmail(p, demoUrl, template);
   const unsubUrl = `${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}`;
   try {
@@ -305,7 +364,7 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
     if (!success) { console.log(`  Skip - scrape failed`); continue; }
 
     // Send email
-    const template = tpls[state.totalSent % 3];
+    const template = pickTemplate(ep.organization.industry || "");
     const demoUrl = `${BASE_URL}/demo/${tenantId}`;
 
     if (!SEND) {
@@ -316,7 +375,7 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
     }
 
     const result = await sendEmail(
-      { firstName: ep.first_name, email, domain, orgName: ep.organization.name, title: ep.title, country, lang },
+      { firstName: ep.first_name, email, domain, orgName: ep.organization.name, title: ep.title, country, lang, industry: ep.organization.industry || "" },
       demoUrl, template
     );
 
