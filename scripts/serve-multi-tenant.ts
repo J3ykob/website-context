@@ -509,17 +509,16 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
 <script>\
 (function(){\
   var shown=false;\
+  var ready=false;\
+  setTimeout(function(){ready=true;},10000);\
+  function showModal(){\
+    if(!shown && ready){\
+      var el=document.getElementById("scroll-modal");\
+      if(el){shown=true;el.classList.add("show");}\
+    }\
+  }\
   window.addEventListener("wheel",function(e){\
-    if(!shown && Math.abs(e.deltaY)>30){\
-      shown=true;\
-      document.getElementById("scroll-modal").classList.add("show");\
-    }\
-  },{passive:true});\
-  window.addEventListener("touchmove",function(){\
-    if(!shown){\
-      shown=true;\
-      document.getElementById("scroll-modal").classList.add("show");\
-    }\
+    if(Math.abs(e.deltaY)>50) showModal();\
   },{passive:true});\
 })();\
 window.__experimentVariant="' + (startExpanded ? 'expanded' : 'collapsed') + '";\
