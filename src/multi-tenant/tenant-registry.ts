@@ -90,6 +90,20 @@ export function createTenant(email: string, siteUrl: string): TenantRecord {
   return getTenant(id)!;
 }
 
+// Idempotent register-or-fetch with an explicit id (used to self-heal a tenant
+// from its R2 context-meta when it's missing from the registry — e.g. the VPS
+// outreach scraped + emailed it but the Render registration call failed). Uses
+// INSERT OR IGNORE so it never throws on an existing row, unlike createTenant.
+export function ensureTenant(id: string, email: string, domain: string, siteUrl: string): TenantRecord | null {
+  ensureMigrated();
+  const db = getDb();
+  db.prepare(
+    `INSERT OR IGNORE INTO tenants (id, email, domain, site_url, qdrant_collection, status)
+     VALUES (?, ?, ?, ?, ?, 'active')`
+  ).run(id, email, domain, siteUrl, `wctx_${id}`);
+  return getTenant(id);
+}
+
 export function getTenant(id: string): TenantRecord | null {
   ensureMigrated();
   const db = getDb();

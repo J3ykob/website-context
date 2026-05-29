@@ -175,20 +175,32 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
       return { success: false, chunks: 0, pages: 0 };
     }
     console.log(`  [scrape] Done: ${result.pages} pages, ${result.chunks} chunks`);
-    // Upload to R2 + update Render tenant status
+    // Upload to R2 — REQUIRED. R2 is the source of truth the demo self-heals
+    // from, so if the upload fails the demo can't resolve; don't email then.
     console.log(`  [r2] Uploading to R2...`);
     const uploaded = await uploadTenantFiles(tenantId, resolve(__dirname, "../data"));
     console.log(`  [r2] ${uploaded} files uploaded`);
+    if (uploaded === 0) {
+      console.log(`  [r2] 0 files uploaded - demo can't self-heal, NOT emailing ${domain}`);
+      return { success: false, chunks: result.chunks, pages: result.pages };
+    }
 
-    // Update tenant status on Render (lightweight - no file uploads)
-    try {
-      await fetch(`${BASE_URL}/api/admin/update-tenant/${tenantId}?secret=${ADMIN_SECRET}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "active", chunksCount: result.chunks, pagesCount: result.pages, domain, siteUrl }),
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch (e: any) { console.log(`  [sync] Render update failed: ${e.message}`); }
+    // Register/activate on Render (retried). If this fails (e.g. a transient
+    // Render outage / deploy), the demo still self-heals from R2 on first visit,
+    // so we don't hard-block the email on it — the R2 upload above is the gate.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const r = await fetch(`${BASE_URL}/api/admin/update-tenant/${tenantId}?secret=${ADMIN_SECRET}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "active", chunksCount: result.chunks, pagesCount: result.pages, domain, siteUrl }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (r.ok) break;
+        console.log(`  [sync] Render update attempt ${attempt}: HTTP ${r.status}`);
+      } catch (e: any) { console.log(`  [sync] Render update attempt ${attempt} failed: ${e.message}`); }
+      if (attempt < 3) await new Promise((res) => setTimeout(res, 5000));
+    }
     return { success: true, chunks: result.chunks, pages: result.pages };
   } catch (err: any) {
     await closeBrowser();

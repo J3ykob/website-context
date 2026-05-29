@@ -35,6 +35,7 @@ import { randomBytes } from "crypto";
 import {
   runMigrations,
   createTenant,
+  ensureTenant,
   getTenant,
   getTenantByDomain,
   updateTenant,
@@ -330,6 +331,34 @@ h1 em { color:#3b82f6; font-style:italic; }
 });
 
 // Demo page — standalone chat for a tenant (no embed needed)
+// Self-heal: a tenant can be missing from Render's registry even though it was
+// scraped (vectors in Vectorize, files in R2) — e.g. the VPS outreach scraped +
+// emailed it but the Render registration call failed (a restart/blip). R2 is the
+// source of truth for scraped data, so if context-meta.json exists there we
+// recreate the registry row on demand and the demo/chat just works.
+async function reconcileTenantFromR2(requestedId: string): Promise<any | null> {
+  try {
+    const { downloadTenantFile } = await import("../src/storage/r2.js");
+    let buf = await downloadTenantFile(requestedId, "context-meta.json");
+    if (!buf) buf = await downloadTenantFile(requestedId.replace(/-/g, "_"), "context-meta.json");
+    if (!buf) return null;
+    const meta = JSON.parse(buf.toString());
+    const id: string = meta.tenantId || requestedId;
+    const siteUrl: string = meta.siteUrl || `https://${id.replace(/_/g, ".")}`;
+    let domain: string;
+    try { domain = new URL(siteUrl).hostname; } catch { domain = id.replace(/_/g, "."); }
+    const t = ensureTenant(id, `info@${domain}`, domain, siteUrl);
+    if (t) {
+      updateTenant(t.id, { status: "active", chunksCount: meta.chunksCount || 0, pagesCount: meta.pagesCount || 0, lastScrapedAt: meta.lastScrapedAt || null });
+      console.log(`[self-heal] reconciled tenant ${t.id} from R2`);
+    }
+    return t;
+  } catch (e: any) {
+    console.error(`[self-heal] ${requestedId} failed: ${e?.message || e}`);
+    return null;
+  }
+}
+
 app.get("/demo/:tenantId", async (req, res) => {
   let tenant = getTenant(req.params.tenantId);
   // Fallback: if not found, try all tenants matching this domain pattern
@@ -343,6 +372,7 @@ app.get("/demo/:tenantId", async (req, res) => {
       return;
     }
   }
+  if (!tenant) tenant = await reconcileTenantFromR2(req.params.tenantId);
   if (!tenant || tenant.status !== "active") {
     res.status(404).send("<!DOCTYPE html><html><body style='font-family:Archivo,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#57534e'><p>This bot is not ready yet. Check back soon.</p></body></html>");
     return;
@@ -989,6 +1019,7 @@ app.post("/api/chat", async (req, res) => {
       const normalized = tenantId.replace(/[-_]/g, "").toLowerCase();
       tenant = allTenants.find((t: any) => t.id.replace(/[-_]/g, "").toLowerCase() === normalized) || null;
     }
+    if (!tenant) tenant = await reconcileTenantFromR2(tenantId);
     if (!tenant) {
       res.status(404).json({ error: "Tenant not found" });
       return;
@@ -1794,13 +1825,8 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
   let tenant = getTenant(req.params.tenantId);
   const { status, chunksCount, pagesCount, domain, siteUrl } = req.body;
   if (!tenant && domain) {
-    tenant = getTenantByDomain(domain) || null;
-    if (!tenant) {
-      try { tenant = createTenant(`info@${domain}`, siteUrl || `https://${domain}`); } catch {}
-    }
-  }
-  if (!tenant && domain) {
-    tenant = getTenantByDomain(domain) || null;
+    // Idempotent register under the requested id (matches the Vectorize tag).
+    tenant = getTenantByDomain(domain) || ensureTenant(req.params.tenantId, `info@${domain}`, domain, siteUrl || `https://${domain}`);
   }
   if (!tenant) return res.status(404).json({ error: "Not found and no domain to create" });
   const updates: any = {};
