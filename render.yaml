@@ -26,7 +26,7 @@ services:
       - key: QDRANT_PORT
         value: "6333"
       - key: CF_API_TOKEN
-        value: "jpi50aMboarO8p8FmhaFeWK0c0czcM7SfWXEOIbrzXI.XffKuEcsgReHDq-dpBljt_WHJaefBxEk-NxFskZDdE8"
+        value: "0F91gzOgM_cvPKbTiIsiBJ0Wp-IYkWjevvK8AkyHPDU.mXLpcMVETZG1PQIfn9l-YvbjcORvoVd2QYYW98d0SnU"
       - key: VECTORIZE_INDEX
         value: "whisp-vectors"
       - key: PORT
