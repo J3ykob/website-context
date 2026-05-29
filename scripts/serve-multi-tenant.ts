@@ -213,15 +213,14 @@ app.get("/api/screenshot/:tenantId", async (req, res) => {
     const p = resolve(__dirname, `../data/${id}/screenshot.png`);
     if (existsSync(p)) { res.sendFile(p); return; }
   }
-  // Try R2
+  // Stream from R2 — do NOT cache to local disk. Screenshots are ~2.5MB each and
+  // caching them across thousands of tenants fills the small persistent disk,
+  // which makes the SQLite registry fail to write (SQLITE_FULL) and silently
+  // breaks new tenant registration -> dead demos. R2 is the source of truth.
   try {
     const { downloadTenantFile } = await import("../src/storage/r2.js");
     const data = await downloadTenantFile(tid, "screenshot.png") || await downloadTenantFile(tid.replace(/-/g, "_"), "screenshot.png");
     if (data) {
-      // Cache locally
-      const dir = resolve(__dirname, `../data/${tid}`);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      await writeFile(resolve(dir, "screenshot.png"), data);
       res.type("image/png").send(data);
       return;
     }
