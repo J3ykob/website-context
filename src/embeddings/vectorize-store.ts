@@ -105,19 +105,19 @@ export class CloudflareVectorizeStore implements VectorStore {
   }
 
   // Vectorize has no delete-by-filter and no list API, so we page through this
-  // tenant's vectors with a fixed probe vector: cosine surfaces the nearest
-  // first, and deleting them reveals the next-nearest, sweeping nearest->
-  // farthest over ALL of them. We track deleted IDs and delete only NEW ones,
-  // so eventual-consistency re-appearances of just-deleted vectors don't burn
-  // the budget (the earlier bug: a fixed cap + re-deleting the same page left
-  // large accumulations un-drained). Terminate when the index reports empty, or
-  // after a sustained run of passes that surface nothing new (deletes still
-  // propagating). Only invoked once per tenant — for legacy untracked vectors.
+  // tenant's vectors with a fixed probe vector (cosine surfaces some 100 each
+  // time) and delete every ID returned, every pass. We do NOT skip already-seen
+  // IDs: under eventual consistency a just-deleted vector keeps appearing for a
+  // few seconds, and re-issuing its delete is a harmless no-op — whereas
+  // skipping it (an earlier bug) made the loop idle-quit at 100 while thousands
+  // remained. The sleep lets deletes propagate so each pass surfaces fresh
+  // vectors; we stop only when the index returns empty twice in a row. Cap is a
+  // generous backstop. Invoked once per tenant, for legacy untracked vectors.
   async deleteAll(): Promise<number> {
     const probe = new Array(1024).fill(0.01);
     const seen = new Set<string>();
-    let idle = 0;
-    for (let pass = 0; pass < 400; pass++) {
+    let emptyStreak = 0;
+    for (let pass = 0; pass < 300; pass++) {
       const resp = await fetch(`${BASE}/query`, {
         method: "POST",
         headers: headers(),
@@ -134,24 +134,23 @@ export class CloudflareVectorizeStore implements VectorStore {
         break;
       }
       const matches = ((await resp.json()) as any).result?.matches || [];
-      if (matches.length === 0) break; // index empty for this tenant -> done
-      const fresh: string[] = matches.map((m: any) => m.id).filter((id: string) => !seen.has(id));
-      if (fresh.length === 0) {
-        // Only already-deleted vectors coming back -> deletes still propagating.
-        if (++idle >= 20) break;
+      if (matches.length === 0) {
+        if (++emptyStreak >= 2) break; // confirmed empty (guards a fluke 0)
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
-      idle = 0;
-      await fetch(`${BASE}/delete-by-ids`, {
+      emptyStreak = 0;
+      const ids: string[] = matches.map((m: any) => m.id);
+      const del = await fetch(`${BASE}/delete-by-ids`, {
         method: "POST",
         headers: headers(),
-        body: JSON.stringify({ ids: fresh }),
+        body: JSON.stringify({ ids }),
       });
-      fresh.forEach((id) => seen.add(id));
-      await new Promise((r) => setTimeout(r, 1500));
+      if (!del.ok) console.error(`[vectorize] deleteAll delete failed: ${(await del.text()).slice(0, 150)}`);
+      ids.forEach((id) => seen.add(id));
+      await new Promise((r) => setTimeout(r, 2500)); // let deletes propagate
     }
-    console.log(`[vectorize] deleteAll ${this.tenantId}: ${seen.size} vectors deleted`);
+    console.log(`[vectorize] deleteAll ${this.tenantId}: ${seen.size} unique vectors removed`);
     return seen.size;
   }
 
