@@ -181,11 +181,13 @@ function buildChunks(
     const contextPrefix = buildContextPrefix(page, section);
     const chunkType = classifyChunkType(section, page);
 
-    if (content.length <= 4000) {
+    const enrichedContent = enrichPricingChunk(content, chunkType);
+
+    if (enrichedContent.length <= 4000) {
       chunks.push({
         id: randomUUID(),
         pageId,
-        content,
+        content: enrichedContent,
         contextPrefix,
         metadata: {
           url: page.url,
@@ -195,12 +197,12 @@ function buildChunks(
         },
       });
     } else {
-      const subChunks = splitIntoChunks(content, 2500, 150);
+      const subChunks = splitIntoChunks(enrichedContent, 2500, 150);
       for (const subChunk of subChunks) {
         chunks.push({
           id: randomUUID(),
           pageId,
-          content: subChunk,
+          content: enrichPricingChunk(subChunk, chunkType),
           contextPrefix,
           metadata: {
             url: page.url,
@@ -301,14 +303,30 @@ function classifyPageType(
 function classifyChunkType(
   section: MarkdownSection,
   page: ScrapedPage
-): "content" | "faq" | "product" | "form-description" | "navigation" {
+): "content" | "faq" | "product" | "form-description" | "navigation" | "pricing" {
   const heading = section.heading.toLowerCase();
+  const content = section.content.toLowerCase();
 
+  // Detect pricing content by heading OR content patterns
+  const pricingHeadings = /pric|cennik|tarif|kosten|preis|rate|fee|cost|cena|opłat/i;
+  const pricingContent = /\d+[.,]?\d*\s*(zł|PLN|€|EUR|\$|USD|£|GBP|kr|SEK|NOK|DKK)|\d+\s*(zł|PLN|€)\/m[²2]|per\s*(month|year|night|hour|person)/i;
+
+  if (pricingHeadings.test(heading) || (pricingContent.test(content) && content.includes("|"))) return "pricing";
   if (heading.includes("faq") || heading.includes("frequently asked")) return "faq";
   if (heading.includes("product") || heading.includes("pricing")) return "product";
   if (heading.includes("contact") || heading.includes("form")) return "form-description";
 
   return "content";
+}
+
+/**
+ * Enrich pricing chunks with explicit keywords so they rank higher
+ * in semantic search when users ask about prices.
+ */
+function enrichPricingChunk(content: string, type: string): string {
+  if (type !== "pricing") return content;
+  // Prepend pricing context so the embedding captures the intent
+  return `[PRICING / CENNIK / PRICES / KOSTEN / TARIF]\n\n${content}`;
 }
 
 function generatePageId(url: string): string {
