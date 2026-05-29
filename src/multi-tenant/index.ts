@@ -6,6 +6,7 @@ export { getDb, closeDb } from "./db/connection.js";
 export { runMigrations } from "./db/migrations.js";
 export {
   createTenant,
+  ensureTenant,
   getTenant,
   getTenantByDomain,
   updateTenant,
