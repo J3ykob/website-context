@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 const R2_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
 const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY || "de08d17162106b5a078b93ad12fa8a56";
@@ -22,6 +22,16 @@ export async function uploadToR2(key: string, data: Buffer | string, contentType
     return true;
   } catch (err: any) {
     console.error(`[r2] Upload failed for ${key}: ${err.message}`);
+    return false;
+  }
+}
+
+export async function deleteFromR2(key: string): Promise<boolean> {
+  try {
+    await client.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    return true;
+  } catch (err: any) {
+    console.error(`[r2] Delete failed for ${key}: ${err.message}`);
     return false;
   }
 }

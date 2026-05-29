@@ -115,7 +115,7 @@ export async function scrapeTenant(
   if (useVectorize) {
     const buf = await downloadFromR2(`tenants/${tenantId}/vector-ids.json`);
     if (buf) { try { prevIds = JSON.parse(buf.toString()); } catch {} }
-    if (!prevIds) {
+    if (!prevIds || prevIds.length === 0) {
       console.log(`[scrape-pipeline] No tracked vector IDs for ${tenantId}; draining existing vectors first`);
       await (store as CloudflareVectorizeStore).deleteAll();
     }
