@@ -97,7 +97,7 @@ export class CloudflareVectorizeStore implements VectorStore {
   async delete(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     const prefixed = ids.map(id => `${this.tenantId}__${id}`);
-    await fetch(`${BASE}/delete-by-ids`, {
+    await fetch(`${BASE}/delete_by_ids`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ ids: prefixed }),
@@ -141,7 +141,7 @@ export class CloudflareVectorizeStore implements VectorStore {
       }
       emptyStreak = 0;
       const ids: string[] = matches.map((m: any) => m.id);
-      const del = await fetch(`${BASE}/delete-by-ids`, {
+      const del = await fetch(`${BASE}/delete_by_ids`, {
         method: "POST",
         headers: headers(),
         body: JSON.stringify({ ids }),
