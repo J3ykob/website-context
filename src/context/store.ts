@@ -181,7 +181,7 @@ function buildChunks(
     const contextPrefix = buildContextPrefix(page, section);
     const chunkType = classifyChunkType(section, page);
 
-    const enrichedContent = enrichPricingChunk(content, chunkType);
+    const enrichedContent = enrichChunk(content, chunkType, section.heading || "");
 
     if (enrichedContent.length <= 4000) {
       chunks.push({
@@ -202,7 +202,7 @@ function buildChunks(
         chunks.push({
           id: randomUUID(),
           pageId,
-          content: enrichPricingChunk(subChunk, chunkType),
+          content: enrichChunk(subChunk, chunkType, section.heading || ""),
           contextPrefix,
           metadata: {
             url: page.url,
@@ -320,13 +320,33 @@ function classifyChunkType(
 }
 
 /**
- * Enrich pricing chunks with explicit keywords so they rank higher
- * in semantic search when users ask about prices.
+ * Enrich structured data chunks (pricing, hours, tables) with a
+ * natural language summary so they rank higher in semantic search.
+ * A table with "1,850 zł/m2" becomes searchable by "how much does renovation cost?"
  */
-function enrichPricingChunk(content: string, type: string): string {
-  if (type !== "pricing") return content;
-  // Prepend pricing context so the embedding captures the intent
-  return `[PRICING / CENNIK / PRICES / KOSTEN / TARIF]\n\n${content}`;
+function enrichChunk(content: string, type: string, heading: string): string {
+  if (type === "pricing") {
+    // Extract key numbers and currencies from the content
+    const prices = content.match(/\d[\d\s,.]*\s*(zł|PLN|€|EUR|\$|USD|£|GBP|kr|SEK|NOK|DKK)(\/m[²2])?/gi) || [];
+    const summary = prices.length > 0
+      ? `This section contains pricing information: ${prices.slice(0, 5).join(", ")}. `
+      : "This section contains pricing and cost information. ";
+    return `${summary}${heading ? "Section: " + heading + ". " : ""}\n\n${content}`;
+  }
+
+  // Detect hours/schedule content
+  const hoursPattern = /\d{1,2}[:.]\d{2}\s*[-–]\s*\d{1,2}[:.]\d{2}|(?:mon|tue|wed|thu|fri|sat|sun|pon|wt|śr|czw|pt|sob|niedz)\w*/i;
+  if (hoursPattern.test(content) && (heading.toLowerCase().includes("hour") || heading.toLowerCase().includes("godzin") || heading.toLowerCase().includes("open"))) {
+    return `This section contains opening hours and schedule information.\n\n${content}`;
+  }
+
+  // Detect contact info
+  const contactPattern = /(?:\+?\d[\d\s()-]{7,})|(?:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
+  if (contactPattern.test(content) && (heading.toLowerCase().includes("contact") || heading.toLowerCase().includes("kontakt"))) {
+    return `This section contains contact information (phone, email, address).\n\n${content}`;
+  }
+
+  return content;
 }
 
 function generatePageId(url: string): string {

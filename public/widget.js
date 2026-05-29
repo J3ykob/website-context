@@ -251,7 +251,7 @@
 #wctx-fab .wctx-bar-input {\
   flex:1; border:none; outline:none; background:transparent;\
   font-family:"Archivo",-apple-system,sans-serif;\
-  font-size:14px; font-weight:500; color:rgba(10,10,10,0.8);\
+  font-size:16px; font-weight:500; color:rgba(10,10,10,0.8);\
   min-width:0;\
 }\
 #wctx-fab .wctx-bar-input::placeholder { color:rgba(10,10,10,0.3); }\
