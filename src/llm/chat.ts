@@ -206,7 +206,7 @@ export class WebsiteChat {
     config: ChatConfig
   ) {
     this.maxTokens = config.maxTokens || 1024;
-    this.topK = config.topK || 10;
+    this.topK = config.topK || 15;
     this.embeddingProvider = embeddingProvider;
     this.store = store;
     this.context = context;
@@ -345,6 +345,21 @@ export class WebsiteChat {
     let retrievedChunks = await searchContext(lastUserMessage, this.embeddingProvider, this.store, {
       topK: this.topK,
     });
+
+    // Boost pricing-related queries with explicit pricing keywords
+    const pricingKeywords = /price|pricing|cost|how much|rate|fee|cennik|cena|koszt|ile kosztuje|opłat|tarif|preis|kosten/i;
+    if (pricingKeywords.test(lastUserMessage)) {
+      const pricingTerms = "cennik cena koszt price pricing rates fees tariff";
+      const pricingChunks = await searchContext(pricingTerms, this.embeddingProvider, this.store, {
+        topK: 5,
+      });
+      const existingContent = new Set(retrievedChunks.map(c => c.content.slice(0, 50)));
+      for (const chunk of pricingChunks) {
+        if (!existingContent.has(chunk.content.slice(0, 50))) {
+          retrievedChunks.push(chunk);
+        }
+      }
+    }
 
     // Detect language mismatch: if query looks English but site has Polish content (or vice versa)
     const isQueryEnglish = /^[a-z\s,.?!'"]+$/i.test(lastUserMessage.replace(/[0-9]/g, ""));
