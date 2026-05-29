@@ -320,33 +320,81 @@ function classifyChunkType(
 }
 
 /**
- * Enrich structured data chunks (pricing, hours, tables) with a
- * natural language summary so they rank higher in semantic search.
- * A table with "1,850 zł/m2" becomes searchable by "how much does renovation cost?"
+ * Enrich every chunk with a summary line + keywords extracted from content.
+ * This bridges the gap between how users ask questions and how data is stored.
+ * "1,850 zł/m2" in a table becomes findable by "how much does renovation cost?"
  */
 function enrichChunk(content: string, type: string, heading: string): string {
-  if (type === "pricing") {
-    // Extract key numbers and currencies from the content
-    const prices = content.match(/\d[\d\s,.]*\s*(zł|PLN|€|EUR|\$|USD|£|GBP|kr|SEK|NOK|DKK)(\/m[²2])?/gi) || [];
-    const summary = prices.length > 0
-      ? `This section contains pricing information: ${prices.slice(0, 5).join(", ")}. `
-      : "This section contains pricing and cost information. ";
-    return `${summary}${heading ? "Section: " + heading + ". " : ""}\n\n${content}`;
-  }
+  const keywords = extractKeywords(content, heading);
+  const summary = generateSummary(content, type, heading);
 
-  // Detect hours/schedule content
-  const hoursPattern = /\d{1,2}[:.]\d{2}\s*[-–]\s*\d{1,2}[:.]\d{2}|(?:mon|tue|wed|thu|fri|sat|sun|pon|wt|śr|czw|pt|sob|niedz)\w*/i;
-  if (hoursPattern.test(content) && (heading.toLowerCase().includes("hour") || heading.toLowerCase().includes("godzin") || heading.toLowerCase().includes("open"))) {
-    return `This section contains opening hours and schedule information.\n\n${content}`;
-  }
-
-  // Detect contact info
-  const contactPattern = /(?:\+?\d[\d\s()-]{7,})|(?:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
-  if (contactPattern.test(content) && (heading.toLowerCase().includes("contact") || heading.toLowerCase().includes("kontakt"))) {
-    return `This section contains contact information (phone, email, address).\n\n${content}`;
+  if (summary || keywords.length > 0) {
+    const parts: string[] = [];
+    if (summary) parts.push(summary);
+    if (keywords.length > 0) parts.push(`Keywords: ${keywords.join(", ")}`);
+    return `${parts.join(". ")}.\n\n${content}`;
   }
 
   return content;
+}
+
+function extractKeywords(content: string, heading: string): string[] {
+  const kw: Set<string> = new Set();
+
+  // Add heading as keyword
+  if (heading) kw.add(heading.toLowerCase().trim());
+
+  // Extract prices
+  const prices = content.match(/\d[\d\s,.]*\s*(zł|PLN|€|EUR|\$|USD|£|GBP|kr|SEK|NOK|DKK)(\/m[²2])?/gi) || [];
+  if (prices.length > 0) { kw.add("pricing"); kw.add("price"); kw.add("cost"); kw.add("cennik"); kw.add("cena"); }
+
+  // Extract times/hours
+  if (/\d{1,2}[:.]\d{2}\s*[-–]\s*\d{1,2}[:.]\d{2}/.test(content)) { kw.add("hours"); kw.add("opening hours"); kw.add("godziny otwarcia"); kw.add("schedule"); }
+
+  // Extract phone numbers
+  if (/(?:\+?\d[\d\s()-]{7,})/.test(content)) { kw.add("phone"); kw.add("contact"); kw.add("telefon"); kw.add("call"); }
+
+  // Extract emails
+  if (/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(content)) { kw.add("email"); kw.add("contact"); kw.add("kontakt"); }
+
+  // Extract addresses
+  if (/(?:ul\.|ulica|street|str\.|aleja|al\.|road|avenue)\s/i.test(content)) { kw.add("address"); kw.add("location"); kw.add("adres"); kw.add("directions"); }
+
+  // Detect tables
+  if (content.includes("|") && content.includes("---")) { kw.add("table"); kw.add("comparison"); kw.add("details"); }
+
+  // Detect FAQ patterns
+  if (/\?[\s\n]/.test(content)) { kw.add("faq"); kw.add("questions"); kw.add("answers"); }
+
+  // Detect booking/reservation
+  if (/book|reserv|rezerwac|termin|appointment|umów/i.test(content)) { kw.add("booking"); kw.add("reservation"); kw.add("rezerwacja"); }
+
+  // Detect menu/food
+  if (/menu|dish|course|danie|zupa|deser|starter|main/i.test(content)) { kw.add("menu"); kw.add("food"); kw.add("dishes"); }
+
+  return [...kw].slice(0, 10);
+}
+
+function generateSummary(content: string, type: string, heading: string): string {
+  if (type === "pricing") {
+    const prices = content.match(/\d[\d\s,.]*\s*(zł|PLN|€|EUR|\$|USD|£|GBP|kr|SEK|NOK|DKK)(\/m[²2])?/gi) || [];
+    return prices.length > 0
+      ? `This section contains pricing: ${prices.slice(0, 5).join(", ")}`
+      : "This section contains pricing and cost information";
+  }
+
+  // Auto-generate summary from heading + detected content types
+  const detections: string[] = [];
+  if (/\d{1,2}[:.]\d{2}/.test(content)) detections.push("schedules/hours");
+  if (/(?:\+?\d[\d\s()-]{7,})/.test(content)) detections.push("phone numbers");
+  if (/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(content)) detections.push("email addresses");
+  if (content.includes("|") && content.includes("---")) detections.push("tabular data");
+
+  if (detections.length > 0) {
+    return `${heading ? heading + ": " : ""}contains ${detections.join(", ")}`;
+  }
+
+  return "";
 }
 
 function generatePageId(url: string): string {
