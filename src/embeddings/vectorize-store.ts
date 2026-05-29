@@ -104,51 +104,53 @@ export class CloudflareVectorizeStore implements VectorStore {
     });
   }
 
-  // Vectorize has no delete-by-filter and no list API, so we page through this
-  // tenant's vectors with a fixed probe vector (cosine surfaces some 100 each
-  // time) and delete every ID returned, every pass. We do NOT skip already-seen
-  // IDs: under eventual consistency a just-deleted vector keeps appearing for a
-  // few seconds, and re-issuing its delete is a harmless no-op — whereas
-  // skipping it (an earlier bug) made the loop idle-quit at 100 while thousands
-  // remained. The sleep lets deletes propagate so each pass surfaces fresh
-  // vectors; we stop only when the index returns empty twice in a row. Cap is a
-  // generous backstop. Invoked once per tenant, for legacy untracked vectors.
+  // Fully delete a tenant's vectors. Vectorize has no delete-by-filter or list
+  // API, and deletes are ASYNC (delete_by_ids returns a mutationId; the vector
+  // stays queryable for ~tens of seconds until processed). A FIXED query probe
+  // just re-surfaces the same not-yet-processed batch and stalls, so each pass
+  // uses a FRESH RANDOM probe (hitting a different region of the space) and
+  // deletes every ID returned. We sweep in rounds: an inner loop issues deletes
+  // until random probes stop surfacing anything new (coverage saturated), then
+  // we wait for async processing and verify with random samples; we repeat until
+  // a post-wait sample comes back empty. Invoked once per tenant (legacy drain).
   async deleteAll(): Promise<number> {
-    const probe = new Array(1024).fill(0.01);
-    const seen = new Set<string>();
-    let emptyStreak = 0;
-    for (let pass = 0; pass < 300; pass++) {
+    const randProbe = (): number[] => {
+      const v = new Array(1024);
+      let n = 0;
+      for (let i = 0; i < 1024; i++) { const x = Math.random() * 2 - 1; v[i] = x; n += x * x; }
+      n = Math.sqrt(n) || 1;
+      return v.map((x) => x / n);
+    };
+    const queryIds = async (vec: number[]): Promise<string[] | null> => {
       const resp = await fetch(`${BASE}/query`, {
         method: "POST",
         headers: headers(),
-        body: JSON.stringify({
-          vector: probe,
-          topK: 100,
-          returnValues: false,
-          returnMetadata: "none",
-          filter: { tenant: this.tenantId },
-        }),
+        body: JSON.stringify({ vector: vec, topK: 100, returnValues: false, returnMetadata: "none", filter: { tenant: this.tenantId } }),
       });
-      if (!resp.ok) {
-        console.error(`[vectorize] deleteAll query failed: ${(await resp.text()).slice(0, 150)}`);
-        break;
+      if (!resp.ok) { console.error(`[vectorize] deleteAll query failed: ${(await resp.text()).slice(0, 150)}`); return null; }
+      return (((await resp.json()) as any).result?.matches || []).map((m: any) => m.id);
+    };
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    const seen = new Set<string>();
+    for (let round = 1; round <= 25; round++) {
+      let lowStreak = 0;
+      for (let pass = 0; pass < 250; pass++) {
+        const ids = await queryIds(randProbe());
+        if (ids === null) { await sleep(2000); continue; }
+        if (ids.length === 0) { lowStreak += 2; if (lowStreak >= 10) break; await sleep(1500); continue; }
+        const fresh = ids.filter((id) => !seen.has(id)).length;
+        await fetch(`${BASE}/delete_by_ids`, { method: "POST", headers: headers(), body: JSON.stringify({ ids }) });
+        ids.forEach((id) => seen.add(id));
+        if (fresh <= 2) lowStreak++; else lowStreak = 0;
+        if (lowStreak >= 10) break;
+        await sleep(700);
       }
-      const matches = ((await resp.json()) as any).result?.matches || [];
-      if (matches.length === 0) {
-        if (++emptyStreak >= 2) break; // confirmed empty (guards a fluke 0)
-        await new Promise((r) => setTimeout(r, 3000));
-        continue;
-      }
-      emptyStreak = 0;
-      const ids: string[] = matches.map((m: any) => m.id);
-      const del = await fetch(`${BASE}/delete_by_ids`, {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ ids }),
-      });
-      if (!del.ok) console.error(`[vectorize] deleteAll delete failed: ${(await del.text()).slice(0, 150)}`);
-      ids.forEach((id) => seen.add(id));
-      await new Promise((r) => setTimeout(r, 2500)); // let deletes propagate
+      // Let async deletes process, then verify with random samples.
+      await sleep(15000);
+      let still = 0;
+      for (let v = 0; v < 8; v++) { const ids = await queryIds(randProbe()); still += (ids || []).length; await sleep(300); }
+      if (still === 0) break;
     }
     console.log(`[vectorize] deleteAll ${this.tenantId}: ${seen.size} unique vectors removed`);
     return seen.size;
