@@ -97,7 +97,7 @@ export interface ChunkMetadata {
   url: string;
   title: string;
   headingHierarchy: string[];
-  type: "content" | "faq" | "product" | "form-description" | "navigation";
+  type: "content" | "faq" | "product" | "form-description" | "navigation" | "pricing";
 }
 
 export interface FlowDefinition {

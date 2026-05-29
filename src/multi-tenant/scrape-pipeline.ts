@@ -15,6 +15,7 @@ import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { embedChunks } from "../embeddings/pipeline.js";
 import { scrapeGooglePlaces, placesToChunks } from "../scraper/google-places.js";
 import { auditBusinessInfo, businessInfoToNotes } from "./business-audit.js";
+import { uploadToR2, downloadFromR2 } from "../storage/r2.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -104,12 +105,42 @@ export async function scrapeTenant(
     console.log(`[scrape-pipeline] Google Maps scrape skipped: ${(err as Error).message}`);
   }
 
-  // Embed into Qdrant
+  // --- Dedup for Vectorize: deterministic IDs + orphan cleanup ---
+  // Vectorize has no delete-by-filter, so we track each tenant's chunk IDs in R2.
+  // Unchanged chunks keep their ID (overwritten on upsert); removed/changed chunks
+  // become orphans we delete. Legacy tenants with no tracked IDs get a one-time
+  // full drain so old random-ID duplicates from past re-scrapes don't linger.
+  const newIds = context.chunks.map((c) => c.id);
+  let prevIds: string[] | null = null;
+  if (useVectorize) {
+    const buf = await downloadFromR2(`tenants/${tenantId}/vector-ids.json`);
+    if (buf) { try { prevIds = JSON.parse(buf.toString()); } catch {} }
+    if (!prevIds) {
+      console.log(`[scrape-pipeline] No tracked vector IDs for ${tenantId}; draining existing vectors first`);
+      await (store as CloudflareVectorizeStore).deleteAll();
+    }
+  }
+
+  // Embed into the vector store
   const embedResult = await embedChunks(context.chunks, provider, store);
   console.log(`[scrape-pipeline] ${embedResult.embeddedChunks} chunks embedded`);
 
   if (context.chunks.length > 0 && embedResult.embeddedChunks < Math.min(3, context.chunks.length)) {
     throw new Error(`Embedding failed: only ${embedResult.embeddedChunks}/${context.chunks.length} chunks embedded`);
+  }
+
+  // Delete orphaned vectors (tracked before, absent now) and persist the current
+  // ID set for the next re-scrape.
+  if (useVectorize) {
+    if (prevIds) {
+      const newSet = new Set(newIds);
+      const orphans = prevIds.filter((id) => !newSet.has(id));
+      if (orphans.length > 0) {
+        await store.delete(orphans);
+        console.log(`[scrape-pipeline] Deleted ${orphans.length} orphaned vectors for ${tenantId}`);
+      }
+    }
+    await uploadToR2(`tenants/${tenantId}/vector-ids.json`, JSON.stringify(newIds), "application/json");
   }
 
   // Save context metadata (siteMap, flows, page list — NOT chunks)

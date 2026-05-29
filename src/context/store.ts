@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import type { CrawlResult, ScrapedPage } from "../scraper/types.js";
 import { htmlToMarkdown, type MarkdownSection } from "../scraper/markdown.js";
 import { fetchPage } from "../scraper/fetcher.js";
+import { OpenRouterProvider } from "../llm/openrouter-provider.js";
 import type {
   WebsiteContext,
   PageContext,
@@ -67,6 +68,8 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
       type: classifyPageType(scrapedPage),
     });
   }
+
+  await enrichChunks(chunks);
 
   return {
     tenantId: "", // set by caller
@@ -181,13 +184,14 @@ function buildChunks(
     const contextPrefix = buildContextPrefix(page, section);
     const chunkType = classifyChunkType(section, page);
 
-    const enrichedContent = enrichChunk(content, chunkType, section.heading || "");
-
-    if (enrichedContent.length <= 4000) {
+    // Enrichment (summary + descriptors) is applied later in enrichChunks(),
+    // after large sections are split, so it lands on the final chunk bodies.
+    const bodies = content.length <= 4000 ? [content] : splitIntoChunks(content, 2500, 150);
+    bodies.forEach((body, i) => {
       chunks.push({
-        id: randomUUID(),
+        id: chunkId(pageId, section.headingPath, i, body),
         pageId,
-        content: enrichedContent,
+        content: body,
         contextPrefix,
         metadata: {
           url: page.url,
@@ -196,23 +200,7 @@ function buildChunks(
           type: chunkType,
         },
       });
-    } else {
-      const subChunks = splitIntoChunks(enrichedContent, 2500, 150);
-      for (const subChunk of subChunks) {
-        chunks.push({
-          id: randomUUID(),
-          pageId,
-          content: enrichChunk(subChunk, chunkType, section.heading || ""),
-          contextPrefix,
-          metadata: {
-            url: page.url,
-            title: page.title,
-            headingHierarchy: section.headingPath,
-            type: chunkType,
-          },
-        });
-      }
-    }
+    });
   }
 
   return chunks;
@@ -320,8 +308,100 @@ function classifyChunkType(
 }
 
 /**
- * Enrich every chunk with a summary line + keywords extracted from content.
- * This bridges the gap between how users ask questions and how data is stored.
+ * Enrich every chunk with an LLM-generated summary + descriptor keywords.
+ * Keywords are CATEGORY descriptors ("dimensions", "opening hours", "warranty"),
+ * not just literal values, so "what are the dimensions?" retrieves a chunk that
+ * only lists raw measurements. Falls back to regex enrichment when no API key is
+ * set or the call fails, so a scrape never silently loses all enrichment.
+ */
+async function enrichChunks(chunks: ContentChunk[]): Promise<void> {
+  const hasKey = !!process.env.OPENROUTER_API_KEY;
+  const concurrency = 8;
+  let next = 0;
+
+  async function worker() {
+    while (next < chunks.length) {
+      const chunk = chunks[next++];
+      const heading = chunk.metadata.headingHierarchy.slice(-1)[0] || "";
+      const llm = hasKey && chunk.content.trim().length >= 60
+        ? await llmEnrich(chunk.content).catch(() => null)
+        : null;
+      if (llm) {
+        chunk.content = `${llm.summary} Keywords: ${llm.keywords.join(", ")}.\n\n${chunk.content}`;
+      } else {
+        chunk.content = enrichChunk(chunk.content, chunk.metadata.type, heading);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, chunks.length) }, worker)
+  );
+}
+
+const ENRICH_SYSTEM =
+  "You label chunks of website content for a semantic search index that powers a customer-facing chatbot. You return a one-line summary and a list of search keywords as strict JSON.";
+
+async function llmEnrich(content: string): Promise<{ summary: string; keywords: string[] }> {
+  const provider = new OpenRouterProvider({
+    model: process.env.ENRICH_MODEL || process.env.OPENROUTER_MODEL,
+    maxTokens: 300,
+    temperature: 0.2,
+  });
+
+  const user = `Analyze this chunk of content from a business website. Produce metadata that helps a retrieval system find it when a customer asks a question.
+
+Return ONLY strict JSON: {"summary": string, "keywords": string[]}
+
+"summary": one short sentence describing WHAT KIND of information the chunk contains (not a sales pitch). Examples: "Lists the dimensions, weight and materials of the product.", "Opening hours for each day of the week.", "Renovation pricing per square metre with warranty terms."
+
+"keywords": 8-15 short search terms. CRITICAL - include CATEGORY DESCRIPTORS for the TYPES of information present, not only the literal values. For example, if the chunk lists "200x90cm, oak, 80kg" include descriptors like "dimensions", "size", "width", "height", "material", "weight" - not just the numbers. Other descriptor examples: "pricing", "opening hours", "contact details", "address", "warranty", "delivery", "technical specifications", "capacity", "ingredients", "availability". Also include the most important specific topics or product names from the chunk.
+
+Write the summary and keywords in the SAME language as the content. For the category descriptors, also add the English equivalent (e.g. for Polish content include both "wymiary" and "dimensions").
+
+Do not invent information that is not present in the chunk.
+
+Content:
+"""
+${content.slice(0, 6000)}
+"""`;
+
+  const res = await provider.chat([
+    { role: "system", content: ENRICH_SYSTEM },
+    { role: "user", content: user },
+  ]);
+
+  const parsed = parseEnrichJSON(res.content);
+  if (!parsed) throw new Error("enrich: unparseable response");
+  return parsed;
+}
+
+function parseEnrichJSON(raw: string): { summary: string; keywords: string[] } | null {
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  const brace = s.match(/\{[\s\S]*\}/);
+  if (brace) s = brace[0];
+  try {
+    const obj = JSON.parse(s) as { summary?: unknown; keywords?: unknown };
+    const summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
+    const keywords = Array.isArray(obj.keywords)
+      ? (obj.keywords.filter((k) => typeof k === "string") as string[])
+          .map((k) => k.trim())
+          .filter(Boolean)
+          .slice(0, 15)
+      : [];
+    if (!summary && keywords.length === 0) return null;
+    let normSummary = summary || "Website content.";
+    if (!/[.!?]$/.test(normSummary)) normSummary += ".";
+    return { summary: normSummary, keywords };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Regex enrichment - fallback used when the LLM call is unavailable.
  * "1,850 zł/m2" in a table becomes findable by "how much does renovation cost?"
  */
 function enrichChunk(content: string, type: string, heading: string): string {
@@ -403,4 +483,15 @@ function generatePageId(url: string): string {
 
 function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 32);
+}
+
+// Deterministic chunk ID from the RAW body + position. Re-scrapes of unchanged
+// content yield the same ID, so the vector is overwritten rather than duplicated
+// (Vectorize has no delete-by-filter). Hashing the raw body — not the enriched
+// content — keeps IDs stable despite non-deterministic LLM enrichment.
+function chunkId(pageId: string, headingPath: string[], index: number, body: string): string {
+  return createHash("sha256")
+    .update(`${pageId} ${headingPath.join(">")} ${index} ${body}`)
+    .digest("hex")
+    .slice(0, 32);
 }

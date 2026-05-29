@@ -104,11 +104,43 @@ export class CloudflareVectorizeStore implements VectorStore {
     });
   }
 
-  async deleteAll(): Promise<void> {
-    // Delete all vectors for this tenant by listing and deleting
-    // Vectorize doesn't support delete-by-filter, so we need to track IDs
-    // For now, just log - full cleanup requires knowing all IDs
-    console.log(`[vectorize] deleteAll for ${this.tenantId} - clearing via re-insert`);
+  // Vectorize has no delete-by-filter and no list API, so we enumerate this
+  // tenant's vectors via repeated filtered similarity queries (a constant dummy
+  // vector just to page through them) and delete by ID. Used to drain legacy
+  // vectors that predate deterministic-ID tracking. Eventual consistency means
+  // deletes lag, so we loop with sleeps until a query returns nothing.
+  async deleteAll(): Promise<number> {
+    const dummy = new Array(1024).fill(0.01);
+    let total = 0;
+    for (let pass = 0; pass < 40; pass++) {
+      const resp = await fetch(`${BASE}/query`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({
+          vector: dummy,
+          topK: 100,
+          returnValues: false,
+          returnMetadata: "none",
+          filter: { tenant: this.tenantId },
+        }),
+      });
+      if (!resp.ok) {
+        console.error(`[vectorize] deleteAll query failed: ${(await resp.text()).slice(0, 150)}`);
+        break;
+      }
+      const matches = ((await resp.json()) as any).result?.matches || [];
+      if (matches.length === 0) break;
+      const ids: string[] = matches.map((m: any) => m.id);
+      await fetch(`${BASE}/delete-by-ids`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ ids }),
+      });
+      total += ids.length;
+      await new Promise((r) => setTimeout(r, 2000)); // let deletes propagate
+    }
+    console.log(`[vectorize] deleteAll ${this.tenantId}: ${total} delete ops issued`);
+    return total;
   }
 
   async count(): Promise<number> {
