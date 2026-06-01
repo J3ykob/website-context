@@ -99,6 +99,28 @@ function alreadySent(email: string): boolean { return email.toLowerCase() in sen
 function domainSent(domain: string): boolean { return Object.keys(sentLog).some(e => e.endsWith("@" + domain) || e.endsWith("." + domain)); }
 function markSent(email: string, template: string) { sentLog[email.toLowerCase()] = { sentAt: new Date().toISOString(), template }; saveSentLog(); }
 
+// Record a non-auth send failure so a registered, active demo is never left with no
+// audit trail (the loop used to just `continue` and forget it).
+const FAILED_LOG_PATH = resolve(DATA_DIR, "send-failures.json");
+let failedLog: Record<string, { at: string; domain: string }> = {};
+try { failedLog = JSON.parse(readFileSync(FAILED_LOG_PATH, "utf-8")); } catch {}
+function recordSendFail(email: string, domain: string) {
+  failedLog[email.toLowerCase()] = { at: new Date().toISOString(), domain };
+  try { writeFileSync(FAILED_LOG_PATH, JSON.stringify(failedLog, null, 2)); } catch {}
+  console.error(`  [resend] send FAILED for ${email} @ ${domain} — recorded (demo is live, prospect NOT emailed).`);
+}
+
+// Preflight: is the serving backend healthy enough to email fresh demo links? A 503
+// from /api/health-deep means a backend (LLM/BGE/Vectorize/R2) is down — don't send
+// links that would open to a broken chat. A network blip on the check doesn't block
+// (the demo self-heals); only a definitive 503 pauses sending.
+async function backendHealthy(): Promise<boolean> {
+  try {
+    const r = await fetch(`${BASE_URL}/api/health-deep`, { signal: AbortSignal.timeout(12000) });
+    return r.status === 200;
+  } catch { return true; }
+}
+
 function detectLang(country: string, domain: string): "pl" | "en" {
   return (country + " " + domain).toLowerCase().includes("poland") || domain.endsWith(".pl") ? "pl" : "en";
 }
@@ -159,6 +181,11 @@ async function enrichPerson(id: string): Promise<any> {
     signal: AbortSignal.timeout(10000),
   });
   if (resp.status === 429) { console.log("  [apollo] Rate limited - 60s"); await new Promise(r => setTimeout(r, 60000)); return enrichPerson(id); }
+  // Credit/auth exhaustion: hard-fail so the loop PAUSES instead of spinning forever
+  // burning cycles on {person:null} with zero demos (the old silent-swallow behavior).
+  if (resp.status === 402 || resp.status === 403) {
+    throw new Error("apollo-credits-exhausted");
+  }
   if (!resp.ok) return { person: null };
   return resp.json();
 }
@@ -328,7 +355,7 @@ function buildEmail(p: Prospect & { industry?: string }, demoUrl: string, templa
   return { subject: t.subject, html: t.body };
 }
 
-async function sendEmail(p: Prospect & { industry?: string }, demoUrl: string, template: string): Promise<"sent" | "quota" | "fail"> {
+async function sendEmail(p: Prospect & { industry?: string }, demoUrl: string, template: string): Promise<"sent" | "quota" | "auth" | "fail"> {
   const { subject, html } = buildEmail(p, demoUrl, template);
   const unsubUrl = `${BASE_URL}/unsubscribe?email=${encodeURIComponent(p.email)}`;
   try {
@@ -342,14 +369,17 @@ async function sendEmail(p: Prospect & { industry?: string }, demoUrl: string, t
     });
     if (resp.ok) return "sent";
     const err = await resp.text();
-    if (err.includes("429") || err.includes("quota")) return "quota";
-    console.log(`  [resend] FAIL: ${err.slice(0, 80)}`);
+    // Auth/credit failure (bad/rotated key, suspended account) is a HARD stop —
+    // classify by status, not a brittle body-substring match, and pause the loop.
+    if (resp.status === 401 || resp.status === 403) { console.error(`  [resend] AUTH FAIL (${resp.status}): ${err.slice(0, 100)}`); return "auth"; }
+    if (resp.status === 429 || err.includes("429") || err.includes("quota")) return "quota";
+    console.log(`  [resend] FAIL (${resp.status}): ${err.slice(0, 80)}`);
     return "fail";
   } catch { return "fail"; }
 }
 
 // --- Main loop ---
-async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
+async function processOne(): Promise<"sent" | "quota" | "skip" | "done" | "auth"> {
   // Find next valid prospect
   for (let attempts = 0; attempts < 50; attempts++) {
     const candidate = await getNextCandidate();
@@ -416,6 +446,12 @@ async function processOne(): Promise<"sent" | "quota" | "skip" | "done"> {
       saveState();
       console.log("  QUOTA HIT");
       return "quota";
+    } else if (result === "auth") {
+      return "auth"; // hard stop — main pauses
+    } else {
+      // non-auth, non-quota failure: the demo is registered + live but the email
+      // didn't go out. Record it so it's not silently lost.
+      recordSendFail(email, domain);
     }
     continue;
   }
@@ -448,7 +484,33 @@ async function main() {
       saveState();
     }
 
-    const result = await processOne();
+    // Preflight: don't onboard + email fresh demo links while the serving backend is
+    // down — the link would open to a broken chat. Pause until it recovers.
+    if (SEND && !(await backendHealthy())) {
+      console.log("\n[preflight] serving backend unhealthy (see /api/health-deep) - pausing 10 min before sending.");
+      await new Promise(r => setTimeout(r, 600000));
+      continue;
+    }
+
+    let result: "sent" | "quota" | "skip" | "done" | "auth";
+    try {
+      result = await processOne();
+    } catch (e: any) {
+      if (String(e?.message || "").includes("apollo-credits-exhausted")) {
+        console.error("\n[apollo] CREDITS EXHAUSTED (402/403) - pausing 6h. Top up Apollo to resume; the loop won't spin burning cycles.");
+        await new Promise(r => setTimeout(r, 6 * 3600000));
+        continue;
+      }
+      console.error(`[loop] processOne error: ${e?.message || e}`);
+      await new Promise(r => setTimeout(r, 30000));
+      continue;
+    }
+
+    if (result === "auth") {
+      console.error("\n[resend] AUTH FAILURE - pausing 1h. Check RESEND_API_KEY (bad/rotated/suspended).");
+      await new Promise(r => setTimeout(r, 3600000));
+      continue;
+    }
     if (result === "quota") continue;
     if (result === "done") {
       state.keywordOffset++;
