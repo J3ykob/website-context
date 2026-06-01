@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { createHash } from "crypto";
+import * as cheerio from "cheerio";
 import type { CrawlResult, ScrapedPage } from "../scraper/types.js";
 import { htmlToMarkdown, type MarkdownSection } from "../scraper/markdown.js";
 import { fetchPage } from "../scraper/fetcher.js";
@@ -36,12 +37,31 @@ function extractTelMailto(html: string): { phones: string[]; emails: string[] } 
   return { phones: [...phones].slice(0, 3), emails: [...emails].slice(0, 3) };
 }
 
+// Pull text from the site-wide regions markdown extraction strips (<header>,
+// <footer>, banner/contentinfo). These hold address, opening hours, company details
+// and nav structure. Captured ONCE and deduped (they repeat on every page) so the
+// info is available without flooding every page's chunks with the nav menu.
+function extractHeaderFooterText(html: string): string[] {
+  try {
+    const $ = cheerio.load(html);
+    const blocks: string[] = [];
+    $("footer, header, [role='contentinfo'], [role='banner']").each((_: any, el: any) => {
+      const t = $(el).text().replace(/\s+/g, " ").trim();
+      if (t.length >= 20 && t.length <= 1500) blocks.push(t);
+    });
+    return blocks;
+  } catch {
+    return [];
+  }
+}
+
 export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteContext> {
   const pages: PageContext[] = [];
   const chunks: ContentChunk[] = [];
   const siteMap: SiteMapEntry[] = [];
   const contactPhones = new Set<string>();
   const contactEmails = new Set<string>();
+  const headerFooterBlocks = new Set<string>();
 
   for (const scrapedPage of crawlResult.pages) {
     // Re-fetch for markdown (we already have the HTML in memory during crawl,
@@ -53,6 +73,8 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
     const ci = extractTelMailto(fetchResult.html);
     ci.phones.forEach((p) => contactPhones.add(p));
     ci.emails.forEach((e) => contactEmails.add(e));
+    // Capture header/footer text (address, hours, company info) — stripped by markdown.
+    extractHeaderFooterText(fetchResult.html).forEach((b) => headerFooterBlocks.add(b));
 
     const pageId = generatePageId(scrapedPage.url);
     const sections = buildSections(markdown.sections, pageId);
@@ -115,6 +137,21 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
       content: body,
       contextPrefix: `Official contact details (phone / email) for this business, taken from the site's tel: and mailto: links.`,
       metadata: { url, title: "Kontakt / Contact", headingHierarchy: ["Kontakt", "Contact"], type: "form-description" },
+    });
+  }
+
+  // Header/footer content (address, hours, company info), captured once + deduped.
+  if (headerFooterBlocks.size > 0 && crawlResult.pages.length > 0) {
+    const ordered = [...headerFooterBlocks].sort((a, b) => b.length - a.length).slice(0, 3);
+    const body = `## Informacje ze stopki / Site info\n\n${ordered.join("\n\n")}`.slice(0, 2500);
+    const url = crawlResult.pages[0].url;
+    const pageId = generatePageId(url);
+    chunks.push({
+      id: chunkId(pageId, ["SiteInfo"], 0, body),
+      pageId,
+      content: body,
+      contextPrefix: `Header/footer information (often address, opening hours, company details) shown site-wide on this business's pages.`,
+      metadata: { url, title: "Site info", headingHierarchy: ["Site info"], type: "content" },
     });
   }
 

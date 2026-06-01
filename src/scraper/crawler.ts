@@ -17,6 +17,10 @@ const DEFAULT_OPTIONS: Required<CrawlOptions> = {
   userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
 };
 
+// URL paths that almost always hold high-value info (contact details, pricing,
+// services, hours, location) — crawled first so they're never missed under the cap.
+const KEY_PAGE_PATTERN = /(kontakt|contact|o-?nas|about|cennik|pricing|prices?|us[lł]ugi|services?|oferta|offer|godziny|opening|hours|dojazd|lokaliz|location|menu)/i;
+
 export async function crawlSite(
   startUrl: string,
   options: CrawlOptions = {}
@@ -84,12 +88,17 @@ export async function crawlSite(
       if (page.renderMethod === "static") staticCount++;
       else dynamicCount++;
 
-      // Add links to queue (internal = same allowed hosts)
+      // Add links to queue (internal = same allowed hosts). Key pages (contact,
+      // about, pricing, services, hours) JUMP the queue so they're crawled even on
+      // large sites where they'd otherwise fall outside the page cap — this is how
+      // a contact page (with the phone) gets reliably captured.
       for (const link of page.links) {
         const linkHost = new URL(link.href).hostname;
         const isInternal = allowedHosts.has(linkHost);
         if (isInternal && !visited.has(normalizeUrl(link.href))) {
-          queue.push({ url: link.href, depth: item.depth + 1, parent: normalizedUrl });
+          const next = { url: link.href, depth: item.depth + 1, parent: normalizedUrl };
+          if (KEY_PAGE_PATTERN.test(new URL(link.href).pathname)) queue.unshift(next);
+          else queue.push(next);
         }
       }
     } catch (error) {

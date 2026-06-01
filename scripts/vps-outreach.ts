@@ -168,7 +168,11 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
   const siteUrl = `https://${domain}`;
   try {
     console.log(`  [scrape] Scraping ${domain} locally...`);
-    const result = await scrapeTenant(tenantId, siteUrl, 20);
+    // Up to 40 pages (was 20) — large sites (many brand/listing pages) were missing
+    // their contact/about/pricing pages. Key pages are crawled first (see crawler),
+    // and the crawl still stops early when the queue empties, so small sites are
+    // unaffected; only sites that NEED more pages get them.
+    const result = await scrapeTenant(tenantId, siteUrl, 40);
     await closeBrowser();
     if (result.chunks === 0) {
       console.log(`  [scrape] 0 chunks - site might be JS-rendered or empty`);
