@@ -3,7 +3,7 @@
  * Uses the public Google Maps search page (no API key needed).
  */
 
-import { chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import type { ContentChunk } from "../context/types.js";
 import { randomUUID } from "crypto";
 
@@ -24,7 +24,7 @@ export async function scrapeGooglePlaces(businessName: string, location: string,
   const query = encodeURIComponent(`${businessName} ${location}`);
   const url = `https://www.google.com/maps/search/${query}`;
 
-  let browser;
+  let browser: Browser | undefined;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   try {
     browser = await chromium.launch({
