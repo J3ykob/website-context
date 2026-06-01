@@ -1068,9 +1068,17 @@ app.post("/api/chat", async (req, res) => {
       res.json(response);
     }
   } catch (error: any) {
-    console.error("[chat error]", error.message);
+    const msg = String(error?.message || "");
+    console.error(`[chat error] ${req.body?.tenantId}: ${msg}`);
     if (!res.headersSent) {
-      res.status(500).json({ error: "Chat failed" });
+      if (/HTTP 401|HTTP 403|Vectorize query failed|Vectorize insert failed/i.test(msg)) {
+        // Grounding backend (CF token / Vectorize) is down — be honest, don't fake an answer.
+        res.status(503).json({ error: "grounding_unavailable", message: "Sorry — I'm having trouble reaching my knowledge base right now. Please try again in a moment." });
+      } else {
+        // No usable knowledge yet for this tenant (e.g. 0 vectors) — degrade gracefully
+        // instead of a hard 500, so a prospect never sees a raw error.
+        res.status(200).json({ message: "I don't have this site's details indexed yet — please reach out to the business directly and we'll have this ready shortly.", degraded: true });
+      }
     }
   }
 });

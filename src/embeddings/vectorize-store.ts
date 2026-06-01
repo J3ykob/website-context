@@ -53,10 +53,22 @@ export class CloudflareVectorizeStore implements VectorStore {
       });
 
       if (!resp.ok) {
+        // FAIL LOUD. Previously this only logged, so an expired CF token (401)
+        // or any insert error produced "embedded N chunks" with ZERO vectors in
+        // Vectorize -> demo marked active + emailed but chat ungrounded. Throwing
+        // lets embedChunks count this as a failure so the scrape gate catches it.
         const err = await resp.text();
-        console.error(`[vectorize] Insert batch failed: ${err.slice(0, 200)}`);
+        throw new Error(`Vectorize insert failed (HTTP ${resp.status}): ${err.slice(0, 200)}`);
       }
     }
+  }
+
+  // True if this tenant has at least one queryable vector. Used as the
+  // load-bearing readiness check — local "embedded N" counts lie (see upsert).
+  async hasVectors(): Promise<boolean> {
+    const probe = new Array(1024).fill(0.01);
+    const hits = await this.search(probe, 1);
+    return hits.length > 0;
   }
 
   async search(query: number[], topK: number = 5, filter?: Record<string, unknown>): Promise<SearchResult[]> {
@@ -73,9 +85,11 @@ export class CloudflareVectorizeStore implements VectorStore {
     });
 
     if (!resp.ok) {
+      // FAIL LOUD on HTTP errors (e.g. 401 expired token, Vectorize down) so the
+      // chat layer can return 503 instead of a silent ungrounded answer. A valid
+      // query with zero matches still returns [] below (that's not an error).
       const err = await resp.text();
-      console.error(`[vectorize] Query failed: ${err.slice(0, 200)}`);
-      return [];
+      throw new Error(`Vectorize query failed (HTTP ${resp.status}): ${err.slice(0, 200)}`);
     }
 
     const data = await resp.json() as any;

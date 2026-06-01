@@ -129,6 +129,28 @@ export async function scrapeTenant(
     throw new Error(`Embedding failed: only ${embedResult.embeddedChunks}/${context.chunks.length} chunks embedded`);
   }
 
+  // POST-EMBED VERIFICATION — the load-bearing readiness check. Local "embedded N"
+  // counts can't be trusted (upsert used to swallow HTTP errors) and Vectorize
+  // INSERT is eventually consistent. Poll the index until a vector is actually
+  // queryable, with backoff; throw if none land. This guarantees a scrape never
+  // reports success with 0 live vectors -> root cause of the 872 ungrounded demos.
+  if (useVectorize && context.chunks.length > 0) {
+    const vstore = store as CloudflareVectorizeStore;
+    let queryable = false;
+    for (let attempt = 1; attempt <= 8 && !queryable; attempt++) {
+      try {
+        if (await vstore.hasVectors()) { queryable = true; break; }
+      } catch (e) {
+        console.log(`[scrape-pipeline] vector probe error (attempt ${attempt}): ${(e as Error).message}`);
+      }
+      await new Promise((r) => setTimeout(r, attempt * 1500));
+    }
+    if (!queryable) {
+      throw new Error(`Post-embed verification failed: 0 vectors queryable for ${tenantId} (embed silently failed or token invalid)`);
+    }
+    console.log(`[scrape-pipeline] verified ${tenantId}: vectors queryable in Vectorize`);
+  }
+
   // Delete orphaned vectors (tracked before, absent now) and persist the current
   // ID set for the next re-scrape.
   if (useVectorize) {
