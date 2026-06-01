@@ -20,17 +20,22 @@ export interface PlacesData {
   description: string | null;
 }
 
-export async function scrapeGooglePlaces(businessName: string, location: string): Promise<PlacesData | null> {
+export async function scrapeGooglePlaces(businessName: string, location: string, maxTimeMs = 25000): Promise<PlacesData | null> {
   const query = encodeURIComponent(`${businessName} ${location}`);
   const url = `https://www.google.com/maps/search/${query}`;
 
   let browser;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
   try {
     browser = await chromium.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     });
+    // Self-bound: force-close the browser if the scrape runs long, so it can never be
+    // orphaned (the caller no longer races + abandons us). In-flight page ops then
+    // error and we return null via the catch below.
+    watchdog = setTimeout(() => { browser?.close().catch(() => {}); }, maxTimeMs);
 
     const page = await browser.newPage();
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -176,7 +181,8 @@ export async function scrapeGooglePlaces(businessName: string, location: string)
     console.error("[google-places] Scrape failed:", (err as Error).message);
     return null;
   } finally {
-    if (browser) await browser.close();
+    if (watchdog) clearTimeout(watchdog);
+    if (browser) await browser.close().catch(() => {});
   }
 }
 

@@ -95,10 +95,9 @@ export async function scrapeTenant(
     const location = tldToCountry[tld] || "";
     console.log(`[scrape-pipeline] Scraping Google Maps for "${businessName} ${location}"...`);
 
-    const placesData = await Promise.race([
-      scrapeGooglePlaces(businessName, location),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Google Maps timeout (30s)")), 30000)),
-    ]);
+    // scrapeGooglePlaces self-bounds (an internal watchdog closes its own browser),
+    // so no external race that would abandon a still-running Chromium.
+    const placesData = await scrapeGooglePlaces(businessName, location, 30000);
     if (placesData && placesData.name) {
       // The Maps lookup is name-based and fuzzy. If it returned a website, require
       // its host to match this site before trusting it — otherwise it may be a

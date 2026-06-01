@@ -157,6 +157,7 @@ export class CloudflareVectorizeStore implements VectorStore {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
     const seen = new Set<string>();
+    let drained = false;
     for (let round = 1; round <= 25; round++) {
       let lowStreak = 0;
       for (let pass = 0; pass < 250; pass++) {
@@ -170,13 +171,23 @@ export class CloudflareVectorizeStore implements VectorStore {
         if (lowStreak >= 10) break;
         await sleep(700);
       }
-      // Let async deletes process, then verify with random samples.
+      // Let async deletes process, then verify with random samples (more samples =
+      // more confidence the namespace is truly empty before we declare it drained).
       await sleep(15000);
       let still = 0;
-      for (let v = 0; v < 8; v++) { const ids = await queryIds(randProbe()); still += (ids || []).length; await sleep(300); }
-      if (still === 0) break;
+      for (let v = 0; v < 12; v++) { const ids = await queryIds(randProbe()); still += (ids || []).length; await sleep(300); }
+      if (still === 0) { drained = true; break; }
     }
-    console.log(`[vectorize] deleteAll ${this.tenantId}: ${seen.size} unique vectors removed`);
+    // Don't silently report success on a probabilistic drain — if 25 rounds didn't
+    // produce a clean verification, residue (old/duplicate vectors) may survive. This
+    // is the LEGACY path (no tracked vector-ids.json); the next re-scrape persists
+    // tracked ids and cleans residue via the authoritative orphan-delete, so we warn
+    // loudly rather than fail the scrape.
+    if (drained) {
+      console.log(`[vectorize] deleteAll ${this.tenantId}: ${seen.size} vectors removed, namespace verified empty`);
+    } else {
+      console.warn(`[vectorize] deleteAll ${this.tenantId}: removed ${seen.size} but namespace NOT verified empty after 25 rounds — residue may survive until next re-scrape's tracked-id cleanup`);
+    }
     return seen.size;
   }
 
