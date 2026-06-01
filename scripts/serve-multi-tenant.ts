@@ -1162,18 +1162,16 @@ app.get("/api/health", (_, res) => {
   res.json({ status: "ok", tenants: tenants.length, active: tenants.filter(t => t.status === "active").length });
 });
 
-// Deep health check (for monitoring, NOT Render's healthCheckPath). Actively probes
-// the three backends every chat depends on — CF token/Vectorize, BGE embeddings, and
-// the LLM provider — so an outage like "OpenRouter out of credits" is visible from a
-// dashboard/cron BEFORE a prospect emails "demo not working". Cached 60s; the LLM
-// balance check is free (/key endpoint), so no credits are burned by polling.
-let healthDeepCache: { at: number; body: any } | null = null;
-app.get("/api/health-deep", async (_, res) => {
-  if (healthDeepCache && Date.now() - healthDeepCache.at < 60000) {
-    res.status(healthDeepCache.body.ok ? 200 : 503).json(healthDeepCache.body);
-    return;
-  }
+// --- Deep health + proactive monitoring --------------------------------------
+// Shared by /api/health-deep AND the background monitor below. Probes every backend
+// a live demo depends on (CF token/Vectorize, BGE, the LLM, R2) PLUS the LLM credit
+// balance, so an outage OR an about-to-run-dry credential is caught from monitoring
+// BEFORE a prospect emails "demo not working".
+const LOW_BALANCE_USD = Number(process.env.LLM_LOW_BALANCE_USD || "5");
+
+async function runDeepHealthChecks(): Promise<{ ok: boolean; lowBalance: boolean; checks: Record<string, any>; lastChatError: any; at: string }> {
   const checks: Record<string, any> = {};
+  let lowBalance = false;
 
   // BGE embeddings
   try {
@@ -1187,32 +1185,106 @@ app.get("/api/health-deep", async (_, res) => {
 
   // CF token / Vectorize (tiny query)
   try {
-    const store = new CloudflareVectorizeStore({ tenantId: "__health__" });
-    await store.search(new Array(1024).fill(0.01), 1);
+    await new CloudflareVectorizeStore({ tenantId: "__health__" }).search(new Array(1024).fill(0.01), 1);
     checks.vectorize = { ok: true };
   } catch (e: any) { checks.vectorize = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
 
-  // LLM provider balance — free /key endpoint, detects credit exhaustion proactively
+  // R2 reachability/auth — strict download distinguishes a real error from absence.
   try {
-    const r = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY || ""}` }, signal: AbortSignal.timeout(8000) });
+    const { downloadFromR2Strict } = await import("../src/storage/r2.js");
+    await downloadFromR2Strict("config/cf-token");
+    checks.r2 = { ok: true };
+  } catch (e: any) { checks.r2 = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
+
+  // LLM provider — balance via the free /credits endpoint (proactive low-balance) and
+  // the recent-chat-failure signal for a hard outage.
+  try {
+    const r = await fetch("https://openrouter.ai/api/v1/credits", { headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY || ""}` }, signal: AbortSignal.timeout(8000) });
     if (r.ok) {
       const d = (await r.json()) as any;
-      const lim = d?.data?.limit;
-      const rem = d?.data?.limit_remaining;
-      // For prepaid credit accounts limit/remaining are null; the live signal is
-      // whether recent chats failed with llm-credits (see lastChatError).
+      const tc = d?.data?.total_credits, tu = d?.data?.total_usage;
+      const remaining = (typeof tc === "number" && typeof tu === "number") ? Math.round((tc - tu) * 100) / 100 : null;
       const creditOutage = lastChatError?.cause === "llm-credits" && (Date.now() - new Date(lastChatError.at).getTime() < 600000);
-      checks.llm = { ok: !creditOutage, keyReachable: true, usage: d?.data?.usage, limit: lim, limitRemaining: rem, recentCreditFailure: creditOutage };
+      const empty = remaining != null && remaining <= 0;
+      const low = remaining != null && remaining > 0 && remaining < LOW_BALANCE_USD;
+      if (low) lowBalance = true;
+      checks.llm = { ok: !creditOutage && !empty, keyReachable: true, remaining, low, recentCreditFailure: creditOutage };
     } else {
       checks.llm = { ok: false, status: r.status };
     }
   } catch (e: any) { checks.llm = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
 
-  const ok = checks.bge?.ok && checks.vectorize?.ok && checks.llm?.ok;
-  const body = { ok, checks, lastChatError, at: new Date().toISOString() };
+  // Browserless (scrape dependency) — informational, only when configured. A dry
+  // token silently produces 0-chunk scrapes + screenshot-less demos, so surface it.
+  if (process.env.BROWSERLESS_TOKEN) {
+    try {
+      const r = await fetch(`https://chrome.browserless.io/pressure?token=${process.env.BROWSERLESS_TOKEN}`, { signal: AbortSignal.timeout(8000) });
+      checks.browserless = { ok: r.ok, status: r.status };
+    } catch (e: any) { checks.browserless = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
+  }
+
+  // Serving-critical health (Browserless excluded — live chat doesn't use it).
+  const ok = !!(checks.bge?.ok && checks.vectorize?.ok && checks.llm?.ok && checks.r2?.ok);
+  return { ok, lowBalance, checks, lastChatError, at: new Date().toISOString() };
+}
+
+let healthDeepCache: { at: number; body: any } | null = null;
+app.get("/api/health-deep", async (_, res) => {
+  if (healthDeepCache && Date.now() - healthDeepCache.at < 60000) {
+    res.status(healthDeepCache.body.ok ? 200 : 503).json(healthDeepCache.body);
+    return;
+  }
+  const body = await runDeepHealthChecks();
   healthDeepCache = { at: Date.now(), body };
-  res.status(ok ? 200 : 503).json(body);
+  res.status(body.ok ? 200 : 503).json(body);
 });
+
+// --- Background monitor + debounced ops alerts -------------------------------
+// The whole point: learn about a dry credential / backend outage from monitoring,
+// NOT from a prospect emailing "demo broken". Runs the deep checks on a timer and
+// emails the owner when something is down or the LLM balance is low — debounced (the
+// same problem is suppressed for 60 min) so it never spams, with one recovery note.
+const OWNER_EMAIL = process.env.OWNER_EMAIL || "kubalol7982@gmail.com";
+async function sendOpsAlert(subject: string, text: string): Promise<void> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) { console.warn("[monitor] no RESEND_API_KEY — cannot send ops alert"); return; }
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: process.env.ALERT_FROM || "Whisp Monitor <monitor@whisp.so>", to: [OWNER_EMAIL], subject, text }),
+      signal: AbortSignal.timeout(10000),
+    });
+    console.log(`[monitor] ops alert emailed: ${subject}`);
+  } catch (e: any) { console.error(`[monitor] alert email failed: ${e?.message || e}`); }
+}
+
+let lastAlertSig = "";
+let lastAlertAt = 0;
+let monitorWasHealthy = true;
+async function healthMonitorTick(): Promise<void> {
+  try {
+    const h = await runDeepHealthChecks();
+    healthDeepCache = { at: Date.now(), body: h }; // warm the endpoint cache too
+    const failing = Object.entries(h.checks).filter(([, v]: any) => v && v.ok === false).map(([k]) => k);
+    const problem = !h.ok || h.lowBalance;
+    const sig = failing.sort().join(",") + (h.lowBalance ? "|lowbal" : "");
+    const now = Date.now();
+    if (problem) {
+      if (sig !== lastAlertSig || now - lastAlertAt > 3600000) {
+        lastAlertSig = sig; lastAlertAt = now; monitorWasHealthy = false;
+        const subj = !h.ok
+          ? `⚠️ Whisp backend DOWN: ${failing.join(", ") || "unknown"}`
+          : `⚠️ Whisp LLM credits low: $${h.checks.llm?.remaining} remaining`;
+        await sendOpsAlert(subj, `${subj}\n\nchecks:\n${JSON.stringify(h.checks, null, 2)}\n\nlastChatError: ${JSON.stringify(h.lastChatError)}\n\nhttps://whisp.so/api/health-deep`);
+      }
+    } else if (!monitorWasHealthy) {
+      monitorWasHealthy = true; lastAlertSig = "";
+      await sendOpsAlert("✅ Whisp backend recovered", "All health-deep checks are green again.");
+    }
+  } catch (e: any) { console.error(`[monitor] tick error: ${e?.message || e}`); }
+}
+setInterval(healthMonitorTick, 4 * 60 * 1000);
 
 // Public onboarding stats — live queue for landing page social proof
 app.get("/api/onboarding-stats", (_, res) => {
