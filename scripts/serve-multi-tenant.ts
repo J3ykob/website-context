@@ -16,6 +16,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { readFile, writeFile, appendFile } from "fs/promises";
 import { loadCfToken } from "../src/storage/cf-auth.js";
+import { CloudflareVectorizeStore } from "../src/embeddings/vectorize-store.js";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
@@ -1000,6 +1001,10 @@ app.get("/api/tenants/:id/status", (req, res) => {
 });
 
 // Chat endpoint
+// Most recent chat backend failure (BGE/Vectorize/LLM). Surfaced by /api/health-deep
+// so an outage is detectable from monitoring instead of via a customer email.
+let lastChatError: { tenantId: string; cause: string; msg: string; at: string } | null = null;
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { messages, sessionId, tenantId } = req.body;
@@ -1070,24 +1075,89 @@ app.post("/api/chat", async (req, res) => {
     }
   } catch (error: any) {
     const msg = String(error?.message || "");
-    console.error(`[chat error] ${req.body?.tenantId}: ${msg}`);
+    // Classify the failure for logs + /api/health-deep. EVERY error caught here is
+    // a transient backend/provider outage, NOT missing data — so the prospect-facing
+    // message stays honest and recoverable regardless of cause.
+    let cause = "unknown";
+    if (/HTTP 401|HTTP 403|Vectorize (query|insert) failed/i.test(msg)) cause = "vectorize/cf-token";
+    else if (/BGE embedding failed/i.test(msg)) cause = "bge-embeddings";
+    else if (/OpenRouter request failed/i.test(msg)) cause = /\(402\)|insufficient credits/i.test(msg) ? "llm-credits" : "llm-provider";
+    console.error(`[chat error] ${req.body?.tenantId} [${cause}]: ${msg.slice(0, 300)}`);
+    lastChatError = { tenantId: req.body?.tenantId || "", cause, msg: msg.slice(0, 300), at: new Date().toISOString() };
     if (!res.headersSent) {
-      if (/HTTP 401|HTTP 403|Vectorize query failed|Vectorize insert failed/i.test(msg)) {
-        // Grounding backend (CF token / Vectorize) is down — be honest, don't fake an answer.
-        res.status(503).json({ error: "grounding_unavailable", message: "Sorry — I'm having trouble reaching my knowledge base right now. Please try again in a moment." });
-      } else {
-        // No usable knowledge yet for this tenant (e.g. 0 vectors) — degrade gracefully
-        // instead of a hard 500, so a prospect never sees a raw error.
-        res.status(200).json({ message: "I don't have this site's details indexed yet — please reach out to the business directly and we'll have this ready shortly.", degraded: true });
-      }
+      // Previously the default branch told the prospect "I don't have this site's
+      // details indexed yet" for ANY non-token error. But BGE outages, LLM provider
+      // failures (incl. OpenRouter 402 "insufficient credits"), and unknown throws
+      // are infra problems on FULLY-INDEXED demos — that message wrongly blamed
+      // missing data and was the literal text behind the recurring "demo not working"
+      // complaints. Be honest and recoverable; the readiness gate (not this catch)
+      // is what keeps genuinely-empty tenants from ever going active.
+      res.status(503).json({
+        error: "backend_unavailable",
+        message: "Sorry — I'm having trouble right now. Please try again in a moment.",
+      });
     }
   }
 });
 
-// Global health check (for Render)
+// Global health check (for Render liveness). Stays SHALLOW on purpose: a backend
+// outage (LLM credits, BGE) must NOT make Render kill a healthy container — the
+// server is alive and should keep serving the honest "try again" message.
 app.get("/api/health", (_, res) => {
   const tenants = listTenants();
   res.json({ status: "ok", tenants: tenants.length, active: tenants.filter(t => t.status === "active").length });
+});
+
+// Deep health check (for monitoring, NOT Render's healthCheckPath). Actively probes
+// the three backends every chat depends on — CF token/Vectorize, BGE embeddings, and
+// the LLM provider — so an outage like "OpenRouter out of credits" is visible from a
+// dashboard/cron BEFORE a prospect emails "demo not working". Cached 60s; the LLM
+// balance check is free (/key endpoint), so no credits are burned by polling.
+let healthDeepCache: { at: number; body: any } | null = null;
+app.get("/api/health-deep", async (_, res) => {
+  if (healthDeepCache && Date.now() - healthDeepCache.at < 60000) {
+    res.status(healthDeepCache.body.ok ? 200 : 503).json(healthDeepCache.body);
+    return;
+  }
+  const checks: Record<string, any> = {};
+
+  // BGE embeddings
+  try {
+    const host = process.env.BGE_HOST || "176.9.1.133";
+    const port = process.env.BGE_PORT || "7900";
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if (process.env.BGE_API_KEY) h["X-API-Key"] = process.env.BGE_API_KEY;
+    const r = await fetch(`http://${host}:${port}/embed`, { method: "POST", headers: h, body: JSON.stringify({ texts: ["health"] }), signal: AbortSignal.timeout(8000) });
+    checks.bge = { ok: r.ok, status: r.status };
+  } catch (e: any) { checks.bge = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
+
+  // CF token / Vectorize (tiny query)
+  try {
+    const store = new CloudflareVectorizeStore({ tenantId: "__health__" });
+    await store.search(new Array(1024).fill(0.01), 1);
+    checks.vectorize = { ok: true };
+  } catch (e: any) { checks.vectorize = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
+
+  // LLM provider balance — free /key endpoint, detects credit exhaustion proactively
+  try {
+    const r = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY || ""}` }, signal: AbortSignal.timeout(8000) });
+    if (r.ok) {
+      const d = (await r.json()) as any;
+      const lim = d?.data?.limit;
+      const rem = d?.data?.limit_remaining;
+      // For prepaid credit accounts limit/remaining are null; the live signal is
+      // whether recent chats failed with llm-credits (see lastChatError).
+      const creditOutage = lastChatError?.cause === "llm-credits" && (Date.now() - new Date(lastChatError.at).getTime() < 600000);
+      checks.llm = { ok: !creditOutage, keyReachable: true, usage: d?.data?.usage, limit: lim, limitRemaining: rem, recentCreditFailure: creditOutage };
+    } else {
+      checks.llm = { ok: false, status: r.status };
+    }
+  } catch (e: any) { checks.llm = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
+
+  const ok = checks.bge?.ok && checks.vectorize?.ok && checks.llm?.ok;
+  const body = { ok, checks, lastChatError, at: new Date().toISOString() };
+  healthDeepCache = { at: Date.now(), body };
+  res.status(ok ? 200 : 503).json(body);
 });
 
 // Public onboarding stats — live queue for landing page social proof
