@@ -16,7 +16,12 @@ export interface BusinessInfo {
   gaps: string[];
 }
 
-const PHONE_REGEX = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{2,4}/g;
+// Phone candidates: a +international number, or digit groups joined by separators.
+// Deliberately does NOT match an unseparated run like "899000.00" — that (a luxury
+// car PRICE) used to be extracted as the phone, so the bot told prospects to call
+// "899000.00". extractPhone() additionally rejects price/measurement-shaped matches.
+const PHONE_CANDIDATE = /\+\d{1,3}(?:[\s.\-]?\d{2,4}){2,5}|\d{2,4}(?:[\s.\-]\d{2,4}){1,4}/g;
+const PHONE_KEYWORD = /(tel|telefon|phone|mobile|kom[óo]rk|gsm|kontakt|zadzwo[nń]|whats?app|call|☎|📞)/i;
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 const HOURS_PATTERNS = [
   /(?:pon|mon|tue|wed|thu|fri|sat|sun|niedz|sob|wt|śr|czw|pt)\w*[:\s-]+\d{1,2}[:.]\d{2}/gi,
@@ -33,7 +38,8 @@ const BOOKING_PATTERNS = [
 ];
 const ADDRESS_PATTERNS = [
   /(?:ul\.|ulica|street|str\.|aleja|al\.)\s*[\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+\d+/gi,
-  /\d{2}-\d{3}\s+[\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+/g,
+  // postal code + a Capitalized city word (so "00-200 km" / mileage isn't an address)
+  /\d{2}-\d{3}\s+[A-ZÀ-ÿĄĆĘŁŃÓŚŹŻ][\wąćęłńóśźż]+/g,
 ];
 const SOCIAL_PATTERNS = [
   /(?:facebook\.com|fb\.com)\/[\w.-]+/gi,
@@ -42,13 +48,37 @@ const SOCIAL_PATTERNS = [
   /linkedin\.com\/(?:company|in)\/[\w.-]+/gi,
 ];
 
+// Extract a real phone number — not a price, mileage, year, or other big number.
+// Rules: 9-15 digits; reject a trailing 2-digit decimal (",00"/".00" = a price);
+// reject if a currency/unit (zł, €, km, ...) immediately follows or a price word
+// (cena/price/od/przebieg/...) immediately precedes; PREFER candidates next to a
+// phone keyword or written in +international form. Returns null rather than risk a
+// wrong number — an honest "I don't have the phone" beats sending a prospect to a
+// dead line (the Select-Automotive "call 899000.00" failure).
+export function extractPhone(text: string): string | null {
+  const strong: string[] = [];
+  const weak: string[] = [];
+  const re = new RegExp(PHONE_CANDIDATE.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const raw = m[0].trim();
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length < 9 || digits.length > 15) continue;
+    if (/[.,]\d{2}$/.test(raw)) continue; // trailing ,00 / .00 -> a price/decimal, not a phone
+    const before = text.slice(Math.max(0, m.index - 28), m.index);
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 8);
+    if (/^\s*(z[łl]|pln|eur|usd|gbp|€|\$|£|km|kg|m2|m²|%|kw|km\/h)/i.test(after)) continue; // price/measurement
+    if (/(cena|price|koszt|od|from|rok|year|vin|przebieg|mileage|nr)\s*[:.]?\s*$/i.test(before)) continue;
+    (PHONE_KEYWORD.test(before) || PHONE_KEYWORD.test(after) || raw.startsWith("+") ? strong : weak).push(raw);
+  }
+  return strong[0] || weak[0] || null;
+}
+
 export function auditBusinessInfo(chunks: { content: string }[]): BusinessInfo {
   const allContent = chunks.map(c => c.content).join("\n\n");
 
-  // Extract phone
-  const phones = allContent.match(PHONE_REGEX) || [];
-  const validPhones = phones.filter(p => p.replace(/\D/g, "").length >= 7);
-  const phone = validPhones[0] || null;
+  // Extract phone (price/measurement-aware — see extractPhone above)
+  const phone = extractPhone(allContent);
 
   // Extract email
   const emails = allContent.match(EMAIL_REGEX) || [];
