@@ -41,6 +41,10 @@ export interface ChatConfig {
 export interface ChatResponse {
   message: string;
   sources: { url: string; title: string }[];
+  // false when no usable site context survived retrieval+filtering — the answer
+  // is an honest fallback, not grounded in the tenant's content. The server uses
+  // this to log/quarantine demos that are active but effectively empty.
+  grounded?: boolean;
   navigateTo?: string;
   suggestedAction?: { flowId: string; flowName: string; description: string };
   flowSession?: {
@@ -544,6 +548,23 @@ export class WebsiteChat {
       return { message: safeMessage, sources };
     }
 
+    // GROUNDING GATE: if nothing survived retrieval+filtering, the demo has no
+    // real context to answer from — a 0-vector/broken tenant, or a question the
+    // site genuinely doesn't cover. The system prompt above is tuned to "make
+    // reasonable inferences" and bans the honest escape hatches, so without this
+    // gate the LLM would invent a confident answer about the prospect's own
+    // business (the worst possible first impression). Return an honest fallback
+    // and flag grounded:false so the server can log/quarantine the tenant.
+    // (We're past all flow paths here, so flow-only demos are unaffected.)
+    if (this.filterContextChunks(retrievedChunks, lastUserMessage).length === 0) {
+      return {
+        message:
+          "I don't have the details to answer that accurately right now, and I'd rather not guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.",
+        sources: [],
+        grounded: false,
+      };
+    }
+
     // Fallback: plain text generation (no flows active or backend doesn't support tools)
     let responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
 
@@ -572,21 +593,17 @@ export class WebsiteChat {
     return { message: plainOutputCheck.sanitized, sources };
   }
 
-  private buildSystemPrompt(
+  // The chunks that actually become answerable context: relevant score, not
+  // navigation, and (unless asked) not privacy pages. Shared by buildSystemPrompt
+  // and the grounding gate so the gate fires on EXACTLY what the LLM would see —
+  // if this is empty, there is nothing real to answer from.
+  private filterContextChunks(
     chunks: { content: string; metadata: Record<string, unknown>; score: number }[],
-    recentlyCompletedFlowId?: string,
     userQuery?: string
-  ): string {
-    const siteInfo = this.context.siteMap
-      .slice(0, 20)
-      .map((s) => `- ${s.title} (${s.url})`)
-      .join("\n");
-
-    // Determine if user is asking about privacy/policy
+  ): typeof chunks {
     const queryLower = (userQuery || "").toLowerCase();
     const isPrivacyQuery = queryLower.includes("privacy") || queryLower.includes("polityka") || queryLower.includes("policy") || queryLower.includes("rodo") || queryLower.includes("gdpr");
-
-    const contextBlocks = chunks
+    return chunks
       .filter((c) => c.score > 0.005) // RRF scores are small (~0.01-0.03), cosine is larger (~0.3-0.9)
       .filter((c) => (c.metadata.type as string) !== "navigation")
       .filter((c) => {
@@ -598,7 +615,20 @@ export class WebsiteChat {
         return !title.includes("privacy") && !title.includes("polityka") && !title.includes("prywatno")
           && !url.includes("privacy") && !url.includes("polityka") && !url.includes("prywatno")
           && !content.includes("polityka prywatności") && !content.includes("privacy policy");
-      })
+      });
+  }
+
+  private buildSystemPrompt(
+    chunks: { content: string; metadata: Record<string, unknown>; score: number }[],
+    recentlyCompletedFlowId?: string,
+    userQuery?: string
+  ): string {
+    const siteInfo = this.context.siteMap
+      .slice(0, 20)
+      .map((s) => `- ${s.title} (${s.url})`)
+      .join("\n");
+
+    const contextBlocks = this.filterContextChunks(chunks, userQuery)
       .map((c, i) => {
         const heading = (c.metadata.headingHierarchy as string[])?.join(" > ") || "";
         return `[Source ${i + 1}: ${c.metadata.title}${heading ? " > " + heading : ""}]\n${c.content}`;

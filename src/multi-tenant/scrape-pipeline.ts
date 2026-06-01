@@ -105,6 +105,17 @@ export async function scrapeTenant(
     console.log(`[scrape-pipeline] Google Maps scrape skipped: ${(err as Error).message}`);
   }
 
+  // GATE: a scrape that produced zero chunks cannot back a grounded demo - the
+  // site is dead, a JS-only SPA, or blocking the crawler. Fail loudly so the
+  // caller quarantines the tenant instead of registering it 'active' with 0
+  // vectors (an ungrounded demo that looks live). The post-embed verification
+  // below only runs when chunks.length > 0, so without this gate a 0-chunk
+  // scrape slips straight through to "active". Empirically this is exactly how
+  // dead/SPA sites (lefournil, thenestreno) became live-but-broken demos.
+  if (context.chunks.length === 0) {
+    throw new Error(`No chunks extracted for ${tenantId} from ${siteUrl} - site is dead, JS-only, or blocking the crawler; refusing to register a 0-vector demo.`);
+  }
+
   // --- Dedup for Vectorize: deterministic IDs + orphan cleanup ---
   // Vectorize has no delete-by-filter, so we track each tenant's chunk IDs in R2.
   // Unchanged chunks keep their ID (overwritten on upsert); removed/changed chunks
