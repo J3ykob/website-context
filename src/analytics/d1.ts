@@ -3,15 +3,16 @@
  * Used by both VPS (outreach loop) and Render (demo visits, chat sessions).
  */
 
+import { getCfToken } from "../storage/cf-auth.js";
+
 const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
-const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
 const D1_DATABASE_ID = process.env.D1_DATABASE_ID || "0dec9229-fea2-4343-bf87-d36ac3205979";
 const D1_BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${D1_DATABASE_ID}/query`;
 
 async function d1Query(sql: string, params: any[] = []): Promise<any> {
   const resp = await fetch(D1_BASE, {
     method: "POST",
-    headers: { Authorization: `Bearer ${CF_API_TOKEN}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${getCfToken()}`, "Content-Type": "application/json" },
     body: JSON.stringify({ sql, params }),
   });
   if (!resp.ok) {

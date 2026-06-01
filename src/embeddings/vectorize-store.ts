@@ -5,14 +5,14 @@
  */
 
 import type { VectorStore, VectorEntry, SearchResult } from "./types.js";
+import { getCfToken } from "../storage/cf-auth.js";
 
 const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
-const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
 const INDEX_NAME = process.env.VECTORIZE_INDEX || "whisp-vectors";
 const BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/vectorize/v2/indexes/${INDEX_NAME}`;
 
 const headers = () => ({
-  "Authorization": `Bearer ${CF_API_TOKEN}`,
+  "Authorization": `Bearer ${getCfToken()}`,
   "Content-Type": "application/json",
 });
 

@@ -15,6 +15,7 @@
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { readFile, writeFile, appendFile } from "fs/promises";
+import { loadCfToken } from "../src/storage/cf-auth.js";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
@@ -2007,6 +2008,10 @@ app.get("/book", (_, res) => {
 
 // Static assets
 app.use(express.static(resolve(__dirname, "../public")));
+
+// Load the Cloudflare API token from R2 (config/cf-token) before serving, so it
+// can be rotated by a file write — no Render dashboard edit / redeploy needed.
+await loadCfToken();
 
 // Start server
 app.listen(port, "0.0.0.0", () => {
