@@ -13,16 +13,46 @@ import type {
   ChunkMetadata,
 } from "./types.js";
 
+// Harvest canonical contact data from tel:/mailto: links in the raw HTML. These are
+// the site's OWN structured contact links (present on almost every page's header/
+// footer), so they're reliable — unlike a phone guessed from prose, which turned a
+// car price into "899000.00". The header/footer where they live is usually dropped
+// during markdown extraction, so without this the real number never reaches a chunk.
+function extractTelMailto(html: string): { phones: string[]; emails: string[] } {
+  const phones = new Set<string>();
+  const emails = new Set<string>();
+  for (const m of html.matchAll(/href\s*=\s*["']tel:([^"']+)["']/gi)) {
+    let raw: string;
+    try { raw = decodeURIComponent(m[1]); } catch { raw = m[1]; }
+    raw = raw.replace(/[^\d+\s().-]/g, "").trim();
+    if (raw.replace(/\D/g, "").length >= 7) phones.add(raw);
+  }
+  for (const m of html.matchAll(/href\s*=\s*["']mailto:([^"'?]+)["']/gi)) {
+    let e: string;
+    try { e = decodeURIComponent(m[1]); } catch { e = m[1]; }
+    e = e.trim().toLowerCase();
+    if (/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(e) && !/\.(png|jpg|jpeg|svg|gif)$/.test(e)) emails.add(e);
+  }
+  return { phones: [...phones].slice(0, 3), emails: [...emails].slice(0, 3) };
+}
+
 export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteContext> {
   const pages: PageContext[] = [];
   const chunks: ContentChunk[] = [];
   const siteMap: SiteMapEntry[] = [];
+  const contactPhones = new Set<string>();
+  const contactEmails = new Set<string>();
 
   for (const scrapedPage of crawlResult.pages) {
     // Re-fetch for markdown (we already have the HTML in memory during crawl,
     // but for now we'll work from the scraped page data)
     const fetchResult = await fetchPage(scrapedPage.url, { timeout: 10000 });
     const markdown = htmlToMarkdown(fetchResult);
+
+    // Harvest canonical contact data from this page's tel:/mailto: links.
+    const ci = extractTelMailto(fetchResult.html);
+    ci.phones.forEach((p) => contactPhones.add(p));
+    ci.emails.forEach((e) => contactEmails.add(e));
 
     const pageId = generatePageId(scrapedPage.url);
     const sections = buildSections(markdown.sections, pageId);
@@ -66,6 +96,25 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
       title: scrapedPage.title,
       depth,
       type: classifyPageType(scrapedPage),
+    });
+  }
+
+  // Add ONE reliable contact chunk from the collected tel:/mailto: links, so the bot
+  // can give the real phone/email even when the header/footer didn't survive markdown
+  // extraction and the dedicated contact page wasn't crawled.
+  if ((contactPhones.size || contactEmails.size) && crawlResult.pages.length > 0) {
+    const lines: string[] = [];
+    if (contactPhones.size) lines.push(`Telefon / phone: ${[...contactPhones].join(", ")}`);
+    if (contactEmails.size) lines.push(`Email: ${[...contactEmails].join(", ")}`);
+    const body = `## Kontakt / Contact\n\n${lines.join("\n")}`;
+    const url = crawlResult.pages[0].url;
+    const pageId = generatePageId(url);
+    chunks.push({
+      id: chunkId(pageId, ["Kontakt"], 0, body),
+      pageId,
+      content: body,
+      contextPrefix: `Official contact details (phone / email) for this business, taken from the site's tel: and mailto: links.`,
+      metadata: { url, title: "Kontakt / Contact", headingHierarchy: ["Kontakt", "Contact"], type: "form-description" },
     });
   }
 
