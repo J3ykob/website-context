@@ -175,13 +175,15 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
       return { success: false, chunks: 0, pages: 0 };
     }
     console.log(`  [scrape] Done: ${result.pages} pages, ${result.chunks} chunks`);
-    // Upload to R2 — REQUIRED. R2 is the source of truth the demo self-heals
-    // from, so if the upload fails the demo can't resolve; don't email then.
+    // Upload to R2 — context-meta.json is MANDATORY (serving self-heals from it;
+    // uploadTenantFiles throws if it didn't land, caught below -> no email).
     console.log(`  [r2] Uploading to R2...`);
-    const uploaded = await uploadTenantFiles(tenantId, resolve(__dirname, "../data"));
-    console.log(`  [r2] ${uploaded} files uploaded`);
-    if (uploaded === 0) {
-      console.log(`  [r2] 0 files uploaded - demo can't self-heal, NOT emailing ${domain}`);
+    const up = await uploadTenantFiles(tenantId, resolve(__dirname, "../data"), ["context-meta.json"]);
+    console.log(`  [r2] uploaded: ${up.uploaded.join(", ") || "none"}${up.failed.length ? ` | FAILED: ${up.failed.join(", ")}` : ""}`);
+    // The hero screenshot must be present too — emailing a demo whose hero image
+    // 404s degrades the prospect's one-shot first impression. Skip rather than send.
+    if (!up.uploaded.includes("screenshot.png")) {
+      console.log(`  [r2] no screenshot for ${domain} - NOT emailing (would show a broken hero image).`);
       return { success: false, chunks: result.chunks, pages: result.pages };
     }
 

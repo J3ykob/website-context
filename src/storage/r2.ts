@@ -54,22 +54,61 @@ export async function downloadFromR2(key: string): Promise<Buffer | null> {
   }
 }
 
-export async function uploadTenantFiles(tenantId: string, dataDir: string): Promise<number> {
+export interface TenantUploadResult {
+  uploaded: string[]; // files that landed in R2
+  missing: string[];  // files not present on disk
+  failed: string[];   // files present on disk but whose upload failed
+}
+
+// Uploads a tenant's R2 artifacts and reports exactly which landed. Pass `required`
+// (e.g. ["context-meta.json"]) to make those mandatory: if any required file is
+// missing or failed to upload, this THROWS so the caller never registers / emails a
+// tenant whose critical R2 files aren't actually present (serving hard-depends on
+// context-meta.json; the demo email's hero needs screenshot.png).
+export async function uploadTenantFiles(tenantId: string, dataDir: string, required: string[] = []): Promise<TenantUploadResult> {
   const { readFileSync, existsSync } = await import("fs");
   const { resolve } = await import("path");
   const files = ["context-meta.json", "business-info.json", "auto-context-notes.json", "screenshot.png"];
-  let uploaded = 0;
+  const uploaded: string[] = [];
+  const missing: string[] = [];
+  const failed: string[] = [];
   for (const file of files) {
     const filePath = resolve(dataDir, tenantId, file);
-    if (!existsSync(filePath)) continue;
+    if (!existsSync(filePath)) { missing.push(file); continue; }
     const data = readFileSync(filePath);
     const contentType = file.endsWith(".json") ? "application/json" : "image/png";
     const ok = await uploadToR2(`tenants/${tenantId}/${file}`, data, contentType);
-    if (ok) uploaded++;
+    (ok ? uploaded : failed).push(file);
   }
-  return uploaded;
+  const bad = required.filter((f) => !uploaded.includes(f));
+  if (bad.length > 0) {
+    throw new Error(`uploadTenantFiles ${tenantId}: required file(s) not uploaded: ${bad.join(", ")} (missing=[${missing.join(",")}] failed=[${failed.join(",")}])`);
+  }
+  return { uploaded, missing, failed };
 }
 
 export async function downloadTenantFile(tenantId: string, file: string): Promise<Buffer | null> {
   return downloadFromR2(`tenants/${tenantId}/${file}`);
+}
+
+// Like downloadFromR2 but distinguishes a genuinely-absent key (returns null) from an
+// R2 auth/network/throttle error (THROWS). Lets callers return 404-vs-500 correctly
+// and lets health checks detect R2 being down — unlike downloadFromR2, whose bare
+// catch makes a dead credential indistinguishable from a missing file. Used on paths
+// that need that distinction; the lenient downloadFromR2 stays for everything else.
+export async function downloadFromR2Strict(key: string): Promise<Buffer | null> {
+  try {
+    const resp = await client.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    const chunks: Buffer[] = [];
+    for await (const chunk of resp.Body as any) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  } catch (err: any) {
+    const name = err?.name || err?.Code || "";
+    if (name === "NoSuchKey" || name === "NotFound" || err?.$metadata?.httpStatusCode === 404) return null;
+    throw new Error(`R2 download error for ${key}: ${name} ${err?.message || ""}`.slice(0, 200));
+  }
+}
+
+export async function downloadTenantFileStrict(tenantId: string, file: string): Promise<Buffer | null> {
+  return downloadFromR2Strict(`tenants/${tenantId}/${file}`);
 }

@@ -240,14 +240,21 @@ app.get("/api/screenshot/:tenantId", async (req, res) => {
   // which makes the SQLite registry fail to write (SQLITE_FULL) and silently
   // breaks new tenant registration -> dead demos. R2 is the source of truth.
   try {
-    const { downloadTenantFile } = await import("../src/storage/r2.js");
-    const data = await downloadTenantFile(tid, "screenshot.png") || await downloadTenantFile(tid.replace(/-/g, "_"), "screenshot.png");
+    const { downloadTenantFileStrict } = await import("../src/storage/r2.js");
+    const data = await downloadTenantFileStrict(tid, "screenshot.png")
+      || await downloadTenantFileStrict(tid.replace(/-/g, "_"), "screenshot.png");
     if (data) {
       res.type("image/png").send(data);
       return;
     }
-  } catch {}
-  res.status(404).json({ error: "No screenshot available" });
+    // Cleanly absent (not an R2 error) — genuine 404.
+    res.status(404).json({ error: "No screenshot available" });
+  } catch (e: any) {
+    // R2 auth/network/throttle error — distinct from a missing image so monitoring
+    // can tell an outage apart from "this tenant has no screenshot".
+    console.error(`[screenshot] R2 error for ${tid}: ${e?.message || e}`);
+    res.status(500).json({ error: "screenshot_backend_unavailable" });
+  }
 });
 
 // Personalized landing page — showcases the AI assistant for a prospect
