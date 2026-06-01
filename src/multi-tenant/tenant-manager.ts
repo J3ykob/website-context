@@ -126,24 +126,18 @@ export class TenantManager {
       systemPromptExtra: `This assistant is deployed on ${new URL(meta.siteUrl).hostname}. Never reference or provide information about any other website or domain.`,
     });
 
-    // Load context notes if they exist
+    // Load ONLY owner-curated context notes (context_notes.json). We deliberately no
+    // longer inject auto-context-notes.json — those are regex-extracted "facts" and
+    // brittle extraction turned a car price into a "phone number" (899000.00), which,
+    // injected as an authoritative note, made the bot confidently repeat the wrong
+    // number even when the visitor corrected it. Contact / hours / address are now
+    // answered from the actual retrieved chunks (real data, in context) with the
+    // grounding gate for honesty — no separately-extracted facts to go stale or wrong.
     const allNotes: { question: string; answer: string }[] = [];
     const notesPath = resolve(DATA_ROOT, tenantId, "context_notes.json");
     if (existsSync(notesPath)) {
       try {
         allNotes.push(...JSON.parse(await readFile(notesPath, "utf-8")));
-      } catch {}
-    }
-    // Load auto-extracted business info notes (disk or R2)
-    let autoNotesPath = resolve(DATA_ROOT, tenantId, "auto-context-notes.json");
-    if (!existsSync(autoNotesPath)) {
-      const { downloadTenantFile } = await import("../storage/r2.js");
-      const r2Notes = await downloadTenantFile(tenantId, "auto-context-notes.json");
-      if (r2Notes) await writeFile(autoNotesPath, r2Notes);
-    }
-    if (existsSync(autoNotesPath)) {
-      try {
-        allNotes.push(...JSON.parse(await readFile(autoNotesPath, "utf-8")));
       } catch {}
     }
     if (allNotes.length > 0) {
