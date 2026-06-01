@@ -75,6 +75,11 @@ export async function scrapeTenant(
   await closeBrowser();
   console.log(`[scrape-pipeline] ${context.chunks.length} chunks built`);
 
+  // Site content captured BEFORE Google Maps augmentation. Maps data (reviews,
+  // hours) is a SUPPLEMENT, never a substitute — a demo grounded only on Maps for a
+  // dead/SPA/blocked site (0 site chunks) would answer about the wrong thing.
+  const siteChunks = context.chunks.length;
+
   // Scrape Google Maps data (reviews, rating, hours, etc.)
   try {
     const domain = new URL(siteUrl).hostname;
@@ -95,9 +100,20 @@ export async function scrapeTenant(
       new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Google Maps timeout (30s)")), 30000)),
     ]);
     if (placesData && placesData.name) {
-      const placesChunks = placesToChunks(placesData, tenantId);
-      context.chunks.push(...placesChunks);
-      console.log(`[scrape-pipeline] Added ${placesChunks.length} chunks from Google Maps (${placesData.reviewCount || 0} reviews, rating: ${placesData.rating || "N/A"})`);
+      // The Maps lookup is name-based and fuzzy. If it returned a website, require
+      // its host to match this site before trusting it — otherwise it may be a
+      // different business's reviews/hours. (Null website = can't verify; keep it.)
+      let sameBiz = true;
+      if (placesData.website) {
+        try { sameBiz = new URL(placesData.website).hostname.replace(/^www\./, "") === domain.replace(/^www\./, ""); } catch { sameBiz = false; }
+      }
+      if (sameBiz) {
+        const placesChunks = placesToChunks(placesData, tenantId);
+        context.chunks.push(...placesChunks);
+        console.log(`[scrape-pipeline] Added ${placesChunks.length} chunks from Google Maps (${placesData.reviewCount || 0} reviews, rating: ${placesData.rating || "N/A"})`);
+      } else {
+        console.log(`[scrape-pipeline] Skipped Google Maps data — website mismatch (${placesData.website} vs ${domain})`);
+      }
     } else {
       console.log(`[scrape-pipeline] No Google Maps data found for "${businessName}"`);
     }
@@ -112,8 +128,8 @@ export async function scrapeTenant(
   // below only runs when chunks.length > 0, so without this gate a 0-chunk
   // scrape slips straight through to "active". Empirically this is exactly how
   // dead/SPA sites (lefournil, thenestreno) became live-but-broken demos.
-  if (context.chunks.length === 0) {
-    throw new Error(`No chunks extracted for ${tenantId} from ${siteUrl} - site is dead, JS-only, or blocking the crawler; refusing to register a 0-vector demo.`);
+  if (siteChunks === 0) {
+    throw new Error(`No SITE chunks for ${tenantId} from ${siteUrl} - dead, JS-only, or blocking the crawler; refusing to register (Google Maps data alone is not a valid site demo).`);
   }
 
   // --- Dedup for Vectorize: deterministic IDs + orphan cleanup ---
@@ -136,8 +152,13 @@ export async function scrapeTenant(
   const embedResult = await embedChunks(context.chunks, provider, store);
   console.log(`[scrape-pipeline] ${embedResult.embeddedChunks} chunks embedded`);
 
-  if (context.chunks.length > 0 && embedResult.embeddedChunks < Math.min(3, context.chunks.length)) {
-    throw new Error(`Embedding failed: only ${embedResult.embeddedChunks}/${context.chunks.length} chunks embedded`);
+  // Treat a meaningful embed shortfall as fatal. embedChunks already retries each
+  // batch 3x, so failures here are persistent — a demo missing a chunk or two is
+  // fine, but one missing 10%+ of its content must never be emailed as ready
+  // (the old `< min(3,N)` gate let a 200-chunk site pass with only 3 embedded).
+  const embedTolerance = Math.floor(context.chunks.length * 0.1);
+  if (embedResult.failedChunks > embedTolerance) {
+    throw new Error(`Embedding incomplete for ${tenantId}: ${embedResult.embeddedChunks}/${embedResult.totalChunks} embedded, ${embedResult.failedChunks} failed (tolerance ${embedTolerance}) — refusing to register a partial demo.`);
   }
 
   // POST-EMBED VERIFICATION — the load-bearing readiness check. Local "embedded N"
@@ -165,15 +186,24 @@ export async function scrapeTenant(
   // Delete orphaned vectors (tracked before, absent now) and persist the current
   // ID set for the next re-scrape.
   if (useVectorize) {
+    let idsToTrack = newIds;
     if (prevIds) {
       const newSet = new Set(newIds);
       const orphans = prevIds.filter((id) => !newSet.has(id));
       if (orphans.length > 0) {
-        await store.delete(orphans);
-        console.log(`[scrape-pipeline] Deleted ${orphans.length} orphaned vectors for ${tenantId}`);
+        try {
+          await store.delete(orphans);
+          console.log(`[scrape-pipeline] Deleted ${orphans.length} orphaned vectors for ${tenantId}`);
+        } catch (e) {
+          // Orphan cleanup failed (delete() now throws on HTTP error). Don't fail the
+          // scrape — the new vectors are embedded + verified. Persist the UNION so the
+          // stale ids stay tracked and get re-cleaned on the next scrape.
+          console.error(`[scrape-pipeline] orphan delete failed for ${tenantId}, keeping union for retry: ${(e as Error).message}`);
+          idsToTrack = [...new Set([...prevIds, ...newIds])];
+        }
       }
     }
-    await uploadToR2(`tenants/${tenantId}/vector-ids.json`, JSON.stringify(newIds), "application/json");
+    await uploadToR2(`tenants/${tenantId}/vector-ids.json`, JSON.stringify(idsToTrack), "application/json");
   }
 
   // Save context metadata (siteMap, flows, page list — NOT chunks)

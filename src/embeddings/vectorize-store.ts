@@ -115,11 +115,17 @@ export class CloudflareVectorizeStore implements VectorStore {
   async delete(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     const prefixed = ids.map(id => `${this.tenantId}__${id}`);
-    await fetch(`${BASE}/delete_by_ids`, {
+    const resp = await fetch(`${BASE}/delete_by_ids`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ ids: prefixed }),
     });
+    if (!resp.ok) {
+      // Mirror upsert: fail loud. A swallowed delete (401/429/5xx) leaves stale
+      // vectors (e.g. old pricing) live forever while the caller believes cleanup
+      // happened — permanent retrieval pollution.
+      throw new Error(`Vectorize delete failed (HTTP ${resp.status}): ${(await resp.text()).slice(0, 200)}`);
+    }
   }
 
   // Fully delete a tenant's vectors. Vectorize has no delete-by-filter or list
