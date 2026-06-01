@@ -31,8 +31,13 @@ export async function loadCfToken(): Promise<void> {
   }
 }
 
-// Re-read from R2 (e.g. after a 401) so serving can recover from a rotated token
-// without a restart. Cheap; call sparingly.
+// Re-read from R2 (e.g. after a 401) so serving can recover from a rotated/expired
+// token WITHOUT a Render restart — closing the recurring "demos broke again" outage.
+// Debounced to at most once per 60s so a burst of 401s can't hammer R2.
+let lastRefresh = 0;
 export async function refreshCfToken(): Promise<void> {
+  const now = Date.now();
+  if (now - lastRefresh < 60000) return;
+  lastRefresh = now;
   await loadCfToken();
 }

@@ -147,11 +147,31 @@ function checkChatRate(sessionId: string): { ok: boolean; retry?: number } {
   return { ok: true };
 }
 
+// Per-IP backstop. The session limiter above is keyed on a client-supplied,
+// per-pageload-random sessionId, so a scripted client can mint unlimited sessions
+// and drain shared OpenRouter credits (402-ing every prospect's demo). This caps by
+// IP too. Limits are deliberately generous (3x the session limit) so a real
+// conversation — even several people behind one office/carrier NAT — never trips it;
+// only sustained scripted abuse does.
+const ipChatRateMap = new Map<string, { mc: number; ms: number; hc: number; hs: number }>();
+function checkIpChatRate(ip: string): { ok: boolean; retry?: number } {
+  const now = Date.now();
+  let e = ipChatRateMap.get(ip);
+  if (!e) { e = { mc: 0, ms: now, hc: 0, hs: now }; ipChatRateMap.set(ip, e); }
+  if (now - e.ms > 60000) { e.mc = 0; e.ms = now; }
+  if (now - e.hs > 3600000) { e.hc = 0; e.hs = now; }
+  if (e.mc >= 60) return { ok: false, retry: Math.ceil((e.ms + 60000 - now) / 1000) };
+  if (e.hc >= 600) return { ok: false, retry: Math.ceil((e.hs + 3600000 - now) / 1000) };
+  e.mc++; e.hc++;
+  return { ok: true };
+}
+
 // Cleanup stale rate limit entries every 10 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [k, e] of signupRateMap) if (now > e.resetAt) signupRateMap.delete(k);
   for (const [k, e] of chatRateMap) if (now - e.hs > 3600000) chatRateMap.delete(k);
+  for (const [k, e] of ipChatRateMap) if (now - e.hs > 3600000) ipChatRateMap.delete(k);
 }, 600000);
 
 // --- Auth middleware ---
@@ -256,16 +276,29 @@ app.get("/for/:tenantId", async (req, res) => {
   for (const q of questions) {
     try {
       const resp = await chat.chat([{ role: "user", content: q }], `landing_${tenant.id}_${Date.now()}`);
+      // Skip ungrounded answers — never freeze a hallucination/fallback about the
+      // prospect's own business into their static showcase page.
+      if (resp.grounded === false || !resp.message || !resp.message.trim()) continue;
       qas.push({ q, a: resp.message.slice(0, 300) + (resp.message.length > 300 ? "..." : "") });
     } catch {
       // skip failed questions
     }
   }
 
+  // If nothing came back grounded, the demo isn't really ready — don't render a
+  // hollow showcase. (The background sweep will also have demoted it to 'broken'.)
+  if (qas.length === 0) {
+    res.status(404).send("Not ready yet.");
+    return;
+  }
+
+  // Escape LLM output before the bold/newline transforms so an answer containing
+  // HTML/script can't inject into the page.
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const qaHtml = qas.map(({ q, a }) => `
     <div class="qa">
-      <div class="qa-q">${q}</div>
-      <div class="qa-a">${a.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")}</div>
+      <div class="qa-q">${esc(q)}</div>
+      <div class="qa-a">${esc(a).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")}</div>
     </div>
   `).join("");
 
@@ -893,11 +926,14 @@ body {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages: messages, tenantId: TENANT, sessionId: SESSION }),
     })
-    .then(function(r) { return r.json(); })
+    .then(function(r) { return r.json().catch(function() { return {}; }); })
     .then(function(data) {
       typing.remove();
-      messages.push({ role: "assistant", content: data.message });
-      addMsg("bot", data.message);
+      var reply = (data && typeof data.message === "string" && data.message.trim())
+        ? data.message
+        : "Sorry, I couldn't process that just now — please try again in a moment.";
+      messages.push({ role: "assistant", content: reply });
+      addMsg("bot", reply);
     })
     .catch(function() {
       typing.remove();
@@ -1040,9 +1076,15 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const sessionKey = sessionId || `${tenantId}_default`;
+    const clientIp = ((req.headers["x-forwarded-for"] as string) || req.ip || "").split(",")[0].trim();
     const rc = checkChatRate(sessionKey);
-    if (!rc.ok) {
-      res.status(429).json({ error: "Rate limited", retryAfter: rc.retry });
+    const iprc = clientIp ? checkIpChatRate(clientIp) : { ok: true as boolean, retry: undefined as number | undefined };
+    if (!rc.ok || !iprc.ok) {
+      res.status(429).json({
+        error: "Rate limited",
+        retryAfter: rc.retry || iprc.retry,
+        message: "You're sending messages a bit fast — please wait a moment and try again.",
+      });
       return;
     }
 

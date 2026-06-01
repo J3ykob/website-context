@@ -5,7 +5,7 @@
  */
 
 import type { VectorStore, VectorEntry, SearchResult } from "./types.js";
-import { getCfToken } from "../storage/cf-auth.js";
+import { getCfToken, refreshCfToken } from "../storage/cf-auth.js";
 
 const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
 const INDEX_NAME = process.env.VECTORIZE_INDEX || "whisp-vectors";
@@ -72,17 +72,21 @@ export class CloudflareVectorizeStore implements VectorStore {
   }
 
   async search(query: number[], topK: number = 5, filter?: Record<string, unknown>): Promise<SearchResult[]> {
-    const resp = await fetch(`${BASE}/query`, {
-      method: "POST",
-      headers: headers(),
-      body: JSON.stringify({
-        vector: query,
-        topK,
-        returnValues: false,
-        returnMetadata: "all",
-        filter: { tenant: this.tenantId, ...filter },
-      }),
+    const body = JSON.stringify({
+      vector: query,
+      topK,
+      returnValues: false,
+      returnMetadata: "all",
+      filter: { tenant: this.tenantId, ...filter },
     });
+    let resp = await fetch(`${BASE}/query`, { method: "POST", headers: headers(), body });
+
+    // Token may have rotated/expired — reload it from R2 once (debounced) and retry
+    // before failing, so serving auto-recovers without a Render restart.
+    if (resp.status === 401 || resp.status === 403) {
+      await refreshCfToken();
+      resp = await fetch(`${BASE}/query`, { method: "POST", headers: headers(), body });
+    }
 
     if (!resp.ok) {
       // FAIL LOUD on HTTP errors (e.g. 401 expired token, Vectorize down) so the
