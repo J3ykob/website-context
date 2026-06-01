@@ -3,7 +3,7 @@ import { extractPage } from "./extractor.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
 
 const DEFAULT_OPTIONS: Required<CrawlOptions> = {
-  maxPages: 50,
+  maxPages: 100,
   maxDepth: 5,
   respectRobotsTxt: true,
   rateLimit: 1000,

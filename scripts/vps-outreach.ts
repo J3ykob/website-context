@@ -168,11 +168,11 @@ async function scrapeLocally(tenantId: string, domain: string): Promise<{ succes
   const siteUrl = `https://${domain}`;
   try {
     console.log(`  [scrape] Scraping ${domain} locally...`);
-    // Up to 40 pages (was 20) — large sites (many brand/listing pages) were missing
-    // their contact/about/pricing pages. Key pages are crawled first (see crawler),
-    // and the crawl still stops early when the queue empties, so small sites are
-    // unaffected; only sites that NEED more pages get them.
-    const result = await scrapeTenant(tenantId, siteUrl, 40);
+    // Up to 100 pages — large sites (many brand/listing pages) were missing their
+    // contact/about/pricing pages. Key pages are crawled first (see crawler), and the
+    // crawl still stops early when the queue empties + is bounded by maxDepth, so
+    // small sites are unaffected; only sites that NEED more pages get them.
+    const result = await scrapeTenant(tenantId, siteUrl, 100);
     await closeBrowser();
     if (result.chunks === 0) {
       console.log(`  [scrape] 0 chunks - site might be JS-rendered or empty`);
