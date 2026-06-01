@@ -1,9 +1,16 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-const R2_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
-const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY || "de08d17162106b5a078b93ad12fa8a56";
-const R2_SECRET_KEY = process.env.R2_SECRET_KEY || "9aa3b7b3aafff813e826519c145597182e6743cbd148d2715b6a0018101f4b26";
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID || "98e447c9e14d384e1b7e6f4d42c39ad2";
+const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY;
+const R2_SECRET_KEY = process.env.R2_SECRET_KEY;
 const R2_BUCKET = process.env.R2_BUCKET || "whisp-data";
+
+if (!R2_ACCESS_KEY || !R2_SECRET_KEY) {
+  // No hardcoded fallback: the previous literal secret leaked into git history and
+  // was rotated. Fail fast so a misconfigured deploy can never silently run with
+  // bad/leaked creds (on Render a boot throw keeps the last good version live).
+  throw new Error("R2_ACCESS_KEY and R2_SECRET_KEY are required (set them in the VPS .env and Render env).");
+}
 
 const client = new S3Client({
   region: "auto",
