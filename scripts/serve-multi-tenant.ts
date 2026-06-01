@@ -1262,15 +1262,22 @@ async function sendOpsAlert(subject: string, text: string): Promise<void> {
 let lastAlertSig = "";
 let lastAlertAt = 0;
 let monitorWasHealthy = true;
+let consecutiveBad = 0;
 async function healthMonitorTick(): Promise<void> {
   try {
     const h = await runDeepHealthChecks();
     healthDeepCache = { at: Date.now(), body: h }; // warm the endpoint cache too
-    const failing = Object.entries(h.checks).filter(([, v]: any) => v && v.ok === false).map(([k]) => k);
+    // Exclude browserless from alert triggers — serving doesn't use it (VPS scrapes
+    // with local Playwright), and it's already excluded from h.ok.
+    const failing = Object.entries(h.checks).filter(([k, v]: any) => k !== "browserless" && v && v.ok === false).map(([k]) => k);
     const problem = !h.ok || h.lowBalance;
+    // Require TWO consecutive bad ticks (~8 min) before alerting, so a single transient
+    // probe timeout (a cold check, a momentary network blip) never fires a false
+    // "DOWN" email. A real outage persists and alerts on the 2nd tick.
+    consecutiveBad = problem ? consecutiveBad + 1 : 0;
     const sig = failing.sort().join(",") + (h.lowBalance ? "|lowbal" : "");
     const now = Date.now();
-    if (problem) {
+    if (problem && consecutiveBad >= 2) {
       if (sig !== lastAlertSig || now - lastAlertAt > 3600000) {
         lastAlertSig = sig; lastAlertAt = now; monitorWasHealthy = false;
         const subj = !h.ok

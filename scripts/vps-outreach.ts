@@ -115,10 +115,18 @@ function recordSendFail(email: string, domain: string) {
 // links that would open to a broken chat. A network blip on the check doesn't block
 // (the demo self-heals); only a definitive 503 pauses sending.
 async function backendHealthy(): Promise<boolean> {
-  try {
-    const r = await fetch(`${BASE_URL}/api/health-deep`, { signal: AbortSignal.timeout(12000) });
-    return r.status === 200;
-  } catch { return true; }
+  // Check twice before pausing — a single transient 503 (a cold probe / momentary
+  // blip) shouldn't stall outreach for 10 min. Only two consecutive 503s = down.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(`${BASE_URL}/api/health-deep`, { signal: AbortSignal.timeout(12000) });
+      if (r.status === 200) return true;
+    } catch {
+      return true; // network blip on the check itself — don't block (the demo self-heals)
+    }
+    if (attempt === 0) await new Promise((res) => setTimeout(res, 5000));
+  }
+  return false;
 }
 
 function detectLang(country: string, domain: string): "pl" | "en" {
