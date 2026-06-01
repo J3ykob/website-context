@@ -350,8 +350,13 @@ async function reconcileTenantFromR2(requestedId: string): Promise<any | null> {
     try { domain = new URL(siteUrl).hostname; } catch { domain = id.replace(/_/g, "."); }
     const t = ensureTenant(id, `info@${domain}`, domain, siteUrl);
     if (t) {
-      updateTenant(t.id, { status: "active", chunksCount: meta.chunksCount || 0, pagesCount: meta.pagesCount || 0, lastScrapedAt: meta.lastScrapedAt || null });
-      console.log(`[self-heal] reconciled tenant ${t.id} from R2`);
+      // Don't trust meta.chunksCount (it can be stale/optimistic) — a tenant must
+      // not self-heal to 'active' unless its vectors are actually queryable now.
+      let queryable = false;
+      try { queryable = await new CloudflareVectorizeStore({ tenantId: id }).hasVectors(); } catch { /* treat as not queryable */ }
+      updateTenant(t.id, { status: queryable ? "active" : "broken", chunksCount: meta.chunksCount || 0, pagesCount: meta.pagesCount || 0, lastScrapedAt: meta.lastScrapedAt || null });
+      console.log(`[self-heal] reconciled tenant ${t.id} from R2 -> ${queryable ? "active" : "broken (0 queryable vectors)"}`);
+      return getTenant(t.id);
     }
     return t;
   } catch (e: any) {
@@ -1903,8 +1908,10 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
   let tenant = getTenant(req.params.tenantId);
   const { status, chunksCount, pagesCount, domain, siteUrl } = req.body;
   if (!tenant && domain) {
-    // Idempotent register under the requested id (matches the Vectorize tag).
-    tenant = getTenantByDomain(domain) || ensureTenant(req.params.tenantId, `info@${domain}`, domain, siteUrl || `https://${domain}`);
+    // Register under the REQUESTED id (which is the VPS scraper's id == the
+    // Vectorize namespace). Do NOT retarget by domain to a different-id row — that
+    // would mark a row 'active' whose vector namespace is empty (audit hole).
+    tenant = ensureTenant(req.params.tenantId, `info@${domain}`, domain, siteUrl || `https://${domain}`);
   }
   if (!tenant) return res.status(404).json({ error: "Not found and no domain to create" });
   const updates: any = {};
@@ -2082,6 +2089,43 @@ app.use(express.static(resolve(__dirname, "../public")));
 // Load the Cloudflare API token from R2 (config/cf-token) before serving, so it
 // can be rotated by a file write — no Render dashboard edit / redeploy needed.
 await loadCfToken();
+
+// Background re-verification sweep: hasVectors() runs only once at scrape time, so
+// a tenant that loses its vectors afterward (drain, corruption, over-delete) would
+// otherwise stay 'active' forever. Each cycle probes a rotating slice of active+broken
+// tenants and reconciles status with reality — demote confirmed-empty 'active' to
+// 'broken', re-promote a 'broken' that has vectors again (self-correcting against a
+// transient false negative). Conservative: small slice, rate-limited, retry-before-
+// demote, and NEVER demote on a probe error.
+let sweepCursor = 0;
+async function sweepTenants() {
+  try {
+    const pool = listTenants().filter((t) => t.status === "active" || t.status === "broken");
+    if (pool.length === 0) return;
+    const SLICE = 40;
+    const slice = pool.slice(sweepCursor, sweepCursor + SLICE);
+    sweepCursor = (sweepCursor + SLICE) % pool.length;
+    for (const t of slice) {
+      const probe = async () => {
+        try { return await new CloudflareVectorizeStore({ tenantId: t.id }).hasVectors(); }
+        catch { return null; } // null = probe error -> never act on it
+      };
+      let ok = await probe();
+      if (ok === false) { await new Promise((r) => setTimeout(r, 3000)); ok = await probe(); } // retry once (eventual consistency)
+      if (ok === false && t.status === "active") {
+        updateTenant(t.id, { status: "broken" });
+        console.warn(`[sweep] ${t.id}: active -> broken (0 queryable vectors)`);
+      } else if (ok === true && t.status === "broken") {
+        updateTenant(t.id, { status: "active" });
+        console.log(`[sweep] ${t.id}: broken -> active (vectors back)`);
+      }
+      await new Promise((r) => setTimeout(r, 200)); // rate-limit CF queries
+    }
+  } catch (e: any) {
+    console.error(`[sweep] error: ${e?.message || e}`);
+  }
+}
+setInterval(sweepTenants, 10 * 60 * 1000); // 40 tenants / 10 min, cycles all in a few hours
 
 // Start server
 app.listen(port, "0.0.0.0", () => {

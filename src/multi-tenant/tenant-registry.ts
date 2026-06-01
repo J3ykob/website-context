@@ -4,6 +4,7 @@
 
 import { getDb } from "./db/connection.js";
 import { runMigrations } from "./db/migrations.js";
+import { normalizeTenantId } from "./tenant-id.js";
 
 export interface TenantRecord {
   id: string;
@@ -11,7 +12,7 @@ export interface TenantRecord {
   domain: string;
   siteUrl: string;
   brandName: string | null;
-  status: "pending" | "scraping" | "active" | "error";
+  status: "pending" | "scraping" | "active" | "error" | "broken";
   createdAt: string;
   updatedAt: string;
   lastScrapedAt: string | null;
@@ -77,7 +78,10 @@ export function createTenant(email: string, siteUrl: string): TenantRecord {
   const db = getDb();
 
   const domain = new URL(siteUrl).hostname;
-  const id = domain.replace(/\./g, "_");
+  // Canonical id MUST match the VPS scraper form (see tenant-id.ts) so the
+  // registry row, Vectorize namespace, R2 path and demo URL all agree — the old
+  // `domain.replace(/\./g,"_")` kept hyphens and broke hyphenated domains.
+  const id = normalizeTenantId(domain);
   const qdrantCollection = `wctx_${id}`;
 
   const stmt = db.prepare(`
