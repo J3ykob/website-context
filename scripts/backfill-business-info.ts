@@ -56,10 +56,13 @@ async function backfillOne(tenantId: string, dry: boolean): Promise<void> {
   if (!ok) { console.log(`[${tenantId}] ERROR — R2 upload failed`); return; }
 
   // Push to the live server's local cache + evict, so it serves the new profile immediately.
+  // Bounded timeout: during a Render deploy the server may be mid-cutover, and an
+  // unbounded fetch would hang the whole sequential backfill (it did, once).
   if (ADMIN_SECRET) {
     try {
       const resp = await fetch(`${SERVE_URL}/api/admin/upload-file/${tenantId}/context-meta.json?secret=${encodeURIComponent(ADMIN_SECRET)}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: json,
+        signal: AbortSignal.timeout(12000),
       });
       console.log(`[${tenantId}] R2 OK; server push ${resp.status === 200 ? "OK (evicted)" : "FAILED " + resp.status}`);
     } catch (e: any) {
