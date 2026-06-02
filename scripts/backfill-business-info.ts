@@ -60,8 +60,11 @@ async function backfillOne(tenantId: string, dry: boolean): Promise<void> {
   // unbounded fetch would hang the whole sequential backfill (it did, once).
   if (ADMIN_SECRET) {
     try {
+      // octet-stream, NOT application/json: the endpoint reads the raw req stream via
+      // req.on("data"/"end"), but express.json() would consume an application/json body
+      // first, leaving those events to never fire -> the handler hangs until our timeout.
       const resp = await fetch(`${SERVE_URL}/api/admin/upload-file/${tenantId}/context-meta.json?secret=${encodeURIComponent(ADMIN_SECRET)}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: json,
+        method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: json,
         signal: AbortSignal.timeout(12000),
       });
       console.log(`[${tenantId}] R2 OK; server push ${resp.status === 200 ? "OK (evicted)" : "FAILED " + resp.status}`);
