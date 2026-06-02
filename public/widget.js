@@ -369,40 +369,41 @@
     }
     appendMsg("user", text);
 
-    // Show thinking in bar
-    var thinkDiv = document.createElement("div");
-    thinkDiv.className = "wctx-bar-msg";
-    thinkDiv.textContent = "Thinking...";
-    thinkDiv.id = "wctx-bar-thinking";
-    barMsgs.appendChild(thinkDiv);
+    // Streaming bubble in the bar — starts as "Thinking...", fills token-by-token.
+    var streamDiv = document.createElement("div");
+    streamDiv.className = "wctx-bar-bubble assistant";
+    streamDiv.id = "wctx-bar-thinking";
+    streamDiv.textContent = "Thinking...";
+    barMsgs.appendChild(streamDiv);
     barMsgs.scrollTop = barMsgs.scrollHeight;
 
-    fetch(API_HOST + "/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: messages, tenantId: TENANT_ID, sessionId: sessionId }),
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var t = document.getElementById("wctx-bar-thinking");
-      if (t) t.remove();
-      messages.push({ role: "assistant", content: data.message }); persistMessages();
-      appendMsg("assistant", data.message, data.sources);
-      syncBarMessages();
-      if (data.navigateTo) {
-        setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
+    var raw = "";
+    streamChat({
+      onFirst: function() { raw = ""; streamDiv.innerHTML = ""; },
+      onDelta: function(delta) {
+        raw += delta;
+        streamDiv.innerHTML = md(raw);
+        barMsgs.scrollTop = barMsgs.scrollHeight;
+      },
+      onDone: function(data) {
+        var t = document.getElementById("wctx-bar-thinking"); if (t) t.remove();
+        messages.push({ role: "assistant", content: data.message }); persistMessages();
+        appendMsg("assistant", data.message, data.sources);
+        syncBarMessages(); // re-render the bar properly (links, sources, last-4 window)
+        if (data.navigateTo) {
+          setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
+        }
+        if (data.flowSession && data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
+          setTimeout(function() { launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}); }, 800);
+        } else if (data.flowSession && data.flowSession.active) {
+          barInput.placeholder = "Provide the requested info...";
+        }
+      },
+      onError: function(msg) {
+        var t = document.getElementById("wctx-bar-thinking"); if (t) t.remove();
+        messages.push({ role: "assistant", content: msg || "Something went wrong." }); persistMessages();
+        syncBarMessages();
       }
-      if (data.flowSession && data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
-        setTimeout(function() { launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}); }, 800);
-      } else if (data.flowSession && data.flowSession.active) {
-        barInput.placeholder = "Provide the requested info...";
-      }
-    })
-    .catch(function() {
-      var t = document.getElementById("wctx-bar-thinking");
-      if (t) t.remove();
-      messages.push({ role: "assistant", content: "Something went wrong." }); persistMessages();
-      syncBarMessages();
     });
   }
 
@@ -762,6 +763,65 @@
   }
   var activeFlowSession = null;
 
+  // Stream a chat response over SSE. Calls cbs.onFirst() just before the first token
+  // (clear the typing indicator), cbs.onDelta(text) per token, cbs.onDone(data) with the
+  // canonical {message, sources, navigateTo, flowSession}, cbs.onError(msg) on failure.
+  // Falls back to plain JSON if the server/proxy didn't actually stream.
+  function streamChat(cbs) {
+    var started = false;
+    fetch(API_HOST + "/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: messages, tenantId: TENANT_ID, sessionId: sessionId, stream: true }),
+    })
+    .then(function(r) {
+      var ct = r.headers.get("content-type") || "";
+      // Non-streaming fallback (older server, or a proxy buffered the whole body).
+      if (!r.body || !r.body.getReader || ct.indexOf("text/event-stream") === -1) {
+        return r.json().then(function(data) {
+          if (data && data.error) { if (cbs.onError) cbs.onError(data.message); return; }
+          if (cbs.onFirst) cbs.onFirst();
+          if (data.message && cbs.onDelta) cbs.onDelta(data.message);
+          if (cbs.onDone) cbs.onDone(data);
+        });
+      }
+      var reader = r.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = "";
+      var finished = false;
+      function handleEvent(payload) {
+        var data;
+        try { data = JSON.parse(payload); } catch (e) { return; }
+        if (data.error) { finished = true; if (cbs.onError) cbs.onError(data.message); return; }
+        if (data.done) { finished = true; if (cbs.onDone) cbs.onDone(data); return; }
+        if (typeof data.delta === "string") {
+          if (!started) { started = true; if (cbs.onFirst) cbs.onFirst(); }
+          if (cbs.onDelta) cbs.onDelta(data.delta);
+        }
+      }
+      function pump() {
+        return reader.read().then(function(res) {
+          if (res.done) {
+            if (!finished && cbs.onError) cbs.onError(); // stream cut off before "done"
+            return;
+          }
+          buffer += decoder.decode(res.value, { stream: true });
+          var events = buffer.split("\n\n");
+          buffer = events.pop() || ""; // keep the trailing partial event
+          for (var i = 0; i < events.length; i++) {
+            var line = events[i].trim();
+            if (line.indexOf("data:") !== 0) continue;
+            handleEvent(line.slice(5).trim());
+          }
+          if (finished) { try { reader.cancel(); } catch (e) {} return; }
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(function() { if (cbs.onError) cbs.onError(); });
+  }
+
   function sendMessage() {
     var text = els.input.value.trim();
     if (!text || isLoading) return;
@@ -777,40 +837,50 @@
     appendMsg("user", text);
     setLoading(true);
 
-    // SSE streaming: show Haiku preview instantly, then full response
-    fetch(API_HOST + "/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: messages, tenantId: TENANT_ID, sessionId: sessionId }),
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      messages.push({ role: "assistant", content: data.message }); persistMessages();
-      appendMsg("assistant", data.message, data.sources);
+    var bubble = null, raw = "";
+    streamChat({
+      onFirst: function() {
+        setLoading(false); // swap the typing dots for the live answer bubble
+        bubble = document.createElement("div");
+        bubble.className = "wctx-msg wctx-msg-assistant";
+        els.msgs.appendChild(bubble);
+      },
+      onDelta: function(delta) {
+        raw += delta;
+        if (bubble) { bubble.innerHTML = md(raw); els.msgs.scrollTop = els.msgs.scrollHeight; }
+      },
+      onDone: function(data) {
+        setLoading(false);
+        // Replace the live (raw) bubble with the canonical cleaned render + links + sources.
+        if (bubble) { bubble.remove(); bubble = null; }
+        messages.push({ role: "assistant", content: data.message }); persistMessages();
+        appendMsg("assistant", data.message, data.sources);
 
-      if (data.navigateTo) {
-        setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
-      }
-      if (data.flowSession) {
-        activeFlowSession = data.flowSession;
-        if (data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
-          setTimeout(function() {
-            launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {});
-          }, 800);
-          activeFlowSession = null;
-        } else if (data.flowSession.active) {
-          els.input.placeholder = "Provide the requested info...";
+        if (data.navigateTo) {
+          setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
         }
-        if (data.flowSession.complete && !data.flowSession.guidedSteps) {
-          activeFlowSession = null;
-          els.input.placeholder = "Tell me what you need…";
+        if (data.flowSession) {
+          activeFlowSession = data.flowSession;
+          if (data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
+            setTimeout(function() {
+              launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {});
+            }, 800);
+            activeFlowSession = null;
+          } else if (data.flowSession.active) {
+            els.input.placeholder = "Provide the requested info...";
+          }
+          if (data.flowSession.complete && !data.flowSession.guidedSteps) {
+            activeFlowSession = null;
+            els.input.placeholder = "Tell me what you need…";
+          }
         }
+      },
+      onError: function(msg) {
+        setLoading(false);
+        if (bubble) { bubble.remove(); bubble = null; }
+        appendMsg("assistant", msg || "Something went wrong. Please try again.");
       }
-    })
-    .catch(function() {
-      appendMsg("assistant", "Something went wrong. Please try again.");
-    })
-    .finally(function() { setLoading(false); });
+    });
   }
 
   function showFlowOffer(action) {

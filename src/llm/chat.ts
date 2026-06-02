@@ -91,6 +91,7 @@ const STRUCTURED_SCHEMA = {
 
 interface LLMBackend {
   generate(system: string, messages: ChatMessage[], maxTokens: number): Promise<string>;
+  generateStream?(system: string, messages: ChatMessage[], maxTokens: number, onToken: (delta: string) => void): Promise<string>;
   generateStructured?(system: string, messages: ChatMessage[], maxTokens: number, schema: object): Promise<StructuredResponse>;
   generateWithTools?(system: string, messages: ChatMessage[], maxTokens: number, mcpConfig: MCPServerConfig): Promise<GenerateWithToolsResult>;
 }
@@ -125,6 +126,15 @@ class OpenRouterBackend implements LLMBackend {
       ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     ];
     const result = await this.provider.chat(orMessages);
+    return result.content;
+  }
+
+  async generateStream(system: string, messages: ChatMessage[], maxTokens: number, onToken: (delta: string) => void): Promise<string> {
+    const orMessages = [
+      { role: "system" as const, content: system },
+      ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    ];
+    const result = await this.provider.chatStream(orMessages, onToken);
     return result.content;
   }
 }
@@ -344,39 +354,7 @@ export class WebsiteChat {
       };
     }
 
-    // Retrieval. Each Vectorize query is ~2s, so the old code's back-to-back main +
-    // pricing-boost + language-mismatch searches added ~4-6s. Decide all needed
-    // searches up front and run them IN PARALLEL (Promise.all) — total ≈ one query.
-    const pricingKeywords = /price|pricing|cost|how much|rate|fee|cennik|cena|koszt|ile kosztuje|opłat|tarif|preis|kosten/i;
-    const isQueryEnglish = /^[a-z\s,.?!'"]+$/i.test(lastUserMessage.replace(/[0-9]/g, ""));
-    const hasMostlyPolishContent = this.context.pages.some(p =>
-      /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(p.title || "")
-    );
-    const langKeyTerms = (isQueryEnglish && hasMostlyPolishContent)
-      ? lastUserMessage.toLowerCase().replace(/what|is|your|the|do|you|have|any|can|i|get|how|much/g, "").trim()
-      : "";
-
-    const searchTasks: Promise<{ content: string; metadata: Record<string, unknown>; score: number }[]>[] = [
-      searchContext(lastUserMessage, this.embeddingProvider, this.store, { topK: this.topK }),
-    ];
-    // Boost pricing queries with explicit pricing keywords (parallel, not after).
-    if (pricingKeywords.test(lastUserMessage)) {
-      searchTasks.push(searchContext("cennik cena koszt price pricing rates fees tariff", this.embeddingProvider, this.store, { topK: 5 }));
-    }
-    // Dual-language recall: English query against Polish content (parallel).
-    if (langKeyTerms.length > 2) {
-      searchTasks.push(searchContext(langKeyTerms, this.embeddingProvider, this.store, { topK: Math.floor(this.topK / 2) }));
-    }
-
-    const [mainChunks, ...extraResults] = await Promise.all(searchTasks);
-    let retrievedChunks = mainChunks;
-    const seenContent = new Set(retrievedChunks.map((c) => c.content.slice(0, 50)));
-    for (const extra of extraResults) {
-      for (const chunk of extra) {
-        const key = chunk.content.slice(0, 50);
-        if (!seenContent.has(key)) { seenContent.add(key); retrievedChunks.push(chunk); }
-      }
-    }
+    const retrievedChunks = await this.retrieveContext(lastUserMessage);
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
     const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage);
@@ -581,6 +559,101 @@ export class WebsiteChat {
     const plainOutputCheck = validateOutput(responseText, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
     return { message: plainOutputCheck.sanitized, sources };
+  }
+
+  // Parallel retrieval shared by chat() and chatStream(). Each Vectorize query is ~2s,
+  // so all needed searches (main + optional pricing-boost + optional language) are
+  // decided up front and run concurrently rather than back-to-back.
+  private async retrieveContext(lastUserMessage: string): Promise<{ content: string; metadata: Record<string, unknown>; score: number }[]> {
+    const pricingKeywords = /price|pricing|cost|how much|rate|fee|cennik|cena|koszt|ile kosztuje|opłat|tarif|preis|kosten/i;
+    const isQueryEnglish = /^[a-z\s,.?!'"]+$/i.test(lastUserMessage.replace(/[0-9]/g, ""));
+    const hasMostlyPolishContent = this.context.pages.some((p) => /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(p.title || ""));
+    const langKeyTerms = (isQueryEnglish && hasMostlyPolishContent)
+      ? lastUserMessage.toLowerCase().replace(/what|is|your|the|do|you|have|any|can|i|get|how|much/g, "").trim()
+      : "";
+    const tasks: Promise<{ content: string; metadata: Record<string, unknown>; score: number }[]>[] = [
+      searchContext(lastUserMessage, this.embeddingProvider, this.store, { topK: this.topK }),
+    ];
+    if (pricingKeywords.test(lastUserMessage)) {
+      tasks.push(searchContext("cennik cena koszt price pricing rates fees tariff", this.embeddingProvider, this.store, { topK: 5 }));
+    }
+    if (langKeyTerms.length > 2) {
+      tasks.push(searchContext(langKeyTerms, this.embeddingProvider, this.store, { topK: Math.floor(this.topK / 2) }));
+    }
+    const [mainChunks, ...extraResults] = await Promise.all(tasks);
+    const retrievedChunks = mainChunks;
+    const seen = new Set(retrievedChunks.map((c) => c.content.slice(0, 50)));
+    for (const extra of extraResults) {
+      for (const chunk of extra) {
+        const key = chunk.content.slice(0, 50);
+        if (!seen.has(key)) { seen.add(key); retrievedChunks.push(chunk); }
+      }
+    }
+    return retrievedChunks;
+  }
+
+  // Streaming variant of chat(): for the common plain-text path it surfaces the answer
+  // token-by-token via onToken(delta) (first token ~1s vs ~3.5s for the full answer).
+  // Flow/tool/structured cases and backends without streaming defer to chat() and are
+  // emitted whole. Returns the canonical (cleaned + validated) full response.
+  async chatStream(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void): Promise<ChatResponse> {
+    if (!this.backend.generateStream) {
+      const r = await this.chat(messages, sessionKey);
+      onToken(r.message);
+      return r;
+    }
+    const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
+    const effectiveSessionKey = sessionKey || "default";
+
+    const inputValidation = validateInput(lastUserMessage);
+    if (inputValidation.blocked) {
+      const msg = "I'm here to help you with questions about this website. How can I assist you?";
+      onToken(msg);
+      return { message: msg, sources: [] };
+    }
+    const sanitizedMessages: ChatMessage[] = inputValidation.sanitized !== lastUserMessage
+      ? messages.map((m, i) => (i === messages.length - 1 && m.role === "user") ? { ...m, content: inputValidation.sanitized } : m)
+      : messages;
+
+    // Flows / tool-calls don't stream cleanly — defer to the full path, emit whole.
+    if (this.hasActiveFlowSession(effectiveSessionKey) || this.context.flows.some((f) => f.status === "active")) {
+      const r = await this.chat(messages, sessionKey);
+      onToken(r.message);
+      return r;
+    }
+
+    const retrievedChunks = await this.retrieveContext(inputValidation.sanitized);
+    const sources = [...new Map(retrievedChunks.map((c) => [c.metadata.url as string, { url: c.metadata.url as string, title: c.metadata.title as string }])).values()];
+
+    // Grounding gate — identical to chat(): no usable context → honest fallback, no LLM.
+    if (this.filterContextChunks(retrievedChunks, inputValidation.sanitized).length === 0) {
+      const msg = "I don't have the details to answer that accurately right now, and I'd rather not guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.";
+      onToken(msg);
+      return { message: msg, sources: [], grounded: false };
+    }
+
+    const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
+    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, inputValidation.sanitized);
+
+    let raw = "";
+    await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
+      raw += delta;
+      onToken(delta);
+    });
+
+    // Same final cleanup as the non-stream path (strip leaked tool syntax + validate).
+    const cleaned = raw
+      .replace(/\[\[?navigate_to_page[^\]]*\]\]?/g, "")
+      .replace(/\[\[?flow_start[^\]]*\]\]?/g, "")
+      .replace(/\[\[?log_unknown[^\]]*\]\]?/g, "")
+      .replace(/```json[\s\S]*?```/g, "")
+      .replace(/\[Action:.*?\]/gi, "")
+      .replace(/\[Tool:.*?\]/gi, "")
+      .replace(/\{action:.*?\}/gi, "")
+      .replace(/One moment,? please!?\s*/gi, "")
+      .trim();
+    const outputCheck = validateOutput(cleaned, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
+    return { message: outputCheck.sanitized, sources, grounded: true };
   }
 
   // The chunks that actually become answerable context: relevant score, not

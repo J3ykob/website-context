@@ -1098,14 +1098,12 @@ app.post("/api/chat", async (req, res) => {
     const chat = await tenantManager.getChatForTenant(tenantId);
     console.log(`[chat:${tenantId}] "${(messages[messages.length - 1]?.content || "").slice(0, 60)}"`);
 
-    {
-      const response = await chat.chat(messages, sessionKey);
-
-      const lastUserContent = messages[messages.length - 1]?.content || "";
+    const lastUserContent = messages[messages.length - 1]?.content || "";
+    const chatIpRaw = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+    const isSelfChat = chatIpRaw === "79.184.118.71" || chatIpRaw === "176.9.1.133" || chatIpRaw.startsWith("127.");
+    // Shared fire-and-forget logging for both the streaming and non-streaming paths.
+    const logResponse = (response: any) => {
       logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
-      // Log both user and bot to D1 for cross-tenant analytics (skip internal IPs)
-      const chatIpRaw = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
-      const isSelfChat = chatIpRaw === "79.184.118.71" || chatIpRaw === "176.9.1.133" || chatIpRaw.startsWith("127.");
       if (!isSelfChat) {
         logChatMessage(tenantId, sessionKey, "user", lastUserContent, tenant.domain).catch(() => {});
         logChatMessage(tenantId, sessionKey, "assistant", response.message, tenant.domain).catch(() => {});
@@ -1114,17 +1112,44 @@ app.post("/api/chat", async (req, res) => {
         getEmailForTenant(tenantId).then(email => {
           if (email) recordEvent(email, "chat_start", { sessionId: sessionKey, firstMessage: lastUserContent.slice(0, 100) });
         }).catch(() => {});
-        // Record experiment event
-        const chatIp = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
-        const chatVisitorId = `${chatIp}_${tenantId}`;
-        recordExperimentEvent("widget-start-state", chatVisitorId, "", "chat_start", { tenantId }).catch(() => {});
+        recordExperimentEvent("widget-start-state", `${chatIpRaw}_${tenantId}`, "", "chat_start", { tenantId }).catch(() => {});
       }
       logMessage(tenantId, sessionKey, "assistant", response.message, {
         flowInvoked: response.flowSession?.flowId || null,
         navigatedTo: response.navigateTo || null,
         hadToolCall: !!(response.flowSession || response.navigateTo),
       }).catch(() => {});
+    };
 
+    // Streaming (SSE) path — surface the answer token-by-token for low perceived latency.
+    if (req.body.stream) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no"); // disable proxy buffering (Render)
+      (res as any).flushHeaders?.();
+      try {
+        const full = await chat.chatStream(messages, sessionKey, (delta) => {
+          res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+        });
+        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null })}\n\n`);
+        res.end();
+        logResponse(full);
+      } catch (error: any) {
+        const m = String(error?.message || "");
+        console.error(`[chat stream error] ${tenantId}: ${m.slice(0, 200)}`);
+        lastChatError = { tenantId, cause: /OpenRouter request failed/i.test(m) ? (/\(402\)|insufficient credits/i.test(m) ? "llm-credits" : "llm-provider") : "stream-error", msg: m.slice(0, 300), at: new Date().toISOString() };
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: "backend_unavailable", message: "Sorry — I'm having trouble right now. Please try again in a moment." })}\n\n`);
+          res.end();
+        }
+      }
+      return;
+    }
+
+    {
+      const response = await chat.chat(messages, sessionKey);
+      logResponse(response);
       res.json(response);
     }
   } catch (error: any) {
