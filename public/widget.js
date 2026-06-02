@@ -237,6 +237,23 @@
   border:1px solid rgba(0,0,0,0.04);\
   border-bottom-left-radius:4px;\
 }\
+/* markdown inside the compact bar bubble — keep tight + consistent (12px) */\
+#wctx-fab .wctx-bar-bubble p { margin:0 0 5px; font-size:inherit; }\
+#wctx-fab .wctx-bar-bubble p:last-child { margin-bottom:0; }\
+#wctx-fab .wctx-bar-bubble strong { font-weight:700; }\
+#wctx-fab .wctx-bar-bubble br { line-height:1.5; }\
+#wctx-fab .wctx-bar-bubble code { background:rgba(0,0,0,0.06); padding:1px 5px; border-radius:4px; font-size:11px; font-family:ui-monospace,monospace; }\
+#wctx-fab .wctx-bar-bubble pre { background:rgba(10,10,10,0.8); color:rgba(255,255,255,0.9); padding:8px 10px; font-size:11px; overflow-x:auto; margin:5px 0; border-radius:8px; white-space:pre-wrap; }\
+#wctx-fab .wctx-bar-bubble a { color:inherit; text-decoration:underline; }\
+#wctx-fab .wctx-bar-bubble a.wctx-page-link, #wctx-fab .wctx-bar-bubble a.wctx-action-btn {\
+  display:inline-flex; align-items:center; gap:4px;\
+  background:rgba(0,0,0,0.06); border:1px solid rgba(0,0,0,0.08); border-radius:7px;\
+  padding:3px 9px; margin:3px 3px 3px 0; font-size:11px; font-weight:600;\
+  color:inherit; text-decoration:none; cursor:pointer; line-height:1.3;\
+}\
+#wctx-fab.wctx-dark .wctx-bar-bubble a.wctx-page-link, #wctx-fab.wctx-dark .wctx-bar-bubble a.wctx-action-btn {\
+  background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.18);\
+}\
 #wctx-fab .wctx-bar {\
   display:flex; align-items:center; gap:10px;\
   padding:6px 6px 6px 18px;\
@@ -392,7 +409,8 @@
   // Expand to full chat
   barExpand.addEventListener("click", openFullChat);
 
-  // Sync messages to the mini bar view
+  // Sync messages to the mini bar view — render the SAME markdown as the full chat
+  // (links, lists, line breaks, code) so the minimized bar isn't a wall of plain text.
   function syncBarMessages() {
     barMsgs.innerHTML = "";
     var recent = messages.slice(-4);
@@ -400,10 +418,18 @@
       var bubble = document.createElement("div");
       bubble.className = "wctx-bar-bubble" + (m.role === "user" ? " user" : " assistant");
       bubble.style.animationDelay = (i * 60) + "ms";
-      var text = m.content;
-      // Simple markdown for bold
-      text = text.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-      bubble.innerHTML = text;
+      if (m.role === "user") {
+        bubble.textContent = m.content;
+      } else {
+        bubble.innerHTML = md(m.content);
+        // Same link behavior as the full chat (navigate/open); tel:/mailto: stay native
+        bubble.querySelectorAll("a[href]").forEach(function(a) {
+          var href = a.getAttribute("href");
+          if (!href || href.charAt(0) === "#" || href.indexOf("mailto:") === 0 || href.indexOf("tel:") === 0) return;
+          a.removeAttribute("target");
+          a.addEventListener("click", function(e) { e.preventDefault(); navigateToPage(href, a.textContent); });
+        });
+      }
       barMsgs.appendChild(bubble);
     });
     barMsgs.scrollTop = barMsgs.scrollHeight;

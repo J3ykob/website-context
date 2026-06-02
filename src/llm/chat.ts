@@ -344,47 +344,37 @@ export class WebsiteChat {
       };
     }
 
-    // Dual-language retrieval: if query language differs from site content,
-    // search with both original and translated query for better recall
-    let retrievedChunks = await searchContext(lastUserMessage, this.embeddingProvider, this.store, {
-      topK: this.topK,
-    });
-
-    // Boost pricing-related queries with explicit pricing keywords
+    // Retrieval. Each Vectorize query is ~2s, so the old code's back-to-back main +
+    // pricing-boost + language-mismatch searches added ~4-6s. Decide all needed
+    // searches up front and run them IN PARALLEL (Promise.all) — total ≈ one query.
     const pricingKeywords = /price|pricing|cost|how much|rate|fee|cennik|cena|koszt|ile kosztuje|opłat|tarif|preis|kosten/i;
-    if (pricingKeywords.test(lastUserMessage)) {
-      const pricingTerms = "cennik cena koszt price pricing rates fees tariff";
-      const pricingChunks = await searchContext(pricingTerms, this.embeddingProvider, this.store, {
-        topK: 5,
-      });
-      const existingContent = new Set(retrievedChunks.map(c => c.content.slice(0, 50)));
-      for (const chunk of pricingChunks) {
-        if (!existingContent.has(chunk.content.slice(0, 50))) {
-          retrievedChunks.push(chunk);
-        }
-      }
-    }
-
-    // Detect language mismatch: if query looks English but site has Polish content (or vice versa)
     const isQueryEnglish = /^[a-z\s,.?!'"]+$/i.test(lastUserMessage.replace(/[0-9]/g, ""));
     const hasMostlyPolishContent = this.context.pages.some(p =>
       /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(p.title || "")
     );
-    if (isQueryEnglish && hasMostlyPolishContent && retrievedChunks.length > 0) {
-      // Also search with key terms that might exist in Polish content
-      const keyTerms = lastUserMessage.toLowerCase()
-        .replace(/what|is|your|the|do|you|have|any|can|i|get|how|much/g, "")
-        .trim();
-      if (keyTerms.length > 2) {
-        const extraChunks = await searchContext(keyTerms, this.embeddingProvider, this.store, {
-          topK: Math.floor(this.topK / 2),
-        });
-        const existingIds = new Set(retrievedChunks.map(c => c.content.slice(0, 50)));
-        for (const chunk of extraChunks) {
-          if (!existingIds.has(chunk.content.slice(0, 50))) {
-            retrievedChunks.push(chunk);
-          }
-        }
+    const langKeyTerms = (isQueryEnglish && hasMostlyPolishContent)
+      ? lastUserMessage.toLowerCase().replace(/what|is|your|the|do|you|have|any|can|i|get|how|much/g, "").trim()
+      : "";
+
+    const searchTasks: Promise<{ content: string; metadata: Record<string, unknown>; score: number }[]>[] = [
+      searchContext(lastUserMessage, this.embeddingProvider, this.store, { topK: this.topK }),
+    ];
+    // Boost pricing queries with explicit pricing keywords (parallel, not after).
+    if (pricingKeywords.test(lastUserMessage)) {
+      searchTasks.push(searchContext("cennik cena koszt price pricing rates fees tariff", this.embeddingProvider, this.store, { topK: 5 }));
+    }
+    // Dual-language recall: English query against Polish content (parallel).
+    if (langKeyTerms.length > 2) {
+      searchTasks.push(searchContext(langKeyTerms, this.embeddingProvider, this.store, { topK: Math.floor(this.topK / 2) }));
+    }
+
+    const [mainChunks, ...extraResults] = await Promise.all(searchTasks);
+    let retrievedChunks = mainChunks;
+    const seenContent = new Set(retrievedChunks.map((c) => c.content.slice(0, 50)));
+    for (const extra of extraResults) {
+      for (const chunk of extra) {
+        const key = chunk.content.slice(0, 50);
+        if (!seenContent.has(key)) { seenContent.add(key); retrievedChunks.push(chunk); }
       }
     }
 
