@@ -11,7 +11,7 @@ import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { QdrantVectorStore } from "../embeddings/qdrant-store.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { WebsiteChat } from "../llm/chat.js";
-import type { WebsiteContext, SiteMapEntry, FlowDefinition } from "../context/types.js";
+import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -81,6 +81,7 @@ export class TenantManager {
       lastScrapedAt: string;
       pagesCount: number;
       chunksCount: number;
+      officialInfo?: OfficialBusinessInfo | null;
     };
 
     // Build minimal WebsiteContext (chunks are in Qdrant, not loaded into memory)
@@ -102,6 +103,7 @@ export class TenantManager {
       })),
       flows: meta.flows || [],
       chunks: [], // Chunks are in Qdrant, not in memory
+      businessProfile: meta.officialInfo || undefined,
     };
 
     // Per-tenant vector store - Cloudflare Vectorize (or Qdrant fallback)

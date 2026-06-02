@@ -4,6 +4,7 @@ import * as cheerio from "cheerio";
 import type { CrawlResult, ScrapedPage } from "../scraper/types.js";
 import { htmlToMarkdown, type MarkdownSection } from "../scraper/markdown.js";
 import { fetchPage } from "../scraper/fetcher.js";
+import { extractOfficialInfo } from "./business-profile.js";
 import { OpenRouterProvider } from "../llm/openrouter-provider.js";
 import type {
   WebsiteContext,
@@ -62,12 +63,15 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
   const contactPhones = new Set<string>();
   const contactEmails = new Set<string>();
   const headerFooterBlocks = new Set<string>();
+  // Raw HTML per page, fed to the canonical Official Business Info extractor below.
+  const profilePages: { url: string; html: string }[] = [];
 
   for (const scrapedPage of crawlResult.pages) {
     // Re-fetch for markdown (we already have the HTML in memory during crawl,
     // but for now we'll work from the scraped page data)
     const fetchResult = await fetchPage(scrapedPage.url, { timeout: 10000 });
     const markdown = htmlToMarkdown(fetchResult);
+    profilePages.push({ url: scrapedPage.url, html: fetchResult.html });
 
     // Harvest canonical contact data from this page's tel:/mailto: links.
     const ci = extractTelMailto(fetchResult.html);
@@ -157,6 +161,11 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
 
   await enrichChunks(chunks);
 
+  // Canonical Official Business Info — built from authoritative typed sources (JSON-LD,
+  // tel:/mailto:) so the chat can answer "what's your main phone/email/address?" from one
+  // always-injected block instead of losing to testimonial/listing chunks in retrieval.
+  const businessProfile = extractOfficialInfo(profilePages, crawlResult.pages[0]?.url);
+
   return {
     tenantId: "", // set by caller
     version: 1,
@@ -165,6 +174,7 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
     pages,
     flows: [],
     chunks,
+    businessProfile,
   };
 }
 

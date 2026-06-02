@@ -225,6 +225,8 @@ export async function scrapeTenant(
     lastScrapedAt: new Date().toISOString(),
     pagesCount: pagesScraped,
     chunksCount: embedResult.embeddedChunks,
+    // Canonical primary facts (always loaded + injected; see OfficialBusinessInfo).
+    officialInfo: context.businessProfile || null,
   };
 
   await writeFile(

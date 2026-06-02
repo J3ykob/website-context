@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync } from "fs";
 import type { EmbeddingProvider, VectorStore } from "../embeddings/types.js";
 import { searchContext } from "../embeddings/pipeline.js";
 import type { WebsiteContext, FlowDefinition } from "../context/types.js";
+import { renderOfficialInfo } from "../context/business-profile.js";
 import { VLLMProvider, type VLLMConfig } from "./vllm-provider.js";
 import { OpenRouterProvider, type OpenRouterConfig } from "./openrouter-provider.js";
 import {
@@ -735,7 +736,7 @@ export class WebsiteChat {
 
 ## Website Pages:
 ${siteInfo}
-${skillsSection}
+${skillsSection}${renderOfficialInfo(this.context.businessProfile)}
 
 ## Relevant Context:
 ${contextBlocks}

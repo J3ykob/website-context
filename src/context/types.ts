@@ -26,6 +26,38 @@ export interface ScrapeConfig {
   schedule?: string; // cron expression for re-scraping
 }
 
+// A single canonical business fact carrying its own provenance, so the injector can
+// decide whether to assert it. Phones/emails are only ever produced from TYPED sources
+// (JSON-LD / tel:/mailto: links) — never regex-scraped from prose — which is what
+// turned a car price into "899000.00". Absence is a first-class state: a missing field
+// means "no trustworthy source found", and the bot then says it doesn't have it rather
+// than guessing.
+export interface BusinessFact<T = string> {
+  value: T;
+  source: "json-ld" | "microdata" | "tel-mailto" | "footer" | "contact-page";
+  confidence: "high" | "medium";
+  sourceUrl: string;
+}
+
+// The authoritative "Official Business Info" profile: small, always-loaded (lives in
+// context-meta.json, NOT the vector store), and always injected into the chat prompt so
+// "what's your main phone/email/address/hours?" is answered from here instead of losing
+// to testimonial/listing chunks in retrieval. One mechanism for ALL primary facts.
+export interface OfficialBusinessInfo {
+  businessName?: BusinessFact;
+  primaryPhone?: BusinessFact;
+  primaryEmail?: BusinessFact;
+  primaryAddress?: BusinessFact;
+  openingHours?: BusinessFact;
+  // Real contacts we deliberately did NOT promote to primary (specific agents/departments,
+  // or all candidates when genuinely ambiguous). Kept so the bot can answer "another number?"
+  // and so multi-contact sites can list options instead of guessing one.
+  alternatePhones?: string[];
+  alternateEmails?: string[];
+  extractedAt: string;
+  extractionBasis: string; // human-readable provenance audit trail
+}
+
 export interface WebsiteContext {
   tenantId: string;
   version: number;
@@ -34,6 +66,8 @@ export interface WebsiteContext {
   pages: PageContext[];
   flows: FlowDefinition[];
   chunks: ContentChunk[];
+  // Canonical primary business facts (always injected; see OfficialBusinessInfo).
+  businessProfile?: OfficialBusinessInfo;
 }
 
 export interface SiteMapEntry {
