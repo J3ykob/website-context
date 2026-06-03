@@ -76,6 +76,37 @@ function fmtHours(h: any): string | null {
   return strs.length ? strs.join("; ").slice(0, 200) : null;
 }
 
+// Guarded prose-phone fallback — used ONLY when no typed source (JSON-LD/tel:) exists.
+// Looks on the contact page (preferred), then others, for a phone-shaped number IMMEDIATELY
+// adjacent to an explicit phone LABEL (tel/telefon/phone/...). Label-adjacency + strict shape
+// + price-context rejection keep this from re-becoming the blind "number-from-prose" bug (the
+// 899000.00 price-as-phone): a price is never preceded by "tel:". Returned at medium confidence.
+const CONTACTISH = /kontakt|contact|impressum|contatti|contacto|nous-contacter/i;
+function extractProsePhone(pages: { url: string; html: string }[]): { value: string; url: string } | null {
+  const ordered = [...pages].sort((a, b) => (CONTACTISH.test(b.url) ? 1 : 0) - (CONTACTISH.test(a.url) ? 1 : 0));
+  const labelRe = /(?:tel|telefon|t[eé]l[eé]phone|telefoon|tel[eé]fono|phone|call us|ring oss|tlf|rufen sie uns|fon)\b[\s.:)\-]*/gi;
+  for (const pg of ordered) {
+    let text = "";
+    try { const $ = cheerio.load(pg.html); $("script,style,noscript").remove(); text = $("body").text(); }
+    catch { text = pg.html.replace(/<[^>]+>/g, " "); }
+    text = text.replace(/\s+/g, " ");
+    labelRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = labelRe.exec(text)) !== null) {
+      const after = text.slice(m.index + m[0].length, m.index + m[0].length + 26);
+      const pm = after.match(/^(\+?\d[\d\s().\-/]{6,}\d)/);
+      if (!pm) continue;
+      const d = pm[1].replace(/\D/g, "");
+      if (d.length < 7 || d.length > 14) continue;
+      // Reject price/postal-ish contexts (belt-and-suspenders; the label guard already excludes most).
+      const ctx = text.slice(Math.max(0, m.index - 14), m.index) + after;
+      if (/[€$£%]|\bz[łl]\b|\bkr\b|\beur\b|\busd\b|cena|price|\bod\b/i.test(ctx)) continue;
+      return { value: pm[1].trim().replace(/\s+/g, " "), url: pg.url };
+    }
+  }
+  return null;
+}
+
 /**
  * Build the canonical profile from a set of pages' raw HTML. Pass the homepage first
  * (it's preferred when entities conflict). Pure + deterministic — no network, no LLM.
@@ -143,30 +174,57 @@ export function extractOfficialInfo(
 
   if (jl.name) info.businessName = { value: jl.name.trim(), source: "json-ld", confidence: "high", sourceUrl: home };
 
-  // --- PHONE (typed sources only) ---
-  if (jl.tel) {
-    const corrob = telCount.has(phoneKey(jl.tel));
-    info.primaryPhone = { value: jl.tel.trim(), source: "json-ld", confidence: corrob ? "high" : "medium", sourceUrl: jlTelPageUrl || home };
-    basis.push(`phone=JSON-LD${corrob ? " (corroborated by tel: link)" : ""}`);
-    const alts = telCandidates.filter((t) => phoneKey(t.display) !== phoneKey(jl.tel!)).map((t) => t.display);
-    if (alts.length) info.alternatePhones = alts.slice(0, 6);
-  } else if (telCandidates.length === 1) {
-    info.primaryPhone = { value: telCandidates[0].display, source: "tel-mailto", confidence: "high", sourceUrl: home };
-    basis.push("phone=single tel: link");
-  } else if (telCandidates.length > 1) {
-    const [first, second] = telCandidates;
-    const clearWinner = first.inFooter && (!second.inFooter || first.count >= second.count * 2);
-    if (clearWinner) {
-      info.primaryPhone = { value: first.display, source: "footer", confidence: "medium", sourceUrl: home };
-      info.alternatePhones = telCandidates.slice(1).map((t) => t.display).slice(0, 6);
-      basis.push("phone=site-wide footer line (clear winner)");
+  // --- PHONE ---
+  // Pick the primary phone from the most authoritative live source. Helper used for the
+  // tel:-link cases (single -> primary; many -> footer winner, else abstain on ambiguity).
+  const selectFromTelLinks = () => {
+    if (telCandidates.length === 1) {
+      info.primaryPhone = { value: telCandidates[0].display, source: "tel-mailto", confidence: "high", sourceUrl: home };
+      basis.push("phone=single tel: link");
     } else {
-      // Genuinely ambiguous (e.g. real-estate agency, many agent mobiles) -> ABSTAIN.
-      info.alternatePhones = telCandidates.map((t) => t.display).slice(0, 6);
-      basis.push(`phone=ABSTAINED (${telCandidates.length} contacts, no clear primary)`);
+      const [first, second] = telCandidates;
+      const clearWinner = first.inFooter && (!second.inFooter || first.count >= second.count * 2);
+      if (clearWinner) {
+        info.primaryPhone = { value: first.display, source: "footer", confidence: "medium", sourceUrl: home };
+        info.alternatePhones = telCandidates.slice(1).map((t) => t.display).slice(0, 6);
+        basis.push("phone=site-wide footer line (clear winner)");
+      } else {
+        // Genuinely ambiguous (e.g. real-estate agency, many agent mobiles) -> ABSTAIN.
+        info.alternatePhones = telCandidates.map((t) => t.display).slice(0, 6);
+        basis.push(`phone=ABSTAINED (${telCandidates.length} contacts, no clear primary)`);
+      }
     }
+  };
+
+  const jlKey = jl.tel ? phoneKey(jl.tel) : "";
+  if (jl.tel && telCount.has(jlKey)) {
+    // JSON-LD telephone corroborated by a live tel: link -> highest confidence.
+    info.primaryPhone = { value: jl.tel.trim(), source: "json-ld", confidence: "high", sourceUrl: jlTelPageUrl || home };
+    basis.push("phone=JSON-LD (corroborated by tel: link)");
+    const alts = telCandidates.filter((t) => phoneKey(t.display) !== jlKey).map((t) => t.display);
+    if (alts.length) info.alternatePhones = alts.slice(0, 6);
+  } else if (jl.tel && telCandidates.length > 0) {
+    // CROSS-VALIDATION: JSON-LD phone disagrees with every live tel: link. JSON-LD is the
+    // likeliest stale source (set-and-forget), so trust the clickable links and keep the
+    // JSON-LD number only as an alternate.
+    selectFromTelLinks();
+    info.alternatePhones = [jl.tel.trim(), ...(info.alternatePhones || [])].slice(0, 6);
+    basis.push("phone: JSON-LD disagreed with tel: links -> used tel:, JSON-LD demoted (possibly stale)");
+  } else if (jl.tel) {
+    // JSON-LD is the only typed source (no tel: link to cross-check) -> medium confidence.
+    info.primaryPhone = { value: jl.tel.trim(), source: "json-ld", confidence: "medium", sourceUrl: jlTelPageUrl || home };
+    basis.push("phone=JSON-LD (uncorroborated, no tel: link to verify)");
+  } else if (telCandidates.length > 0) {
+    selectFromTelLinks();
   } else {
-    basis.push("phone=absent (no typed source)");
+    // No typed source at all -> guarded, label-adjacent prose fallback (contact page).
+    const prose = extractProsePhone(pages);
+    if (prose) {
+      info.primaryPhone = { value: prose.value, source: "contact-page", confidence: "medium", sourceUrl: prose.url };
+      basis.push("phone=contact-page prose (label-adjacent, no typed source)");
+    } else {
+      basis.push("phone=absent (no typed source)");
+    }
   }
 
   // --- EMAIL (typed sources only) ---
