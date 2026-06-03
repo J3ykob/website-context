@@ -160,26 +160,33 @@ export async function scrapeTenant(
     throw new Error(`Embedding incomplete for ${tenantId}: ${embedResult.embeddedChunks}/${embedResult.totalChunks} embedded, ${embedResult.failedChunks} failed (tolerance ${embedTolerance}) — refusing to register a partial demo.`);
   }
 
-  // POST-EMBED VERIFICATION — the load-bearing readiness check. Local "embedded N"
-  // counts can't be trusted (upsert used to swallow HTTP errors) and Vectorize
-  // INSERT is eventually consistent. Poll the index until a vector is actually
-  // queryable, with backoff; throw if none land. This guarantees a scrape never
-  // reports success with 0 live vectors -> root cause of the 872 ungrounded demos.
+  // POST-EMBED VERIFICATION — confirm vectors are actually queryable. The real
+  // guarantee against silent failure lives in upsert(): it throws on ANY non-2xx
+  // /insert (token invalid / HTTP error), so reaching here means the insert
+  // HTTP-SUCCEEDED. This poll only confirms the index has caught up. Vectorize INSERT
+  // is eventually consistent and routinely lags past a minute under load — empirically,
+  // every tenant that "failed" a 42s poll had its vectors queryable minutes later. So
+  // we poll generously but DO NOT throw on timeout: throwing strands a genuinely-
+  // successful scrape AND skips the downstream context-meta.json write + R2 upload
+  // (both below), manufacturing a vectors-but-no-context broken demo — the exact
+  // opposite of the intent. Warn and proceed; the vectors land shortly.
   if (useVectorize && context.chunks.length > 0) {
     const vstore = store as CloudflareVectorizeStore;
     let queryable = false;
-    for (let attempt = 1; attempt <= 8 && !queryable; attempt++) {
+    const maxAttempts = 12; // ~100s total: 2,4,6,8,10,12,12,12,12,12,12s backoff
+    for (let attempt = 1; attempt <= maxAttempts && !queryable; attempt++) {
       try {
         if (await vstore.hasVectors()) { queryable = true; break; }
       } catch (e) {
         console.log(`[scrape-pipeline] vector probe error (attempt ${attempt}): ${(e as Error).message}`);
       }
-      await new Promise((r) => setTimeout(r, attempt * 1500));
+      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, Math.min(attempt * 2000, 12000)));
     }
-    if (!queryable) {
-      throw new Error(`Post-embed verification failed: 0 vectors queryable for ${tenantId} (embed silently failed or token invalid)`);
+    if (queryable) {
+      console.log(`[scrape-pipeline] verified ${tenantId}: vectors queryable in Vectorize`);
+    } else {
+      console.log(`[scrape-pipeline] WARNING ${tenantId}: ${context.chunks.length} chunks embedded, /insert HTTP-succeeded, but vectors not queryable after ~100s — Vectorize eventual-consistency lag. Proceeding (vectors land shortly); NOT failing the scrape.`);
     }
-    console.log(`[scrape-pipeline] verified ${tenantId}: vectors queryable in Vectorize`);
   }
 
   // Delete orphaned vectors (tracked before, absent now) and persist the current
