@@ -1347,6 +1347,14 @@ app.get("/api/onboarding-stats", (_, res) => {
   });
 });
 
+// Read-only: list active tenant ids with chunks. Used to enumerate targets for the
+// canonical business-info backfill (the SQLite registry lives only here on the server).
+app.get("/api/admin/active-tenant-ids", (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
+  const ids = listTenants().filter((t) => t.status === "active" && t.chunksCount > 0).map((t) => t.id);
+  res.json({ count: ids.length, ids });
+});
+
 // Admin rescrape single tenant (?maxPages=10 to limit crawl size)
 app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
