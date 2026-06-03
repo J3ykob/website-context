@@ -933,6 +933,15 @@
   }
   var activeFlowSession = null;
 
+  // Keep the posted history under the server's per-request caps (<=50 messages and
+  // <=32768 total content chars), trimming oldest first but always keeping the newest.
+  function trimHistory(msgs) {
+    var out = msgs.slice(-40);
+    var total = function(a) { var t = 0; for (var i = 0; i < a.length; i++) t += ((a[i] && a[i].content) || "").length; return t; };
+    while (out.length > 1 && total(out) > 30000) out.shift();
+    return out;
+  }
+
   // Stream a chat response over SSE. Calls cbs.onFirst() just before the first token
   // (clear the typing indicator), cbs.onDelta(text) per token, cbs.onDone(data) with the
   // canonical {message, sources, navigateTo, flowSession}, cbs.onError(msg) on failure.
@@ -942,7 +951,7 @@
     fetch(API_HOST + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: messages, tenantId: TENANT_ID, sessionId: sessionId, stream: true }),
+      body: JSON.stringify({ messages: trimHistory(messages), tenantId: TENANT_ID, sessionId: sessionId, stream: true }),
     })
     .then(function(r) {
       var ct = r.headers.get("content-type") || "";
