@@ -12,12 +12,27 @@
  * Cost: ~2-4 HTTP fetches per tenant. Zero tokens. Vectors/chunks untouched.
  */
 import { downloadTenantFile, uploadToR2 } from "../src/storage/r2.js";
-import { fetchPage } from "../src/scraper/fetcher.js";
 import { extractOfficialInfo } from "../src/context/business-profile.js";
 
 const CONTACT_RE = /kontakt|contact|impressum|o-nas|contacto|contatti|kontakt-oss|contact-us|nous-contacter/i;
 const SERVE_URL = process.env.SERVE_URL || "https://whisp.so";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
+
+// STATIC-only fetch. Deliberately NOT scraper/fetcher.fetchPage: its dynamic-render
+// fallback (chromium.launch, no hard timeout) hangs + orphans chromium under the
+// backfill's -P4 concurrency, stalling the whole run. Typed sources + prose are in the
+// static HTML; pure-JS sites get their profile from the next full Playwright scrape.
+async function fetchStatic(url: string): Promise<string | null> {
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.8", Accept: "text/html,*/*;q=0.8" },
+      redirect: "follow", signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) return null;
+    return await r.text();
+  } catch { return null; }
+}
 
 async function backfillOne(tenantId: string, dry: boolean): Promise<void> {
   const buf = await downloadTenantFile(tenantId, "context-meta.json");
@@ -37,10 +52,8 @@ async function backfillOne(tenantId: string, dry: boolean): Promise<void> {
 
   const pages: { url: string; html: string }[] = [];
   for (const u of urls) {
-    try {
-      const r = await fetchPage(u, { timeout: 15000 });
-      if (r?.html && r.html.length > 300) pages.push({ url: u, html: r.html });
-    } catch { /* skip unreachable page */ }
+    const html = await fetchStatic(u);
+    if (html && html.length > 300) pages.push({ url: u, html });
   }
   if (!pages.length) { console.log(`[${tenantId}] SKIP — could not fetch any page`); return; }
 
