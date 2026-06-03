@@ -28,6 +28,11 @@
   }
 
   function detectTheme() {
+    // A visitor's explicit saved choice wins over both forceTheme and auto-detection.
+    if (settings && (settings.theme === "dark" || settings.theme === "light")) {
+      if (settings.theme !== currentTheme) { currentTheme = settings.theme; applyTheme(settings.theme); }
+      return settings.theme;
+    }
     // Allow forcing theme via config
     if (config.forceTheme === "dark" || config.forceTheme === "light") {
       var forced = config.forceTheme;
@@ -85,6 +90,28 @@
       fab && fab.classList.remove("wctx-dark");
       overlay && overlay.classList.remove("wctx-dark");
     }
+  }
+
+  // ---- Visitor-local settings (theme / font size / color-impaired), cached in localStorage ----
+  var SETTINGS_KEY = "wctx-settings";
+  var settings = (function () { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { return {}; } })();
+  function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {} }
+  function applySettings() {
+    [fab, overlay].forEach(function (el) {
+      if (!el) return;
+      el.classList.remove("wctx-fs-s", "wctx-fs-m", "wctx-fs-l");
+      el.classList.add("wctx-fs-" + (settings.fontSize || "m"));
+      el.classList.toggle("wctx-cb", settings.colorImpaired === true);
+    });
+    if (settings.theme === "dark" || settings.theme === "light") {
+      currentTheme = settings.theme;
+      applyTheme(settings.theme);
+    }
+    if (typeof updateSettingsUI === "function") updateSettingsUI();
+  }
+  function setThemePref(theme) {
+    settings.theme = theme; currentTheme = theme; applyTheme(theme); saveSettings();
+    if (typeof updateSettingsUI === "function") updateSettingsUI();
   }
 
   function debouncedDetectTheme() {
@@ -176,12 +203,34 @@
 #wctx-fab {\
   position:fixed; bottom:26px; left:50%; transform:translateX(-50%);\
   z-index:999998; display:none;\
-  width:min(520px, calc(100vw - 32px));\
+  max-width:calc(100vw - 20px);\
 }\
+#wctx-fab .wctx-bar-row { display:flex; align-items:flex-end; justify-content:center; gap:10px; }\
+#wctx-fab .wctx-glass {\
+  background:rgba(200,200,210,0.55);\
+  backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
+  border:1px solid rgba(255,255,255,0.2); box-shadow:0 6px 24px rgba(0,0,0,0.12);\
+}\
+#wctx-fab .wctx-mic {\
+  width:48px; height:48px; flex-shrink:0; border-radius:50%;\
+  display:flex; align-items:center; justify-content:center;\
+  color:rgba(10,10,10,0.4); cursor:not-allowed; padding:0;\
+}\
+#wctx-fab .wctx-mic:disabled { opacity:0.6; }\
+#wctx-fab .wctx-ctrls {\
+  display:flex; align-items:center; gap:2px; flex-shrink:0; height:48px; padding:0 5px; border-radius:26px;\
+}\
+#wctx-fab .wctx-ctl {\
+  width:38px; height:38px; display:flex; align-items:center; justify-content:center;\
+  background:none; border:none; cursor:pointer; border-radius:50%;\
+  color:rgba(10,10,10,0.5); transition:background 0.2s, color 0.2s; padding:0;\
+}\
+#wctx-fab .wctx-ctl:hover { background:rgba(255,255,255,0.55); color:rgba(10,10,10,0.85); }\
 #wctx-fab .wctx-bar-wrap {\
   display:flex;\
   flex-direction:column;\
-  border-radius:20px;\
+  border-radius:24px;\
+  width:340px;\
   background:rgba(200,200,210,0.55);\
   backdrop-filter:blur(40px) saturate(1.5);\
   -webkit-backdrop-filter:blur(40px) saturate(1.5);\
@@ -191,6 +240,8 @@
   overflow:hidden;\
   max-height:52px;\
 }\
+#wctx-fab .wctx-bar-wrap.pinned { width:clamp(300px, 45vw, 620px); }\
+@media (max-width:640px) { #wctx-fab .wctx-bar-wrap { width:170px; } #wctx-fab .wctx-bar-wrap.pinned { width:calc(100vw - 150px); } }\
 #wctx-fab .wctx-bar-wrap:hover,\
 #wctx-fab .wctx-bar-wrap.pinned {\
   max-height:380px;\
@@ -273,19 +324,14 @@
 }\
 #wctx-fab .wctx-bar-input::placeholder { color:rgba(10,10,10,0.3); }\
 #wctx-fab .wctx-bar-send {\
-  font-family:"Archivo",sans-serif;\
-  font-size:11px; text-transform:uppercase; letter-spacing:0.08em; font-weight:700;\
-  color:rgba(10,10,10,0.5); background:rgba(255,255,255,0.4);\
-  border:1px solid rgba(0,0,0,0.06); border-radius:12px;\
-  padding:10px 16px; cursor:pointer;\
+  flex-shrink:0; width:34px; height:34px; border-radius:50%;\
+  display:flex; align-items:center; justify-content:center;\
+  color:rgba(10,10,10,0.55); background:rgba(255,255,255,0.45);\
+  border:1px solid rgba(0,0,0,0.06); cursor:pointer; padding:0;\
   transition:all 0.2s;\
 }\
-#wctx-fab .wctx-bar-send:hover { background:rgba(255,255,255,0.7); color:rgba(10,10,10,0.8); }\
-#wctx-fab .wctx-bar-expand {\
-  background:none; border:none; cursor:pointer; padding:10px;\
-  color:rgba(10,10,10,0.35); display:flex; transition:color 0.2s;\
-}\
-#wctx-fab .wctx-bar-expand:hover { color:rgba(10,10,10,0.7); }\
+#wctx-fab .wctx-bar-send:hover { background:rgba(255,255,255,0.85); color:rgba(10,10,10,0.9); }\
+/* .wctx-bar-expand is now a .wctx-ctl (styled above); class kept only as a JS hook */\
 \
 #wctx-fab.wctx-dark .wctx-bar-wrap {\
   background:rgba(20,20,35,0.6);\
@@ -314,17 +360,44 @@
   border-color:rgba(255,255,255,0.12);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-send:hover { background:rgba(255,255,255,0.15); color:rgba(255,255,255,0.9); }\
-#wctx-fab.wctx-dark .wctx-bar-expand { color:rgba(255,255,255,0.35); }\
-#wctx-fab.wctx-dark .wctx-bar-expand:hover { color:rgba(255,255,255,0.7); }\
+#wctx-fab.wctx-dark .wctx-glass { background:rgba(20,20,35,0.6); border-color:rgba(255,255,255,0.08); box-shadow:0 6px 24px rgba(0,0,0,0.3); }\
+#wctx-fab.wctx-dark .wctx-mic { color:rgba(255,255,255,0.4); }\
+#wctx-fab.wctx-dark .wctx-ctl { color:rgba(255,255,255,0.55); }\
+#wctx-fab.wctx-dark .wctx-ctl:hover { background:rgba(255,255,255,0.12); color:#fff; }\
+/* font-size visitor setting (s/m/l) */\
+#wctx-fab.wctx-fs-s .wctx-bar-bubble, #wctx-fab.wctx-fs-s .wctx-bar-input { font-size:14px; }\
+#wctx-fab.wctx-fs-l .wctx-bar-bubble, #wctx-fab.wctx-fs-l .wctx-bar-input { font-size:19px; }\
+/* color-impaired mode: max contrast + non-color cues (underlined links) */\
+#wctx-fab.wctx-cb .wctx-bar-dot { background:#0a84ff; box-shadow:0 0 0 2px rgba(255,255,255,0.6); }\
+#wctx-fab.wctx-cb .wctx-bar-bubble.assistant { background:#fff; color:#000; border:2px solid #000; }\
+#wctx-fab.wctx-cb .wctx-bar-bubble.user { background:#000; color:#fff; border:2px solid #000; }\
+#wctx-fab.wctx-cb.wctx-dark .wctx-bar-bubble.assistant { background:#000; color:#fff; border:2px solid #fff; }\
+#wctx-fab.wctx-cb.wctx-dark .wctx-bar-bubble.user { background:#fff; color:#000; border:2px solid #fff; }\
+#wctx-fab.wctx-cb .wctx-bar-bubble a { text-decoration:underline; font-weight:700; }\
 </style>\
-<div class="wctx-bar-wrap">\
-  <div class="wctx-bar-messages" id="wctx-bar-msgs"></div>\
-  <div class="wctx-bar">\
-    <span class="wctx-bar-dot"></span>\
-    <input class="wctx-bar-input" type="text" placeholder="Ask anything…" autocomplete="off" />\
-    <button class="wctx-bar-send" type="button">Send</button>\
-    <button class="wctx-bar-expand" type="button" title="Expand chat">\
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>\
+<div class="wctx-bar-row">\
+  <button class="wctx-mic wctx-glass" type="button" disabled title="Voice input (coming soon)">\
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg>\
+  </button>\
+  <div class="wctx-bar-wrap">\
+    <div class="wctx-bar-messages" id="wctx-bar-msgs"></div>\
+    <div class="wctx-bar">\
+      <span class="wctx-bar-dot"></span>\
+      <input class="wctx-bar-input" type="text" placeholder="Ask anything…" autocomplete="off" />\
+      <button class="wctx-bar-send" type="button" title="Send">\
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>\
+      </button>\
+    </div>\
+  </div>\
+  <div class="wctx-ctrls wctx-glass">\
+    <button class="wctx-ctl wctx-ctl-settings" type="button" title="Settings">\
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>\
+    </button>\
+    <button class="wctx-ctl wctx-ctl-theme" type="button" title="Toggle light / dark">\
+      <svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>\
+    </button>\
+    <button class="wctx-ctl wctx-bar-expand" type="button" title="Expand chat">\
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>\
     </button>\
   </div>\
 </div>';
@@ -335,6 +408,77 @@
   var barExpand = fab.querySelector(".wctx-bar-expand");
   var barWrap = fab.querySelector(".wctx-bar-wrap");
   var barMsgs = fab.querySelector("#wctx-bar-msgs");
+  var btnSettings = fab.querySelector(".wctx-ctl-settings");
+  var btnTheme = fab.querySelector(".wctx-ctl-theme");
+
+  // ---- Settings modal (theme / text size / color-impaired) — local visitor prefs ----
+  var settingsModal = null;
+  function buildSettingsModal() {
+    var m = document.createElement("div");
+    m.id = "wctx-settings-modal";
+    m.innerHTML = '<style>\
+#wctx-settings-modal { position:fixed; inset:0; z-index:1000000; display:none; align-items:center; justify-content:center; }\
+#wctx-settings-modal.open { display:flex; }\
+#wctx-settings-modal .wctx-sm-bg { position:absolute; inset:0; background:rgba(10,10,15,0.5); backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px); }\
+#wctx-settings-modal .wctx-sm-card { position:relative; width:min(420px, calc(100vw - 32px)); max-height:85vh; overflow-y:auto; background:#fff; color:#16161c; border-radius:22px; padding:24px; box-shadow:0 24px 80px rgba(0,0,0,0.4); font-family:"Archivo",-apple-system,sans-serif; animation:wctx-sm-in 0.25s cubic-bezier(0.16,1,0.3,1) both; }\
+@keyframes wctx-sm-in { from { opacity:0; transform:translateY(16px) scale(0.97);} to { opacity:1; transform:none; } }\
+#wctx-settings-modal.wctx-dark .wctx-sm-card { background:#1c1c28; color:#f0f0f5; }\
+#wctx-settings-modal .wctx-sm-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }\
+#wctx-settings-modal .wctx-sm-head h3 { margin:0; font-size:19px; font-weight:700; }\
+#wctx-settings-modal .wctx-sm-close { background:none; border:none; cursor:pointer; font-size:24px; line-height:1; color:inherit; opacity:0.45; padding:2px 6px; }\
+#wctx-settings-modal .wctx-sm-close:hover { opacity:1; }\
+#wctx-settings-modal .wctx-sm-row { margin-bottom:22px; }\
+#wctx-settings-modal .wctx-sm-label { font-size:12px; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:9px; }\
+#wctx-settings-modal .wctx-seg { display:flex; gap:7px; }\
+#wctx-settings-modal .wctx-seg button { flex:1; padding:11px; border-radius:13px; border:1.5px solid rgba(120,120,140,0.25); background:transparent; color:inherit; font-family:inherit; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.15s; }\
+#wctx-settings-modal .wctx-seg button:hover { border-color:rgba(120,120,140,0.55); }\
+#wctx-settings-modal .wctx-seg button.active { background:#0a84ff; border-color:#0a84ff; color:#fff; }\
+#wctx-settings-modal .wctx-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }\
+#wctx-settings-modal .wctx-toggle-row span { font-size:15px; font-weight:600; }\
+#wctx-settings-modal .wctx-switch { width:48px; height:28px; border-radius:14px; border:none; background:rgba(120,120,140,0.35); position:relative; cursor:pointer; transition:background 0.2s; flex-shrink:0; }\
+#wctx-settings-modal .wctx-switch::after { content:""; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:transform 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.3); }\
+#wctx-settings-modal .wctx-switch.on { background:#0a84ff; }\
+#wctx-settings-modal .wctx-switch.on::after { transform:translateX(20px); }\
+#wctx-settings-modal .wctx-sm-hint { font-size:12px; opacity:0.5; margin-top:7px; line-height:1.4; }\
+</style>\
+<div class="wctx-sm-bg"></div>\
+<div class="wctx-sm-card">\
+  <div class="wctx-sm-head"><h3>Settings</h3><button class="wctx-sm-close" type="button" aria-label="Close">&times;</button></div>\
+  <div class="wctx-sm-row"><div class="wctx-sm-label">Theme</div><div class="wctx-seg" data-seg="theme"><button data-v="light" type="button">Light</button><button data-v="dark" type="button">Dark</button></div></div>\
+  <div class="wctx-sm-row"><div class="wctx-sm-label">Text size</div><div class="wctx-seg" data-seg="fontSize"><button data-v="s" type="button">Small</button><button data-v="m" type="button">Medium</button><button data-v="l" type="button">Large</button></div></div>\
+  <div class="wctx-sm-row"><div class="wctx-toggle-row"><span>Color-impaired mode</span><button class="wctx-switch" data-toggle="colorImpaired" type="button" aria-label="Toggle color-impaired mode"></button></div><div class="wctx-sm-hint">Maximizes contrast and underlines links for clearer visibility.</div></div>\
+</div>';
+    document.body.appendChild(m);
+    m.querySelector(".wctx-sm-bg").addEventListener("click", closeSettings);
+    m.querySelector(".wctx-sm-close").addEventListener("click", closeSettings);
+    m.querySelectorAll(".wctx-seg").forEach(function (seg) {
+      seg.addEventListener("click", function (e) {
+        var b = e.target.closest("button[data-v]"); if (!b) return;
+        var key = seg.getAttribute("data-seg"); var val = b.getAttribute("data-v");
+        if (key === "theme") { setThemePref(val); }
+        else { settings[key] = val; saveSettings(); applySettings(); }
+      });
+    });
+    m.querySelector('[data-toggle="colorImpaired"]').addEventListener("click", function () {
+      settings.colorImpaired = !settings.colorImpaired; saveSettings(); applySettings();
+    });
+    return m;
+  }
+  function updateSettingsUI() {
+    if (!settingsModal) return;
+    var t = settings.theme || currentTheme;
+    var fs = settings.fontSize || "m";
+    settingsModal.querySelectorAll('[data-seg="theme"] button').forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-v") === t); });
+    settingsModal.querySelectorAll('[data-seg="fontSize"] button').forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-v") === fs); });
+    var sw = settingsModal.querySelector('[data-toggle="colorImpaired"]'); if (sw) sw.classList.toggle("on", settings.colorImpaired === true);
+    settingsModal.classList.toggle("wctx-dark", currentTheme === "dark");
+  }
+  function openSettings() { if (!settingsModal) settingsModal = buildSettingsModal(); settingsModal.classList.add("open"); updateSettingsUI(); }
+  function closeSettings() { if (settingsModal) settingsModal.classList.remove("open"); }
+  if (btnSettings) btnSettings.addEventListener("click", openSettings);
+  if (btnTheme) btnTheme.addEventListener("click", function () { setThemePref(currentTheme === "dark" ? "light" : "dark"); });
+  // Apply any saved visitor prefs now that fab + overlay exist.
+  applySettings();
 
   // Pin the bar open when interacting
   barInput.addEventListener("focus", function() { barWrap.classList.add("pinned"); });
