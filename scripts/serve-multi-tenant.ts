@@ -33,7 +33,7 @@ import {
   getUnknownQuestions,
   clearUnknownQuestions,
 } from "../src/storage/conversation-store.js";
-import { randomBytes } from "crypto";
+import { randomBytes, createHmac, timingSafeEqual } from "crypto";
 import {
   runMigrations,
   createTenant,
@@ -118,6 +118,8 @@ const channelSessions = new ChannelSessionStore();
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
+// Twilio webhooks POST application/x-www-form-urlencoded bodies — needed for /api/voice/* routes.
+app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
 // --- Rate limiting ---
 const signupRateMap = new Map<string, { count: number; resetAt: number }>();
@@ -463,6 +465,9 @@ app.get("/demo/:tenantId", async (req, res) => {
     const variant = await assignVariant("widget-start-state", visitorId, tenant.id);
     startExpanded = variant === "expanded";
   } catch {}
+  // Explicit override (handy for previewing a specific state): ?collapsed=1 / ?expanded=1
+  if (req.query.collapsed === "1" || req.query.bar === "1") startExpanded = false;
+  if (req.query.expanded === "1") startExpanded = true;
 
   res.send('<!DOCTYPE html>\
 <html lang="en">\
@@ -2127,6 +2132,126 @@ app.post("/api/webhooks/resend", async (req, res) => {
     recordEmailEvent(email, type, data?.email_id).catch(() => {});
   }
   res.status(200).send("OK");
+});
+
+// ============================================================================
+// Voice outreach (Twilio) — call businesses, play a recorded pitch, capture
+// call-backs and SMS replies. Companion runner: scripts/voice-outreach.ts
+// ============================================================================
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
+const TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER || "";
+const VOICE_FORWARD_TO = process.env.VOICE_FORWARD_TO || ""; // user's cell for call-back forwarding
+
+// Do-not-call list — numbers that texted STOP or were added manually. Mirrors the
+// UNSUBSCRIBED email pattern below. The voice-outreach runner pulls this via
+// GET /api/voice/suppression before each batch so STOP opt-outs stop future calls.
+const VOICE_SUPPRESSION = new Set<string>();
+const voiceSuppressionPath = resolve(__dirname, "../data/voice-suppression.json");
+try { (JSON.parse(require("fs").readFileSync(voiceSuppressionPath, "utf-8")) as string[]).forEach(n => VOICE_SUPPRESSION.add(n)); } catch {}
+function saveVoiceSuppression() { writeFile(voiceSuppressionPath, JSON.stringify([...VOICE_SUPPRESSION], null, 2)).catch(() => {}); }
+
+const voiceRepliesPath = resolve(__dirname, "../data/voice-replies.json");
+
+function xmlEscape(s: string): string {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// Validate Twilio's X-Twilio-Signature so these public endpoints can't be abused.
+// Algorithm: HMAC-SHA1(authToken, fullUrl + sorted(POST params concatenated)) -> base64.
+function validateTwilio(req: express.Request): boolean {
+  if (!TWILIO_AUTH_TOKEN) return false; // fail closed until configured
+  const sig = req.get("X-Twilio-Signature");
+  if (!sig) return false;
+  const base = (process.env.PUBLIC_BASE_URL || ("https://" + req.get("host") || "")).replace(/\/$/, "");
+  const url = base + req.originalUrl;
+  const params = (req.body && typeof req.body === "object") ? req.body : {};
+  const data = url + Object.keys(params).sort().map(k => k + params[k]).join("");
+  const expected = createHmac("sha1", TWILIO_AUTH_TOKEN).update(Buffer.from(data, "utf-8")).digest("base64");
+  const a = Buffer.from(sig); const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// TwiML the call executes: play the recorded pitch, then hang up. The recording
+// itself asks the prospect to call back or text. ?audio=<file> selects which mp3
+// under public/voice/ to play (defaults to whisp-pitch-pl.mp3).
+app.all("/api/voice/twiml", (req, res) => {
+  if (!validateTwilio(req)) { res.status(403).send("Forbidden"); return; }
+  const raw = (req.query.audio as string) || "whisp-pitch-pl.mp3";
+  const audio = raw.replace(/[^a-zA-Z0-9._-]/g, ""); // prevent path traversal
+  const base = (process.env.PUBLIC_BASE_URL || ("https://" + req.get("host"))).replace(/\/$/, "");
+  const audioUrl = `${base}/voice/${audio}`;
+  res.setHeader("Content-Type", "text/xml");
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Play>${xmlEscape(audioUrl)}</Play>\n  <Hangup/>\n</Response>`);
+});
+
+// Call status callbacks (StatusCallbackEvent=completed). Logged to the admin log
+// ring; the runner separately polls Twilio for the authoritative per-call outcome.
+app.post("/api/voice/status", (req, res) => {
+  if (!validateTwilio(req)) { res.status(403).send("Forbidden"); return; }
+  const { To, CallStatus, AnsweredBy, CallDuration, CallSid } = req.body || {};
+  console.log(`[voice-status] ${To} status=${CallStatus} answeredBy=${AnsweredBy || "-"} dur=${CallDuration || 0}s sid=${(CallSid || "").slice(0, 10)}`);
+  res.status(204).send("");
+});
+
+// Inbound SMS — a prospect replying to the campaign number. Log it, email the
+// owner, and honor STOP/NIE opt-outs by adding the sender to the suppression list.
+app.post("/api/voice/sms-in", (req, res) => {
+  if (!validateTwilio(req)) { res.status(403).send("Forbidden"); return; }
+  const from = (req.body?.From || "").trim();
+  const body = (req.body?.Body || "").trim();
+  const optOut = /^\s*(stop|nie|unsubscribe|wypisz|stop nie)\b/i.test(body);
+  console.log(`[voice-sms] from=${from} optOut=${optOut} body="${body.slice(0, 80)}"`);
+
+  if (from) {
+    appendFile(voiceRepliesPath, JSON.stringify({ ts: new Date().toISOString(), from, body }) + "\n").catch(() => {});
+    if (optOut) { VOICE_SUPPRESSION.add(from); saveVoiceSuppression(); }
+    // Notify the owner so replies are actually seen (no inbox on the campaign number).
+    const key = process.env.RESEND_API_KEY;
+    if (key) {
+      fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: process.env.ALERT_FROM || "Whisp Voice <monitor@whisp.so>",
+          to: [OWNER_EMAIL],
+          subject: optOut ? `Voice campaign: OPT-OUT from ${from}` : `Voice campaign reply from ${from}`,
+          text: `From: ${from}\n${optOut ? "(STOP — added to do-not-call list)\n" : ""}\n${body}`,
+        }),
+      }).catch(() => {});
+    }
+  }
+  // Empty TwiML: acknowledge without auto-replying (avoids unsolicited outbound SMS).
+  res.setHeader("Content-Type", "text/xml");
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>`);
+});
+
+// Inbound voice — a prospect calling the campaign number back. Forward to the
+// owner's cell if configured; otherwise leave a short Polish voicemail prompt.
+app.post("/api/voice/incoming", (req, res) => {
+  if (!validateTwilio(req)) { res.status(403).send("Forbidden"); return; }
+  const from = (req.body?.From || "").trim();
+  console.log(`[voice-incoming] call-back from ${from}`);
+  res.setHeader("Content-Type", "text/xml");
+  if (VOICE_FORWARD_TO && TWILIO_FROM_NUMBER) {
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Dial callerId="${xmlEscape(TWILIO_FROM_NUMBER)}" timeout="25">${xmlEscape(VOICE_FORWARD_TO)}</Dial>\n</Response>`);
+  } else {
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Say language="pl-PL">Dziękujemy za telefon. Proszę zostawić wiadomość po sygnale, oddzwonimy.</Say>\n  <Record maxLength="120" playBeep="true"/>\n</Response>`);
+  }
+});
+
+// Suppression list for the runner (mirrors GET /api/admin/unsubscribed usage).
+app.get("/api/voice/suppression", (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  res.json([...VOICE_SUPPRESSION]);
+});
+
+// Manually add numbers to the do-not-call list. Body: { numbers: ["+48..."] }
+app.post("/api/voice/suppress", (req, res) => {
+  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  const nums: string[] = Array.isArray(req.body?.numbers) ? req.body.numbers : [];
+  nums.forEach(n => { const t = String(n).trim(); if (t) VOICE_SUPPRESSION.add(t); });
+  saveVoiceSuppression();
+  res.json({ ok: true, total: VOICE_SUPPRESSION.size });
 });
 
 // Analytics endpoints
