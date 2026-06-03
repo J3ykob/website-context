@@ -162,6 +162,10 @@ export class CloudflareVectorizeStore implements VectorStore {
       return (((await resp.json()) as any).result?.matches || []).map((m: any) => m.id);
     };
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // Surfaced ids are prefixed (`<tenant>__<chunkId>`); keepIds are the bare
+    // chunkIds the caller upserted. Strip before comparing so keep actually keeps.
+    const prefix = `${this.tenantId}__`;
+    const bare = (id: string): string => (id.startsWith(prefix) ? id.slice(prefix.length) : id);
 
     const seen = new Set<string>();
     let drained = false;
@@ -171,7 +175,7 @@ export class CloudflareVectorizeStore implements VectorStore {
         const surfaced = await queryIds(randProbe());
         if (surfaced === null) { await sleep(2000); continue; }
         // NEVER delete a kept id — that is the race-proofing invariant.
-        const ids = keepIds.size ? surfaced.filter((id) => !keepIds.has(id)) : surfaced;
+        const ids = keepIds.size ? surfaced.filter((id) => !keepIds.has(bare(id))) : surfaced;
         if (ids.length === 0) { lowStreak += 2; if (lowStreak >= 10) break; await sleep(1500); continue; }
         const fresh = ids.filter((id) => !seen.has(id)).length;
         await fetch(`${BASE}/delete_by_ids`, { method: "POST", headers: headers(), body: JSON.stringify({ ids }) });
@@ -186,7 +190,7 @@ export class CloudflareVectorizeStore implements VectorStore {
       let still = 0;
       for (let v = 0; v < 12; v++) {
         const surfaced = await queryIds(randProbe());
-        still += (surfaced || []).filter((id) => !keepIds.has(id)).length;
+        still += (surfaced || []).filter((id) => !keepIds.has(bare(id))).length;
         await sleep(300);
       }
       if (still === 0) { drained = true; break; }
