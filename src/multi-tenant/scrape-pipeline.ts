@@ -4,7 +4,7 @@
  */
 
 import { existsSync, mkdirSync } from "fs";
-import { writeFile } from "fs/promises";
+import { writeFile, readFile } from "fs/promises";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { crawlSite, closeBrowser } from "../scraper/index.js";
@@ -306,6 +306,32 @@ export async function scrapeTenant(
     }
   } else {
     console.log(`[scrape-pipeline] Screenshot already exists for ${tenantId}, skipping`);
+  }
+
+  // Mirror the on-disk artifacts to R2 so a demo survives a Render disk reset.
+  // Render-worker scrapes (self-serve onboarding) previously left context-meta /
+  // business-info / screenshot ONLY on local disk — chat worked until the next
+  // redeploy wiped it, then broke silently with no R2 fallback (exactly how
+  // bistro-burger_fr ended up vectors-but-no-R2). vector-ids.json is uploaded
+  // above; sync the rest here for EVERY scrape so the manual pushR2 in the VPS
+  // re-scrape scripts is no longer load-bearing.
+  if (useVectorize) {
+    const artifacts: [string, string][] = [
+      ["context-meta.json", "application/json"],
+      ["business-info.json", "application/json"],
+      ["auto-context-notes.json", "application/json"],
+      ["screenshot.png", "image/png"],
+    ];
+    for (const [file, ct] of artifacts) {
+      const p = resolve(tenantDir, file);
+      if (!existsSync(p)) continue;
+      try {
+        await uploadToR2(`tenants/${tenantId}/${file}`, await readFile(p), ct);
+      } catch (e) {
+        console.error(`[scrape-pipeline] R2 sync failed for ${tenantId}/${file}: ${(e as Error).message}`);
+      }
+    }
+    console.log(`[scrape-pipeline] Synced on-disk artifacts to R2 for ${tenantId}`);
   }
 
   return {
