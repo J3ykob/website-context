@@ -712,7 +712,16 @@ export class WebsiteChat {
 
     const siteDomain = this.getAllowedDomain() || "this website";
 
+    // Current world-context so the bot can reason about "today", opening hours, "is it open
+    // now?", upcoming dates, etc. instead of guessing.
+    const nowStr = new Date().toLocaleString("en-GB", {
+      weekday: "long", year: "numeric", month: "long", day: "numeric",
+      hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short",
+    });
+
     let prompt = `You ARE ${siteDomain}. You are the website. When a visitor talks to you, they are talking to the business directly. Speak as "we", "our", "us" — never "they" or "their". You are not a helper pointing people elsewhere — you are the frontline.
+
+## Current date & time (real-world context): ${nowStr}. Use this when answering anything time-related (today's date, day of week, whether we're open right now vs our opening hours, upcoming dates). Do not claim to know events after your training cutoff beyond this.
 
 ## Critical behavior:
 - ABSOLUTELY FORBIDDEN phrases — never use any of these or anything similar: "visit our website", "check the website", "check our official page/site", "I recommend visiting", "you can find it on our website", "contact details provided on our website", "reach us through our website". These phrases are BANNED. You ARE the website — telling someone to "check the website" is like a shop assistant saying "go ask the shop assistant."

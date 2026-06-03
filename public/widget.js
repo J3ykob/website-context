@@ -254,12 +254,12 @@
   max-height:52px;\
 }\
 #wctx-fab.wctx-active .wctx-bar-wrap {\
-  width:clamp(320px, 45vw, 620px);\
-  max-height:380px;\
+  width:clamp(320px, 60vw, 760px);\
+  max-height:min(72vh, 620px);\
   box-shadow:0 12px 48px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.5);\
 }\
-/* Tablet: a touch more generous than the desktop 45vw but still leaves room for the bubbles. */\
-@media (min-width:641px) and (max-width:1024px) { #wctx-fab.wctx-active .wctx-bar-wrap { width:clamp(320px, 52vw, 540px); } }\
+/* Tablet: wide expanded input but still room for the bubbles. */\
+@media (min-width:641px) and (max-width:1024px) { #wctx-fab.wctx-active .wctx-bar-wrap { width:clamp(320px, 56vw, 560px); } }\
 /* Mobile: shrink bubbles + size the expanded input to the space left after they fly out, so nothing clips. */\
 @media (max-width:640px) {\
   #wctx-fab .wctx-bar-wrap { width:clamp(140px, 52vw, 260px); }\
@@ -279,7 +279,7 @@
   transition:all 0.35s cubic-bezier(0.4,0,0.2,1);\
 }\
 #wctx-fab.wctx-active .wctx-bar-messages {\
-  max-height:300px;\
+  max-height:min(64vh, 540px);\
   padding:12px 14px;\
   opacity:1;\
 }\
