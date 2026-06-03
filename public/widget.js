@@ -205,21 +205,31 @@
   z-index:999998; display:none;\
   max-width:calc(100vw - 20px);\
 }\
-#wctx-fab .wctx-bar-row { display:flex; align-items:flex-end; justify-content:center; gap:10px; }\
+/* The input pill is the only in-flow element, so the fab (centered) keeps the INPUT\
+   screen-centered. The mic + controls are absolutely positioned flanking it (asymmetric),\
+   and stay hidden until the bar is interacted with (hover / focus / typing). */\
+#wctx-fab .wctx-bar-row { position:relative; }\
 #wctx-fab .wctx-glass {\
   background:rgba(200,200,210,0.55);\
   backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
   border:1px solid rgba(255,255,255,0.2); box-shadow:0 6px 24px rgba(0,0,0,0.12);\
 }\
 #wctx-fab .wctx-mic {\
-  width:48px; height:48px; flex-shrink:0; border-radius:50%;\
+  position:absolute; right:calc(100% + 10px); bottom:2px;\
+  width:48px; height:48px; border-radius:50%;\
   display:flex; align-items:center; justify-content:center;\
   color:rgba(10,10,10,0.4); cursor:not-allowed; padding:0;\
+  opacity:0; transform:translateX(10px) scale(0.9); pointer-events:none;\
+  transition:opacity 0.28s, transform 0.28s;\
 }\
-#wctx-fab .wctx-mic:disabled { opacity:0.6; }\
 #wctx-fab .wctx-ctrls {\
-  display:flex; align-items:center; gap:2px; flex-shrink:0; height:48px; padding:0 5px; border-radius:26px;\
+  position:absolute; left:calc(100% + 10px); bottom:2px;\
+  display:flex; align-items:center; gap:2px; height:48px; padding:0 5px; border-radius:26px;\
+  opacity:0; transform:translateX(-10px) scale(0.9); pointer-events:none;\
+  transition:opacity 0.28s, transform 0.28s;\
 }\
+#wctx-fab.wctx-active .wctx-mic { opacity:0.55; transform:none; }\
+#wctx-fab.wctx-active .wctx-ctrls { opacity:1; transform:none; pointer-events:auto; }\
 #wctx-fab .wctx-ctl {\
   width:38px; height:38px; display:flex; align-items:center; justify-content:center;\
   background:none; border:none; cursor:pointer; border-radius:50%;\
@@ -230,23 +240,22 @@
   display:flex;\
   flex-direction:column;\
   border-radius:24px;\
-  width:340px;\
+  width:clamp(260px, 30vw, 380px);\
   background:rgba(200,200,210,0.55);\
   backdrop-filter:blur(40px) saturate(1.5);\
   -webkit-backdrop-filter:blur(40px) saturate(1.5);\
   border:1px solid rgba(255,255,255,0.2);\
   box-shadow:0 6px 24px rgba(0,0,0,0.12);\
-  transition:all 0.35s cubic-bezier(0.4,0,0.2,1);\
+  transition:width 0.35s cubic-bezier(0.4,0,0.2,1), max-height 0.35s cubic-bezier(0.4,0,0.2,1), box-shadow 0.35s;\
   overflow:hidden;\
   max-height:52px;\
 }\
-#wctx-fab .wctx-bar-wrap.pinned { width:clamp(300px, 45vw, 620px); }\
-@media (max-width:640px) { #wctx-fab .wctx-bar-wrap { width:170px; } #wctx-fab .wctx-bar-wrap.pinned { width:calc(100vw - 150px); } }\
-#wctx-fab .wctx-bar-wrap:hover,\
-#wctx-fab .wctx-bar-wrap.pinned {\
+#wctx-fab.wctx-active .wctx-bar-wrap {\
+  width:clamp(320px, 45vw, 620px);\
   max-height:380px;\
   box-shadow:0 12px 48px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.5);\
 }\
+@media (max-width:640px) { #wctx-fab .wctx-bar-wrap { width:clamp(200px, 58vw, 300px); } #wctx-fab.wctx-active .wctx-bar-wrap { width:calc(100vw - 140px); } }\
 #wctx-fab .wctx-bar-messages {\
   display:flex;\
   flex-direction:column;\
@@ -256,12 +265,12 @@
   opacity:0;\
   transition:all 0.35s cubic-bezier(0.4,0,0.2,1);\
 }\
-#wctx-fab .wctx-bar-wrap:hover .wctx-bar-messages,\
-#wctx-fab .wctx-bar-wrap.pinned .wctx-bar-messages {\
+#wctx-fab.wctx-active .wctx-bar-messages {\
   max-height:300px;\
   padding:12px 14px;\
   opacity:1;\
 }\
+#wctx-fab .wctx-bar-messages:empty { padding:0; max-height:0; }\
 #wctx-fab .wctx-bar-bubble {\
   font-family:"Archivo",-apple-system,sans-serif;\
   font-size:16px; line-height:1.5; margin-bottom:6px;\
@@ -339,8 +348,7 @@
   box-shadow:0 6px 24px rgba(0,0,0,0.3);\
   backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
 }\
-#wctx-fab.wctx-dark .wctx-bar-wrap:hover,\
-#wctx-fab.wctx-dark .wctx-bar-wrap.pinned {\
+#wctx-fab.wctx-dark.wctx-active .wctx-bar-wrap {\
   box-shadow:0 12px 48px rgba(0,0,0,0.5);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-bubble.user {\
@@ -397,7 +405,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>\
     </button>\
     <button class="wctx-ctl wctx-bar-expand" type="button" title="Expand chat">\
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>\
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H4v6M4 4l6 6M14 20h6v-6M20 20l-6-6"/></svg>\
     </button>\
   </div>\
 </div>';
@@ -480,15 +488,20 @@
   // Apply any saved visitor prefs now that fab + overlay exist.
   applySettings();
 
-  // Pin the bar open when interacting
-  barInput.addEventListener("focus", function() { barWrap.classList.add("pinned"); });
-  barInput.addEventListener("blur", function() {
-    setTimeout(function() {
-      if (document.activeElement !== barInput && document.activeElement !== barSend) {
-        barWrap.classList.remove("pinned");
-      }
-    }, 200);
-  });
+  // Active = any interaction with the bar (hover OR focus/typing). Expands the input and
+  // reveals the flanking bubbles. mouseover/mouseout bubble up from the absolutely-positioned
+  // bubbles (DOM children of the fab) even though they sit outside the fab's box, so moving
+  // the cursor from the input onto a bubble keeps it open (no hover gap).
+  var activeTimer;
+  function setBarActive(on) {
+    clearTimeout(activeTimer);
+    if (on) { fab.classList.add("wctx-active"); }
+    else { activeTimer = setTimeout(function() { if (document.activeElement !== barInput) fab.classList.remove("wctx-active"); }, 240); }
+  }
+  fab.addEventListener("mouseover", function() { setBarActive(true); });
+  fab.addEventListener("mouseout", function(e) { if (!fab.contains(e.relatedTarget)) setBarActive(false); });
+  barInput.addEventListener("focus", function() { setBarActive(true); });
+  barInput.addEventListener("blur", function() { setBarActive(false); });
 
   // Send from the bottom bar — stay in bar mode, don't expand to full chat
   barSend.addEventListener("click", function() { sendFromBar(); });
@@ -500,7 +513,7 @@
     var text = barInput.value.trim();
     if (!text) return;
     barInput.value = "";
-    barWrap.classList.add("pinned");
+    fab.classList.add("wctx-active");
 
     messages.push({ role: "user", content: text }); persistMessages();
     syncBarMessages();
@@ -857,7 +870,7 @@
         target = els.input;
       } else if (fab.style.display !== "none") {
         target = barInput;
-        barWrap.classList.add("pinned");
+        fab.classList.add("wctx-active");
       } else {
         return;
       }
@@ -880,7 +893,7 @@
       target2 = els.input;
     } else if (fab.style.display !== "none") {
       target2 = barInput;
-      barWrap.classList.add("pinned");
+      fab.classList.add("wctx-active");
     }
     if (target2) target2.focus();
   });
