@@ -230,22 +230,26 @@ app.get("/api/widget-config/:tenantId", (req, res) => {
 // Tenant screenshot (for demo background) - local disk, then R2
 app.get("/api/screenshot/:tenantId", async (req, res) => {
   const tid = req.params.tenantId;
+  // Prefer the compressed .jpg (~250KB), fall back to legacy .png (~3.7MB). The browser
+  // cache header means repeat demo views don't re-download the image at all.
+  const VARIANTS = [["screenshot.jpg", "image/jpeg"], ["screenshot.png", "image/png"]] as const;
+  const cache = "public, max-age=86400, immutable";
   // Try local disk first
   for (const id of [tid, tid.replace(/-/g, "_"), tid.replace(/_/g, "-")]) {
-    const p = resolve(__dirname, `../data/${id}/screenshot.png`);
-    if (existsSync(p)) { res.sendFile(p); return; }
+    for (const [file, type] of VARIANTS) {
+      const p = resolve(__dirname, `../data/${id}/${file}`);
+      if (existsSync(p)) { res.set("Cache-Control", cache); res.type(type); res.sendFile(p); return; }
+    }
   }
-  // Stream from R2 — do NOT cache to local disk. Screenshots are ~2.5MB each and
-  // caching them across thousands of tenants fills the small persistent disk,
-  // which makes the SQLite registry fail to write (SQLITE_FULL) and silently
+  // Stream from R2 — do NOT cache to local disk. Screenshots fill the small persistent
+  // disk, which makes the SQLite registry fail to write (SQLITE_FULL) and silently
   // breaks new tenant registration -> dead demos. R2 is the source of truth.
   try {
     const { downloadTenantFileStrict } = await import("../src/storage/r2.js");
-    const data = await downloadTenantFileStrict(tid, "screenshot.png")
-      || await downloadTenantFileStrict(tid.replace(/-/g, "_"), "screenshot.png");
-    if (data) {
-      res.type("image/png").send(data);
-      return;
+    for (const [file, type] of VARIANTS) {
+      const data = await downloadTenantFileStrict(tid, file)
+        || await downloadTenantFileStrict(tid.replace(/-/g, "_"), file);
+      if (data) { res.set("Cache-Control", cache); res.type(type).send(data); return; }
     }
     // Cleanly absent (not an R2 error) — genuine 404.
     res.status(404).json({ error: "No screenshot available" });
@@ -349,7 +353,7 @@ h1 em { color:#3b82f6; font-style:italic; }
   <p class="sub">It read your entire website and can answer visitor questions 24/7 - services, pricing, contact info, anything on your site.</p>
 
   <div class="screenshot-wrap">
-    <img src="${screenshotUrl}" alt="${brand}">
+    <img src="${screenshotUrl}" alt="${brand}" decoding="async" fetchpriority="high">
     <div class="screenshot-overlay"></div>
   </div>
 
