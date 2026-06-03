@@ -12,7 +12,7 @@
  *   QDRANT_PORT — Qdrant server port
  */
 
-import { resolve, dirname } from "path";
+import { resolve, dirname, sep } from "path";
 import { fileURLToPath } from "url";
 import { readFile, writeFile, appendFile } from "fs/promises";
 import { loadCfToken } from "../src/storage/cf-auth.js";
@@ -71,7 +71,15 @@ import type { MetaChannelConfig } from "../src/channels/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "3211");
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "whisp-admin-2026";
+// Admin secret: env-only. The old committed default ("whisp-admin-2026") is public
+// (it's in git history + client scripts), so it is explicitly rejected. When the secret
+// is missing/weak/default we FAIL CLOSED (every admin route 403s) rather than crash the
+// process — a boot crash would silently keep the previous deploy live (deploy-awareness).
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
+const ADMIN_SECRET_OK = ADMIN_SECRET.length >= 24 && ADMIN_SECRET !== "whisp-admin-2026";
+if (!ADMIN_SECRET_OK) {
+  console.error("[SECURITY] ADMIN_SECRET is unset/weak/default — ALL /api/admin/* routes are DISABLED (fail-closed). Set a strong (>=24 char) ADMIN_SECRET env var.");
+}
 
 if (!process.env.OPENROUTER_API_KEY) {
   console.error("OPENROUTER_API_KEY environment variable is required");
@@ -120,6 +128,13 @@ app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 // Twilio webhooks POST application/x-www-form-urlencoded bodies — needed for /api/voice/* routes.
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
+// Baseline security headers (safe for the cross-origin widget — no framing/CSP changes here).
+// strict-origin-when-cross-origin stops the admin ?secret= query string leaking via Referer.
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
 
 // --- Rate limiting ---
 const signupRateMap = new Map<string, { count: number; resetAt: number }>();
@@ -195,6 +210,52 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
   next();
 }
 
+// --- Security helpers ---
+// Constant-time string compare (avoids leaking secret length/prefix via timing).
+function safeStrEq(a: unknown, b: unknown): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+
+// Admin authorization. Prefers the X-Admin-Secret header (or Authorization: Bearer);
+// the ?secret= query param is accepted as a deprecated fallback for existing clients
+// (it leaks into access logs — migrate callers to the header, then drop query support).
+// Fails closed when ADMIN_SECRET is unset/weak/default.
+function adminOk(req: express.Request): boolean {
+  if (!ADMIN_SECRET_OK) return false;
+  const provided =
+    (req.get("x-admin-secret") || "").trim() ||
+    (req.get("authorization") || "").replace(/^Bearer\s+/i, "").trim() ||
+    ((req.query.secret as string) || "").trim();
+  return !!provided && safeStrEq(provided, ADMIN_SECRET);
+}
+
+// Map a user-supplied tenant id to a safe directory strictly inside DATA_DIR.
+// Returns null on any traversal/charset violation. Used by file read/write routes.
+function safeTenantDir(rawId: unknown): { id: string; dir: string } | null {
+  const id = String(rawId || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!id) return null;
+  const dir = resolve(DATA_DIR, id);
+  if (dir !== DATA_DIR && !dir.startsWith(DATA_DIR + sep)) return null;
+  return { id, dir };
+}
+
+// Per-account auth attempt throttle (brute-force protection). Keyed on the target
+// account (email / tenantId), NOT the proxy IP — so it can't be defeated by IP rotation
+// and can't be abused to lock every user out at once via a shared proxy address.
+const authAttemptMap = new Map<string, { count: number; resetAt: number }>();
+function checkAuthAttempt(key: string): boolean {
+  const now = Date.now();
+  let e = authAttemptMap.get(key);
+  if (!e || now > e.resetAt) { e = { count: 0, resetAt: now + 15 * 60 * 1000 }; authAttemptMap.set(key, e); }
+  if (e.count >= 10) return false;
+  e.count++;
+  return true;
+}
+setInterval(() => { const now = Date.now(); for (const [k, e] of authAttemptMap) if (now > e.resetAt) authAttemptMap.delete(k); }, 600000);
+
 // --- Public routes ---
 
 // Landing page
@@ -231,7 +292,10 @@ app.get("/api/widget-config/:tenantId", (req, res) => {
 
 // Tenant screenshot (for demo background) - local disk, then R2
 app.get("/api/screenshot/:tenantId", async (req, res) => {
-  const tid = req.params.tenantId;
+  // Charset-sanitize first: strips '.' and '/', which closes both the local sendFile
+  // traversal and the R2-key traversal (cross-tenant object read) on this public route.
+  const tid = (req.params.tenantId || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!tid) { res.status(404).json({ error: "No screenshot available" }); return; }
   // Prefer the compressed .jpg (~250KB), fall back to legacy .png (~3.7MB). The browser
   // cache header means repeat demo views don't re-download the image at all.
   const VARIANTS = [["screenshot.jpg", "image/jpeg"], ["screenshot.png", "image/png"]] as const;
@@ -411,6 +475,68 @@ async function reconcileTenantFromR2(requestedId: string): Promise<any | null> {
   }
 }
 
+// Self-serve onboarding page shown when a demo isn't live yet: lets the visitor claim the
+// site (we scrape it on demand) and get emailed when their assistant is ready.
+function buildOnboardPage(opts: { siteUrl: string; brand: string; state: "onboard" | "building"; baseUrl: string }): string {
+  const safeBrand = (opts.brand || "this website").replace(/[<>]/g, "");
+  const safeUrl = (opts.siteUrl || "").replace(/"/g, "&quot;");
+  const building = opts.state === "building";
+  const body = building
+    ? `<div class="ok"><div class="spinner"></div>
+        <h1>Building ${safeBrand}'s assistant...</h1>
+        <p class="sub">We're reading the website and training the AI now. This usually takes a few minutes - we'll email you the moment it's ready.</p></div>`
+    : `<div class="badge">Whisp AI</div>
+        <h1>${safeBrand} doesn't have an AI assistant yet</h1>
+        <p class="sub">We'll read the entire website and build a chat assistant that answers visitor questions 24/7 - a free, working preview in a few minutes.</p>
+        <div id="err"></div>
+        <label>Website</label>
+        <input id="url" type="url" value="${safeUrl}" placeholder="https://example.com" />
+        <label>Your email (we'll notify you when it's ready)</label>
+        <input id="email" type="email" placeholder="you@company.com" />
+        <button id="go" type="button">Build my AI assistant</button>
+        <p class="fine">Free preview. We only read public pages. No card required.</p>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${safeBrand} - AI assistant</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0a0e1a;color:#e7e9ee;font-family:'Archivo',-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{width:100%;max-width:480px;background:rgba(22,24,34,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:22px;padding:40px 36px;box-shadow:0 24px 80px rgba(0,0,0,0.5)}
+.badge{display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#60a5fa;margin-bottom:18px}
+h1{font-family:'DM Serif Display',Georgia,serif;font-weight:400;font-size:27px;line-height:1.25;margin:0 0 12px}
+p.sub{font-size:15px;color:#9aa3b2;line-height:1.6;margin:0 0 26px}
+label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#7b8494;margin:0 0 7px}
+input{width:100%;padding:13px 15px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:#fff;font-family:inherit;font-size:15px;margin-bottom:18px}
+input:focus{outline:none;border-color:#3b82f6}
+button{width:100%;padding:15px;border:none;border-radius:12px;background:#3b82f6;color:#fff;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;transition:background 0.2s}
+button:hover{background:#2563eb}button:disabled{opacity:0.6;cursor:default}
+.fine{font-size:12px;color:#5b6472;margin-top:16px;line-height:1.5}
+.ok{text-align:center}
+.spinner{width:34px;height:34px;border:3px solid rgba(255,255,255,0.15);border-top-color:#3b82f6;border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto 22px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#err{color:#f87171;font-size:13px;margin:0 0 14px;display:none}
+</style></head>
+<body><div class="card" id="card">${body}</div>
+<script>
+(function(){
+  var go=document.getElementById('go'); if(!go) return;
+  go.addEventListener('click', function(){
+    var url=document.getElementById('url').value.trim(), email=document.getElementById('email').value.trim();
+    var err=document.getElementById('err'); err.style.display='none';
+    if(!url || !email){ err.textContent='Please enter your website and email.'; err.style.display='block'; return; }
+    go.disabled=true; go.textContent='Starting...';
+    fetch('${opts.baseUrl}/api/onboard-demo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({siteUrl:url,email:email})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(res.d && res.d.ready && res.d.tenantId){ location.href='${opts.baseUrl}/demo/'+res.d.tenantId; return; }
+        if(res.ok){ document.getElementById('card').innerHTML='<div class="ok"><div class="spinner"></div><h1>On it!</h1><p class="sub" style="margin-bottom:0">We are building your assistant now. We will email <strong style="color:#f1f5f9">'+email+'</strong> the moment it is ready - usually a few minutes.</p></div>'; }
+        else { err.textContent=(res.d && res.d.error) || 'Something went wrong. Please try again.'; err.style.display='block'; go.disabled=false; go.textContent='Build my AI assistant'; }
+      })
+      .catch(function(){ err.textContent='Network error. Please try again.'; err.style.display='block'; go.disabled=false; go.textContent='Build my AI assistant'; });
+  });
+})();
+</script></body></html>`;
+}
+
 app.get("/demo/:tenantId", async (req, res) => {
   let tenant = getTenant(req.params.tenantId);
   // Fallback: if not found, try all tenants matching this domain pattern
@@ -426,7 +552,15 @@ app.get("/demo/:tenantId", async (req, res) => {
   }
   if (!tenant) tenant = await reconcileTenantFromR2(req.params.tenantId);
   if (!tenant || tenant.status !== "active") {
-    res.status(404).send("<!DOCTYPE html><html><body style='font-family:Archivo,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#57534e'><p>This bot is not ready yet. Check back soon.</p></body></html>");
+    // Not live yet -> self-serve onboarding. If it's already being built (queued/scraping),
+    // show the in-progress state; otherwise offer to claim + scrape it on demand.
+    const reqId = req.params.tenantId;
+    const obHost = req.get("host") || "whisp.so";
+    const obBase = process.env.BASE_URL || "https://" + obHost;
+    const building = !!tenant && ["pending", "queued", "scraping"].includes(tenant.status);
+    const guessUrl = (tenant && tenant.siteUrl) || ("https://" + reqId.replace(/_/g, "."));
+    const guessBrand = (tenant && (tenant.brandName || tenant.domain)) || reqId.replace(/_/g, ".");
+    res.status(building ? 200 : 404).send(buildOnboardPage({ siteUrl: guessUrl, brand: guessBrand, state: building ? "building" : "onboard", baseUrl: obBase }));
     return;
   }
   const isReady = true;
@@ -607,7 +741,7 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
   },{passive:true});\
 })();\
 window.__experimentVariant="' + (startExpanded ? 'expanded' : 'collapsed') + '";\
-window.__visitorId="' + visitorId.replace(/"/g, '') + '";\
+window.__visitorId=' + JSON.stringify(visitorId).replace(/</g, '\\u003c') + ';\
 window.addEventListener("load", function(){\
   var c={"tenantId":"' + tenant.id + '","apiHost":"' + baseUrl + '","brandName":"' + brand.replace(/"/g, '\\"') + '","forceTheme":"dark","startExpanded":' + startExpanded + ',"demoMode":true,"experimentVariant":"' + (startExpanded ? 'expanded' : 'collapsed') + '"};\
   window.__wctx=c;\
@@ -976,7 +1110,7 @@ body {
 
 // Create tenant
 app.post("/api/tenants", (req, res) => {
-  const isAdmin = req.query.secret === ADMIN_SECRET;
+  const isAdmin = adminOk(req);
   if (!isAdmin) {
     const ip = req.ip || req.socket.remoteAddress || "unknown";
     if (!checkSignupRate(ip)) {
@@ -1040,6 +1174,46 @@ app.post("/api/tenants", (req, res) => {
   }
 });
 
+// Self-serve demo onboarding: a visitor claims a not-yet-live site. We create the tenant,
+// queue an on-demand scrape, and the worker emails them when the bot is ready (sendBotReadyEmail).
+app.post("/api/onboard-demo", async (req, res) => {
+  const ip = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+  if (!adminOk(req) && !checkSignupRate(ip)) {
+    res.status(429).json({ error: "Too many requests - please try again in a few minutes." });
+    return;
+  }
+  const { siteUrl, email } = req.body || {};
+  if (!siteUrl || !email) { res.status(400).json({ error: "Website and email are required." }); return; }
+  let origin: string, domain: string;
+  try { const u = new URL(siteUrl); if (!/^https?:$/.test(u.protocol)) throw new Error("proto"); origin = u.origin; domain = u.hostname.replace(/^www\./, ""); }
+  catch { res.status(400).json({ error: "Please enter a valid website URL (https://...)." }); return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) { res.status(400).json({ error: "Please enter a valid email address." }); return; }
+
+  const MAX_PAGES = 15; // bounded on-demand scrape (keeps Render memory/time/cost in check)
+  try {
+    const existing = getTenantByDomain(domain);
+    if (existing) {
+      if (existing.status === "active") { res.json({ ready: true, tenantId: existing.id }); return; }
+      if (["pending", "queued", "scraping"].includes(existing.status)) {
+        if (email && existing.email !== email) updateTenant(existing.id, { email });
+        res.json({ building: true, tenantId: existing.id }); return;
+      }
+      // broken / error -> re-onboard
+      updateTenant(existing.id, { email, status: "pending" });
+      worker.enqueue(existing.id, existing.siteUrl || origin, MAX_PAGES);
+      console.log(`[onboard-demo] re-queued ${existing.id} (${domain}) -> notify ${email}`);
+      res.json({ building: true, tenantId: existing.id }); return;
+    }
+    const tenant = createTenant(email, origin);
+    worker.enqueue(tenant.id, origin, MAX_PAGES);
+    console.log(`[onboard-demo] queued scrape for ${tenant.id} (${domain}) -> notify ${email}`);
+    res.status(201).json({ building: true, tenantId: tenant.id });
+  } catch (e: any) {
+    console.error("[onboard-demo]", e?.message || e);
+    res.status(500).json({ error: "Failed to start onboarding. Please try again." });
+  }
+});
+
 // Check tenant status
 app.get("/api/tenants/:id/status", (req, res) => {
   const tenant = getTenant(req.params.id);
@@ -1067,6 +1241,17 @@ app.post("/api/chat", async (req, res) => {
     const { messages, sessionId, tenantId } = req.body;
     if (!messages || !Array.isArray(messages)) {
       res.status(400).json({ error: "messages required" });
+      return;
+    }
+    // Hard cap per request (independent of the 5mb body limit): bounds the prompt size
+    // sent to the paid LLM so a single call can't be inflated into a large completion cost.
+    if (messages.length > 50) {
+      res.status(400).json({ error: "Too many messages" });
+      return;
+    }
+    const totalContentBytes = messages.reduce((n: number, m: any) => n + (typeof m?.content === "string" ? m.content.length : 0), 0);
+    if (totalContentBytes > 32768) {
+      res.status(400).json({ error: "Message too long" });
       return;
     }
     if (!tenantId) {
@@ -1263,14 +1448,20 @@ async function runDeepHealthChecks(): Promise<{ ok: boolean; lowBalance: boolean
 }
 
 let healthDeepCache: { at: number; body: any } | null = null;
-app.get("/api/health-deep", async (_, res) => {
+app.get("/api/health-deep", async (req, res) => {
+  let body;
   if (healthDeepCache && Date.now() - healthDeepCache.at < 60000) {
-    res.status(healthDeepCache.body.ok ? 200 : 503).json(healthDeepCache.body);
-    return;
+    body = healthDeepCache.body;
+  } else {
+    body = await runDeepHealthChecks();
+    healthDeepCache = { at: Date.now(), body };
   }
-  const body = await runDeepHealthChecks();
-  healthDeepCache = { at: Date.now(), body };
-  res.status(body.ok ? 200 : 503).json(body);
+  const status = body.ok ? 200 : 503;
+  // Public callers get liveness only. The full payload (live LLM credit balance, backend
+  // topology/IPs, internal error strings) is admin-only — otherwise it hands an attacker a
+  // precise cost-drain target and infra map.
+  if (!adminOk(req)) { res.status(status).json({ ok: body.ok }); return; }
+  res.status(status).json(body);
 });
 
 // --- Background monitor + debounced ops alerts -------------------------------
@@ -1359,13 +1550,14 @@ app.get("/api/onboarding-stats", (_, res) => {
 // Read-only: list active tenant ids with chunks. Used to enumerate targets for the
 // canonical business-info backfill (the SQLite registry lives only here on the server).
 app.get("/api/admin/active-tenant-ids", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const ids = listTenants().filter((t) => t.status === "active" && t.chunksCount > 0).map((t) => t.id);
   res.json({ count: ids.length, ids });
 });
 
 // Admin rescrape single tenant (?maxPages=10 to limit crawl size)
 app.post("/api/admin/rescrape/:tenantId", (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenant = getTenant(req.params.tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
   const maxPages = parseInt(req.query.maxPages as string) || 20;
@@ -1379,7 +1571,7 @@ app.post("/api/admin/rescrape/:tenantId", (req, res) => {
 
 // Admin flush queue — stop scraping pending domains so only priority ones get scraped
 app.post("/api/admin/flush-queue", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const tenants = listTenants();
   const pending = tenants.filter(t => t.status === "pending");
   for (const t of pending) {
@@ -1391,9 +1583,10 @@ app.post("/api/admin/flush-queue", (req, res) => {
 
 // Admin bulk rescrape — re-enqueue all pending/error tenants
 app.post("/api/admin/rescrape-all", (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenants = listTenants();
   const targets = tenants.filter(t => t.status === "pending" || t.status === "error" || (t.status === "active" && t.pagesCount === 0));
-  const maxPages = parseInt(req.query.maxPages as string) || 10;
+  const maxPages = Math.min(parseInt(req.query.maxPages as string) || 10, 50);
   let queued = 0;
   for (const t of targets) {
     worker.enqueue(t.id, t.siteUrl, maxPages);
@@ -1406,7 +1599,10 @@ app.post("/api/admin/rescrape-all", (req, res) => {
 
 // Run business audit on all tenants + optionally send insight emails
 app.post("/api/admin/audit", async (req, res) => {
-  const sendEmails = req.query.send === "true";
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  // Defense-in-depth: mass email requires BOTH send=true and an explicit confirmSend=true,
+  // so even a leaked secret can't accidentally fire bulk mail from monitor@whisp.so.
+  const sendEmails = req.query.send === "true" && req.query.confirmSend === "true";
   const limit = parseInt(req.query.limit as string) || 20;
   const allTenants = listTenants().filter(t => t.status === "active" && t.chunksCount > 0);
   const force = req.query.force === "true";
@@ -1519,6 +1715,11 @@ app.post("/api/auth/login", (req, res) => {
     res.status(400).json({ error: "email and password required" });
     return;
   }
+  // Throttle online password brute force (keyed per-account, not per-proxy-IP).
+  if (!checkAuthAttempt(`login:${String(email).toLowerCase()}`)) {
+    res.status(429).json({ error: "Too many attempts. Try again later." });
+    return;
+  }
 
   // Find tenant by email (check all tenants)
   const tenants = listTenants();
@@ -1549,6 +1750,11 @@ app.post("/api/auth/setup-password", (req, res) => {
     res.status(400).json({ error: "tenantId and password required" });
     return;
   }
+  // Throttle brute force of the setup token / apiKey (account-takeover of unclaimed tenants).
+  if (!checkAuthAttempt(`setup:${String(tenantId)}`)) {
+    res.status(429).json({ error: "Too many attempts. Try again later." });
+    return;
+  }
 
   if (!apiKey && !setupToken) {
     res.status(400).json({ error: "Either apiKey or token is required" });
@@ -1568,12 +1774,12 @@ app.post("/api/auth/setup-password", (req, res) => {
 
   // Validate via setup token or API key
   if (setupToken) {
-    if (!tenant.setupToken || tenant.setupToken !== setupToken) {
+    if (!tenant.setupToken || !safeStrEq(tenant.setupToken, setupToken)) {
       res.status(401).json({ error: "Invalid or expired setup token" });
       return;
     }
   } else if (apiKey) {
-    if (tenant.apiKey !== apiKey) {
+    if (!safeStrEq(tenant.apiKey, apiKey)) {
       res.status(401).json({ error: "Invalid API key" });
       return;
     }
@@ -2033,7 +2239,7 @@ function redactChannelConfig(config: MetaChannelConfig): any {
 
 // Admin conversations — view chats across all or specific tenants
 app.get("/api/admin/conversations", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const tenantId = req.query.tenant as string | undefined;
   const limit = Math.min(parseInt(req.query.n as string) || 20, 100);
 
@@ -2058,7 +2264,7 @@ app.get("/api/admin/conversations", async (req, res) => {
 
 // Admin full conversation messages
 app.get("/api/admin/messages", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const tenantId = req.query.tenant as string;
   const sessionId = req.query.session as string | undefined;
   const limit = Math.min(parseInt(req.query.n as string) || 200, 1000);
@@ -2074,7 +2280,7 @@ app.get("/api/admin/messages", async (req, res) => {
 
 // Admin update tenant (used by VPS outreach to mark tenants as active after remote scraping)
 app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   let tenant = getTenant(req.params.tenantId);
   const { status, chunksCount, pagesCount, domain, siteUrl } = req.body;
   if (!tenant && domain) {
@@ -2094,8 +2300,10 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
 
 // Admin upload screenshot (from VPS scraper)
 app.post("/api/admin/screenshot/:tenantId", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
-  const tenantDir = resolve(__dirname, `../data/${req.params.tenantId}`);
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
+  const safe = safeTenantDir(req.params.tenantId);
+  if (!safe) { res.status(400).json({ error: "bad tenant id" }); return; }
+  const tenantDir = safe.dir;
   if (!existsSync(tenantDir)) mkdirSync(tenantDir, { recursive: true });
   const screenshotPath = resolve(tenantDir, "screenshot.png");
   const chunks: Buffer[] = [];
@@ -2109,17 +2317,20 @@ app.post("/api/admin/screenshot/:tenantId", (req, res) => {
 
 // Admin upload file for tenant (from VPS scraper)
 app.post("/api/admin/upload-file/:tenantId/:filename", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const allowed = ["context-meta.json", "business-info.json", "auto-context-notes.json"];
   if (!allowed.includes(req.params.filename)) return res.status(400).json({ error: "Not allowed" });
-  const tenantDir = resolve(__dirname, `../data/${req.params.tenantId}`);
+  const safe = safeTenantDir(req.params.tenantId);
+  if (!safe) { res.status(400).json({ error: "bad tenant id" }); return; }
+  const tenantDir = safe.dir;
   if (!existsSync(tenantDir)) mkdirSync(tenantDir, { recursive: true });
   const filePath = resolve(tenantDir, req.params.filename);
+  if (!filePath.startsWith(tenantDir + sep)) { res.status(400).json({ error: "bad path" }); return; }
   const chunks: Buffer[] = [];
   req.on("data", (chunk: Buffer) => chunks.push(chunk));
   req.on("end", async () => {
     await writeFile(filePath, Buffer.concat(chunks));
-    tenantManager.evictTenant(req.params.tenantId);
+    tenantManager.evictTenant(safe.id);
     res.json({ ok: true });
   });
 });
@@ -2241,13 +2452,13 @@ app.post("/api/voice/incoming", (req, res) => {
 
 // Suppression list for the runner (mirrors GET /api/admin/unsubscribed usage).
 app.get("/api/voice/suppression", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   res.json([...VOICE_SUPPRESSION]);
 });
 
 // Manually add numbers to the do-not-call list. Body: { numbers: ["+48..."] }
 app.post("/api/voice/suppress", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const nums: string[] = Array.isArray(req.body?.numbers) ? req.body.numbers : [];
   nums.forEach(n => { const t = String(n).trim(); if (t) VOICE_SUPPRESSION.add(t); });
   saveVoiceSuppression();
@@ -2256,40 +2467,40 @@ app.post("/api/voice/suppress", (req, res) => {
 
 // Analytics endpoints
 app.get("/api/admin/analytics/overview", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const [templates, funnel] = await Promise.all([getTemplateStats(), getFunnel()]);
   res.json({ templates, funnel });
 });
 
 app.get("/api/admin/analytics/breakdown", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const [byCountry, byIndustry] = await Promise.all([getCountryBreakdown(), getIndustryBreakdown()]);
   res.json({ byCountry, byIndustry });
 });
 
 app.get("/api/admin/analytics/daily", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const days = parseInt(req.query.days as string) || 7;
   res.json(await getDailyStats(days));
 });
 
 // Conversation analytics
 app.get("/api/admin/analytics/conversations", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const limit = Math.min(parseInt(req.query.n as string) || 50, 200);
   const summary = await getConversationSummary(limit);
   res.json(summary);
 });
 
 app.get("/api/admin/analytics/conversation/:tenantId/:sessionId", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const messages = await getConversation(req.params.tenantId, req.params.sessionId);
   res.json(messages);
 });
 
 // Experiment results
 app.get("/api/admin/analytics/experiments", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const expId = (req.query.id as string) || "widget-start-state";
   const results = await getExperimentResults(expId);
   res.json({ experiment: expId, results });
@@ -2297,7 +2508,7 @@ app.get("/api/admin/analytics/experiments", async (req, res) => {
 
 // Admin tenants list
 app.get("/api/admin/tenants", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const tenants = listTenants().map((t: any) => ({
     id: t.id, domain: t.domain, email: t.email, status: t.status, chunksCount: t.chunksCount,
   }));
@@ -2306,7 +2517,7 @@ app.get("/api/admin/tenants", (req, res) => {
 
 // Admin demo visits
 app.get("/api/admin/demo-visits", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const n = Math.min(parseInt(req.query.n as string) || 50, DEMO_VISITS_MAX);
   const tenant = req.query.tenant as string | undefined;
   let visits = DEMO_VISITS;
@@ -2317,7 +2528,7 @@ app.get("/api/admin/demo-visits", (req, res) => {
 
 // Admin logs endpoint
 app.get("/api/admin/logs", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const level = req.query.level as string | undefined;
   const n = Math.min(parseInt(req.query.n as string) || 100, LOG_MAX);
   const search = (req.query.q as string || "").toLowerCase();
@@ -2357,14 +2568,14 @@ app.get("/unsubscribe", async (req, res) => {
 });
 
 app.delete("/api/admin/unsubscribed", async (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   UNSUBSCRIBED.clear();
   await writeFile(unsubPath, JSON.stringify([], null, 2));
   res.json({ ok: true, cleared: true });
 });
 
 app.get("/api/admin/unsubscribed", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   res.json([...UNSUBSCRIBED]);
 });
 
