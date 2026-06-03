@@ -1218,7 +1218,7 @@ app.post("/api/onboard-demo", async (req, res) => {
 // the bot-ready email uses — so we can tell whether a missing/wrong Render key is why the
 // onboarding callback email never arrives (the worker swallows the Resend error).
 app.post("/api/admin/email-diag", async (req, res) => {
-  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  if (!ADMIN_SECRET || (req.query.secret as string) !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
   const to = (req.query.to as string) || OWNER_EMAIL;
   const from = process.env.EMAIL_FROM || "Jakub <jakub@whisp.so>";
   const key = process.env.RESEND_API_KEY || "";
@@ -1235,6 +1235,25 @@ app.post("/api/admin/email-diag", async (req, res) => {
     const body = await r.text();
     res.json({ ...diag, sent: r.ok, status: r.status, resendResponse: body.slice(0, 240) });
   } catch (e: any) { res.json({ ...diag, sent: false, error: e?.message || String(e) }); }
+});
+
+// Admin: re-scrape a specific list of tenant ids (e.g. the "active but no data" demos).
+// Queues each on the worker so they get real vectors + the canonical facts.
+app.post("/api/admin/rescrape-list", (req, res) => {
+  if (!ADMIN_SECRET || (req.query.secret as string) !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
+  const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (!ids.length) { res.status(400).json({ error: "ids[] required" }); return; }
+  const queued: string[] = [];
+  for (const id of ids.slice(0, 300)) {
+    const t = getTenant(id);
+    if (!t) continue;
+    updateTenant(id, { status: "pending" });
+    worker.enqueue(id, t.siteUrl || `https://${t.domain}`, 15);
+    tenantManager.evictTenant(id);
+    queued.push(id);
+  }
+  console.log(`[rescrape-list] queued ${queued.length} tenant(s)`);
+  res.json({ queued: queued.length, ids: queued });
 });
 
 // Check tenant status
