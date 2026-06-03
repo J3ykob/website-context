@@ -134,17 +134,17 @@ export async function scrapeTenant(
   // --- Dedup for Vectorize: deterministic IDs + orphan cleanup ---
   // Vectorize has no delete-by-filter, so we track each tenant's chunk IDs in R2.
   // Unchanged chunks keep their ID (overwritten on upsert); removed/changed chunks
-  // become orphans we delete. Legacy tenants with no tracked IDs get a one-time
-  // full drain so old random-ID duplicates from past re-scrapes don't linger.
+  // become orphans we delete. CRITICAL ORDERING: we always UPSERT FIRST, then delete
+  // (orphans for tracked tenants, residue for untracked) — and we never delete an ID
+  // that's in the current set. Deletes are async; the old code drained untracked
+  // tenants BEFORE re-embedding, so an in-flight delete of a deterministic ID could
+  // eat the same-ID re-insert (large tenants landed 0 queryable). Load prevIds here;
+  // do all deletion AFTER the upsert+verify below.
   const newIds = context.chunks.map((c) => c.id);
   let prevIds: string[] | null = null;
   if (useVectorize) {
     const buf = await downloadFromR2(`tenants/${tenantId}/vector-ids.json`);
     if (buf) { try { prevIds = JSON.parse(buf.toString()); } catch {} }
-    if (!prevIds || prevIds.length === 0) {
-      console.log(`[scrape-pipeline] No tracked vector IDs for ${tenantId}; draining existing vectors first`);
-      await (store as CloudflareVectorizeStore).deleteAll();
-    }
   }
 
   // Embed into the vector store
@@ -193,8 +193,8 @@ export async function scrapeTenant(
   // ID set for the next re-scrape.
   if (useVectorize) {
     let idsToTrack = newIds;
+    const newSet = new Set(newIds);
     if (prevIds) {
-      const newSet = new Set(newIds);
       const orphans = prevIds.filter((id) => !newSet.has(id));
       if (orphans.length > 0) {
         try {
@@ -207,6 +207,21 @@ export async function scrapeTenant(
           console.error(`[scrape-pipeline] orphan delete failed for ${tenantId}, keeping union for retry: ${(e as Error).message}`);
           idsToTrack = [...new Set([...prevIds, ...newIds])];
         }
+      }
+    } else {
+      // Untracked tenant: the new chunks are already upserted (in place — same
+      // deterministic IDs overwrite any prior copy, so there's no gap). Now clear
+      // any LEGACY residue (old random-ID vectors from the pre-deterministic era)
+      // WITHOUT touching the IDs we just inserted. This replaces the old pre-embed
+      // deleteAll() that raced the re-insert. deleteAll(keepIds) never deletes a
+      // kept ID, so the current vectors are safe regardless of async-delete timing.
+      // (For a brand-new tenant the index is empty, so this resolves in one quick
+      // round.) Non-fatal: residue gets re-cleaned on the next, now-tracked scrape.
+      try {
+        const removed = await (store as CloudflareVectorizeStore).deleteAll(newSet);
+        if (removed > 0) console.log(`[scrape-pipeline] Cleared ${removed} legacy residue vectors for ${tenantId} (kept ${newSet.size} current)`);
+      } catch (e) {
+        console.error(`[scrape-pipeline] residue cleanup failed for ${tenantId} (current vectors unaffected): ${(e as Error).message}`);
       }
     }
     await uploadToR2(`tenants/${tenantId}/vector-ids.json`, JSON.stringify(idsToTrack), "application/json");
