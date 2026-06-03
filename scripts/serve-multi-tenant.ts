@@ -1214,6 +1214,29 @@ app.post("/api/onboard-demo", async (req, res) => {
   }
 });
 
+// Diagnostic: tests THIS server's (Render's) email path — the same RESEND_API_KEY + FROM
+// the bot-ready email uses — so we can tell whether a missing/wrong Render key is why the
+// onboarding callback email never arrives (the worker swallows the Resend error).
+app.post("/api/admin/email-diag", async (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  const to = (req.query.to as string) || OWNER_EMAIL;
+  const from = process.env.EMAIL_FROM || "Jakub <jakub@whisp.so>";
+  const key = process.env.RESEND_API_KEY || "";
+  const diag: any = { resendKeySet: !!key, keyLen: key.length, from, baseUrl: process.env.BASE_URL || "(unset)" };
+  if (!key) { res.json({ ...diag, sent: false, reason: "RESEND_API_KEY is NOT set on Render" }); return; }
+  try {
+    // Replicate the bot-ready send shape (from + replyTo) to catch payload-level rejections too.
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to, replyTo: "jakub@whisp.so", subject: "Whisp Render email diagnostic", html: "<p>If you received this, Render's email path works.</p>" }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const body = await r.text();
+    res.json({ ...diag, sent: r.ok, status: r.status, resendResponse: body.slice(0, 240) });
+  } catch (e: any) { res.json({ ...diag, sent: false, error: e?.message || String(e) }); }
+});
+
 // Check tenant status
 app.get("/api/tenants/:id/status", (req, res) => {
   const tenant = getTenant(req.params.id);
