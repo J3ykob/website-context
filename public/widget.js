@@ -213,7 +213,7 @@
 }\
 #wctx-fab .wctx-bar-bubble {\
   font-family:"Archivo",-apple-system,sans-serif;\
-  font-size:12px; line-height:1.5; margin-bottom:6px;\
+  font-size:16px; line-height:1.5; margin-bottom:6px;\
   padding:6px 10px;\
   border-radius:10px;\
   max-width:85%;\
@@ -1352,7 +1352,7 @@
   background:none;\
   color:rgba(10,10,10,0.7);\
   padding:0;\
-  font-size:15px;\
+  font-size:16px;\
   line-height:1.6;\
   font-weight:500;\
   text-align:right;\
@@ -1360,7 +1360,7 @@
 }\
 .wctx-msg-assistant {\
   align-self:flex-start;\
-  font-size:15px;\
+  font-size:16px;\
   line-height:1.7;\
   color:rgba(10,10,10,0.85);\
   background:none;\
