@@ -128,16 +128,23 @@ export class CloudflareVectorizeStore implements VectorStore {
     }
   }
 
-  // Fully delete a tenant's vectors. Vectorize has no delete-by-filter or list
-  // API, and deletes are ASYNC (delete_by_ids returns a mutationId; the vector
-  // stays queryable for ~tens of seconds until processed). A FIXED query probe
-  // just re-surfaces the same not-yet-processed batch and stalls, so each pass
-  // uses a FRESH RANDOM probe (hitting a different region of the space) and
-  // deletes every ID returned. We sweep in rounds: an inner loop issues deletes
-  // until random probes stop surfacing anything new (coverage saturated), then
-  // we wait for async processing and verify with random samples; we repeat until
-  // a post-wait sample comes back empty. Invoked once per tenant (legacy drain).
-  async deleteAll(): Promise<number> {
+  // Delete a tenant's vectors. Vectorize has no delete-by-filter or list API, and
+  // deletes are ASYNC (delete_by_ids returns a mutationId; the vector stays
+  // queryable for ~tens of seconds until processed). A FIXED query probe just
+  // re-surfaces the same not-yet-processed batch and stalls, so each pass uses a
+  // FRESH RANDOM probe (hitting a different region of the space) and deletes the
+  // IDs returned. We sweep in rounds: an inner loop issues deletes until random
+  // probes stop surfacing anything new (coverage saturated), then we wait for
+  // async processing and verify with random samples; we repeat until a post-wait
+  // sample comes back clean.
+  //
+  // `keepIds` (optional) are NEVER deleted. This is the load-bearing invariant for
+  // residue cleanup AFTER a re-insert: deterministic chunk IDs mean a re-scrape
+  // re-inserts the same IDs, and an async delete of an ID we then re-upsert can eat
+  // the fresh vector (confirmed: large tenants landed 0 queryable). By upserting
+  // first and passing the current IDs as keepIds, the just-inserted vectors are
+  // safe by construction no matter how the async deletes interleave.
+  async deleteAll(keepIds: Set<string> = new Set()): Promise<number> {
     const randProbe = (): number[] => {
       const v = new Array(1024);
       let n = 0;
@@ -155,14 +162,20 @@ export class CloudflareVectorizeStore implements VectorStore {
       return (((await resp.json()) as any).result?.matches || []).map((m: any) => m.id);
     };
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // Surfaced ids are prefixed (`<tenant>__<chunkId>`); keepIds are the bare
+    // chunkIds the caller upserted. Strip before comparing so keep actually keeps.
+    const prefix = `${this.tenantId}__`;
+    const bare = (id: string): string => (id.startsWith(prefix) ? id.slice(prefix.length) : id);
 
     const seen = new Set<string>();
     let drained = false;
     for (let round = 1; round <= 25; round++) {
       let lowStreak = 0;
       for (let pass = 0; pass < 250; pass++) {
-        const ids = await queryIds(randProbe());
-        if (ids === null) { await sleep(2000); continue; }
+        const surfaced = await queryIds(randProbe());
+        if (surfaced === null) { await sleep(2000); continue; }
+        // NEVER delete a kept id — that is the race-proofing invariant.
+        const ids = keepIds.size ? surfaced.filter((id) => !keepIds.has(bare(id))) : surfaced;
         if (ids.length === 0) { lowStreak += 2; if (lowStreak >= 10) break; await sleep(1500); continue; }
         const fresh = ids.filter((id) => !seen.has(id)).length;
         await fetch(`${BASE}/delete_by_ids`, { method: "POST", headers: headers(), body: JSON.stringify({ ids }) });
@@ -172,21 +185,25 @@ export class CloudflareVectorizeStore implements VectorStore {
         await sleep(700);
       }
       // Let async deletes process, then verify with random samples (more samples =
-      // more confidence the namespace is truly empty before we declare it drained).
+      // more confidence the namespace is truly clean before we declare it drained).
       await sleep(15000);
       let still = 0;
-      for (let v = 0; v < 12; v++) { const ids = await queryIds(randProbe()); still += (ids || []).length; await sleep(300); }
+      for (let v = 0; v < 12; v++) {
+        const surfaced = await queryIds(randProbe());
+        still += (surfaced || []).filter((id) => !keepIds.has(bare(id))).length;
+        await sleep(300);
+      }
       if (still === 0) { drained = true; break; }
     }
     // Don't silently report success on a probabilistic drain — if 25 rounds didn't
-    // produce a clean verification, residue (old/duplicate vectors) may survive. This
-    // is the LEGACY path (no tracked vector-ids.json); the next re-scrape persists
-    // tracked ids and cleans residue via the authoritative orphan-delete, so we warn
-    // loudly rather than fail the scrape.
+    // produce a clean verification, residue (old/duplicate vectors) may survive. The
+    // next re-scrape persists tracked ids and cleans residue via the authoritative
+    // orphan-delete, so we warn loudly rather than fail the scrape.
+    const kept = keepIds.size ? `, ${keepIds.size} kept` : "";
     if (drained) {
-      console.log(`[vectorize] deleteAll ${this.tenantId}: ${seen.size} vectors removed, namespace verified empty`);
+      console.log(`[vectorize] deleteAll ${this.tenantId}: ${seen.size} vectors removed${kept}, namespace verified clean`);
     } else {
-      console.warn(`[vectorize] deleteAll ${this.tenantId}: removed ${seen.size} but namespace NOT verified empty after 25 rounds — residue may survive until next re-scrape's tracked-id cleanup`);
+      console.warn(`[vectorize] deleteAll ${this.tenantId}: removed ${seen.size}${kept} but NOT verified clean after 25 rounds — residue may survive until next re-scrape's tracked-id cleanup`);
     }
     return seen.size;
   }
