@@ -214,22 +214,24 @@
   backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
   border:1px solid rgba(255,255,255,0.2); box-shadow:0 6px 24px rgba(0,0,0,0.12);\
 }\
+/* Bubbles start tucked UNDER the input (translated inward, scaled down, z-index below the\
+   pill) and fly outward to the sides when the bar becomes active. */\
 #wctx-fab .wctx-mic {\
-  position:absolute; right:calc(100% + 10px); bottom:2px;\
+  position:absolute; right:calc(100% + 10px); bottom:2px; z-index:1;\
   width:48px; height:48px; border-radius:50%;\
   display:flex; align-items:center; justify-content:center;\
   color:rgba(10,10,10,0.4); cursor:not-allowed; padding:0;\
-  opacity:0; transform:translateX(10px) scale(0.9); pointer-events:none;\
-  transition:opacity 0.28s, transform 0.28s;\
+  opacity:0; transform:translateX(64px) scale(0.5); transform-origin:right center; pointer-events:none;\
+  transition:opacity 0.3s ease, transform 0.45s cubic-bezier(0.34,1.45,0.6,1);\
 }\
 #wctx-fab .wctx-ctrls {\
-  position:absolute; left:calc(100% + 10px); bottom:2px;\
+  position:absolute; left:calc(100% + 10px); bottom:2px; z-index:1;\
   display:flex; align-items:center; gap:2px; height:48px; padding:0 5px; border-radius:26px;\
-  opacity:0; transform:translateX(-10px) scale(0.9); pointer-events:none;\
-  transition:opacity 0.28s, transform 0.28s;\
+  opacity:0; transform:translateX(-64px) scale(0.5); transform-origin:left center; pointer-events:none;\
+  transition:opacity 0.3s ease, transform 0.45s cubic-bezier(0.34,1.45,0.6,1);\
 }\
-#wctx-fab.wctx-active .wctx-mic { opacity:0.55; transform:none; }\
-#wctx-fab.wctx-active .wctx-ctrls { opacity:1; transform:none; pointer-events:auto; }\
+#wctx-fab.wctx-active .wctx-mic { opacity:0.55; transform:translateX(0) scale(1); }\
+#wctx-fab.wctx-active .wctx-ctrls { opacity:1; transform:translateX(0) scale(1); pointer-events:auto; }\
 #wctx-fab .wctx-ctl {\
   width:38px; height:38px; display:flex; align-items:center; justify-content:center;\
   background:none; border:none; cursor:pointer; border-radius:50%;\
@@ -239,6 +241,7 @@
 #wctx-fab .wctx-bar-wrap {\
   display:flex;\
   flex-direction:column;\
+  position:relative; z-index:2;\
   border-radius:24px;\
   width:clamp(260px, 30vw, 380px);\
   background:rgba(200,200,210,0.55);\
@@ -255,7 +258,17 @@
   max-height:380px;\
   box-shadow:0 12px 48px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.5);\
 }\
-@media (max-width:640px) { #wctx-fab .wctx-bar-wrap { width:clamp(200px, 58vw, 300px); } #wctx-fab.wctx-active .wctx-bar-wrap { width:calc(100vw - 140px); } }\
+/* Tablet: a touch more generous than the desktop 45vw but still leaves room for the bubbles. */\
+@media (min-width:641px) and (max-width:1024px) { #wctx-fab.wctx-active .wctx-bar-wrap { width:clamp(320px, 52vw, 540px); } }\
+/* Mobile: shrink bubbles + size the expanded input to the space left after they fly out, so nothing clips. */\
+@media (max-width:640px) {\
+  #wctx-fab .wctx-bar-wrap { width:clamp(140px, 52vw, 260px); }\
+  /* input is centered, so symmetric space = 2x the wider (controls) side must fit */\
+  #wctx-fab.wctx-active .wctx-bar-wrap { width:calc(100vw - 224px); }\
+  #wctx-fab .wctx-mic { width:40px; height:40px; right:calc(100% + 7px); }\
+  #wctx-fab .wctx-ctrls { height:40px; left:calc(100% + 7px); padding:0 3px; }\
+  #wctx-fab .wctx-ctl { width:30px; height:30px; }\
+}\
 #wctx-fab .wctx-bar-messages {\
   display:flex;\
   flex-direction:column;\
