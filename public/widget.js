@@ -260,14 +260,26 @@
 }\
 /* Tablet: wide expanded input but still room for the bubbles. */\
 @media (min-width:641px) and (max-width:1024px) { #wctx-fab.wctx-active .wctx-bar-wrap { width:clamp(320px, 56vw, 560px); } }\
-/* Mobile: shrink bubbles + size the expanded input to the space left after they fly out, so nothing clips. */\
+/* Mobile: NO side fly-out bubbles (they made the input a thin sliver). Minimized = the\
+   input pill only at 90vw. Expanded (active) = 92vw with the controls floating top-right\
+   INSIDE the bar (sibling of the wrap, lifted above it via z-index), so the full width\
+   goes to the input + chat. The mic (disabled "coming soon") is hidden entirely. */\
 @media (max-width:640px) {\
-  #wctx-fab .wctx-bar-wrap { width:clamp(140px, 52vw, 260px); }\
-  /* input is centered, so symmetric space = 2x the wider (controls) side must fit */\
-  #wctx-fab.wctx-active .wctx-bar-wrap { width:calc(100vw - 224px); }\
-  #wctx-fab .wctx-mic { width:40px; height:40px; right:calc(100% + 7px); }\
-  #wctx-fab .wctx-ctrls { height:40px; left:calc(100% + 7px); padding:0 3px; }\
-  #wctx-fab .wctx-ctl { width:30px; height:30px; }\
+  #wctx-fab .wctx-mic { display:none; }\
+  #wctx-fab .wctx-bar-wrap { width:90vw; max-width:90vw; }\
+  #wctx-fab.wctx-active .wctx-bar-wrap { width:92vw; max-width:92vw; }\
+  #wctx-fab .wctx-ctrls {\
+    position:absolute; top:8px; right:8px; left:auto; bottom:auto; z-index:5;\
+    height:auto; padding:3px 4px; gap:1px; border-radius:18px;\
+    transform:translateY(-4px) scale(0.92);\
+  }\
+  #wctx-fab.wctx-active .wctx-ctrls { transform:translateY(0) scale(1); }\
+  /* id selector beats the base `.wctx-bar-messages` padding rule (which is later in\
+     source) so the messages clear the floating controls instead of sliding under them */\
+  #wctx-fab.wctx-active #wctx-bar-msgs { padding-top:48px; }\
+  #wctx-fab.wctx-active #wctx-bar-msgs:empty { max-height:46px; padding-top:0; }\
+  #wctx-fab .wctx-bar-bubble { max-width:92%; }\
+  #wctx-fab .wctx-ctl { width:32px; height:32px; }\
 }\
 #wctx-fab .wctx-bar-messages {\
   display:flex;\
@@ -290,6 +302,7 @@
   padding:6px 10px;\
   border-radius:10px;\
   max-width:85%;\
+  box-sizing:border-box; overflow-wrap:anywhere; word-break:break-word;\
   animation:wctx-bubbleIn 0.25s ease-out both;\
 }\
 @keyframes wctx-bubbleIn {\
@@ -779,6 +792,12 @@
     els.input.focus();
   } else {
     minimizeToBar();
+    // Mobile: open in the expanded (active) bar so controls are reachable and the input
+    // isn't a thin sliver. Minimized (input-only @ 90vw) is one tap away. Don't focus the
+    // input (would force the keyboard up on load). Delay past the collapse animation.
+    if (window.matchMedia && window.matchMedia("(max-width:640px)").matches) {
+      setTimeout(function() { fab.classList.add("wctx-active"); }, 540);
+    }
   }
 
   // --- Initialize theme detection ---
@@ -1519,6 +1538,7 @@
 \
 .wctx-msg {\
   max-width:82%;\
+  overflow-wrap:anywhere; word-break:break-word;\
   opacity:0;\
   transform:translateY(12px);\
   animation:wctx-msgIn 0.5s cubic-bezier(0.16,1,0.3,1) forwards;\
