@@ -268,16 +268,16 @@
   #wctx-fab .wctx-mic { display:none; }\
   #wctx-fab .wctx-bar-wrap { width:90vw; max-width:90vw; }\
   #wctx-fab.wctx-active .wctx-bar-wrap { width:92vw; max-width:92vw; }\
+  /* Controls bubble overlaid on the RIGHT of the input pill, vertically centered with\
+     the input row (bottom of the wrap). The input row is padded-right (only when active)\
+     so its text + send stop before the bubble instead of sliding under it. */\
   #wctx-fab .wctx-ctrls {\
-    position:absolute; top:8px; right:8px; left:auto; bottom:auto; z-index:5;\
-    height:auto; padding:3px 4px; gap:1px; border-radius:18px;\
-    transform:translateY(-4px) scale(0.92);\
+    position:absolute; right:7px; bottom:7px; top:auto; left:auto; z-index:5;\
+    height:38px; padding:0 5px; gap:1px; border-radius:19px;\
+    transform:translateY(6px) scale(0.9);\
   }\
   #wctx-fab.wctx-active .wctx-ctrls { transform:translateY(0) scale(1); }\
-  /* id selector beats the base `.wctx-bar-messages` padding rule (which is later in\
-     source) so the messages clear the floating controls instead of sliding under them */\
-  #wctx-fab.wctx-active #wctx-bar-msgs { padding-top:48px; }\
-  #wctx-fab.wctx-active #wctx-bar-msgs:empty { max-height:46px; padding-top:0; }\
+  #wctx-fab.wctx-active .wctx-bar { padding-right:124px; }\
   #wctx-fab .wctx-bar-bubble { max-width:92%; }\
   #wctx-fab .wctx-ctl { width:32px; height:32px; }\
 }\
@@ -775,6 +775,8 @@
   }
 
   els.browse.addEventListener("click", minimizeToBar);
+  var btnMinimize = overlay.querySelector(".wctx-minimize-btn");
+  if (btnMinimize) btnMinimize.addEventListener("click", minimizeToBar);
 
   // Restore previous messages into the UI
   if (messages.length > 0) {
@@ -1324,6 +1326,12 @@
   -webkit-backdrop-filter:blur(4px);\
 }\
 .wctx-browse-btn:hover { background:rgba(255,255,255,0.45); color:rgba(10,10,10,0.7); border-color:rgba(255,255,255,0.5); transform:translateY(-1px); }\
+/* Mobile-only minimize (collapse fullscreen chat back to the bar). On desktop the\
+   "Browse site manually" text button handles this; it is hidden on mobile, so without\
+   this icon there was no way out of the fullscreen overlay on a phone. */\
+.wctx-minimize-btn { display:none; align-items:center; justify-content:center; width:40px; height:40px; padding:0; border-radius:50%; background:rgba(255,255,255,0.3); border:1px solid rgba(255,255,255,0.35); color:rgba(10,10,10,0.6); cursor:pointer; -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); }\
+.wctx-minimize-btn:hover { background:rgba(255,255,255,0.5); color:rgba(10,10,10,0.9); }\
+#wctx-overlay.wctx-dark .wctx-minimize-btn { background:rgba(255,255,255,0.1); border-color:rgba(255,255,255,0.16); color:rgba(255,255,255,0.7); }\
 \
 .wctx-owner-btn {\
   font-family:"Archivo",sans-serif;\
@@ -1661,6 +1669,7 @@
   .wctx-messages{padding:20px 16px 100px}\
   .wctx-chat-input{font-size:17px;padding:18px 0}\
   .wctx-browse-btn{display:none}\
+  .wctx-minimize-btn{display:flex}\
   .wctx-input-frame{border-radius:14px}\
 }\
 \
@@ -1821,6 +1830,9 @@
       <div class="wctx-dot"></div>\
       ' + (IS_OWNER ? '<button class="wctx-owner-btn" id="wctx-owner-toggle">Owner</button>' : '') + '\
       <button class="wctx-browse-btn">Browse site manually</button>\
+      <button class="wctx-minimize-btn" type="button" aria-label="Minimize chat" title="Minimize">\
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>\
+      </button>\
     </div>\
   </div>\
   <div class="wctx-main wctx-state-idle">\
