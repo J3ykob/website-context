@@ -665,10 +665,15 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
   align-items:center; justify-content:center;\
 }\
 .scroll-modal.show { display:flex; }\
+/* Entrance for the FLEX-CENTERED box. It must NOT reuse the demo-info fadeUp keyframe:\
+   that ends on transform:translateX(-50%) (correct for demo-info, which is left:50%),\
+   but here the box is already centered by the parent flexbox, so translateX(-50%)\
+   shoved it half its width off-center -> off-screen on mobile. Translate Y only. */\
+@keyframes scrollModalIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }\
 .scroll-modal-box {\
   background:#111827; border:1px solid rgba(255,255,255,0.08); border-radius:20px;\
-  padding:36px 32px; max-width:420px; width:calc(100% - 40px); text-align:center;\
-  animation:fadeUp 0.3s ease both;\
+  padding:36px 32px; max-width:400px; width:calc(100% - 32px); text-align:center;\
+  animation:scrollModalIn 0.3s ease both;\
 }\
 .scroll-modal-box h3 { font-family:"DM Serif Display",serif; font-size:22px; color:#f1f5f9; margin-bottom:10px; }\
 .scroll-modal-box p { font-size:14px; color:#94a3b8; line-height:1.6; margin-bottom:24px; }\
