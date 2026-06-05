@@ -13,7 +13,25 @@
  */
 
 import { normalizeTenantId } from "./tenant-id.js";
-import type { TenantRecord } from "./tenant-registry.js";
+
+export interface TenantRecord {
+  id: string;
+  email: string;
+  domain: string;
+  siteUrl: string;
+  brandName: string | null;
+  status: "pending" | "scraping" | "active" | "error" | "broken";
+  createdAt: string;
+  updatedAt: string;
+  lastScrapedAt: string | null;
+  pagesCount: number;
+  chunksCount: number;
+  qdrantCollection: string;
+  settings: any;
+  ownerPasswordHash: string | null;
+  apiKey: string | null;
+  setupToken: string | null;
+}
 
 interface TenantRow {
   id: string; email: string; domain: string; site_url: string; brand_name: string | null;

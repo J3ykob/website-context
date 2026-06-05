@@ -44,6 +44,7 @@ import {
   getTenantByDomain,
   updateTenant,
   listTenants,
+  hydrateRegistry,
   hashPassword,
   verifyPassword,
   createSession,
@@ -117,6 +118,14 @@ console.warn = (...args: unknown[]) => { pushLog("warn", args.map(String).join("
 // Initialize database
 runMigrations();
 console.log("[multi-tenant] Database initialized");
+
+// Load the Cloudflare API token (D1/Vectorize/R2 auth) and hydrate the tenant
+// registry cache from D1 (source of truth) BEFORE any service uses the registry —
+// the worker's recoverStuckJobs() reads listTenants(). Registry reads are then
+// synchronous off this cache (refreshed every 60s).
+await loadCfToken();
+const hydratedCount = await hydrateRegistry();
+console.log(`[multi-tenant] Registry hydrated from D1: ${hydratedCount} tenants`);
 
 // Initialize services
 const worker = new ScrapeWorker();
@@ -194,7 +203,7 @@ setInterval(() => {
 }, 600000);
 
 // --- Auth middleware ---
-function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void {
+async function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     res.status(401).json({ error: "Authentication required" });
@@ -202,7 +211,8 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
   }
 
   const token = authHeader.slice(7);
-  const tenantId = validateSession(token);
+  let tenantId: string | null = null;
+  try { tenantId = await validateSession(token); } catch { tenantId = null; }
   if (!tenantId) {
     res.status(401).json({ error: "Invalid or expired session" });
     return;
@@ -1771,7 +1781,7 @@ app.get("/api/health/:tenantId", (req, res) => {
 // --- Auth routes ---
 
 // Login
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "email and password required" });
@@ -1801,19 +1811,19 @@ app.post("/api/auth/login", (req, res) => {
     return;
   }
 
-  const token = createSession(tenant.id);
+  const token = await createSession(tenant.id);
   res.json({ token, tenantId: tenant.id });
 });
 
 // Admin-gated login: mint a dashboard session for ANY tenant (support + e2e testing).
 // Requires ADMIN_SECRET — not a public backdoor. ?redirect=1 stores the token and
 // opens the dashboard directly; otherwise returns { token, tenantId } as JSON.
-app.get("/api/admin/login-as", (req, res) => {
+app.get("/api/admin/login-as", async (req, res) => {
   if (!ADMIN_SECRET || (req.query.secret as string) !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenantId = ((req.query.tenantId as string) || "").trim();
   if (!tenantId) { res.status(400).json({ error: "tenantId required" }); return; }
   if (!getTenant(tenantId)) { res.status(404).json({ error: "Tenant not found" }); return; }
-  const token = createSession(tenantId);
+  const token = await createSession(tenantId);
   if (req.query.redirect === "1") {
     res.type("html").send('<!DOCTYPE html><meta charset="utf-8"><title>Signing in…</title><script>'
       + 'localStorage.setItem("wctx-dashboard-token",' + JSON.stringify(token) + ');'
@@ -1841,7 +1851,7 @@ app.post("/api/admin/migrate-registry-to-d1", async (req, res) => {
 });
 
 // Setup password (first-time) — accepts either setup token or API key
-app.post("/api/auth/setup-password", (req, res) => {
+app.post("/api/auth/setup-password", async (req, res) => {
   const { tenantId, apiKey, token: setupToken, password } = req.body;
   if (!tenantId || !password) {
     res.status(400).json({ error: "tenantId and password required" });
@@ -1891,7 +1901,7 @@ app.post("/api/auth/setup-password", (req, res) => {
   // Clear setup token after use
   updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null });
 
-  const sessionToken = createSession(tenantId);
+  const sessionToken = await createSession(tenantId);
   res.json({ token: sessionToken, tenantId });
 });
 
@@ -2788,9 +2798,8 @@ app.get("/book", (_, res) => {
 // Static assets
 app.use(express.static(resolve(__dirname, "../public")));
 
-// Load the Cloudflare API token from R2 (config/cf-token) before serving, so it
-// can be rotated by a file write — no Render dashboard edit / redeploy needed.
-await loadCfToken();
+// (CF token load + D1 registry hydration happen early, right after DB init above —
+// the token can still be rotated by an R2 file write without a redeploy.)
 
 // Background re-verification sweep: hasVectors() runs only once at scrape time, so
 // a tenant that loses its vectors afterward (drain, corruption, over-delete) would

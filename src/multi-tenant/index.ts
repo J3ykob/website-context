@@ -12,6 +12,7 @@ export {
   updateTenant,
   listTenants,
   deleteTenant,
+  hydrateRegistry,
 } from "./tenant-registry.js";
 export type { TenantRecord } from "./tenant-registry.js";
 export {
