@@ -11,7 +11,7 @@
  */
 
 const BASE_URL = process.env.BASE_URL || "https://whisp.so";
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "whisp-admin-2026";
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
 const RESEND_KEY = process.env.RESEND_API_KEY || "";
 const FROM = "Jakub <jakub@whisp.so>";
 const SEND = process.argv.includes("--send");
@@ -101,7 +101,9 @@ async function askBot(tenantId: string, question: string): Promise<string> {
   try {
     const resp = await fetch(`${BASE_URL}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // X-Whisp-Probe marks this as internal audit traffic so it never pollutes
+      // prospect analytics (chat_start / sessions / messages) — see the serve isProbe gate.
+      headers: { "Content-Type": "application/json", "X-Whisp-Probe": "1" },
       body: JSON.stringify({
         tenantId,
         sessionId,
