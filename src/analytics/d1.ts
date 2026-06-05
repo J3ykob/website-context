@@ -141,16 +141,7 @@ export async function getEmailForTenant(tenantId: string): Promise<string | null
   return tenantEmailCache.get(tenantId) || null;
 }
 
-// --- Conversation logging ---
-
-export async function logChatMessage(tenantId: string, sessionId: string, role: string, content: string, domain?: string): Promise<void> {
-  try {
-    await d1Query(
-      `INSERT INTO chat_messages (tenant_id, session_id, role, content, domain) VALUES (?, ?, ?, ?, ?)`,
-      [tenantId, sessionId, role, content.slice(0, 5000), domain || ""]
-    );
-  } catch (e: any) { console.error(`[d1] logChatMessage failed: ${e.message}`); }
-}
+// --- Conversation reads (writes happen via conversation-store.logMessage -> chat_messages) ---
 
 export async function getRecentConversations(limit: number = 20): Promise<any[]> {
   return d1Query(`

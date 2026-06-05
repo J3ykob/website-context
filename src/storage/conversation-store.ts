@@ -1,11 +1,37 @@
-import { randomUUID } from "crypto";
+/**
+ * Conversation + gaps store — backed by Cloudflare D1 (was Qdrant).
+ *
+ * Messages live in D1 `chat_messages` (id, tenant_id, session_id, role, content,
+ * domain, created_at, flow_invoked); gaps in D1 `unknown_questions`. A "conversation"
+ * is a session (grouped by session_id). Analytics fields the old Qdrant payload
+ * carried (intent, wordCount, hasQuestion) are DERIVED on read — no extra columns.
+ * The D1 query is injectable (__setQuery) so tests run real SQL against in-memory
+ * SQLite (no network, no mocks).
+ */
 
-const QDRANT_HOST = process.env.QDRANT_HOST || "152.53.243.28";
-const QDRANT_PORT = process.env.QDRANT_PORT || "6333";
-const BASE = `http://${QDRANT_HOST}:${QDRANT_PORT}`;
+const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
+const D1_DATABASE_ID = process.env.D1_DATABASE_ID || "0dec9229-fea2-4343-bf87-d36ac3205979";
+const D1_BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${D1_DATABASE_ID}/query`;
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+type QueryFn = (sql: string, params?: any[]) => Promise<any[]>;
+const realQuery: QueryFn = async (sql, params = []) => {
+  const { getCfToken } = await import("./cf-auth.js"); // lazy: avoid R2 boot-throw in tests
+  const resp = await fetch(D1_BASE, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getCfToken()}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ sql, params }),
+  });
+  if (!resp.ok) throw new Error(`D1 query failed (${resp.status}): ${(await resp.text()).slice(0, 200)}`);
+  const data = (await resp.json()) as any;
+  return data.result?.[0]?.results || [];
+};
+let query: QueryFn = realQuery;
+/** Test seam: inject a fake D1 query. */
+export function __setQuery(fn: QueryFn | null): void {
+  query = fn || realQuery;
+}
 
+// ─── Types (stable; consumers import these) ──────────────────────────────────
 export interface MessageRecord {
   id: string;
   tenantId: string;
@@ -14,25 +40,17 @@ export interface MessageRecord {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
-  messageIndex: number; // 0 = first message in conversation, 1 = second, etc.
-
-  // Analytics metadata
-  isFirstMessage: boolean; // true for the very first user message in a session
-  isEntryMessage: boolean; // true for first user message in each conversation
+  messageIndex: number;
+  isFirstMessage: boolean;
+  isEntryMessage: boolean;
   wordCount: number;
-  hasQuestion: boolean; // contains "?"
-  language?: string;
-
-  // Context about what happened
+  hasQuestion: boolean;
   flowInvoked?: string | null;
   navigatedTo?: string | null;
   hadToolCall?: boolean;
-  sourcePages?: string[]; // which pages were used as context for this response
-
-  // For future sentiment analysis
+  intent?: string | null;
+  topic?: string | null;
   sentiment?: "positive" | "negative" | "neutral" | null;
-  intent?: string | null; // "question", "action_request", "complaint", "praise", "greeting", etc.
-  topic?: string | null; // extracted topic: "pricing", "shipping", "contact", "product", etc.
 }
 
 export interface ConversationSummary {
@@ -45,7 +63,7 @@ export interface ConversationSummary {
   userMessageCount: number;
   firstUserMessage: string;
   flowsInvoked: string[];
-  resolved: boolean; // did the conversation end positively?
+  resolved: boolean;
 }
 
 export interface UnknownQuestionEntry {
@@ -53,113 +71,6 @@ export interface UnknownQuestionEntry {
   tenantId: string;
   question: string;
   timestamp: string;
-}
-
-// ─── Collection helpers ─────────────────────────────────────────────────────
-
-const ensuredCollections = new Set<string>();
-
-async function ensureCollection(name: string) {
-  if (ensuredCollections.has(name)) return;
-  try {
-    const check = await fetch(`${BASE}/collections/${name}`);
-    if (check.status === 404) {
-      await fetch(`${BASE}/collections/${name}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vectors: { size: 1, distance: "Cosine" } }),
-      });
-    }
-    ensuredCollections.add(name);
-  } catch {}
-}
-
-function col(tenantId: string, type: string) {
-  return `wctx_${tenantId.replace(/[^a-zA-Z0-9_]/g, "_")}_${type}`;
-}
-
-// ─── Message-level logging ──────────────────────────────────────────────────
-
-// Track session state for analytics. Bounded by an idle sweep — this map used to
-// grow unbounded (one entry per unique session, never cleared), a memory leak.
-const sessionState = new Map<string, { messageCount: number; conversationId: string; isFirstSession: boolean; ts: number }>();
-const SESSION_STATE_TTL_MS = 2 * 60 * 60 * 1000; // 2h idle = session over
-const sessionSweep = setInterval(() => {
-  const cutoff = Date.now() - SESSION_STATE_TTL_MS;
-  for (const [k, v] of sessionState) if (v.ts < cutoff) sessionState.delete(k);
-}, 30 * 60 * 1000);
-(sessionSweep as any).unref?.();
-
-export async function logMessage(
-  tenantId: string,
-  sessionId: string,
-  role: "user" | "assistant",
-  content: string,
-  meta: {
-    flowInvoked?: string | null;
-    navigatedTo?: string | null;
-    hadToolCall?: boolean;
-    sourcePages?: string[];
-  } = {}
-) {
-  const collection = col(tenantId, "messages");
-  await ensureCollection(collection);
-
-  // Get/create session state
-  const stateKey = `${tenantId}:${sessionId}`;
-  let state = sessionState.get(stateKey);
-  if (!state) {
-    state = {
-      messageCount: 0,
-      conversationId: randomUUID(),
-      isFirstSession: true,
-      ts: Date.now(),
-    };
-    sessionState.set(stateKey, state);
-  }
-  state.ts = Date.now(); // mark active for the idle sweep
-
-  const messageIndex = state.messageCount;
-  state.messageCount++;
-
-  const isFirstMessage = messageIndex === 0 && role === "user";
-  const isEntryMessage = role === "user" && (messageIndex === 0 || messageIndex === 1);
-
-  const record: MessageRecord = {
-    id: randomUUID(),
-    tenantId,
-    sessionId,
-    conversationId: state.conversationId,
-    role,
-    content,
-    timestamp: new Date().toISOString(),
-    messageIndex,
-    isFirstMessage,
-    isEntryMessage,
-    wordCount: content.split(/\s+/).filter(Boolean).length,
-    hasQuestion: content.includes("?"),
-    flowInvoked: meta.flowInvoked || null,
-    navigatedTo: meta.navigatedTo || null,
-    hadToolCall: meta.hadToolCall || false,
-    sourcePages: meta.sourcePages,
-    sentiment: null,
-    intent: classifyIntent(content, role),
-    topic: null,
-  };
-
-  try {
-    await fetch(`${BASE}/collections/${collection}/points`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        points: [{
-          id: record.id,
-          vector: [0],
-          payload: record,
-        }],
-      }),
-    });
-  } catch {}
 }
 
 function classifyIntent(content: string, role: string): string {
@@ -173,90 +84,124 @@ function classifyIntent(content: string, role: string): string {
   return "statement";
 }
 
-// ─── Query functions ────────────────────────────────────────────────────────
+function rowToRecord(r: any): MessageRecord {
+  const content = r.content || "";
+  return {
+    id: String(r.id),
+    tenantId: r.tenant_id,
+    sessionId: r.session_id,
+    conversationId: r.session_id, // a session == a conversation
+    role: r.role,
+    content,
+    timestamp: r.created_at,
+    messageIndex: 0,
+    isFirstMessage: false,
+    isEntryMessage: false,
+    wordCount: content.split(/\s+/).filter(Boolean).length,
+    hasQuestion: content.includes("?"),
+    flowInvoked: r.flow_invoked || null,
+    navigatedTo: null,
+    hadToolCall: !!r.flow_invoked,
+    intent: classifyIntent(content, r.role),
+    topic: null,
+    sentiment: null,
+  };
+}
 
-export async function getMessages(tenantId: string, options: {
-  limit?: number;
-  role?: "user" | "assistant";
-  firstOnly?: boolean; // only first messages per session
-  sessionId?: string;
-} = {}): Promise<MessageRecord[]> {
-  const collection = col(tenantId, "messages");
-  const limit = options.limit || 100;
-
-  const filter: any = { must: [] };
-  if (options.role) filter.must.push({ key: "role", match: { value: options.role } });
-  if (options.firstOnly) filter.must.push({ key: "isFirstMessage", match: { value: true } });
-  if (options.sessionId) filter.must.push({ key: "sessionId", match: { value: options.sessionId } });
-
+// ─── Write (single D1 writer for chat messages) ──────────────────────────────
+export async function logMessage(
+  tenantId: string,
+  sessionId: string,
+  role: "user" | "assistant",
+  content: string,
+  meta: { flowInvoked?: string | null; navigatedTo?: string | null; hadToolCall?: boolean; sourcePages?: string[]; domain?: string } = {}
+): Promise<void> {
   try {
-    const res = await fetch(`${BASE}/collections/${collection}/points/scroll`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        limit,
-        with_payload: true,
-        filter: filter.must.length > 0 ? filter : undefined,
-      }),
-    });
-    if (!res.ok) return [];
-    const data = await res.json() as { result: { points: { payload: MessageRecord }[] } };
-    return data.result.points
-      .map((p) => p.payload)
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  } catch { return []; }
+    const id = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+    await query(
+      "INSERT INTO chat_messages (id, tenant_id, session_id, role, content, domain, created_at, flow_invoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, tenantId, sessionId, role, content, meta.domain || null, new Date().toISOString(), meta.flowInvoked || null]
+    );
+  } catch { /* logging never breaks chat */ }
+}
+
+// ─── Reads ───────────────────────────────────────────────────────────────────
+export async function getMessages(tenantId: string, options: {
+  limit?: number; role?: "user" | "assistant"; firstOnly?: boolean; sessionId?: string;
+} = {}): Promise<MessageRecord[]> {
+  const limit = options.limit || 100;
+  let sql = "SELECT id, tenant_id, session_id, role, content, created_at, flow_invoked FROM chat_messages WHERE tenant_id = ?";
+  const params: any[] = [tenantId];
+  if (options.role) { sql += " AND role = ?"; params.push(options.role); }
+  if (options.sessionId) { sql += " AND session_id = ?"; params.push(options.sessionId); }
+  sql += " ORDER BY created_at DESC LIMIT ?";
+  params.push(options.firstOnly ? limit * 10 : limit);
+
+  let recs: MessageRecord[];
+  try { recs = (await query(sql, params)).map(rowToRecord); } catch { return []; }
+
+  if (options.firstOnly) {
+    // First message per session (earliest). Walk ascending, keep first seen per session.
+    const seen = new Set<string>();
+    const out: MessageRecord[] = [];
+    for (const r of recs.slice().sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1))) {
+      if (!seen.has(r.sessionId)) { seen.add(r.sessionId); r.isFirstMessage = true; out.push(r); }
+    }
+    return out.slice(0, limit);
+  }
+  return recs; // already DESC by created_at
 }
 
 export async function getConversations(tenantId: string, limit = 50): Promise<any[]> {
-  // Get recent messages and group by conversationId
   const messages = await getMessages(tenantId, { limit: limit * 5 });
-
   const convos = new Map<string, MessageRecord[]>();
   for (const msg of messages) {
-    const key = msg.conversationId || msg.sessionId;
-    if (!convos.has(key)) convos.set(key, []);
-    convos.get(key)!.push(msg);
+    if (!convos.has(msg.sessionId)) convos.set(msg.sessionId, []);
+    convos.get(msg.sessionId)!.push(msg);
   }
-
   return Array.from(convos.entries())
-    .map(([id, msgs]) => {
-      msgs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    .map(([sessionId, msgs]) => {
+      msgs.sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
       const userMsgs = msgs.filter((m) => m.role === "user");
-      const lastMsg = msgs[msgs.length - 1];
       return {
-        conversationId: id,
-        sessionId: msgs[0].sessionId,
+        conversationId: sessionId,
+        sessionId,
         timestamp: msgs[0].timestamp,
         userMessage: userMsgs[0]?.content || "",
         botResponse: msgs.find((m) => m.role === "assistant")?.content || "",
         messageCount: msgs.length,
         flowInvoked: msgs.find((m) => m.flowInvoked)?.flowInvoked || null,
-        navigatedTo: msgs.find((m) => m.navigatedTo)?.navigatedTo || null,
+        navigatedTo: null,
         hadToolCall: msgs.some((m) => m.hadToolCall),
       };
     })
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1))
     .slice(0, limit);
 }
 
 export async function getConversationStats(tenantId: string) {
-  const messages = await getMessages(tenantId, { limit: 5000 });
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-
-  const todayMsgs = messages.filter((m) => new Date(m.timestamp) >= todayStart);
-  const sessions = new Set(messages.map((m) => m.sessionId));
-  const todaySessions = new Set(todayMsgs.map((m) => m.sessionId));
-
-  return {
-    totalConversations: sessions.size,
-    totalToday: todaySessions.size,
-    totalMessages: messages.length,
-    flowsExecuted: messages.filter((m) => m.flowInvoked).length,
-  };
+  try {
+    const rows = await query(
+      `SELECT COUNT(DISTINCT session_id) AS sessions,
+              COUNT(*) AS msgs,
+              COUNT(DISTINCT CASE WHEN created_at >= ? THEN session_id END) AS today_sessions,
+              COUNT(CASE WHEN flow_invoked IS NOT NULL THEN 1 END) AS flows
+       FROM chat_messages WHERE tenant_id = ?`,
+      [todayStart.toISOString(), tenantId]
+    );
+    const r = rows[0] || {};
+    return {
+      totalConversations: Number(r.sessions || 0),
+      totalToday: Number(r.today_sessions || 0),
+      totalMessages: Number(r.msgs || 0),
+      flowsExecuted: Number(r.flows || 0),
+    };
+  } catch {
+    return { totalConversations: 0, totalToday: 0, totalMessages: 0, flowsExecuted: 0 };
+  }
 }
-
-// ─── Analytics queries ──────────────────────────────────────────────────────
 
 export async function getFirstMessages(tenantId: string, limit = 50): Promise<MessageRecord[]> {
   return getMessages(tenantId, { role: "user", firstOnly: true, limit });
@@ -265,58 +210,39 @@ export async function getFirstMessages(tenantId: string, limit = 50): Promise<Me
 export async function getIntentBreakdown(tenantId: string): Promise<Record<string, number>> {
   const messages = await getMessages(tenantId, { role: "user", limit: 1000 });
   const counts: Record<string, number> = {};
-  for (const msg of messages) {
-    const intent = msg.intent || "unknown";
-    counts[intent] = (counts[intent] || 0) + 1;
-  }
+  for (const msg of messages) counts[msg.intent || "unknown"] = (counts[msg.intent || "unknown"] || 0) + 1;
   return counts;
 }
 
 export async function getTopQuestions(tenantId: string, limit = 20): Promise<string[]> {
   const messages = await getMessages(tenantId, { role: "user", limit: 500 });
-  return messages
-    .filter((m) => m.hasQuestion)
-    .map((m) => m.content)
-    .slice(0, limit);
+  return messages.filter((m) => m.hasQuestion).map((m) => m.content).slice(0, limit);
 }
 
-// ─── Unknown questions ──────────────────────────────────────────────────────
-
-export async function logUnknownQuestion(tenantId: string, question: string) {
-  const collection = col(tenantId, "gaps");
-  await ensureCollection(collection);
-
-  await fetch(`${BASE}/collections/${collection}/points`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      points: [{
-        id: randomUUID(),
-        vector: [0],
-        payload: { tenantId, question, timestamp: new Date().toISOString() },
-      }],
-    }),
-  }).catch(() => {});
+// ─── Gaps (unknown questions) ────────────────────────────────────────────────
+export async function logUnknownQuestion(tenantId: string, question: string): Promise<void> {
+  try {
+    const id = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+    await query(
+      "INSERT INTO unknown_questions (id, tenant_id, question, created_at) VALUES (?, ?, ?, ?)",
+      [id, tenantId, question, new Date().toISOString()]
+    );
+  } catch { /* never breaks chat */ }
 }
 
 export async function getUnknownQuestions(tenantId: string): Promise<UnknownQuestionEntry[]> {
-  const collection = col(tenantId, "gaps");
   try {
-    const res = await fetch(`${BASE}/collections/${collection}/points/scroll`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limit: 200, with_payload: true }),
-    });
-    if (!res.ok) return [];
-    const data = await res.json() as { result: { points: { payload: UnknownQuestionEntry }[] } };
+    const rows = await query(
+      "SELECT id, tenant_id, question, created_at FROM unknown_questions WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200",
+      [tenantId]
+    );
     const seen = new Set<string>();
-    return data.result.points
-      .map((p) => p.payload)
-      .filter((q) => { const k = q.question?.toLowerCase(); if (!k || seen.has(k)) return false; seen.add(k); return true; })
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return rows
+      .map((r: any) => ({ id: String(r.id), tenantId: r.tenant_id, question: r.question, timestamp: r.created_at }))
+      .filter((q: UnknownQuestionEntry) => { const k = q.question?.toLowerCase(); if (!k || seen.has(k)) return false; seen.add(k); return true; });
   } catch { return []; }
 }
 
-export async function clearUnknownQuestions(tenantId: string) {
-  try { await fetch(`${BASE}/collections/${col(tenantId, "gaps")}`, { method: "DELETE" }); } catch {}
+export async function clearUnknownQuestions(tenantId: string): Promise<void> {
+  try { await query("DELETE FROM unknown_questions WHERE tenant_id = ?", [tenantId]); } catch { /* ignore */ }
 }

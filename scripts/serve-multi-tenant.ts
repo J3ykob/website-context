@@ -22,7 +22,7 @@ import { createHash } from "crypto";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
-import { recordEvent, getEmailForTenant, getTemplateStats, getCountryBreakdown, getIndustryBreakdown, getFunnel, getDailyStats, recordEmailEvent, assignVariant, recordExperimentEvent, getExperimentResults, logChatMessage, getConversationSummary, getConversation } from "../src/analytics/d1.js";
+import { recordEvent, getEmailForTenant, getTemplateStats, getCountryBreakdown, getIndustryBreakdown, getFunnel, getDailyStats, recordEmailEvent, assignVariant, recordExperimentEvent, getExperimentResults, getConversationSummary, getConversation } from "../src/analytics/d1.js";
 import {
   logMessage,
   getConversations,
@@ -1368,10 +1368,16 @@ app.post("/api/chat", async (req, res) => {
     const isSelfChat = chatIpRaw === "79.184.118.71" || chatIpRaw === "176.9.1.133" || chatIpRaw.startsWith("127.");
     // Shared fire-and-forget logging for both the streaming and non-streaming paths.
     const logResponse = (response: any) => {
-      logMessage(tenantId, sessionKey, "user", lastUserContent).catch(() => {});
+      // Single D1 writer for chat messages (logMessage -> chat_messages). Skip
+      // self-chat / internal probes so they don't pollute analytics.
       if (!isSelfChat) {
-        logChatMessage(tenantId, sessionKey, "user", lastUserContent, tenant.domain).catch(() => {});
-        logChatMessage(tenantId, sessionKey, "assistant", response.message, tenant.domain).catch(() => {});
+        logMessage(tenantId, sessionKey, "user", lastUserContent, { domain: tenant.domain }).catch(() => {});
+        logMessage(tenantId, sessionKey, "assistant", response.message, {
+          flowInvoked: response.flowSession?.flowId || null,
+          navigatedTo: response.navigateTo || null,
+          hadToolCall: !!(response.flowSession || response.navigateTo),
+          domain: tenant.domain,
+        }).catch(() => {});
       }
       if (messages.length <= 1) {
         getEmailForTenant(tenantId).then(email => {
@@ -1379,16 +1385,8 @@ app.post("/api/chat", async (req, res) => {
         }).catch(() => {});
         recordExperimentEvent("widget-start-state", `${chatIpRaw}_${tenantId}`, "", "chat_start", { tenantId }).catch(() => {});
       }
-      logMessage(tenantId, sessionKey, "assistant", response.message, {
-        flowInvoked: response.flowSession?.flowId || null,
-        navigatedTo: response.navigateTo || null,
-        hadToolCall: !!(response.flowSession || response.navigateTo),
-      }).catch(() => {});
-      // Capture gaps deterministically: an ungrounded answer means the knowledge
-      // base couldn't answer this question. Log it to the SAME store the dashboard
-      // reads (getUnknownQuestions); read-side dedups by question text. Previously
-      // this relied on the LLM choosing to call a log tool (unreliable) AND wrote
-      // to a local JSONL the dashboard never reads — so the gaps panel was always empty.
+      // Capture gaps deterministically: an ungrounded answer = a question the KB
+      // couldn't answer. Logged to D1 unknown_questions (the store the dashboard reads).
       if (response.grounded === false && !isSelfChat && lastUserContent.trim()) {
         logUnknownQuestion(tenantId, lastUserContent.trim()).catch(() => {});
       }
