@@ -1834,22 +1834,6 @@ app.get("/api/admin/login-as", async (req, res) => {
   res.json({ token, tenantId });
 });
 
-// One-time migration: copy the current (SQLite) tenant registry into D1. Idempotent
-// (INSERT OR REPLACE). Run before the D1 cutover; reports parity for verification.
-app.post("/api/admin/migrate-registry-to-d1", async (req, res) => {
-  if (!ADMIN_SECRET || (req.query.secret as string) !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
-  try {
-    const { bulkUpsertTenants, countD1Tenants } = await import("../src/multi-tenant/d1-registry.js");
-    const sqliteTenants = listTenants(); // current registry (SQLite, pre-cutover)
-    const d1Before = await countD1Tenants();
-    const result = await bulkUpsertTenants(sqliteTenants);
-    const d1After = await countD1Tenants();
-    res.json({ sqliteCount: sqliteTenants.length, d1Before, d1After, ...result, parity: d1After >= sqliteTenants.length });
-  } catch (e) {
-    res.status(500).json({ error: (e as Error).message });
-  }
-});
-
 // Setup password (first-time) — accepts either setup token or API key
 app.post("/api/auth/setup-password", async (req, res) => {
   const { tenantId, apiKey, token: setupToken, password } = req.body;

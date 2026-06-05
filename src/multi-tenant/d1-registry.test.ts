@@ -118,25 +118,6 @@ describe("d1-registry CRUD + cache", () => {
   });
 });
 
-describe("migration helpers", () => {
-  it("bulkUpsertTenants: writes all records to D1, idempotent", async () => {
-    const recs = [
-      { id: "m1_com", email: "a@m1.com", domain: "m1.com", siteUrl: "https://m1.com", brandName: null, status: "active" as const, createdAt: "2026-01-01", updatedAt: "2026-01-01", lastScrapedAt: null, pagesCount: 3, chunksCount: 9, qdrantCollection: "wctx_m1_com", settings: {}, ownerPasswordHash: null, apiKey: null, setupToken: null },
-      { id: "m2_pl", email: "b@m2.pl", domain: "m2.pl", siteUrl: "https://m2.pl", brandName: "M2", status: "pending" as const, createdAt: "2026-01-02", updatedAt: "2026-01-02", lastScrapedAt: null, pagesCount: 0, chunksCount: 0, qdrantCollection: "wctx_m2_pl", settings: { x: 1 }, ownerPasswordHash: null, apiKey: null, setupToken: null },
-    ];
-    const r1 = await registry.bulkUpsertTenants(recs);
-    expect(r1).toEqual({ ok: 2, fail: 0 });
-    expect(await registry.countD1Tenants()).toBe(2);
-    // idempotent re-run (INSERT OR REPLACE) — still 2 rows, no error
-    const r2 = await registry.bulkUpsertTenants(recs);
-    expect(r2).toEqual({ ok: 2, fail: 0 });
-    expect(await registry.countD1Tenants()).toBe(2);
-    await registry.hydrateRegistry();
-    expect(registry.getTenant("m1_com")?.chunksCount).toBe(9);
-    expect(registry.getTenant("m2_pl")?.settings.x).toBe(1);
-  });
-});
-
 describe("d1-auth sessions", () => {
   it("createSession -> validateSession returns tenantId", async () => {
     const token = await auth.createSession("acme_co_uk");
