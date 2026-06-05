@@ -23,7 +23,11 @@ interface CachedTenant {
 }
 
 export class TenantManager {
+  // LRU cache: Map insertion order tracks recency (move-to-end on hit). Hard cap
+  // bounds RAM — without it the cache grew unbounded as more of the ~800+ tenants
+  // were accessed (only a 30-min idle sweep), the primary OOM cause on Render.
   private cache = new Map<string, CachedTenant>();
+  private readonly maxCache = Math.max(5, parseInt(process.env.TENANT_CACHE_MAX || "50"));
   private bgeProvider: BGEEmbeddingProvider;
   private evictionInterval: ReturnType<typeof setInterval>;
 
@@ -45,6 +49,10 @@ export class TenantManager {
     const cached = this.cache.get(tenantId);
     if (cached) {
       cached.lastAccess = Date.now();
+      // LRU touch: re-insert so this tenant becomes most-recently-used (Map keeps
+      // insertion order, so the first key is always the eviction candidate).
+      this.cache.delete(tenantId);
+      this.cache.set(tenantId, cached);
       return cached.chat;
     }
 
@@ -149,7 +157,13 @@ export class TenantManager {
       chat.setContextNotes(allNotes.map(n => ({ ...n, addedAt: (n as any).addedAt || new Date().toISOString() })));
     }
 
-    // Cache the instance
+    // Cache the instance, evicting the least-recently-used while at capacity.
+    while (this.cache.size >= this.maxCache) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+      console.log(`[tenant-manager] LRU-evicted ${oldest} (cap ${this.maxCache})`);
+    }
     this.cache.set(tenantId, { chat, lastAccess: Date.now() });
 
     return chat;

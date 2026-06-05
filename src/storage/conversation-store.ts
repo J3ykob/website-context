@@ -80,8 +80,15 @@ function col(tenantId: string, type: string) {
 
 // ─── Message-level logging ──────────────────────────────────────────────────
 
-// Track session state for analytics
-const sessionState = new Map<string, { messageCount: number; conversationId: string; isFirstSession: boolean }>();
+// Track session state for analytics. Bounded by an idle sweep — this map used to
+// grow unbounded (one entry per unique session, never cleared), a memory leak.
+const sessionState = new Map<string, { messageCount: number; conversationId: string; isFirstSession: boolean; ts: number }>();
+const SESSION_STATE_TTL_MS = 2 * 60 * 60 * 1000; // 2h idle = session over
+const sessionSweep = setInterval(() => {
+  const cutoff = Date.now() - SESSION_STATE_TTL_MS;
+  for (const [k, v] of sessionState) if (v.ts < cutoff) sessionState.delete(k);
+}, 30 * 60 * 1000);
+(sessionSweep as any).unref?.();
 
 export async function logMessage(
   tenantId: string,
@@ -106,9 +113,11 @@ export async function logMessage(
       messageCount: 0,
       conversationId: randomUUID(),
       isFirstSession: true,
+      ts: Date.now(),
     };
     sessionState.set(stateKey, state);
   }
+  state.ts = Date.now(); // mark active for the idle sweep
 
   const messageIndex = state.messageCount;
   state.messageCount++;
