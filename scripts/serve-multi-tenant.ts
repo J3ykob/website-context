@@ -69,6 +69,7 @@ import {
   ChannelSessionStore,
 } from "../src/channels/index.js";
 import type { MetaChannelConfig } from "../src/channels/index.js";
+import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "3211");
@@ -2508,6 +2509,21 @@ app.all("/api/voice/twiml", (req, res) => {
   res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Play>${xmlEscape(audioUrl)}</Play>\n  <Hangup/>\n</Response>`);
 });
 
+// Live voice bot (Twilio ConversationRelay): Twilio does Polish STT+TTS+turn-taking and
+// connects to our WebSocket (/api/voice/relay), which streams answers from the tenant chat.
+// Query overrides (?tenantId / ?tts / ?voice) let you A/B a voice without a redeploy.
+app.all("/api/voice/relay-twiml", (req, res) => {
+  if (!validateTwilio(req)) { res.status(403).send("Forbidden"); return; }
+  const wsUrl = `wss://${req.get("host")}/api/voice/relay`;
+  const tenantId = (((req.query.tenantId as string) || process.env.VOICE_BOT_TENANT || "")).replace(/[^a-zA-Z0-9_-]/g, "");
+  const ttsProvider = (((req.query.tts as string) || process.env.VOICE_TTS_PROVIDER || "Google")).replace(/[^a-zA-Z]/g, "");
+  const voice = (((req.query.voice as string) || process.env.VOICE_TTS_VOICE || "")).replace(/[^a-zA-Z0-9._-]/g, "");
+  const greeting = process.env.VOICE_GREETING || "Dzień dobry, z tej strony asystent Whisp. W czym mogę pomóc?";
+  const voiceAttr = voice ? ` voice="${xmlEscape(voice)}"` : "";
+  res.setHeader("Content-Type", "text/xml");
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" language="pl-PL" transcriptionProvider="Deepgram" ttsProvider="${xmlEscape(ttsProvider)}"${voiceAttr} interruptible="any">\n      <Parameter name="tenantId" value="${xmlEscape(tenantId)}"/>\n    </ConversationRelay>\n  </Connect>\n</Response>`);
+});
+
 // Call status callbacks (StatusCallbackEvent=completed). Logged to the admin log
 // ring; the runner separately polls Twilio for the authoritative per-call outcome.
 app.post("/api/voice/status", (req, res) => {
@@ -2741,8 +2757,10 @@ async function sweepTenants() {
 setInterval(sweepTenants, 10 * 60 * 1000); // 40 tenants / 10 min, cycles all in a few hours
 
 // Start server
-app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`[multi-tenant] Server ready on port ${port}`);
   console.log(`  Dashboard: http://localhost:${port}/dashboard`);
   console.log(`  API: http://localhost:${port}/api`);
 });
+// Live voice bot (Twilio ConversationRelay) shares this HTTP server for its WebSocket.
+attachVoiceRelayWS(server, tenantManager);
