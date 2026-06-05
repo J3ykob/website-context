@@ -11,6 +11,7 @@ import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { QdrantVectorStore } from "../embeddings/qdrant-store.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { WebsiteChat } from "../llm/chat.js";
+import { getFlows } from "../flows/flow-store.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -101,7 +102,9 @@ export class TenantManager {
         forms: [],
         structuredData: [],
       })),
-      flows: meta.flows || [],
+      // Flows come from the R2-backed flow-store (source of truth), not meta.flows
+      // (which was scrape-time only) — so owner-recorded flows actually reach the bot.
+      flows: await getFlows(meta.tenantId),
       chunks: [], // Chunks are in Qdrant, not in memory
       businessProfile: meta.officialInfo || undefined,
     };
