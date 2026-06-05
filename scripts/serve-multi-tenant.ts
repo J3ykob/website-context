@@ -594,7 +594,7 @@ app.get("/demo/:tenantId", async (req, res) => {
   const visitIp = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
   // Filter scanner IPs (AWS, Azure, Google Cloud) and internal IPs
   const isScanner = /^(18\.|52\.|54\.|35\.|4\.|13\.|34\.|20\.|40\.|48\.|72\.14[45]|85\.210|135\.225|155\.117|164\.132|172\.186|217\.182)/.test(visitIp);
-  const isInternal = visitIp === "79.184.118.71" || visitIp === "176.9.1.133" || visitIp.startsWith("127.");
+  const isInternal = !!req.headers["x-whisp-probe"] || (req.query as any)?.probe === "1" || visitIp === "79.184.118.71" || visitIp === "176.9.1.133" || visitIp.startsWith("127.");
   if (!isScanner && !isInternal) {
     getEmailForTenant(tenant.id).then(email => {
       if (email) recordEvent(email, "demo_visit", { ip: visitIp });
@@ -1363,7 +1363,12 @@ app.post("/api/chat", async (req, res) => {
 
     const lastUserContent = messages[messages.length - 1]?.content || "";
     const chatIpRaw = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
-    const isSelfChat = chatIpRaw === "79.184.118.71" || chatIpRaw === "176.9.1.133" || chatIpRaw.startsWith("127.");
+    // Internal/probe traffic must NEVER touch prospect analytics. Two signals:
+    // (1) self-test IPs, (2) an explicit X-Whisp-Probe header / ?probe=1 marker that
+    // the fleet health-check + dev test scripts set (robust regardless of origin IP —
+    // the health-check pings every demo and otherwise inflates chat_start/sessions).
+    const isProbe = !!req.headers["x-whisp-probe"] || (req.query as any)?.probe === "1";
+    const isSelfChat = isProbe || chatIpRaw === "79.184.118.71" || chatIpRaw === "176.9.1.133" || chatIpRaw.startsWith("127.");
     // Shared fire-and-forget logging for both the streaming and non-streaming paths.
     const logResponse = (response: any) => {
       // Single D1 writer for chat messages (logMessage -> chat_messages). Skip
@@ -1377,7 +1382,7 @@ app.post("/api/chat", async (req, res) => {
           domain: tenant.domain,
         }).catch(() => {});
       }
-      if (messages.length <= 1) {
+      if (messages.length <= 1 && !isSelfChat) {
         getEmailForTenant(tenantId).then(email => {
           if (email) recordEvent(email, "chat_start", { sessionId: sessionKey, firstMessage: lastUserContent.slice(0, 100) });
         }).catch(() => {});
