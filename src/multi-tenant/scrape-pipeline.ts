@@ -1,6 +1,6 @@
 /**
  * Reusable scrape+embed pipeline for a tenant.
- * Crawls the site, builds context, embeds into Qdrant, and saves metadata.
+ * Crawls the site, builds context, embeds into Cloudflare Vectorize, and saves metadata.
  */
 
 import { existsSync, mkdirSync } from "fs";
@@ -25,7 +25,7 @@ export interface ScrapePipelineResult {
 }
 
 /**
- * Scrapes a tenant's site, builds context, embeds into Qdrant, and saves metadata.
+ * Scrapes a tenant's site, builds context, embeds into Cloudflare Vectorize, and saves metadata.
  */
 export async function scrapeTenant(
   tenantId: string,

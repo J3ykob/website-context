@@ -1,6 +1,7 @@
 /**
  * Tenant Manager — lazily loads and caches WebsiteChat instances per tenant.
- * Shares a single BGEEmbeddingProvider across all tenants, with per-tenant Qdrant collections.
+ * Shares a single BGEEmbeddingProvider across all tenants; vectors live in per-tenant
+ * Cloudflare Vectorize namespaces (Qdrant has been fully retired from the serving path).
  */
 
 import { existsSync } from "fs";
@@ -92,7 +93,7 @@ export class TenantManager {
       officialInfo?: OfficialBusinessInfo | null;
     };
 
-    // Build minimal WebsiteContext (chunks are in Qdrant, not loaded into memory)
+    // Build minimal WebsiteContext (chunks live in Vectorize, not loaded into memory)
     const context: WebsiteContext = {
       tenantId: meta.tenantId,
       version: 1,
@@ -112,7 +113,7 @@ export class TenantManager {
       // Flows come from the R2-backed flow-store (source of truth), not meta.flows
       // (which was scrape-time only) — so owner-recorded flows actually reach the bot.
       flows: await getFlows(meta.tenantId),
-      chunks: [], // Chunks are in Qdrant, not in memory
+      chunks: [], // Chunks live in Vectorize, not in memory
       businessProfile: meta.officialInfo || undefined,
     };
 

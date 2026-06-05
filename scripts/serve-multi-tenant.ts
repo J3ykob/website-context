@@ -8,8 +8,6 @@
  *   PORT — server port (default: 3211)
  *   BGE_HOST — BGE embedding server host
  *   BGE_PORT — BGE embedding server port
- *   QDRANT_HOST — Qdrant server host
- *   QDRANT_PORT — Qdrant server port
  */
 
 import { resolve, dirname, sep } from "path";
@@ -1674,96 +1672,6 @@ app.post("/api/admin/rescrape-all", (req, res) => {
   res.json({ ok: true, queued, tenants: targets.map(t => t.id) });
 });
 
-// Run business audit on all tenants + optionally send insight emails
-app.post("/api/admin/audit", async (req, res) => {
-  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
-  // Defense-in-depth: mass email requires BOTH send=true and an explicit confirmSend=true,
-  // so even a leaked secret can't accidentally fire bulk mail from monitor@whisp.so.
-  const sendEmails = req.query.send === "true" && req.query.confirmSend === "true";
-  const limit = parseInt(req.query.limit as string) || 20;
-  const allTenants = listTenants().filter(t => t.status === "active" && t.chunksCount > 0);
-  const force = req.query.force === "true";
-  // Only process tenants that haven't been audited yet, up to limit (unless force)
-  const tenants = force
-    ? allTenants.slice(0, limit)
-    : allTenants.filter(t => !existsSync(resolve(__dirname, `../data/${t.id}/business-info.json`))).slice(0, limit);
-
-  const qdrantHost = process.env.QDRANT_HOST || "152.53.243.28";
-  const qdrantPort = process.env.QDRANT_PORT || "6333";
-
-  let audited = 0;
-  let withGaps = 0;
-  let emailed = 0;
-
-  for (const tenant of tenants) {
-    const tenantDir = resolve(__dirname, `../data/${tenant.id}`);
-    const bizInfoPath = resolve(tenantDir, "business-info.json");
-
-    if (existsSync(bizInfoPath)) { audited++; continue; }
-
-    try {
-      const collection = `wctx_${tenant.id}`;
-      const resp = await fetch(`http://${qdrantHost}:${qdrantPort}/collections/${collection}/points/scroll`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 100, with_payload: true }),
-        signal: AbortSignal.timeout(5000),
-      });
-      const data = await resp.json() as any;
-      const chunks = (data.result?.points || []).map((p: any) => ({ content: p.payload?.content || "" }));
-      if (chunks.length === 0) continue;
-
-      const { auditBusinessInfo, businessInfoToNotes } = await import("../src/multi-tenant/business-audit.js");
-      const bizInfo = auditBusinessInfo(chunks);
-      const autoNotes = businessInfoToNotes(bizInfo);
-
-      if (!existsSync(tenantDir)) mkdirSync(tenantDir, { recursive: true });
-      await writeFile(bizInfoPath, JSON.stringify({ ...bizInfo, autoNotes, auditedAt: new Date().toISOString() }, null, 2));
-      if (autoNotes.length > 0) {
-        await writeFile(resolve(tenantDir, "auto-context-notes.json"), JSON.stringify(autoNotes, null, 2));
-      }
-
-      audited++;
-      if (bizInfo.gaps.length > 0) withGaps++;
-
-      if (sendEmails && bizInfo.gaps.length > 0 && tenant.email) {
-        const { generateGapEmail } = await import("../src/multi-tenant/business-audit.js");
-        const gapDescriptions: Record<string, string> = {
-          "phone number": "Visitors looking to call you can't find your phone number easily",
-          "email address": "There's no clear email contact for inquiries",
-          "physical address / location": "Customers trying to visit can't find your address",
-          "opening hours / business hours": "People checking when you're open get no answer",
-          "pricing / rates": "Visitors want to know your prices before contacting you",
-          "booking / appointment system": "There's no clear way to book online",
-        };
-        const insights = bizInfo.gaps.filter((g: string) => gapDescriptions[g]).slice(0, 3);
-        if (insights.length > 0) {
-          const demoUrl = `${process.env.BASE_URL || "https://whisp.so"}/demo/${tenant.id}`;
-          const insightList = insights.map((g: string) => `<li style="padding:6px 0;color:#cbd5e1;font-size:14px;">${gapDescriptions[g]}</li>`).join("");
-
-          try {
-            const emailResp = await fetch("https://api.resend.com/emails", {
-              method: "POST",
-              headers: { "Authorization": `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({
-                from: process.env.EMAIL_FROM || "Jakub <jakub@whisp.so>",
-                to: [tenant.email],
-                reply_to: "jakub@whisp.so",
-                subject: `${tenant.domain} — ${bizInfo.gaps.length} things your visitors can't find`,
-                html: `<div style="font-family:system-ui;background:#0a0e1a;padding:40px 20px;"><div style="max-width:520px;margin:0 auto;background:#111827;border-radius:16px;border:1px solid rgba(255,255,255,0.08);padding:40px;"><h2 style="color:#f1f5f9;font-size:20px;margin:0 0 16px;">I analyzed ${tenant.domain}</h2><p style="color:#94a3b8;font-size:15px;line-height:1.6;margin:0 0 20px;">I ran an AI audit on your website and found ${insights.length} thing${insights.length > 1 ? "s" : ""} visitors are probably looking for but can't find:</p><ul style="list-style:none;padding:0;margin:0 0 24px;">${insightList}</ul><p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0 0 24px;">I also built an AI assistant that knows your website and answers visitor questions 24/7:</p><a href="${demoUrl}" style="display:inline-block;background:#3b82f6;color:#fff;font-size:14px;font-weight:600;padding:12px 24px;border-radius:10px;text-decoration:none;">See your AI assistant</a><p style="color:#64748b;font-size:13px;margin-top:20px;">Free — no signup needed. One line of code to add to your site.</p><p style="color:#334155;font-size:11px;margin-top:28px;">Jakub — whisp.so</p></div></div>`,
-              }),
-            });
-            if (emailResp.ok) emailed++;
-          } catch {}
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-    } catch {}
-  }
-
-  res.json({ ok: true, audited, withGaps, emailed, total: tenants.length });
-});
-
 // Health check per tenant
 app.get("/api/health/:tenantId", (req, res) => {
   const tenant = getTenant(req.params.tenantId);
@@ -1926,14 +1834,14 @@ app.get("/api/dashboard/stats", authMiddleware, async (req, res) => {
   } catch { res.json({ totalConversations: 0, totalToday: 0, questionsAnswered: 0, gapsFound: 0, flowsExecuted: 0 }); }
 });
 
-// Conversations (from Qdrant — persists across deploys)
+// Conversations (from D1 chat_messages — persists across deploys)
 app.get("/api/dashboard/conversations", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
   res.json(await getConversations(tenantId, limit));
 });
 
-// Unknown questions (from Qdrant)
+// Unknown questions (from D1 unknown_questions)
 app.get("/api/dashboard/unknown-questions", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   res.json(await getUnknownQuestions(tenantId));
