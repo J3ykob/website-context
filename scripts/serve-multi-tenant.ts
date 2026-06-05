@@ -1176,13 +1176,20 @@ app.post("/api/tenants", (req, res) => {
     // Scraping is handled by VPS - don't enqueue on Render
     // worker.enqueue(tenant.id, siteUrl);
 
-    // Send welcome email with setup link
-    const protocol = req.protocol || "http";
-    const host = req.get("host") || `localhost:${port}`;
-    const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
-    sendWelcomeEmail(email, tenant.id, setupToken, baseUrl).catch((err) => {
-      console.error("[create-tenant] Failed to send welcome email:", err.message);
-    });
+    // Welcome / set-password email — ONLY for genuine self-serve signups (the public,
+    // non-admin path). Outreach creates tenants via the admin path (?secret=); cold
+    // prospects must NOT get a "set your password" email — that's a spam-complaint /
+    // sender-reputation risk and isn't an approved outreach template.
+    if (!isAdmin) {
+      const protocol = req.protocol || "http";
+      const host = req.get("host") || `localhost:${port}`;
+      const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+      sendWelcomeEmail(email, tenant.id, setupToken, baseUrl).catch((err) => {
+        console.error("[create-tenant] Failed to send welcome email:", err.message);
+      });
+    } else {
+      console.log(`[create-tenant] ${tenant.id}: admin/outreach create — welcome email skipped`);
+    }
 
     res.status(201).json({
       tenantId: tenant.id,
