@@ -1805,6 +1805,25 @@ app.post("/api/auth/login", (req, res) => {
   res.json({ token, tenantId: tenant.id });
 });
 
+// Admin-gated login: mint a dashboard session for ANY tenant (support + e2e testing).
+// Requires ADMIN_SECRET — not a public backdoor. ?redirect=1 stores the token and
+// opens the dashboard directly; otherwise returns { token, tenantId } as JSON.
+app.get("/api/admin/login-as", (req, res) => {
+  if (!ADMIN_SECRET || (req.query.secret as string) !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
+  const tenantId = ((req.query.tenantId as string) || "").trim();
+  if (!tenantId) { res.status(400).json({ error: "tenantId required" }); return; }
+  if (!getTenant(tenantId)) { res.status(404).json({ error: "Tenant not found" }); return; }
+  const token = createSession(tenantId);
+  if (req.query.redirect === "1") {
+    res.type("html").send('<!DOCTYPE html><meta charset="utf-8"><title>Signing in…</title><script>'
+      + 'localStorage.setItem("wctx-dashboard-token",' + JSON.stringify(token) + ');'
+      + 'localStorage.setItem("wctx-tenant-id",' + JSON.stringify(tenantId) + ');'
+      + 'location.href="/dashboard";</script>Signing in…');
+    return;
+  }
+  res.json({ token, tenantId });
+});
+
 // Setup password (first-time) — accepts either setup token or API key
 app.post("/api/auth/setup-password", (req, res) => {
   const { tenantId, apiKey, token: setupToken, password } = req.body;
