@@ -41,7 +41,7 @@ async function streamPitchReply(messages: { role: string; content: string }[], o
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: process.env.VOICE_LLM_MODEL || "google/gemini-2.0-flash-001", // low time-to-first-token
+      model: process.env.VOICE_LLM_MODEL || "openai/gpt-4o-mini", // fast TTFT + solid Polish (verified on OpenRouter)
       messages: [{ role: "system", content: WHISP_SYSTEM }, ...messages],
       stream: true,
       max_tokens: 180,
