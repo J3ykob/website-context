@@ -10,7 +10,6 @@ import { fileURLToPath } from "url";
 import { crawlSite, closeBrowser } from "../scraper/index.js";
 import { buildContext } from "../context/index.js";
 import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
-import { QdrantVectorStore } from "../embeddings/qdrant-store.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { embedChunks } from "../embeddings/pipeline.js";
 import { scrapeGooglePlaces, placesToChunks } from "../scraper/google-places.js";
@@ -33,34 +32,17 @@ export async function scrapeTenant(
   siteUrl: string,
   maxPages: number
 ): Promise<ScrapePipelineResult> {
-  const collection = `wctx_${tenantId}`;
-
   const provider = new BGEEmbeddingProvider({
     host: process.env.BGE_HOST,
     port: process.env.BGE_PORT ? parseInt(process.env.BGE_PORT) : undefined,
   });
 
-  const useVectorize = !!process.env.CF_API_TOKEN;
-  const store = useVectorize
-    ? new CloudflareVectorizeStore({ tenantId })
-    : new QdrantVectorStore({
-        host: process.env.QDRANT_HOST,
-        port: process.env.QDRANT_PORT ? parseInt(process.env.QDRANT_PORT) : undefined,
-        collection,
-        createIfMissing: true,
-      });
-
-  // Clear old vectors before re-scraping
-  if (useVectorize) {
-    console.log(`[scrape-pipeline] Using Cloudflare Vectorize for ${tenantId}`);
-  } else {
-    const qdrantHost = process.env.QDRANT_HOST || "152.53.243.28";
-    const qdrantPort = process.env.QDRANT_PORT || "6333";
-    try {
-      await fetch(`http://${qdrantHost}:${qdrantPort}/collections/${collection}`, { method: "DELETE" });
-      console.log(`[scrape-pipeline] Cleared old collection ${collection}`);
-    } catch {}
-  }
+  // Cloudflare Vectorize is the only vector store in production (CF_API_TOKEN is
+  // always set on Render/VPS). Kept as a constant so the vector-op guards below read
+  // clearly; the Qdrant vector fallback was dead code and has been removed.
+  const useVectorize = true;
+  const store = new CloudflareVectorizeStore({ tenantId });
+  console.log(`[scrape-pipeline] Using Cloudflare Vectorize for ${tenantId}`);
 
   // Crawl site first (uses shared browser)
   console.log(`[scrape-pipeline] Crawling ${siteUrl} (max ${maxPages} pages) for tenant ${tenantId}`);

@@ -8,7 +8,6 @@ import { readFile, writeFile } from "fs/promises";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
-import { QdrantVectorStore } from "../embeddings/qdrant-store.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { WebsiteChat } from "../llm/chat.js";
 import { getFlows } from "../flows/flow-store.js";
@@ -117,16 +116,8 @@ export class TenantManager {
       businessProfile: meta.officialInfo || undefined,
     };
 
-    // Per-tenant vector store - Cloudflare Vectorize (or Qdrant fallback)
-    const useVectorize = !!process.env.CF_API_TOKEN;
-    const store = useVectorize
-      ? new CloudflareVectorizeStore({ tenantId })
-      : new QdrantVectorStore({
-          host: process.env.QDRANT_HOST,
-          port: process.env.QDRANT_PORT ? parseInt(process.env.QDRANT_PORT) : undefined,
-          collection: `wctx_${tenantId}`,
-          createIfMissing: false,
-        });
+    // Per-tenant vector store — Cloudflare Vectorize (the only store in production).
+    const store = new CloudflareVectorizeStore({ tenantId });
 
     // Create WebsiteChat with OpenRouter
     const chat = new WebsiteChat(this.bgeProvider, store, context, {
