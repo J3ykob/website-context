@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pricing — Whisp</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root { --bg:#0a0e1a; --text:#f1f5f9; --muted:#94a3b8; --line:rgba(255,255,255,0.08); --blue:#3b82f6; }
+  body { font-family:"Archivo",-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; padding:20px 32px; max-width:1100px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-size:14px; font-weight:700; letter-spacing:0.08em; }
+  .brand .mark { width:22px; height:22px; background:rgba(255,255,255,0.85); border-radius:6px; position:relative; }
+  .brand .mark::before { content:""; position:absolute; inset:4px; border:1.5px solid rgba(10,14,26,0.85); border-radius:3px; }
+  .nav-back { font-size:13px; color:var(--muted); text-decoration:none; }
+  .nav-back:hover { color:var(--text); }
+  .hero { text-align:center; padding:56px 24px 8px; }
+  .hero .label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.14em; color:var(--blue); margin-bottom:14px; }
+  .hero h1 { font-family:"DM Serif Display",serif; font-weight:400; font-size:clamp(30px,6vw,52px); line-height:1.05; }
+  .hero p { color:var(--muted); font-size:16px; margin-top:14px; }
+  .pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; max-width:1040px; margin:48px auto 64px; padding:0 24px; align-items:start; }
+  .price-card { background:#111827; border:1px solid var(--line); border-radius:20px; padding:32px 28px; display:flex; flex-direction:column; }
+  .price-card.featured { border-color:rgba(59,130,246,0.5); box-shadow:0 12px 48px rgba(59,130,246,0.15); position:relative; }
+  .price-card.featured::after { content:"Most popular"; position:absolute; top:-11px; left:50%; transform:translateX(-50%); background:var(--blue); color:#fff; font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:4px 12px; border-radius:8px; }
+  .price-name { font-size:14px; font-weight:700; letter-spacing:0.04em; }
+  .price-amount { font-family:"DM Serif Display",serif; font-size:40px; margin:14px 0 4px; }
+  .price-amount span { font-family:"Archivo",sans-serif; font-size:13px; font-weight:500; color:var(--muted); }
+  .price-desc { color:var(--muted); font-size:13px; margin-bottom:22px; }
+  .price-features { list-style:none; flex:1; margin-bottom:26px; }
+  .price-features li { font-size:14px; color:#cbd5e1; padding:7px 0 7px 26px; position:relative; line-height:1.4; }
+  .price-features li::before { content:""; position:absolute; left:2px; top:11px; width:12px; height:7px; border-left:2px solid var(--blue); border-bottom:2px solid var(--blue); transform:rotate(-45deg); }
+  .price-btn { display:block; text-align:center; padding:13px; border-radius:12px; font-size:14px; font-weight:700; text-decoration:none; transition:all 0.2s; }
+  .price-btn-primary { background:var(--blue); color:#fff; }
+  .price-btn-primary:hover { background:#2563eb; }
+  .price-btn-outline { background:transparent; color:var(--text); border:1px solid rgba(255,255,255,0.18); }
+  .price-btn-outline:hover { background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.35); }
+  .foot { text-align:center; color:var(--muted); font-size:12px; padding:0 24px 56px; line-height:1.6; }
+  .foot a { color:var(--blue); text-decoration:none; }
+  @media (max-width:760px) {
+    .pricing-grid { grid-template-columns:1fr; max-width:440px; gap:16px; margin:36px auto 48px; }
+    .price-card.featured { order:-1; }
+    .topbar { padding:16px 20px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="/" class="brand"><span class="mark"></span><span>WHISP</span></a>
+    <a href="/" class="nav-back">← Back to home</a>
+  </div>
+
+  <div class="hero">
+    <div class="label">Pricing</div>
+    <h1>Free forever. Pay for insights.</h1>
+    <p>Start free in under 5 minutes - no credit card required.</p>
+  </div>
+
+  <div class="pricing-grid">
+    <div class="price-card">
+      <div class="price-name">Free</div>
+      <div class="price-amount">0 <span>PLN / month</span></div>
+      <div class="price-desc">Everything to get started.</div>
+      <ul class="price-features">
+        <li>AI chat widget</li>
+        <li>Auto-scrape your site</li>
+        <li>Unlimited conversations</li>
+        <li>1 recorded flow</li>
+        <li>Gap notifications</li>
+        <li>7-day history</li>
+      </ul>
+      <a href="/#signup" class="price-btn price-btn-outline">Get started</a>
+    </div>
+
+    <div class="price-card featured">
+      <div class="price-name">Analytics Pro</div>
+      <div class="price-amount">149 <span>PLN / month</span></div>
+      <div class="price-desc">Know what your visitors want.</div>
+      <ul class="price-features">
+        <li>Everything in Free</li>
+        <li>Intent heatmap &amp; trends</li>
+        <li>Full conversation search</li>
+        <li>Weekly email digest</li>
+        <li>90-day history</li>
+        <li>Unlimited flows</li>
+        <li>API access</li>
+      </ul>
+      <a href="/#signup" class="price-btn price-btn-primary">Start free trial</a>
+    </div>
+
+    <div class="price-card">
+      <div class="price-name">Industry Benchmarks</div>
+      <div class="price-amount">299 <span>PLN / month</span></div>
+      <div class="price-desc">Compare to your sector.</div>
+      <ul class="price-features">
+        <li>Everything in Pro</li>
+        <li>Cross-industry insights</li>
+        <li>Competitor comparison</li>
+        <li>AI recommendations</li>
+        <li>White-label widget</li>
+        <li>Priority support</li>
+        <li>Custom integrations</li>
+      </ul>
+      <a href="/#signup" class="price-btn price-btn-outline">Contact us</a>
+    </div>
+  </div>
+
+  <div class="foot">
+    Prices in PLN, billed monthly. Cancel anytime.<br>
+    Questions? <a href="/">Try the live demo on our homepage</a> or email jakub@whisp.so
+  </div>
+</body>
+</html>

@@ -275,6 +275,11 @@ app.get("/claim", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/claim/index.html"));
 });
 
+// Pricing page
+app.get("/pricing", (_, res) => {
+  res.sendFile(resolve(__dirname, "../public/pricing.html"));
+});
+
 // Widget JS
 app.get("/widget.js", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/widget.js"));
