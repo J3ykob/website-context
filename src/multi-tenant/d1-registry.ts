@@ -162,3 +162,30 @@ export function deleteTenant(id: string): void {
   persist("DELETE FROM tenants WHERE id = ?", [id], "deleteTenant");
   persist("DELETE FROM sessions WHERE tenant_id = ?", [id], "deleteTenant.sessions");
 }
+
+/**
+ * One-time migration helper: AWAITED bulk upsert of records (read from the legacy
+ * SQLite registry) into D1. Unlike the write-through upsert(), this awaits each
+ * write and reports failures so the migration can be verified. Idempotent
+ * (INSERT OR REPLACE).
+ */
+export async function bulkUpsertTenants(records: TenantRecord[]): Promise<{ ok: number; fail: number }> {
+  const placeholders = UPSERT_COLS.split(",").map(() => "?").join(",");
+  let ok = 0, fail = 0;
+  for (const r of records) {
+    try {
+      await query(`INSERT OR REPLACE INTO tenants (${UPSERT_COLS}) VALUES (${placeholders})`, recordParams(r));
+      ok++;
+    } catch (e) {
+      console.error(`[migrate] tenant ${r.id} failed: ${(e as Error).message}`);
+      fail++;
+    }
+  }
+  return { ok, fail };
+}
+
+/** Count tenants currently in D1 (source of truth) — for migration verification. */
+export async function countD1Tenants(): Promise<number> {
+  const rows = await query("SELECT COUNT(*) AS n FROM tenants");
+  return Number((rows[0] as any)?.n || 0);
+}
