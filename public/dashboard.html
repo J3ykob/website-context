@@ -904,7 +904,12 @@
     function saveNewChunk() {
       var t=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();
       if (!c) return;
-      authFetch(API+"/api/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:t})}).then(function(){closeChunkModal();loadChunks();});
+      authFetch(API+"/api/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:t})}).then(function(r){
+        if (!r.ok) throw new Error("save failed");
+        closeChunkModal();
+        alert("Added to the knowledge base. New material is indexed now and becomes answerable within about a minute.");
+        setTimeout(loadChunks, 1500);
+      }).catch(function(){ alert("Could not save - please try again."); });
     }
 
     function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }

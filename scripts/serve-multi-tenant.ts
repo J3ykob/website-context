@@ -17,6 +17,8 @@ import { fileURLToPath } from "url";
 import { readFile, writeFile, appendFile } from "fs/promises";
 import { loadCfToken } from "../src/storage/cf-auth.js";
 import { CloudflareVectorizeStore } from "../src/embeddings/vectorize-store.js";
+import { BGEEmbeddingProvider } from "../src/embeddings/bge-provider.js";
+import { createHash } from "crypto";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
 import cors from "cors";
@@ -2000,19 +2002,123 @@ app.post("/api/dashboard/rescrape", authMiddleware, (req, res) => {
 });
 
 // Chunks
+// ─── Knowledge base: visualize + edit chunks ─────────────────────────────
+// Chunk CONTENT lives in Vectorize metadata, not context-meta (which only has
+// the page list). So the KB tree reads the tenant's vectors directly. With a
+// search term we embed it for real semantic matches; without, a fixed probe
+// surfaces an arbitrary slice (capped at topK 100).
+function bgeProvider() {
+  return new BGEEmbeddingProvider({
+    host: process.env.BGE_HOST,
+    port: process.env.BGE_PORT ? parseInt(process.env.BGE_PORT) : undefined,
+  });
+}
+async function adjustChunkCount(tenantId: string, delta: number) {
+  try {
+    const metaPath = resolve(__dirname, `../data/${tenantId}/context-meta.json`);
+    if (!existsSync(metaPath)) return;
+    const meta = JSON.parse(await readFile(metaPath, "utf-8"));
+    meta.chunksCount = Math.max(0, (meta.chunksCount || 0) + delta);
+    await writeFile(metaPath, JSON.stringify(meta, null, 2));
+  } catch { /* best effort — viz still works off Vectorize */ }
+}
+
 app.get("/api/dashboard/chunks", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
+  const search = ((req.query.search as string) || "").trim();
+  const store = new CloudflareVectorizeStore({ tenantId });
+  let queryVec: number[];
+  try {
+    queryVec = search ? (await bgeProvider().embed([search]))[0] : new Array(1024).fill(0.01);
+  } catch { queryVec = new Array(1024).fill(0.01); }
 
-  // Load context meta to get page info
-  const metaPath = resolve(__dirname, `../data/${tenantId}/context-meta.json`);
-  if (!existsSync(metaPath)) { res.json({ total: 0, pages: [] }); return; }
+  let results: any[] = [];
+  try { results = await store.search(queryVec, 100); } catch { results = []; }
 
-  const meta = JSON.parse(await readFile(metaPath, "utf-8"));
-  res.json({
-    total: meta.chunksCount || 0,
-    pages: meta.pages || [],
-    note: "Chunk content is stored in Qdrant. Use search to find specific content.",
-  });
+  // Group chunks by source page (url) into the folder tree the dashboard expects.
+  const byUrl = new Map<string, any>();
+  for (const r of results) {
+    const url = (r.metadata && r.metadata.url) || "manual://added";
+    if (!byUrl.has(url)) {
+      const isManual = String(url).indexOf("manual") === 0;
+      byUrl.set(url, { url, title: isManual ? "Added materials" : ((r.metadata && r.metadata.title) || url), chunks: [] });
+    }
+    const hh = (r.metadata && r.metadata.headingHierarchy) || [];
+    byUrl.get(url).chunks.push({
+      id: r.id,
+      heading: Array.isArray(hh) && hh.length ? hh[hh.length - 1] : ((r.metadata && r.metadata.title) || ""),
+      type: (r.metadata && r.metadata.type) || "content",
+      content: r.content || "",
+    });
+  }
+
+  // Authoritative total comes from context-meta (the Vectorize query caps at 100).
+  let total = results.length;
+  try {
+    const metaPath = resolve(__dirname, `../data/${tenantId}/context-meta.json`);
+    if (existsSync(metaPath)) total = JSON.parse(await readFile(metaPath, "utf-8")).chunksCount || results.length;
+  } catch { /* ignore */ }
+
+  res.json({ total, pages: Array.from(byUrl.values()), truncated: results.length >= 100 });
+});
+
+// Upload a free-text knowledge chunk. Embeds it and upserts into Vectorize so the
+// bot retrieves it like any scraped chunk. Deliberately NOT tracked in
+// vector-ids.json, so a re-scrape's orphan cleanup leaves it alone (owner-added
+// material survives re-scrapes).
+app.post("/api/chunks", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const content = ((req.body && req.body.content) || "").toString().trim();
+  const title = (((req.body && req.body.title) || "").toString().trim()) || "Added material";
+  if (!content) { res.status(400).json({ error: "content required" }); return; }
+  if (content.length > 20000) { res.status(400).json({ error: "content too long (max 20000 chars)" }); return; }
+  try {
+    const vec = (await bgeProvider().embed([title + "\n\n" + content]))[0];
+    const id = "manual-" + createHash("sha256").update(content).digest("hex").slice(0, 16);
+    await new CloudflareVectorizeStore({ tenantId }).upsert([{
+      id, vector: vec, content,
+      metadata: { title, url: "manual://added", type: "manual", headingHierarchy: [title] },
+    }]);
+    await adjustChunkCount(tenantId, +1);
+    try { tenantManager.evictTenant(tenantId); } catch { /* not cached */ }
+    res.status(201).json({ id, ok: true });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// Edit a chunk's content (re-embed + overwrite the same id).
+app.put("/api/chunks/:id", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const id = req.params.id;
+  const content = ((req.body && req.body.content) || "").toString().trim();
+  if (!content) { res.status(400).json({ error: "content required" }); return; }
+  if (content.length > 20000) { res.status(400).json({ error: "content too long" }); return; }
+  try {
+    const vec = (await bgeProvider().embed([content]))[0];
+    await new CloudflareVectorizeStore({ tenantId }).upsert([{
+      id, vector: vec, content,
+      metadata: { title: "", url: "manual://added", type: "edited", headingHierarchy: [] },
+    }]);
+    try { tenantManager.evictTenant(tenantId); } catch { /* not cached */ }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// Delete a chunk.
+app.delete("/api/chunks/:id", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const id = req.params.id;
+  try {
+    await new CloudflareVectorizeStore({ tenantId }).delete([id]);
+    await adjustChunkCount(tenantId, -1);
+    try { tenantManager.evictTenant(tenantId); } catch { /* not cached */ }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
 });
 
 // ─── Analytics endpoints ─────────────────────────────────────────────────
