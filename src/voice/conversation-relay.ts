@@ -48,7 +48,7 @@ async function streamPitchReply(messages: { role: string; content: string }[], o
       model: process.env.VOICE_LLM_MODEL || "openai/gpt-4o-mini",
       messages: [{ role: "system", content: WHISP_SYSTEM }, ...messages],
       stream: true,
-      max_tokens: 130, // short, conversational turns
+      max_tokens: 80, // very short turns -> first audio sooner, snappier feel
       temperature: 0.6,
     }),
     signal: AbortSignal.timeout(30000),
