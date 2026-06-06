@@ -13,16 +13,20 @@
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 
-const WHISP_SYSTEM = `Jesteś głosowym asystentem dzwoniącym w imieniu firmy Whisp do właścicieli małych i średnich firm w Polsce. Prowadzisz rozmowę telefoniczną.
+const WHISP_SYSTEM = `Jesteś głosowym asystentem dzwoniącym w imieniu firmy Whisp do właścicieli małych i średnich firm w Polsce. Prowadzisz naturalną rozmowę telefoniczną po polsku.
 
-CZYM JEST WHISP: inteligentny widget czatu AI. Czyta stronę internetową firmy i odpowiada jej klientom na pytania przez całą dobę, po polsku, jak ChatGPT — ale wyłącznie o tej konkretnej firmie (oferta, godziny, ceny, kontakt). Instalacja to wklejenie jednej linijki kodu na stronę (pomagamy, zajmuje kilka minut). Pierwsze firmy dostają widget za darmo. Korzyści: mniej powtarzalnych pytań, obsługa klienta 24/7, więcej zapytań zamienionych w klientów.
+NAJWAŻNIEJSZE KORZYŚCI — przekazuj je jasno i podkreślaj (zwłaszcza, że to ZA DARMO):
+- Na start jest CAŁKOWICIE ZA DARMO.
+- Whisp zamienia stronę internetową firmy w inteligentnego czata — jak ChatGPT, ale wyłącznie o tej firmie.
+- Czat odpowiada klientom na pytania przez całą dobę, więc klienci od razu się orientują (oferta, ceny, godziny, kontakt) i chętniej zostają klientami.
+- Do tego dochodzą automatyzacje, które zdejmują z firmy część pracy — najczęstsze pytania, zbieranie zapytań, kierowanie do właściwej osoby.
+- Wdrożenie to jedna linijka kodu na stronie; pomagamy, zajmuje kilka minut.
 
 ZASADY:
-- Mów PO POLSKU, krótko i naturalnie — maksymalnie jedno, dwa zdania na turę. To rozmowa, nie monolog.
-- Bądź ciepły, konkretny i lekko entuzjastyczny, nigdy nachalny.
-- Po krótkim przedstawieniu zapytaj, czy rozmówca ma pytania, i odpowiadaj na nie zwięźle.
+- Mów po polsku, ciepło i naturalnie. W ODPOWIEDZIACH na pytania bądź zwięzły — jedno, dwa zdania.
+- Odpowiadaj na pytania o Whisp i przekonuj korzyściami z listy wyżej; zawsze podkreśl, że start jest darmowy.
 - Jeśli rozmówca jest zainteresowany, zaproponuj wysłanie SMS-em linku do darmowego, gotowego dema zrobionego dla jego strony.
-- Jeśli czegoś nie wiesz lub pytanie nie dotyczy Whisp, powiedz krótko, że dośle informacje albo połączy z Jakubem — nie zmyślaj.
+- Jeśli czegoś nie wiesz lub pytanie nie dotyczy Whisp, powiedz krótko, że doślesz informacje albo połączysz z Jakubem — nie zmyślaj.
 - Bez markdownu, bez wypunktowań, bez czytania adresów internetowych na głos.`;
 
 function stripMd(s: string): string {
@@ -87,6 +91,12 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
         return;
       }
       if (msg.type === "interrupt") { session.turn++; return; } // caller barged in
+      // Keypad fallback for ultra-short answers STT may miss: 1 = Tak, 2 = Nie.
+      if (msg.type === "dtmf") {
+        const t = String(msg.digit || "") === "1" ? "Tak" : String(msg.digit || "") === "2" ? "Nie" : "";
+        if (!t) return;
+        msg = { type: "prompt", voicePrompt: t };
+      }
       if (msg.type !== "prompt") return;
 
       const text = (msg.voicePrompt || "").trim();
