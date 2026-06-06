@@ -25,6 +25,7 @@ NAJWAŻNIEJSZE KORZYŚCI — przekazuj jasno (zwłaszcza, że to ZA DARMO):
 
 ZASADY ROZMOWY:
 - Mów po polsku, bardzo krótko i naturalnie — jedno, maksymalnie dwa krótkie zdania na turę. Bez monologów.
+- Prowadź rozmowę pytaniami OTWARTYMI (np. „Co Pana najbardziej interesuje?”, „Czego chciałby się Pan dowiedzieć?”) zamiast pytań tak/nie — dzięki temu rozmowa płynie i lepiej Pana słychać.
 - NIE pytaj o numer telefonu — już go mamy, bo to my dzwonimy.
 - Gdy rozmówca jest zainteresowany demem, prosi o link, mówi "tak"/"wyślij"/"poproszę", albo chce więcej informacji: powiedz krótko i ciepło, że właśnie wysyłasz mu SMS-em link do darmowego, gotowego dema, i NA SAMYM KOŃCU swojej wypowiedzi dopisz dokładnie znacznik ${SMS_TAG}. Ten znacznik jest niewidoczny i nie jest czytany. Wyślij SMS tylko raz w rozmowie.
 - Jeśli czegoś nie wiesz lub pytanie nie dotyczy Whisp, powiedz krótko, że dośle informacje albo połączy z Jakubem — nie zmyślaj.
@@ -97,6 +98,21 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
   wss.on("connection", (ws: WebSocket) => {
     const session: Session = { callSid: "", prospect: "", messages: [], turn: 0, smsSent: false };
 
+    // No-input recovery: if a short reply ("tak"/"dobra") isn't transcribed, the caller hears
+    // dead air. After ~8s of silence following the bot's turn, gently re-prompt (max twice).
+    let noInputTimer: ReturnType<typeof setTimeout> | null = null;
+    let reprompts = 0;
+    const clearNoInput = () => { if (noInputTimer) { clearTimeout(noInputTimer); noInputTimer = null; } };
+    const armNoInput = () => {
+      clearNoInput();
+      noInputTimer = setTimeout(() => {
+        if (reprompts >= 2) return;
+        reprompts++;
+        try { ws.send(JSON.stringify({ type: "text", token: "Halo, słyszał mnie Pan? Proszę śmiało mówić — słucham.", last: true })); } catch { /* socket closed */ }
+        armNoInput();
+      }, 8000);
+    };
+
     ws.on("message", (raw: any) => {
       let msg: any;
       try { msg = JSON.parse(raw.toString()); } catch { return; }
@@ -107,7 +123,7 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
         console.log(`[voice-relay] setup call=${session.callSid.slice(0, 10)} prospect=${session.prospect}`);
         return;
       }
-      if (msg.type === "interrupt") { session.turn++; return; }
+      if (msg.type === "interrupt") { session.turn++; clearNoInput(); return; }
       if (msg.type === "dtmf") {
         const t = String(msg.digit || "") === "1" ? "Tak" : String(msg.digit || "") === "2" ? "Nie" : "";
         if (!t) return;
@@ -117,6 +133,7 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
 
       const text = (msg.voicePrompt || "").trim();
       if (!text) return;
+      clearNoInput(); reprompts = 0; // real input arrived
       const myTurn = ++session.turn;
       session.messages.push({ role: "user", content: text });
       console.log(`[voice-relay] caller: "${text.slice(0, 90)}"`);
@@ -154,6 +171,7 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
             const ok = await sendDemoSms(session.prospect);
             console.log(`[voice-relay] demo SMS to ${session.prospect}: ${ok ? "sent" : "FAILED"}`);
           }
+          armNoInput(); // watch for dead air after the bot's turn (dropped short reply)
         } catch (e: any) {
           console.error(`[voice-relay] error: ${e?.message || e}`);
           if (myTurn === session.turn && !ended) ws.send(JSON.stringify({ type: "text", token: "Przepraszam, mam teraz problem techniczny. Proszę spróbować za chwilę.", last: true }));
@@ -161,7 +179,7 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
       })();
     });
 
-    ws.on("close", () => console.log(`[voice-relay] closed call=${session.callSid.slice(0, 10)}`));
+    ws.on("close", () => { clearNoInput(); console.log(`[voice-relay] closed call=${session.callSid.slice(0, 10)}`); });
     ws.on("error", (e: any) => console.error(`[voice-relay] ws error: ${e?.message || e}`));
   });
 
