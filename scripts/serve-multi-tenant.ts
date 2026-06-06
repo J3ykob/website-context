@@ -2520,12 +2520,13 @@ app.all("/api/voice/relay-twiml", (req, res) => {
   const voice = (((req.query.voice as string) || process.env.VOICE_TTS_VOICE || "")).replace(/[^a-zA-Z0-9._-]/g, "");
   const greeting = process.env.VOICE_GREETING || "Dzień dobry, z tej strony asystent Whisp. W czym mogę pomóc?";
   const voiceAttr = voice ? ` voice="${xmlEscape(voice)}"` : "";
+  const prospect = String(req.body?.To || req.body?.Called || "").replace(/[^0-9+]/g, ""); // the number we dialed → SMS target
   res.setHeader("Content-Type", "text/xml");
   // STT tuning: speechTimeout=800 (fixed short end-of-speech gap so a lone "tak"/"nie"
   // finalizes instead of being swallowed by adaptive endpointing — the #1 dropped-word fix);
   // reportInputDuringAgentSpeech=speech (deliver a reply spoken over the greeting);
   // nova-3 + hints bias the short answer words; dtmfDetection adds a 1/2 fallback.
-  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" language="pl-PL" transcriptionProvider="Deepgram" speechModel="nova-3-general" speechTimeout="800" reportInputDuringAgentSpeech="speech" interruptible="any" interruptSensitivity="medium" dtmfDetection="true" hints="tak,nie,ok,zgoda,potwierdzam,anuluj,jeden,dwa" ttsProvider="${xmlEscape(ttsProvider)}"${voiceAttr} elevenlabsTextNormalization="on">\n      <Parameter name="tenantId" value="${xmlEscape(tenantId)}"/>\n    </ConversationRelay>\n  </Connect>\n</Response>`);
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" language="pl-PL" transcriptionProvider="Deepgram" speechModel="nova-3-general" speechTimeout="800" reportInputDuringAgentSpeech="speech" interruptible="any" interruptSensitivity="high" dtmfDetection="true" hints="tak,nie,ok,zgoda,potwierdzam,anuluj,jeden,dwa" ttsProvider="${xmlEscape(ttsProvider)}"${voiceAttr} elevenlabsTextNormalization="on">\n      <Parameter name="tenantId" value="${xmlEscape(tenantId)}"/>\n      <Parameter name="prospect" value="${xmlEscape(prospect)}"/>\n    </ConversationRelay>\n  </Connect>\n</Response>`);
 });
 
 // Call status callbacks (StatusCallbackEvent=completed). Logged to the admin log
