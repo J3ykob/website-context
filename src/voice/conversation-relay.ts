@@ -13,6 +13,7 @@ import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 
 const SMS_TAG = "[SMS]";
+const TRANSFER_TAG = "[TRANSFER]";
 
 const WHISP_SYSTEM = `Jesteś głosowym asystentem dzwoniącym w imieniu firmy Whisp do właścicieli małych i średnich firm w Polsce. Prowadzisz naturalną, szybką rozmowę telefoniczną po polsku.
 
@@ -27,6 +28,7 @@ ZASADY ROZMOWY:
 - Mów po polsku, bardzo krótko i naturalnie — jedno, maksymalnie dwa krótkie zdania na turę. Bez monologów.
 - NIE pytaj o numer telefonu — już go mamy, bo to my dzwonimy.
 - Gdy rozmówca jest zainteresowany demem, prosi o link, mówi "tak"/"wyślij"/"poproszę", albo chce więcej informacji: powiedz krótko i ciepło, że właśnie wysyłasz mu SMS-em link do darmowego, gotowego dema, i NA SAMYM KOŃCU swojej wypowiedzi dopisz dokładnie znacznik ${SMS_TAG}. Ten znacznik jest niewidoczny i nie jest czytany. Wyślij SMS tylko raz w rozmowie.
+- Gdy rozmówca wyraźnie chce porozmawiać z człowiekiem lub z Jakubem (np. „połącz mnie z Jakubem”, „chcę z kimś porozmawiać”): powiedz krótko i ciepło, że już łączysz z Jakubem i prosisz o chwilę cierpliwości, a NA SAMYM KOŃCU dopisz dokładnie znacznik ${TRANSFER_TAG}. Rób to tylko na wyraźną prośbę o rozmowę z człowiekiem.
 - Jeśli czegoś nie wiesz lub pytanie nie dotyczy Whisp, powiedz krótko, że dośle informacje albo połączy z Jakubem — nie zmyślaj.
 - Bez markdownu, bez wypunktowań, bez czytania adresów internetowych na głos.`;
 
@@ -89,13 +91,30 @@ async function sendDemoSms(to: string): Promise<boolean> {
   } catch { return false; }
 }
 
-interface Session { callSid: string; prospect: string; messages: { role: string; content: string }[]; turn: number; smsSent: boolean; }
+// Warm handoff: redirect the in-progress call to a human (ends ConversationRelay, dials them).
+async function transferCall(callSid: string, to: string): Promise<boolean> {
+  const sid = process.env.TWILIO_ACCOUNT_SID, tok = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !tok || !callSid || !to) return false;
+  const callerId = process.env.TWILIO_FROM_NUMBER || to;
+  const twiml = `<Response><Dial callerId="${callerId}" timeout="30">${to}</Dial></Response>`;
+  try {
+    const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Calls/${callSid}.json`, {
+      method: "POST",
+      headers: { Authorization: "Basic " + Buffer.from(`${sid}:${tok}`).toString("base64"), "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ Twiml: twiml }),
+      signal: AbortSignal.timeout(15000),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+interface Session { callSid: string; prospect: string; messages: { role: string; content: string }[]; turn: number; smsSent: boolean; transferred: boolean; }
 
 export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
   const wss = new WebSocketServer({ server, path: "/api/voice/relay" });
 
   wss.on("connection", (ws: WebSocket) => {
-    const session: Session = { callSid: "", prospect: "", messages: [], turn: 0, smsSent: false };
+    const session: Session = { callSid: "", prospect: "", messages: [], turn: 0, smsSent: false, transferred: false };
 
     ws.on("message", (raw: any) => {
       let msg: any;
@@ -125,12 +144,13 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
         let ended = false;
         const endTurn = () => { if (ended || myTurn !== session.turn) return; ended = true; ws.send(JSON.stringify({ type: "text", token: "", last: true })); };
 
-        // Stream to TTS while hiding the [SMS] tag (which may straddle deltas) and detecting it.
-        let pending = "", wantSms = false, spokenLen = 0;
-        const KEEP = SMS_TAG.length - 1;
+        // Stream to TTS while hiding the [SMS]/[TRANSFER] tags (which may straddle deltas).
+        let pending = "", wantSms = false, wantTransfer = false, spokenLen = 0;
+        const KEEP = Math.max(SMS_TAG.length, TRANSFER_TAG.length) - 1;
         const flush = (final: boolean) => {
           let i: number;
           while ((i = pending.indexOf(SMS_TAG)) >= 0) { wantSms = true; pending = pending.slice(0, i) + pending.slice(i + SMS_TAG.length); }
+          while ((i = pending.indexOf(TRANSFER_TAG)) >= 0) { wantTransfer = true; pending = pending.slice(0, i) + pending.slice(i + TRANSFER_TAG.length); }
           let out = "";
           if (final) { out = pending; pending = ""; }
           else if (pending.length > KEEP) { out = pending.slice(0, pending.length - KEEP); pending = pending.slice(pending.length - KEEP); }
@@ -147,12 +167,19 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
             if (spokenLen > 450) endTurn();
           });
           flush(true);
-          session.messages.push({ role: "assistant", content: (fullRaw || "").split(SMS_TAG).join("").trim() });
+          session.messages.push({ role: "assistant", content: (fullRaw || "").split(SMS_TAG).join("").split(TRANSFER_TAG).join("").trim() });
           endTurn();
           if (wantSms && !session.smsSent && session.prospect) {
             session.smsSent = true;
             const ok = await sendDemoSms(session.prospect);
             console.log(`[voice-relay] demo SMS to ${session.prospect}: ${ok ? "sent" : "FAILED"}`);
+          }
+          if (wantTransfer && !session.transferred && session.callSid) {
+            session.transferred = true;
+            const human = process.env.VOICE_FORWARD_TO || "";
+            console.log(`[voice-relay] handoff to ${human} for call=${session.callSid.slice(0, 10)} in ~3.5s`);
+            // let the "łączę z Jakubem" TTS finish before the redirect supersedes the relay
+            setTimeout(() => { transferCall(session.callSid, human).then((ok) => console.log(`[voice-relay] handoff ${ok ? "redirected" : "FAILED"}`)); }, 3500);
           }
         } catch (e: any) {
           console.error(`[voice-relay] error: ${e?.message || e}`);
