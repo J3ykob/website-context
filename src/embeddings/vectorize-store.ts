@@ -142,18 +142,24 @@ export class CloudflareVectorizeStore implements VectorStore {
   async getByIds(ids: string[]): Promise<SearchResult[]> {
     if (ids.length === 0) return [];
     const prefixed = ids.map((id) => (id.startsWith(`${this.tenantId}__`) ? id : `${this.tenantId}__${id}`));
-    const body = JSON.stringify({ ids: prefixed });
-    let resp = await fetch(`${BASE}/get_by_ids`, { method: "POST", headers: headers(), body });
-    if (resp.status === 401 || resp.status === 403) {
-      await refreshCfToken();
-      resp = await fetch(`${BASE}/get_by_ids`, { method: "POST", headers: headers(), body });
-    }
-    if (!resp.ok) {
-      const err = await resp.text();
-      throw new Error(`Vectorize get_by_ids failed (HTTP ${resp.status}): ${err.slice(0, 200)}`);
-    }
-    const data = await resp.json() as any;
-    const vectors = Array.isArray(data.result) ? data.result : [];
+    // get_by_ids caps at 20 ids per request (error 40007) — batch and fan out.
+    const batches: string[][] = [];
+    for (let i = 0; i < prefixed.length; i += 20) batches.push(prefixed.slice(i, i + 20));
+    const perBatch = await Promise.all(batches.map(async (batch) => {
+      const body = JSON.stringify({ ids: batch });
+      let resp = await fetch(`${BASE}/get_by_ids`, { method: "POST", headers: headers(), body });
+      if (resp.status === 401 || resp.status === 403) {
+        await refreshCfToken();
+        resp = await fetch(`${BASE}/get_by_ids`, { method: "POST", headers: headers(), body });
+      }
+      if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(`Vectorize get_by_ids failed (HTTP ${resp.status}): ${err.slice(0, 200)}`);
+      }
+      const data = await resp.json() as any;
+      return Array.isArray(data.result) ? data.result : [];
+    }));
+    const vectors = perBatch.flat();
     return vectors.map((m: any) => ({
       id: String(m.id).replace(`${this.tenantId}__`, ""),
       content: m.metadata?.content || "",
