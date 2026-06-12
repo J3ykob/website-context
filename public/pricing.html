@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pricing — Whisp</title>
+<title>Pricing - Whisp</title>
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700;900&display=swap" rel="stylesheet">
 <style>
@@ -21,27 +21,36 @@
   .hero .label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.14em; color:var(--blue); margin-bottom:14px; }
   .hero h1 { font-family:"DM Serif Display",serif; font-weight:400; font-size:clamp(30px,6vw,52px); line-height:1.05; }
   .hero p { color:var(--muted); font-size:16px; margin-top:14px; }
-  .pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; max-width:1040px; margin:48px auto 64px; padding:0 24px; align-items:start; }
-  .price-card { background:#111827; border:1px solid var(--line); border-radius:20px; padding:32px 28px; display:flex; flex-direction:column; }
-  .price-card.featured { border-color:rgba(59,130,246,0.5); box-shadow:0 12px 48px rgba(59,130,246,0.15); position:relative; }
-  .price-card.featured::after { content:"Most popular"; position:absolute; top:-11px; left:50%; transform:translateX(-50%); background:var(--blue); color:#fff; font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:4px 12px; border-radius:8px; }
+  .pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:24px; max-width:1060px; margin:48px auto 32px; padding:0 24px; align-items:start; }
+  .price-card { background:#111827; border:1px solid var(--line); border-radius:16px; padding:32px 28px; display:flex; flex-direction:column; transition:border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease; }
+  @media (hover:hover) {
+    .price-card:hover { border-color:rgba(255,255,255,0.16); transform:translateY(-2px); box-shadow:0 8px 32px rgba(0,0,0,0.35); }
+    .price-card.featured:hover { border-color:rgba(59,130,246,0.7); box-shadow:0 12px 48px rgba(59,130,246,0.22); }
+    .price-btn:hover { transform:translateY(-1px); }
+  }
+  .price-card.featured { background:linear-gradient(180deg, rgba(59,130,246,0.07), rgba(59,130,246,0) 45%), #111827; border-color:rgba(59,130,246,0.5); box-shadow:0 12px 48px rgba(59,130,246,0.15); position:relative; }
+  .price-card.featured::after { content:"Most popular"; position:absolute; top:-11px; left:50%; transform:translateX(-50%); background:var(--blue); color:#fff; font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:4px 12px; border-radius:999px; }
   .price-name { font-size:14px; font-weight:700; letter-spacing:0.04em; }
-  .price-amount { font-family:"DM Serif Display",serif; font-size:40px; margin:14px 0 4px; }
+  .price-amount { font-family:"DM Serif Display",serif; font-size:40px; margin:16px 0 4px; }
   .price-amount span { font-family:"Archivo",sans-serif; font-size:13px; font-weight:500; color:var(--muted); }
-  .price-desc { color:var(--muted); font-size:13px; margin-bottom:22px; }
-  .price-features { list-style:none; flex:1; margin-bottom:26px; }
-  .price-features li { font-size:14px; color:#cbd5e1; padding:7px 0 7px 26px; position:relative; line-height:1.4; }
-  .price-features li::before { content:""; position:absolute; left:2px; top:11px; width:12px; height:7px; border-left:2px solid var(--blue); border-bottom:2px solid var(--blue); transform:rotate(-45deg); }
-  .price-btn { display:block; text-align:center; padding:13px; border-radius:12px; font-size:14px; font-weight:700; text-decoration:none; transition:all 0.2s; }
+  .price-desc { color:var(--muted); font-size:13px; margin-bottom:24px; }
+  .price-features { list-style:none; flex:1; margin-bottom:24px; }
+  .price-features li { font-size:14px; color:#cbd5e1; padding:8px 0 8px 28px; position:relative; line-height:1.4; }
+  .price-features li::before { content:""; position:absolute; left:2px; top:12px; width:12px; height:7px; border-left:2px solid var(--blue); border-bottom:2px solid var(--blue); transform:rotate(-45deg); }
+  .price-btn { display:block; text-align:center; padding:13px; border-radius:10px; font-size:14px; font-weight:600; text-decoration:none; transition:all 0.15s ease; }
   .price-btn-primary { background:var(--blue); color:#fff; }
   .price-btn-primary:hover { background:#2563eb; }
-  .price-btn-outline { background:transparent; color:var(--text); border:1px solid rgba(255,255,255,0.18); }
+  .price-btn-outline { background:transparent; color:var(--text); border:1px solid rgba(255,255,255,0.14); }
   .price-btn-outline:hover { background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.35); }
-  .foot { text-align:center; color:var(--muted); font-size:12px; padding:0 24px 56px; line-height:1.6; }
+  .reassure { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px 12px; padding:0 24px; margin:0 auto 48px; color:#64748b; font-size:13px; text-align:center; }
+  .reassure .dot { width:3px; height:3px; border-radius:999px; background:rgba(255,255,255,0.25); }
+  .foot { text-align:center; color:var(--muted); font-size:13px; padding:0 24px 64px; line-height:1.6; }
   .foot a { color:var(--blue); text-decoration:none; }
   @media (max-width:760px) {
-    .pricing-grid { grid-template-columns:1fr; max-width:440px; gap:16px; margin:36px auto 48px; }
+    .pricing-grid { grid-template-columns:1fr; max-width:440px; gap:24px; margin:32px auto 24px; }
     .price-card.featured { order:-1; }
+    .price-features li { font-size:15px; }
+    .reassure { margin-bottom:32px; }
     .topbar { padding:16px 20px; }
   }
 </style>
@@ -107,8 +116,15 @@
     </div>
   </div>
 
+  <div class="reassure">
+    <span>Cancel anytime</span>
+    <span class="dot" aria-hidden="true"></span>
+    <span>Prices in PLN, billed monthly</span>
+    <span class="dot" aria-hidden="true"></span>
+    <span>No credit card to start</span>
+  </div>
+
   <div class="foot">
-    Prices in PLN, billed monthly. Cancel anytime.<br>
     Questions? <a href="/">Try the live demo on our homepage</a> or email jakub@whisp.so
   </div>
 </body>

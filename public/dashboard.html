@@ -3,36 +3,47 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Command Center — Whisp</title>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>Command Center - Whisp</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --font: "Archivo", -apple-system, sans-serif;
-      --serif: "Instrument Serif", Georgia, serif;
-      --bg: #f6f5f1;
-      --surface: #ffffff;
-      --text: #1a1a1a;
-      --text-2: #555;
-      --text-3: #999;
-      --text-4: #ccc;
-      --border: rgba(0,0,0,0.06);
-      --green: #22c55e;
+      --font: "Archivo", -apple-system, system-ui, sans-serif;
+      --serif: "DM Serif Display", Georgia, serif;
+      --bg: #0a0e1a;
+      --surface: #111827;
+      --card: rgba(255,255,255,0.03);
+      --line: rgba(255,255,255,0.08);
+      --line-bright: rgba(255,255,255,0.16);
+      --text: #f1f5f9;
+      --text-2: #94a3b8;
+      --text-3: #64748b;
+      --text-4: #64748b;
+      --border: rgba(255,255,255,0.08);
+      --green: #10b981;
       --amber: #f59e0b;
       --red: #ef4444;
       --blue: #3b82f6;
+      --blue-hover: #2563eb;
       --radius: 16px;
+      --shadow: 0 8px 32px rgba(0,0,0,0.35);
     }
 
     * { margin:0; padding:0; box-sizing:border-box; }
 
+    html, body { overflow-x: hidden; }
+
+    input::placeholder, textarea::placeholder { color: var(--text-3); }
+
     body {
       font-family: var(--font);
-      background: var(--bg);
+      background:
+        radial-gradient(640px 420px at 88% -8%, rgba(59,130,246,0.07), transparent 60%),
+        radial-gradient(760px 540px at -12% 30%, rgba(59,130,246,0.05), transparent 60%),
+        var(--bg);
       color: var(--text);
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
       line-height: 1.5;
-      background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h1v1H0z' fill='%23000' fill-opacity='.02'/%3E%3C/svg%3E");
     }
 
     /* ─── Shell ─── */
@@ -54,15 +65,16 @@
     .topbar-left { display:flex; align-items:center; gap:16px; }
     .logo-mark {
       width: 32px; height: 32px;
-      background: var(--text);
+      background: linear-gradient(135deg, var(--blue), var(--blue-hover));
       border-radius: 8px;
       position: relative;
+      flex-shrink: 0;
     }
     .logo-mark::before {
       content: "";
       position: absolute;
       inset: 5px;
-      border: 2px solid var(--bg);
+      border: 2px solid rgba(255,255,255,0.85);
       border-radius: 4px;
     }
     .site-info h1 {
@@ -86,8 +98,8 @@
       animation: pulse 2.5s ease-in-out infinite;
     }
     @keyframes pulse {
-      0%,100% { opacity:1; box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
-      50% { opacity:0.7; box-shadow: 0 0 0 4px rgba(34,197,94,0); }
+      0%,100% { opacity:1; box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+      50% { opacity:0.7; box-shadow: 0 0 0 4px rgba(16,185,129,0); }
     }
     .topbar-right { display:flex; gap:8px; }
 
@@ -107,17 +119,17 @@
       align-items: center;
       gap: 6px;
     }
-    .btn-dark { background: var(--text); color: #fff; }
-    .btn-dark:hover { background: #333; }
+    .btn-dark { background: var(--blue); color: #fff; }
+    .btn-dark:hover { background: var(--blue-hover); transform: translateY(-1px); }
     .btn-outline {
       background: transparent;
-      color: var(--text-2);
-      border: 1px solid var(--border);
+      color: var(--text);
+      border: 1px solid rgba(255,255,255,0.14);
     }
-    .btn-outline:hover { border-color: var(--text-4); color: var(--text); }
+    .btn-outline:hover { border-color: var(--line-bright); background: rgba(255,255,255,0.04); transform: translateY(-1px); }
     .btn-sm { font-size: 11px; padding: 6px 12px; border-radius: 8px; }
-    .btn-success { background: rgba(34,197,94,0.1); color: #16a34a; }
-    .btn-success:hover { background: rgba(34,197,94,0.18); }
+    .btn-success { background: rgba(16,185,129,0.12); color: var(--green); }
+    .btn-success:hover { background: rgba(16,185,129,0.2); }
     .btn-ghost { background:none; color:var(--text-3); }
     .btn-ghost:hover { color:var(--text); }
 
@@ -125,20 +137,20 @@
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 1px;
-      background: var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
+      gap: 16px;
       margin-bottom: 48px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
     .stat {
-      background: var(--surface);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
       padding: 28px 32px;
       display: flex;
       flex-direction: column;
       gap: 6px;
+      transition: border-color 0.2s;
     }
+    .stat:hover { border-color: var(--line-bright); }
     .stat-label {
       font-size: 11px;
       font-weight: 600;
@@ -158,10 +170,11 @@
     /* ─── Grid ─── */
     .grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 32px;
       margin-bottom: 48px;
     }
+    .grid > div { min-width: 0; }
 
     /* ─── Section ─── */
     .section-head {
@@ -184,17 +197,18 @@
       border-radius: 20px;
       margin-left: 10px;
     }
-    .badge-amber { background: rgba(245,158,11,0.12); color: #b45309; }
-    .badge-green { background: rgba(34,197,94,0.1); color: #16a34a; }
+    .badge-amber { background: rgba(245,158,11,0.12); color: var(--amber); }
+    .badge-green { background: rgba(16,185,129,0.12); color: var(--green); }
 
     /* ─── Card ─── */
     .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
+      background: var(--card);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
       overflow: hidden;
+      transition: border-color 0.2s;
     }
+    .card:hover { border-color: var(--line-bright); }
 
     /* ─── Gaps ─── */
     .gap-item {
@@ -203,7 +217,7 @@
       transition: background 0.15s;
     }
     .gap-item:last-child { border-bottom: none; }
-    .gap-item:hover { background: #fafaf8; }
+    .gap-item:hover { background: rgba(255,255,255,0.03); }
     .gap-item.resolved { opacity: 0.4; }
     .gap-item.resolved .gap-question { text-decoration: line-through; }
     .gap-top { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
@@ -216,16 +230,16 @@
       font-family: var(--font);
       font-size: 14px;
       padding: 14px 16px;
-      border: 1.5px solid var(--border);
-      border-radius: 12px;
-      background: #fafaf8;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.05);
       outline: none;
       color: var(--text);
       resize: vertical;
       min-height: 80px;
-      transition: border-color 0.2s;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
-    .gap-answer-form textarea:focus { border-color: var(--text-4); }
+    .gap-answer-form textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.5); }
     .gap-answer-form .form-actions { display:flex; gap:8px; }
 
     /* ─── Activity ─── */
@@ -240,7 +254,7 @@
       transition: background 0.15s;
     }
     .activity-item:last-child { border-bottom: none; }
-    .activity-item:hover { background: #fafaf8; }
+    .activity-item:hover { background: rgba(255,255,255,0.03); }
     .activity-dot {
       width: 8px; height: 8px;
       border-radius: 50%;
@@ -271,7 +285,8 @@
       display: none;
       margin-top: 10px;
       padding: 12px 14px;
-      background: #f6f5f1;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--line);
       border-radius: 10px;
       font-size: 13px;
       line-height: 1.6;
@@ -292,7 +307,7 @@
       transition: background 0.15s;
     }
     .skill-item:last-child { border-bottom: none; }
-    .skill-item:hover { background: #fafaf8; }
+    .skill-item:hover { background: rgba(255,255,255,0.03); }
     .skill-info { display:flex; align-items:center; gap:12px; flex:1; min-width:0; }
     .skill-name {
       font-size: 13px;
@@ -317,7 +332,7 @@
       position: absolute;
       cursor: pointer;
       inset: 0;
-      background: #e5e5e5;
+      background: rgba(255,255,255,0.15);
       border-radius: 22px;
       transition: all 0.25s;
     }
@@ -345,13 +360,14 @@
       font-family: var(--font);
       font-size: 13px;
       padding: 10px 14px;
-      border: 1.5px solid var(--border);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
-      background: #fafaf8;
+      background: rgba(255,255,255,0.05);
       outline: none;
       color: var(--text);
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
-    .skill-edit-form input:focus { border-color: var(--text-4); }
+    .skill-edit-form input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.5); }
 
     /* ─── Knowledge Base ─── */
     .kb-head {
@@ -364,14 +380,15 @@
       font-family: var(--font);
       font-size: 13px;
       padding: 8px 14px;
-      border: 1px solid var(--border);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
-      background: var(--surface);
+      background: rgba(255,255,255,0.05);
       outline: none;
       color: var(--text);
       width: 240px;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
-    .kb-search:focus { border-color: var(--text-4); }
+    .kb-search:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.5); }
 
     .page-folder {
       border-bottom: 1px solid var(--border);
@@ -386,7 +403,7 @@
       transition: background 0.15s;
       user-select: none;
     }
-    .page-header:hover { background: #fafaf8; }
+    .page-header:hover { background: rgba(255,255,255,0.03); }
     .page-arrow {
       font-size: 10px;
       color: var(--text-4);
@@ -417,27 +434,27 @@
     .page-count {
       font-size: 11px;
       font-weight: 600;
-      color: var(--text-3);
-      background: var(--bg);
+      color: var(--text-2);
+      background: rgba(255,255,255,0.06);
       padding: 2px 8px;
-      border-radius: 10px;
+      border-radius: 999px;
       flex-shrink: 0;
     }
     .page-chunks {
       display: none;
-      background: #fafaf8;
+      background: rgba(0,0,0,0.25);
     }
     .page-folder.open .page-chunks { display: block; }
 
     .chunk-item {
       padding: 12px 24px 12px 50px;
-      border-top: 1px solid rgba(0,0,0,0.03);
+      border-top: 1px solid rgba(255,255,255,0.05);
       transition: background 0.15s;
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
-    .chunk-item:hover { background: #f3f2ee; }
+    .chunk-item:hover { background: rgba(255,255,255,0.03); }
     .chunk-heading {
       display: flex;
       align-items: center;
@@ -453,10 +470,10 @@
       text-transform: uppercase;
       letter-spacing: 0.06em;
       font-weight: 600;
-      color: var(--text-4);
-      background: rgba(0,0,0,0.03);
+      color: var(--text-2);
+      background: rgba(255,255,255,0.07);
       padding: 1px 6px;
-      border-radius: 3px;
+      border-radius: 4px;
     }
     .chunk-content {
       font-size: 13px;
@@ -494,8 +511,8 @@
       cursor: pointer;
       transition: all 0.15s;
     }
-    .btn-tiny:hover { border-color: var(--text-4); color: var(--text); }
-    .btn-tiny.active { background: var(--text); color: #fff; border-color: var(--text); }
+    .btn-tiny:hover { border-color: var(--line-bright); color: var(--text); }
+    .btn-tiny.active { background: var(--blue); color: #fff; border-color: var(--blue); }
     .btn-tiny.btn-danger:hover { background: rgba(239,68,68,0.08); color: var(--red); border-color: rgba(239,68,68,0.2); }
 
     /* ─── Modal ─── */
@@ -504,7 +521,7 @@
       position: fixed;
       inset: 0;
       z-index: 10000;
-      background: rgba(0,0,0,0.2);
+      background: rgba(3,7,18,0.65);
       backdrop-filter: blur(4px);
       -webkit-backdrop-filter: blur(4px);
       align-items: center;
@@ -513,10 +530,11 @@
     .modal-overlay.open { display: flex; }
     .modal {
       background: var(--surface);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
       padding: 32px;
       width: min(520px, 90vw);
-      box-shadow: 0 24px 48px rgba(0,0,0,0.12);
+      box-shadow: var(--shadow);
     }
     .modal .section-title { margin-bottom: 20px; }
     .modal input, .modal textarea {
@@ -524,24 +542,50 @@
       font-family: var(--font);
       font-size: 14px;
       padding: 12px 14px;
-      border: 1.5px solid var(--border);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
-      background: #fafaf8;
+      background: rgba(255,255,255,0.05);
       outline: none;
       color: var(--text);
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
     .modal input { margin-bottom: 10px; }
     .modal textarea { resize:vertical; min-height: 120px; }
-    .modal input:focus, .modal textarea:focus { border-color: var(--text-4); }
+    .modal input:focus, .modal textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.5); }
     .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
 
     /* ─── Empty ─── */
     .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
       text-align: center;
       padding: 48px 24px;
       color: var(--text-3);
       font-size: 13px;
     }
+    .empty-icon {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(59,130,246,0.1);
+      color: var(--blue);
+      flex-shrink: 0;
+    }
+    .empty-icon svg { width: 20px; height: 20px; }
+    .empty-icon.green { background: rgba(16,185,129,0.1); color: var(--green); }
+    .empty-icon.amber { background: rgba(245,158,11,0.1); color: var(--amber); }
+    .empty-text {
+      font-size: 14px;
+      color: var(--text-2);
+      max-width: 360px;
+      line-height: 1.5;
+    }
+    .empty-state .btn { margin-top: 4px; }
 
     .loading {
       display: flex;
@@ -552,25 +596,42 @@
     .loading::after {
       content: "";
       width: 20px; height: 20px;
-      border: 2px solid var(--border);
-      border-top-color: var(--text-3);
+      border: 2px solid var(--line);
+      border-top-color: var(--blue);
       border-radius: 50%;
       animation: spin 0.6s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ─── Scrollbars ─── */
+    .activity-list::-webkit-scrollbar, #chunks-panel::-webkit-scrollbar { width: 8px; }
+    .activity-list::-webkit-scrollbar-track, #chunks-panel::-webkit-scrollbar-track { background: transparent; }
+    .activity-list::-webkit-scrollbar-thumb, #chunks-panel::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.12);
+      border-radius: 4px;
+    }
+
     /* ─── Responsive ─── */
     @media (max-width: 900px) {
-      .grid { grid-template-columns: 1fr; }
-      .stats { grid-template-columns: repeat(2, 1fr); }
+      .grid { grid-template-columns: minmax(0, 1fr); }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     }
     @media (max-width: 520px) {
       .shell { padding: 0 16px 60px; }
-      .stats { grid-template-columns: 1fr 1fr; }
-      .stat { padding: 20px; }
-      .stat-value { font-size: 32px; }
-      .topbar { flex-direction: column; align-items: flex-start; gap: 12px; }
-      .kb-search { width: 100%; }
+      .stats { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .stat { padding: 18px 16px; }
+      .stat-value { font-size: 30px; }
+      .topbar { flex-direction: column; align-items: flex-start; gap: 14px; }
+      .topbar-right { width: 100%; flex-wrap: wrap; }
+      .btn { min-height: 44px; padding: 10px 16px; font-size: 13px; }
+      .btn-sm { min-height: 40px; }
+      .kb-head { flex-wrap: wrap; }
+      .kb-search { width: 100%; order: 3; flex: 1 1 100%; }
+      .gap-question { font-size: 15px; }
+      .activity-question, .skill-name, .page-title { font-size: 14px; }
+      .activity-response { font-size: 13px; }
+      .chunk-content, .activity-expanded { font-size: 15px; }
+      .modal { padding: 24px; }
     }
   </style>
 </head>
@@ -698,13 +759,44 @@
       await Promise.all([loadSiteInfo(), loadStats(), loadGaps(), loadActivity(), loadSkills(), loadChunks()]);
     }
 
+    // "select_automotive_pl" -> "Select Automotive PL" (display fallback when the
+    // API has no brand name / domain for this tenant).
+    function humanizeId(id) {
+      return String(id || "").split(/[_-]+/).map(function(w) {
+        if (!w) return "";
+        if (w.length <= 2) return w.toUpperCase();
+        return w.charAt(0).toUpperCase() + w.slice(1);
+      }).filter(Boolean).join(" ");
+    }
+
     async function loadSiteInfo() {
       try {
         var res = await authFetch(API + "/api/dashboard/embed-code");
         var data = await res.json();
-        document.getElementById("site-name").textContent = data.tenantId || "Dashboard";
-        document.getElementById("site-url").textContent = data.apiUrl || API;
-        document.getElementById("open-site-btn").href = data.apiUrl || "#";
+
+        // Prefer the tenant's real site (siteUrl/domain) - data.apiUrl is the
+        // Whisp serving host, NOT the customer's site, so never use it here.
+        var siteHref = data.siteUrl || (data.domain ? "https://" + data.domain : "");
+        var siteHost = "";
+        if (siteHref) {
+          try { siteHost = new URL(siteHref).hostname.replace(/^www\./, ""); } catch (e2) { siteHost = siteHref; }
+        }
+
+        var displayName = data.brandName || siteHost || humanizeId(data.tenantId) || "Dashboard";
+        var nameEl = document.getElementById("site-name");
+        nameEl.textContent = displayName;
+        nameEl.title = data.tenantId || "";
+        document.getElementById("site-url").textContent = siteHost || data.tenantId || "";
+
+        var openBtn = document.getElementById("open-site-btn");
+        if (siteHref) {
+          openBtn.href = siteHref;
+          openBtn.style.display = "";
+        } else {
+          // No real site known for this tenant - hide the link rather than
+          // pointing it at the Whisp host.
+          openBtn.style.display = "none";
+        }
       } catch (e) {
         document.getElementById("site-name").textContent = "Dashboard";
       }
@@ -736,7 +828,7 @@
 
         renderGaps(questions, resolvedSet);
       } catch (e) {
-        document.getElementById("gaps-panel").innerHTML = '<div class="empty-state">Failed to load</div>';
+        document.getElementById("gaps-panel").innerHTML = emptyState('alert', 'amber', 'Could not load knowledge gaps.', 'Retry', 'loadGaps()');
       }
     }
 
@@ -745,7 +837,7 @@
         var res = await authFetch(API + "/api/dashboard/conversations?limit=20");
         renderActivity(await res.json());
       } catch (e) {
-        document.getElementById("activity-panel").innerHTML = '<div class="empty-state">Failed to load</div>';
+        document.getElementById("activity-panel").innerHTML = emptyState('alert', 'amber', 'Could not load recent activity.', 'Retry', 'loadActivity()');
       }
     }
 
@@ -754,13 +846,36 @@
         var res = await authFetch(API + "/api/dashboard/flows");
         renderSkills(await res.json());
       } catch (e) {
-        document.getElementById("skills-panel").innerHTML = '<div class="empty-state">Failed to load</div>';
+        document.getElementById("skills-panel").innerHTML = emptyState('alert', 'amber', 'Could not load skills.', 'Retry', 'loadSkills()');
       }
+    }
+
+    // ─── Empty states ────
+    var EMPTY_ICONS = {
+      check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+      zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+      book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+      alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+      search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+      chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
+    };
+
+    function emptyState(icon, tone, text, ctaLabel, ctaOnclick, ctaPrimary) {
+      return '<div class="empty-state">' +
+        '<div class="empty-icon' + (tone ? ' ' + tone : '') + '">' + (EMPTY_ICONS[icon] || '') + '</div>' +
+        '<div class="empty-text">' + text + '</div>' +
+        (ctaLabel ? '<button class="btn btn-sm ' + (ctaPrimary ? 'btn-dark' : 'btn-outline') + '" onclick="' + ctaOnclick + '">' + ctaLabel + '</button>' : '') +
+      '</div>';
     }
 
     function renderGaps(questions, resolvedSet) {
       var panel = document.getElementById("gaps-panel");
-      if (!questions.length) { panel.innerHTML = '<div class="empty-state">No gaps — your context is complete</div>'; return; }
+      if (!questions.length) {
+        panel.innerHTML = emptyState('check', 'green',
+          'No gaps - your assistant has answered everything it was asked so far.',
+          'Add knowledge', 'openChunkModal()');
+        return;
+      }
 
       var sorted = questions.slice().sort(function(a, b) {
         var ar = resolvedSet.has(a.question || a.rawMessage), br = resolvedSet.has(b.question || b.rawMessage);
@@ -785,7 +900,11 @@
 
     function renderActivity(conversations) {
       var panel = document.getElementById("activity-panel");
-      if (!conversations.length) { panel.innerHTML = '<div class="empty-state">No conversations yet</div>'; return; }
+      if (!conversations.length) {
+        panel.innerHTML = emptyState('chat', '',
+          'No conversations yet - messages from your site visitors will show up here.');
+        return;
+      }
 
       panel.innerHTML = '<div class="activity-list">' + conversations.map(function(c) {
         var dot = c.flowInvoked ? "flow" : "";
@@ -802,7 +921,12 @@
 
     function renderSkills(flows) {
       var panel = document.getElementById("skills-panel");
-      if (!flows.length) { panel.innerHTML = '<div class="empty-state">No skills yet</div>'; return; }
+      if (!flows.length) {
+        panel.innerHTML = emptyState('zap', '',
+          'No skills yet - record a flow on your site and the assistant learns to walk visitors through it.',
+          'Record your first flow', "window.open('/record','_blank')", true);
+        return;
+      }
 
       panel.innerHTML = flows.map(function(f) {
         var triggers = (f.triggerPhrases || []).slice(0,3).join(", ");
@@ -843,11 +967,25 @@
         var params = chunksSearch ? "?search="+encodeURIComponent(chunksSearch) : "";
         var res = await authFetch(API+"/api/dashboard/chunks"+params);
         var data = await res.json();
-        document.getElementById("chunks-badge").textContent = data.total;
+        document.getElementById("chunks-badge").textContent = data.total || 0;
         var panel = document.getElementById("chunks-panel");
 
         if (!data.pages || !data.pages.length) {
-          panel.innerHTML = '<div class="empty-state">'+(chunksSearch?"No matches":"No knowledge yet")+'</div>';
+          if (chunksSearch) {
+            panel.innerHTML = emptyState('search', '',
+              'No knowledge matches "' + esc(chunksSearch) + '".',
+              'Clear search', 'clearChunkSearch()');
+          } else if (data.total > 0) {
+            // The index reports chunks but the list query returned none - a
+            // backend/data issue, not an empty knowledge base. Be honest.
+            panel.innerHTML = emptyState('alert', 'amber',
+              data.total + ' chunks are indexed, but the list could not be loaded right now. This is usually temporary.',
+              'Retry', 'loadChunks()');
+          } else {
+            panel.innerHTML = emptyState('book', '',
+              'No knowledge yet - add material your assistant can answer from.',
+              '+ Add knowledge', 'openChunkModal()', true);
+          }
           return;
         }
 
@@ -881,7 +1019,7 @@
           '</div>';
         }).join("");
       } catch(e) {
-        document.getElementById("chunks-panel").innerHTML = '<div class="empty-state">Failed to load</div>';
+        document.getElementById("chunks-panel").innerHTML = emptyState('alert', 'amber', 'Could not load the knowledge base.', 'Retry', 'loadChunks()');
       }
     }
 
@@ -890,6 +1028,11 @@
       el.classList.toggle("open");
     }
     document.getElementById("chunk-search").addEventListener("input",function(e){ chunksSearch=e.target.value; chunksPage=0; clearTimeout(this._t); this._t=setTimeout(loadChunks,300); });
+    function clearChunkSearch() {
+      document.getElementById("chunk-search").value = "";
+      chunksSearch = ""; chunksPage = 0;
+      loadChunks();
+    }
     function editChunk(id) {
       var el = document.getElementById("chunk-text-"+id);
       if (el.contentEditable==="true") {
@@ -899,7 +1042,8 @@
       } else { el.contentEditable="true"; el.focus(); el.style.background="rgba(245,158,11,0.06)"; el.style.border="1px solid rgba(245,158,11,0.2)"; el.parentElement.querySelector(".btn-tiny").textContent="Save"; }
     }
     function deleteChunk(id) { if (!confirm("Delete this chunk?")) return; authFetch(API+"/api/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
-    document.getElementById("add-chunk-btn").addEventListener("click",function(){ document.getElementById("add-chunk-modal").classList.add("open"); });
+    function openChunkModal() { document.getElementById("add-chunk-modal").classList.add("open"); }
+    document.getElementById("add-chunk-btn").addEventListener("click", openChunkModal);
     function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; }
     function saveNewChunk() {
       var t=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();

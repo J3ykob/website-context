@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Whisp — Your website already has a chatbot</title>
+<title>Whisp - Your website already has a chatbot</title>
 <meta name="description" content="Paste your URL and see your AI chatbot working in seconds. No signup, no setup.">
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -42,7 +42,7 @@ body {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; font-weight: 600; color: #3b82f6;
   background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2);
-  padding: 6px 16px; border-radius: 20px; margin-bottom: 28px;
+  padding: 6px 16px; border-radius: 999px; margin-bottom: 28px;
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 .claim-badge::before {
@@ -81,12 +81,12 @@ h1 em { font-style: italic; color: #3b82f6; }
   background: transparent; border: none; outline: none;
   font-family: inherit; font-size: 16px; color: #f1f5f9;
 }
-.url-input::placeholder { color: #475569; }
+.url-input::placeholder { color: #64748b; }
 .url-btn {
   padding: 18px 28px; background: #3b82f6;
   color: white; border: none; font-family: inherit;
-  font-size: 15px; font-weight: 700; cursor: pointer;
-  white-space: nowrap; transition: background 0.2s;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; transition: background 0.15s ease;
 }
 .url-btn:hover { background: #2563eb; }
 .url-btn:disabled { opacity: 0.5; cursor: default; }
@@ -150,9 +150,9 @@ h1 em { font-style: italic; color: #3b82f6; }
 }
 .claim-result .demo-btn {
   display: inline-block; padding: 14px 28px;
-  background: #3b82f6; color: white; border-radius: 12px;
-  font-weight: 700; font-size: 15px; text-decoration: none;
-  transition: all 0.2s; margin: 4px;
+  background: #3b82f6; color: white; border-radius: 10px;
+  font-weight: 600; font-size: 15px; text-decoration: none;
+  transition: all 0.15s ease; margin: 4px;
 }
 .claim-result .demo-btn:hover { background: #2563eb; transform: translateY(-1px); }
 .claim-result .demo-btn.secondary {
@@ -168,8 +168,8 @@ h1 em { font-style: italic; color: #3b82f6; }
 .claim-error {
   display: none; margin-top: 20px;
   padding: 14px 20px; border-radius: 12px;
-  background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2);
-  color: #ef4444; font-size: 14px;
+  background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
+  color: #f87171; font-size: 14px;
 }
 .claim-error.active { display: block; }
 
@@ -209,6 +209,7 @@ footer a:hover { color: #3b82f6; }
   .url-form { flex-direction: column; }
   .url-btn { padding: 16px; }
   .claim-result .stats { flex-direction: column; gap: 12px; }
+  .example-chip { padding: 12px 16px; }
 }
 </style>
 </head>

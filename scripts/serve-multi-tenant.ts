@@ -516,15 +516,16 @@ function buildOnboardPage(opts: { siteUrl: string; brand: string; state: "onboar
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0a0e1a;color:#e7e9ee;font-family:'Archivo',-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
-.card{width:100%;max-width:480px;background:rgba(22,24,34,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:22px;padding:40px 36px;box-shadow:0 24px 80px rgba(0,0,0,0.5)}
+.card{width:100%;max-width:480px;background:rgba(22,24,34,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px 36px;box-shadow:0 8px 32px rgba(0,0,0,0.35)}
 .badge{display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#60a5fa;margin-bottom:18px}
 h1{font-family:'DM Serif Display',Georgia,serif;font-weight:400;font-size:27px;line-height:1.25;margin:0 0 12px}
 p.sub{font-size:15px;color:#9aa3b2;line-height:1.6;margin:0 0 26px}
 label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#7b8494;margin:0 0 7px}
-input{width:100%;padding:13px 15px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:#fff;font-family:inherit;font-size:15px;margin-bottom:18px}
-input:focus{outline:none;border-color:#3b82f6}
-button{width:100%;padding:15px;border:none;border-radius:12px;background:#3b82f6;color:#fff;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;transition:background 0.2s}
-button:hover{background:#2563eb}button:disabled{opacity:0.6;cursor:default}
+input{width:100%;padding:13px 15px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#f1f5f9;font-family:inherit;font-size:15px;margin-bottom:18px}
+input::placeholder{color:#64748b}
+input:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.5)}
+button{width:100%;padding:15px;border:none;border-radius:10px;background:#3b82f6;color:#fff;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s ease}
+button:hover{background:#2563eb;transform:translateY(-1px)}button:disabled{opacity:0.6;cursor:default;transform:none}
 .fine{font-size:12px;color:#5b6472;margin-top:16px;line-height:1.5}
 .ok{text-align:center}
 .spinner{width:34px;height:34px;border:3px solid rgba(255,255,255,0.15);border-top-color:#3b82f6;border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto 22px}
@@ -624,56 +625,102 @@ app.get("/demo/:tenantId", async (req, res) => {
 <head>\
 <meta charset="UTF-8">\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">\
-<title>' + brand + ' — AI Assistant by Whisp</title>\
+<title>' + brand + ' - AI assistant by Whisp</title>\
 <link rel="icon" type="image/svg+xml" href="/logo.svg">\
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">\
 <style>\
 * { margin:0; padding:0; box-sizing:border-box; }\
-body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; display:flex; flex-direction:column; color:#f1f5f9; }\
+html, body { height:100%; }\
+body {\
+  font-family:"Archivo",system-ui,sans-serif; color:#f1f5f9;\
+  background-color:#0a0e1a;\
+  background-image:radial-gradient(ellipse 70% 55% at 50% -12%, rgba(59,130,246,0.14), transparent 60%), radial-gradient(ellipse 45% 40% at 88% 105%, rgba(59,130,246,0.07), transparent 60%);\
+  height:100vh; height:100dvh; overflow:hidden;\
+  display:flex; flex-direction:column;\
+}\
 .demo-header {\
-  position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:50;\
-  padding:10px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px;\
-  background:rgba(20,20,35,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:16px;\
-  backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
-  box-shadow:0 8px 32px rgba(0,0,0,0.2);\
-  animation:fadeDown 0.5s ease 0.3s both;\
+  flex:none; position:relative; z-index:60;\
+  display:flex; align-items:center; gap:14px; padding:13px 24px;\
+  background:rgba(10,14,26,0.75); border-bottom:1px solid rgba(255,255,255,0.08);\
+  backdrop-filter:blur(20px) saturate(1.4); -webkit-backdrop-filter:blur(20px) saturate(1.4);\
+  animation:fadeDown 0.5s ease 0.1s both;\
 }\
-@keyframes fadeDown { from{opacity:0;transform:translateX(-50%) translateY(-10px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }\
-.demo-brand { display:flex; align-items:center; gap:10px; }\
-.demo-mark { width:22px; height:22px; }\
-.demo-name { font-size:13px; font-weight:700; color:#f1f5f9; }\
-.demo-badge { font-size:9px; font-weight:600; color:#3b82f6; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); padding:3px 8px; border-radius:8px; }\
+@keyframes fadeDown { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }\
+.demo-brand { display:flex; align-items:center; gap:10px; min-width:0; }\
+.demo-mark { width:26px; height:26px; flex:none; }\
+.demo-name { font-size:14px; font-weight:700; color:#f1f5f9; letter-spacing:-0.01em; }\
+.demo-badge { font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:#3b82f6; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.25); padding:4px 10px; border-radius:999px; white-space:nowrap; }\
+.demo-domain {\
+  margin-left:auto; font-size:13px; color:#94a3b8;\
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);\
+  padding:7px 16px; border-radius:999px; max-width:320px;\
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\
+}\
 .demo-cta {\
-  padding:7px 14px; background:#3b82f6; color:#fff; border:none; border-radius:10px;\
-  font-family:inherit; font-size:11px; font-weight:700; cursor:pointer; text-decoration:none;\
-  transition: all 0.2s; white-space:nowrap;\
+  flex:none; display:inline-flex; align-items:center; justify-content:center;\
+  min-height:40px; padding:9px 18px; background:#3b82f6; color:#fff; border:none; border-radius:10px;\
+  font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; text-decoration:none;\
+  transition:all 0.15s ease; white-space:nowrap;\
 }\
-.demo-cta:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.3); }\
-.demo-body { flex:1; position:relative; overflow:hidden; }\
-.demo-bg { position:absolute; inset:0; z-index:0; }\
-.demo-bg iframe { width:100%; height:100%; border:none; display:block; pointer-events:none; }\
-.demo-bg img { width:100%; height:100%; object-fit:cover; object-position:top; display:block; }\
+.demo-cta:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.35); }\
+.demo-body {\
+  flex:1; min-height:0; position:relative; z-index:1;\
+  display:flex; flex-direction:column; align-items:center;\
+  padding:28px 24px 0;\
+}\
+.demo-hero-copy { flex:none; text-align:center; max-width:720px; margin-bottom:24px; animation:fadeDown 0.5s ease 0.25s both; }\
+.demo-eyebrow { font-size:11px; font-weight:700; letter-spacing:0.16em; text-transform:uppercase; color:#3b82f6; margin-bottom:10px; }\
+.demo-title { font-family:"DM Serif Display",serif; font-weight:400; font-size:clamp(24px,3.4vw,38px); line-height:1.18; color:#f1f5f9; margin-bottom:10px; }\
+.demo-sub { font-size:15px; color:#94a3b8; line-height:1.6; max-width:560px; margin:0 auto; }\
+.demo-sub strong { color:#f1f5f9; font-weight:600; }\
+.browser-frame {\
+  width:100%; max-width:1140px; flex:1; min-height:0;\
+  display:flex; flex-direction:column;\
+  background:#111827; border:1px solid rgba(255,255,255,0.1); border-bottom:none;\
+  border-radius:16px 16px 0 0; overflow:hidden;\
+  box-shadow:0 8px 32px rgba(0,0,0,0.35);\
+  animation:riseIn 0.6s ease 0.35s both;\
+}\
+@keyframes riseIn { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }\
+.browser-chrome {\
+  flex:none; position:relative; display:flex; align-items:center; gap:7px;\
+  padding:11px 16px; background:rgba(255,255,255,0.03); border-bottom:1px solid rgba(255,255,255,0.08);\
+}\
+.browser-dot { width:10px; height:10px; border-radius:999px; flex:none; }\
+.browser-dot.r { background:rgba(248,113,113,0.75); }\
+.browser-dot.y { background:rgba(245,158,11,0.75); }\
+.browser-dot.g { background:rgba(16,185,129,0.75); }\
+.browser-url {\
+  position:absolute; left:50%; transform:translateX(-50%);\
+  font-size:12px; color:#94a3b8; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);\
+  padding:4px 16px; border-radius:999px; max-width:55%;\
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\
+}\
+.browser-viewport { flex:1; min-height:0; position:relative; background:#0d1322; }\
+.browser-viewport img { width:100%; height:100%; object-fit:cover; object-position:top; display:block; }\
 .demo-bg-fallback {\
-  min-height:60vh; display:flex; align-items:center; justify-content:center;\
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;\
   background:linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);\
 }\
 .demo-bg-fallback .domain {\
-  font-family:"DM Serif Display",serif; font-size:clamp(28px,5vw,48px); color:rgba(255,255,255,0.06);\
+  font-family:"DM Serif Display",serif; font-size:clamp(28px,5vw,48px); color:rgba(255,255,255,0.08);\
   letter-spacing:0.02em;\
 }\
 .demo-info {\
-  position:fixed; bottom:100px; left:50%; transform:translateX(-50%);\
-  background:rgba(20,20,35,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:24px 32px;\
-  backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
-  box-shadow:0 8px 40px rgba(0,0,0,0.15); z-index:10; text-align:center;\
-  max-width:400px; width:calc(100% - 40px); animation: fadeUp 0.5s ease 1s both;\
+  position:fixed; bottom:108px; left:50%; transform:translateX(-50%);\
+  background:rgba(17,24,39,0.88); border:1px solid rgba(255,255,255,0.1); border-radius:16px; padding:22px 28px;\
+  backdrop-filter:blur(24px) saturate(1.4); -webkit-backdrop-filter:blur(24px) saturate(1.4);\
+  box-shadow:0 8px 32px rgba(0,0,0,0.35); z-index:10; text-align:center;\
+  max-width:380px; width:calc(100% - 40px); animation: fadeUp 0.5s ease 1s both;\
 }\
 @keyframes fadeUp { from{opacity:0;transform:translateX(-50%) translateY(10px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }\
-.demo-info h3 { font-family:"DM Serif Display",serif; font-size:20px; margin-bottom:6px; color:#f1f5f9; }\
-.demo-info p { font-size:14px; color:#94a3b8; line-height:1.6; margin-bottom:16px; }\
-.demo-info .arrow { font-size:20px; color:#64748b; animation:bounce 1.5s ease infinite; }\
+.demo-info .tag { display:inline-block; font-size:10px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:#3b82f6; margin-bottom:8px; }\
+.demo-info h3 { font-family:"DM Serif Display",serif; font-weight:400; font-size:21px; margin-bottom:6px; color:#f1f5f9; }\
+.demo-info p { font-size:14px; color:#94a3b8; line-height:1.6; margin-bottom:14px; }\
+.demo-info p strong { color:#f1f5f9; font-weight:600; }\
+.demo-info .arrow { font-size:18px; color:#3b82f6; animation:bounce 1.5s ease infinite; margin-bottom:4px; }\
 @keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(6px)} }\
-.demo-dismiss { font-size:12px; color:#64748b; cursor:pointer; border:none; background:none; font-family:inherit; }\
+.demo-dismiss { font-size:12px; color:#64748b; cursor:pointer; border:none; background:none; font-family:inherit; padding:6px 10px; }\
 .demo-dismiss:hover { color:#f1f5f9; }\
 .scroll-modal {\
   display:none; position:fixed; inset:0; z-index:100000;\
@@ -687,57 +734,80 @@ body { font-family:"Archivo",sans-serif; background:#0a0e1a; min-height:100vh; d
    shoved it half its width off-center -> off-screen on mobile. Translate Y only. */\
 @keyframes scrollModalIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }\
 .scroll-modal-box {\
-  background:#111827; border:1px solid rgba(255,255,255,0.08); border-radius:20px;\
+  background:#111827; border:1px solid rgba(255,255,255,0.08); border-radius:16px;\
   padding:36px 32px; max-width:400px; width:calc(100% - 32px); text-align:center;\
+  box-shadow:0 8px 32px rgba(0,0,0,0.35);\
   animation:scrollModalIn 0.3s ease both;\
 }\
-.scroll-modal-box h3 { font-family:"DM Serif Display",serif; font-size:22px; color:#f1f5f9; margin-bottom:10px; }\
+.scroll-modal-box h3 { font-family:"DM Serif Display",serif; font-weight:400; font-size:22px; color:#f1f5f9; margin-bottom:10px; }\
 .scroll-modal-box p { font-size:14px; color:#94a3b8; line-height:1.6; margin-bottom:24px; }\
+.scroll-modal-box p strong { color:#f1f5f9; font-weight:600; }\
 .scroll-modal-cta {\
-  display:inline-block; background:#3b82f6; color:#fff; font-size:14px; font-weight:700;\
-  padding:12px 28px; border-radius:12px; text-decoration:none; transition:all 0.2s;\
+  display:inline-block; background:#3b82f6; color:#fff; font-size:14px; font-weight:600;\
+  padding:13px 28px; border-radius:10px; text-decoration:none; transition:all 0.15s ease;\
 }\
-.scroll-modal-cta:hover { background:#2563eb; transform:translateY(-1px); }\
+.scroll-modal-cta:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.35); }\
 .scroll-modal-close {\
-  display:block; margin-top:14px; font-size:12px; color:#64748b; cursor:pointer;\
-  border:none; background:none; font-family:inherit;\
+  display:block; margin:14px auto 0; font-size:12px; color:#64748b; cursor:pointer;\
+  border:none; background:none; font-family:inherit; padding:6px 10px;\
 }\
 .scroll-modal-close:hover { color:#f1f5f9; }\
-@media(max-width:600px) { .demo-cta { display:none; } }\
+@media(max-width:640px) {\
+  .demo-header { padding:10px 14px; gap:10px; }\
+  .demo-domain { display:none; }\
+  .demo-badge { display:none; }\
+  .demo-cta { margin-left:auto; min-height:44px; padding:10px 14px; font-size:12px; }\
+  .demo-body { padding:16px 12px 0; }\
+  .demo-hero-copy { margin-bottom:14px; }\
+  .demo-title { font-size:21px; }\
+  .demo-sub { display:none; }\
+  .browser-url { max-width:70%; }\
+  .demo-info { bottom:96px; padding:18px 20px; }\
+}\
+@media(max-height:560px) { .demo-hero-copy { display:none; } .demo-body { padding-top:16px; } }\
 </style>\
 </head>\
 <body>\
-<div class="demo-header">\
+<header class="demo-header">\
   <div class="demo-brand">\
     <svg class="demo-mark" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1-.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg>\
-    <span class="demo-name">' + brand + '</span>\
-    <span class="demo-badge">Whisp AI</span>\
+    <span class="demo-name">Whisp</span>\
+    <span class="demo-badge">Live demo</span>\
   </div>\
-  <a class="demo-cta" href="/">Get Whisp for your website</a>\
-</div>\
-<div class="demo-body">\
-  <div class="demo-bg" id="demo-bg"></div>\
+  <span class="demo-domain">' + tenant.domain + '</span>\
+  <a class="demo-cta" href="/">Get this for your site</a>\
+</header>\
+<main class="demo-body">\
+  <div class="demo-hero-copy">\
+    <div class="demo-eyebrow">AI assistant preview</div>\
+    <h1 class="demo-title">The AI assistant for ' + brand + '</h1>\
+    <p class="demo-sub">A live preview of Whisp installed on <strong>' + tenant.domain + '</strong>. Everything it answers comes from the website&#39;s own content.</p>\
+  </div>\
+  <div class="browser-frame">\
+    <div class="browser-chrome">\
+      <span class="browser-dot r"></span><span class="browser-dot y"></span><span class="browser-dot g"></span>\
+      <span class="browser-url">' + tenant.domain + '</span>\
+    </div>\
+    <div class="browser-viewport" id="demo-bg"></div>\
+  </div>\
 <script>\
 (function(){\
   var bg=document.getElementById("demo-bg");\
   var img=document.createElement("img");\
   img.src="' + baseUrl + '/api/screenshot/' + tenant.id + '";\
+  img.alt="Screenshot of ' + tenant.domain + '";\
   img.onerror=function(){bg.innerHTML=\'<div class="demo-bg-fallback"><span class="domain">' + tenant.domain + '</span></div>\';};\
   bg.appendChild(img);\
-  var iframe=document.createElement("iframe");\
-  iframe.src="https://' + tenant.domain + '";\
-  iframe.setAttribute("sandbox","allow-same-origin");\
-  iframe.style.cssText="position:absolute;inset:0;width:100%;height:100%;border:none;pointer-events:none;z-index:1;";\
-  bg.appendChild(iframe);\
 })();\
 </script>\
   <div class="demo-info" id="demo-info">\
-    <h3>Try it out!</h3>\
+    <span class="tag">Try it out</span>\
+    <h3>Ask it anything</h3>\
     <p>This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.</p>\
     <div class="arrow">↓</div>\
     <button class="demo-dismiss" onclick="document.getElementById(\'demo-info\').style.display=\'none\'">Dismiss</button>\
   </div>\
-</div>\
+</main>\
 <div class="scroll-modal" id="scroll-modal">\
   <div class="scroll-modal-box">\
     <h3>This is a preview</h3>\
@@ -1988,13 +2058,25 @@ app.get("/api/dashboard/chunks", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   const search = ((req.query.search as string) || "").trim();
   const store = new CloudflareVectorizeStore({ tenantId });
-  let queryVec: number[];
-  try {
-    queryVec = search ? (await bgeProvider().embed([search]))[0] : new Array(1024).fill(0.01);
-  } catch { queryVec = new Array(1024).fill(0.01); }
 
+  // Vectorize caps topK at 20 when returnMetadata="all" (error 40025) — the old
+  // single search(vec, 100) here ALWAYS 400'd, so the KB browser showed "No
+  // knowledge yet" next to a real count. Search path: relevance-ranked top 20
+  // (cap-legal). Browse path: two-step — id probe without metadata (topK 100
+  // allowed), then hydrate metadata via get_by_ids.
   let results: any[] = [];
-  try { results = await store.search(queryVec, 100); } catch { results = []; }
+  try {
+    if (search) {
+      const queryVec = (await bgeProvider().embed([search]))[0];
+      results = await store.search(queryVec, 20);
+    } else {
+      const idHits = await store.searchIds(new Array(1024).fill(0.01), 100);
+      results = await store.getByIds(idHits);
+    }
+  } catch (e: any) {
+    console.error(`[dashboard:chunks] ${tenantId}: ${e.message}`);
+    results = [];
+  }
 
   // Group chunks by source page (url) into the folder tree the dashboard expects.
   const byUrl = new Map<string, any>();
@@ -2119,9 +2201,12 @@ app.get("/api/dashboard/embed-code", authMiddleware, (req, res) => {
   const tenant = getTenant(tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
 
+  // Render terminates TLS at the proxy, so req.protocol reads "http" — which made
+  // the embed snippet load http://whisp.so/widget.js and get mixed-content-blocked
+  // on every https customer site. Prefer BASE_URL; never emit http for non-local.
   const host = req.get("host") || `localhost:${port}`;
-  const protocol = req.protocol || "http";
-  const baseUrl = `${protocol}://${host}`;
+  const baseUrl = process.env.BASE_URL
+    || (host.startsWith("localhost") ? `http://${host}` : `https://${host}`);
 
   const embedCode = `<script>
 (function() {
@@ -2133,7 +2218,16 @@ app.get("/api/dashboard/embed-code", authMiddleware, (req, res) => {
 })();
 </script>`;
 
-  res.json({ embedCode, tenantId, apiUrl: baseUrl });
+  // siteUrl/domain/brandName drive the dashboard's "Open site" link + header title
+  // (it previously linked apiUrl — i.e. whisp.so — instead of the tenant's site).
+  res.json({
+    embedCode,
+    tenantId,
+    apiUrl: baseUrl,
+    siteUrl: tenant.siteUrl || (tenant.domain ? `https://${tenant.domain}` : null),
+    domain: tenant.domain || null,
+    brandName: (tenant as any).brandName || null,
+  });
 });
 
 // ─── Meta Channel Webhook Routes ────────────────────────────────────────────

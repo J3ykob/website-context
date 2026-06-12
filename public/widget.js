@@ -212,7 +212,7 @@
 #wctx-fab .wctx-glass {\
   background:rgba(200,200,210,0.55);\
   backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
-  border:1px solid rgba(255,255,255,0.2); box-shadow:0 6px 24px rgba(0,0,0,0.12);\
+  border:1px solid rgba(255,255,255,0.2); box-shadow:0 8px 32px rgba(0,0,0,0.16);\
 }\
 /* Bubbles start tucked UNDER the input (translated inward, scaled down, z-index below the\
    pill) and fly outward to the sides when the bar becomes active. */\
@@ -235,9 +235,9 @@
 #wctx-fab .wctx-ctl {\
   width:38px; height:38px; display:flex; align-items:center; justify-content:center;\
   background:none; border:none; cursor:pointer; border-radius:50%;\
-  color:rgba(10,10,10,0.5); transition:background 0.2s, color 0.2s; padding:0;\
+  color:rgba(10,10,10,0.5); transition:background 0.15s ease, color 0.15s ease, transform 0.15s ease; padding:0;\
 }\
-#wctx-fab .wctx-ctl:hover { background:rgba(255,255,255,0.55); color:rgba(10,10,10,0.85); }\
+#wctx-fab .wctx-ctl:hover { background:rgba(255,255,255,0.55); color:rgba(10,10,10,0.85); transform:translateY(-1px); }\
 #wctx-fab .wctx-bar-wrap {\
   display:flex;\
   flex-direction:column;\
@@ -248,7 +248,7 @@
   backdrop-filter:blur(40px) saturate(1.5);\
   -webkit-backdrop-filter:blur(40px) saturate(1.5);\
   border:1px solid rgba(255,255,255,0.2);\
-  box-shadow:0 6px 24px rgba(0,0,0,0.12);\
+  box-shadow:0 8px 32px rgba(0,0,0,0.16);\
   transition:width 0.35s cubic-bezier(0.4,0,0.2,1), max-height 0.35s cubic-bezier(0.4,0,0.2,1), box-shadow 0.35s;\
   overflow:hidden;\
   max-height:52px;\
@@ -257,6 +257,10 @@
   width:clamp(320px, 60vw, 760px);\
   max-height:min(72vh, 620px);\
   box-shadow:0 12px 48px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.5);\
+}\
+#wctx-fab .wctx-bar-wrap:focus-within {\
+  border-color:rgba(59,130,246,0.5);\
+  box-shadow:0 12px 48px rgba(0,0,0,0.18), 0 0 0 2px rgba(59,130,246,0.5), inset 0 1px 0 rgba(255,255,255,0.5);\
 }\
 /* Tablet: wide expanded input but still room for the bubbles. */\
 @media (min-width:641px) and (max-width:1024px) { #wctx-fab.wctx-active .wctx-bar-wrap { width:clamp(320px, 56vw, 560px); } }\
@@ -296,11 +300,19 @@
   opacity:1;\
 }\
 #wctx-fab .wctx-bar-messages:empty { padding:0; max-height:0; }\
+#wctx-fab .wctx-bar-messages { scrollbar-width:thin; scrollbar-color:rgba(10,10,10,0.18) transparent; }\
+#wctx-fab .wctx-bar-messages::-webkit-scrollbar { width:6px; }\
+#wctx-fab .wctx-bar-messages::-webkit-scrollbar-track { background:transparent; }\
+#wctx-fab .wctx-bar-messages::-webkit-scrollbar-thumb { background:rgba(10,10,10,0.18); border-radius:999px; }\
+#wctx-fab .wctx-bar-messages::-webkit-scrollbar-thumb:hover { background:rgba(10,10,10,0.3); }\
+#wctx-fab.wctx-dark .wctx-bar-messages { scrollbar-color:rgba(255,255,255,0.16) transparent; }\
+#wctx-fab.wctx-dark .wctx-bar-messages::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.16); }\
+#wctx-fab.wctx-dark .wctx-bar-messages::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,0.28); }\
 #wctx-fab .wctx-bar-bubble {\
   font-family:"Archivo",-apple-system,sans-serif;\
-  font-size:16px; line-height:1.5; margin-bottom:6px;\
-  padding:6px 10px;\
-  border-radius:10px;\
+  font-size:16px; line-height:1.5; margin-bottom:8px;\
+  padding:7px 11px;\
+  border-radius:14px;\
   max-width:85%;\
   box-sizing:border-box; overflow-wrap:anywhere; word-break:break-word;\
   animation:wctx-bubbleIn 0.25s ease-out both;\
@@ -312,8 +324,8 @@
 #wctx-fab .wctx-bar-bubble:last-child { margin-bottom:0; }\
 #wctx-fab .wctx-bar-bubble.user {\
   align-self:flex-end; margin-left:auto;\
-  background:rgba(10,10,10,0.55);\
-  color:rgba(255,255,255,0.9);\
+  background:#3b82f6;\
+  color:#fff;\
   border-bottom-right-radius:4px;\
 }\
 #wctx-fab .wctx-bar-bubble.assistant {\
@@ -330,7 +342,8 @@
 #wctx-fab .wctx-bar-bubble br { line-height:1.5; }\
 #wctx-fab .wctx-bar-bubble code { background:rgba(0,0,0,0.06); padding:1px 5px; border-radius:4px; font-size:11px; font-family:ui-monospace,monospace; }\
 #wctx-fab .wctx-bar-bubble pre { background:rgba(10,10,10,0.8); color:rgba(255,255,255,0.9); padding:8px 10px; font-size:11px; overflow-x:auto; margin:5px 0; border-radius:8px; white-space:pre-wrap; }\
-#wctx-fab .wctx-bar-bubble a { color:inherit; text-decoration:underline; }\
+#wctx-fab .wctx-bar-bubble a { color:#2563eb; text-decoration:underline; }\
+#wctx-fab.wctx-dark .wctx-bar-bubble a:not(.wctx-page-link):not(.wctx-action-btn) { color:#60a5fa; }\
 #wctx-fab .wctx-bar-bubble a.wctx-page-link, #wctx-fab .wctx-bar-bubble a.wctx-action-btn {\
   display:inline-flex; align-items:center; gap:4px;\
   background:rgba(0,0,0,0.06); border:1px solid rgba(0,0,0,0.08); border-radius:7px;\
@@ -347,7 +360,7 @@
 }\
 #wctx-fab .wctx-bar-dot {\
   width:6px; height:6px; flex-shrink:0;\
-  background:rgba(52,199,89,0.8);\
+  background:rgba(16,185,129,0.85);\
   border-radius:50%;\
   animation:wctx-blink 2.8s ease-in-out infinite;\
 }\
@@ -357,7 +370,7 @@
   font-size:16px; font-weight:500; color:rgba(10,10,10,0.8);\
   min-width:0;\
 }\
-#wctx-fab .wctx-bar-input::placeholder { color:rgba(10,10,10,0.3); }\
+#wctx-fab .wctx-bar-input::placeholder { color:#64748b; }\
 #wctx-fab .wctx-bar-send {\
   flex-shrink:0; width:34px; height:34px; border-radius:50%;\
   display:flex; align-items:center; justify-content:center;\
@@ -365,36 +378,40 @@
   border:1px solid rgba(0,0,0,0.06); cursor:pointer; padding:0;\
   transition:all 0.2s;\
 }\
-#wctx-fab .wctx-bar-send:hover { background:rgba(255,255,255,0.85); color:rgba(10,10,10,0.9); }\
+#wctx-fab .wctx-bar-send:hover { background:rgba(255,255,255,0.85); color:rgba(10,10,10,0.9); transform:translateY(-1px); }\
 /* .wctx-bar-expand is now a .wctx-ctl (styled above); class kept only as a JS hook */\
 \
 #wctx-fab.wctx-dark .wctx-bar-wrap {\
   background:rgba(20,20,35,0.6);\
-  border-color:rgba(255,255,255,0.08);\
-  box-shadow:0 6px 24px rgba(0,0,0,0.3);\
+  border-color:rgba(255,255,255,0.12);\
+  box-shadow:0 8px 32px rgba(0,0,0,0.35);\
   backdrop-filter:blur(40px) saturate(1.5); -webkit-backdrop-filter:blur(40px) saturate(1.5);\
 }\
 #wctx-fab.wctx-dark.wctx-active .wctx-bar-wrap {\
   box-shadow:0 12px 48px rgba(0,0,0,0.5);\
 }\
+#wctx-fab.wctx-dark .wctx-bar-wrap:focus-within {\
+  border-color:rgba(59,130,246,0.5);\
+  box-shadow:0 12px 48px rgba(0,0,0,0.5), 0 0 0 2px rgba(59,130,246,0.5);\
+}\
 #wctx-fab.wctx-dark .wctx-bar-bubble.user {\
-  background:rgba(80,80,80,0.7);\
+  background:#3b82f6;\
   color:#fff;\
 }\
 #wctx-fab.wctx-dark .wctx-bar-bubble.assistant {\
-  background:rgba(50,50,50,0.7);\
-  color:rgba(255,255,255,0.95);\
-  border-color:rgba(80,80,80,0.4);\
+  background:rgba(255,255,255,0.06);\
+  color:#f1f5f9;\
+  border-color:rgba(255,255,255,0.08);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-input { color:#fff; }\
-#wctx-fab.wctx-dark .wctx-bar-input::placeholder { color:rgba(255,255,255,0.4); }\
+#wctx-fab.wctx-dark .wctx-bar-input::placeholder { color:#94a3b8; }\
 #wctx-fab.wctx-dark .wctx-bar-send {\
   color:rgba(255,255,255,0.6);\
   background:rgba(255,255,255,0.08);\
   border-color:rgba(255,255,255,0.12);\
 }\
 #wctx-fab.wctx-dark .wctx-bar-send:hover { background:rgba(255,255,255,0.15); color:rgba(255,255,255,0.9); }\
-#wctx-fab.wctx-dark .wctx-glass { background:rgba(20,20,35,0.6); border-color:rgba(255,255,255,0.08); box-shadow:0 6px 24px rgba(0,0,0,0.3); }\
+#wctx-fab.wctx-dark .wctx-glass { background:rgba(20,20,35,0.6); border-color:rgba(255,255,255,0.12); box-shadow:0 8px 32px rgba(0,0,0,0.35); }\
 #wctx-fab.wctx-dark .wctx-mic { color:rgba(255,255,255,0.4); }\
 #wctx-fab.wctx-dark .wctx-ctl { color:rgba(255,255,255,0.55); }\
 #wctx-fab.wctx-dark .wctx-ctl:hover { background:rgba(255,255,255,0.12); color:#fff; }\
@@ -431,7 +448,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>\
     </button>\
     <button class="wctx-ctl wctx-bar-expand" type="button" title="Expand chat">\
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H4v6M4 4l6 6M14 20h6v-6M20 20l-6-6"/></svg>\
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H4v6M4 4l6 6M14 20h6v-6M20 20l-6-6"/></svg>\
     </button>\
   </div>\
 </div>';
@@ -454,9 +471,9 @@
 #wctx-settings-modal { position:fixed; inset:0; z-index:1000000; display:none; align-items:center; justify-content:center; }\
 #wctx-settings-modal.open { display:flex; }\
 #wctx-settings-modal .wctx-sm-bg { position:absolute; inset:0; background:rgba(10,10,15,0.5); backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px); }\
-#wctx-settings-modal .wctx-sm-card { position:relative; width:min(420px, calc(100vw - 32px)); max-height:85vh; overflow-y:auto; background:#fff; color:#16161c; border-radius:22px; padding:24px; box-shadow:0 24px 80px rgba(0,0,0,0.4); font-family:"Archivo",-apple-system,sans-serif; animation:wctx-sm-in 0.25s cubic-bezier(0.16,1,0.3,1) both; }\
+#wctx-settings-modal .wctx-sm-card { position:relative; width:min(420px, calc(100vw - 32px)); max-height:85vh; overflow-y:auto; background:#fff; color:#16161c; border-radius:16px; padding:24px; box-shadow:0 24px 80px rgba(0,0,0,0.4); font-family:"Archivo",-apple-system,sans-serif; animation:wctx-sm-in 0.25s cubic-bezier(0.16,1,0.3,1) both; }\
 @keyframes wctx-sm-in { from { opacity:0; transform:translateY(16px) scale(0.97);} to { opacity:1; transform:none; } }\
-#wctx-settings-modal.wctx-dark .wctx-sm-card { background:#1c1c28; color:#f0f0f5; }\
+#wctx-settings-modal.wctx-dark .wctx-sm-card { background:#111827; color:#f1f5f9; border:1px solid rgba(255,255,255,0.08); }\
 #wctx-settings-modal .wctx-sm-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }\
 #wctx-settings-modal .wctx-sm-head h3 { margin:0; font-size:19px; font-weight:700; }\
 #wctx-settings-modal .wctx-sm-close { background:none; border:none; cursor:pointer; font-size:24px; line-height:1; color:inherit; opacity:0.45; padding:2px 6px; }\
@@ -464,14 +481,14 @@
 #wctx-settings-modal .wctx-sm-row { margin-bottom:22px; }\
 #wctx-settings-modal .wctx-sm-label { font-size:12px; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:9px; }\
 #wctx-settings-modal .wctx-seg { display:flex; gap:7px; }\
-#wctx-settings-modal .wctx-seg button { flex:1; padding:11px; border-radius:13px; border:1.5px solid rgba(120,120,140,0.25); background:transparent; color:inherit; font-family:inherit; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.15s; }\
+#wctx-settings-modal .wctx-seg button { flex:1; padding:11px; border-radius:10px; border:1.5px solid rgba(120,120,140,0.25); background:transparent; color:inherit; font-family:inherit; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.15s; }\
 #wctx-settings-modal .wctx-seg button:hover { border-color:rgba(120,120,140,0.55); }\
-#wctx-settings-modal .wctx-seg button.active { background:#0a84ff; border-color:#0a84ff; color:#fff; }\
+#wctx-settings-modal .wctx-seg button.active { background:#3b82f6; border-color:#3b82f6; color:#fff; }\
 #wctx-settings-modal .wctx-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }\
 #wctx-settings-modal .wctx-toggle-row span { font-size:15px; font-weight:600; }\
 #wctx-settings-modal .wctx-switch { width:48px; height:28px; border-radius:14px; border:none; background:rgba(120,120,140,0.35); position:relative; cursor:pointer; transition:background 0.2s; flex-shrink:0; }\
 #wctx-settings-modal .wctx-switch::after { content:""; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:transform 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.3); }\
-#wctx-settings-modal .wctx-switch.on { background:#0a84ff; }\
+#wctx-settings-modal .wctx-switch.on { background:#3b82f6; }\
 #wctx-settings-modal .wctx-switch.on::after { transform:translateX(20px); }\
 #wctx-settings-modal .wctx-sm-hint { font-size:12px; opacity:0.5; margin-top:7px; line-height:1.4; }\
 </style>\
@@ -1301,7 +1318,7 @@
 }\
 .wctx-dot {\
   width:6px; height:6px;\
-  background:rgba(52,199,89,0.8);\
+  background:rgba(16,185,129,0.85);\
   border-radius:50%;\
   animation:wctx-blink 2.8s ease-in-out infinite;\
 }\
@@ -1463,8 +1480,8 @@
   transition:all 0.3s cubic-bezier(0.4,0,0.2,1);\
 }\
 .wctx-input-frame:focus-within {\
-  border-color:rgba(255,255,255,0.5);\
-  box-shadow:0 4px 24px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.5);\
+  border-color:rgba(59,130,246,0.5);\
+  box-shadow:0 4px 24px rgba(0,0,0,0.1), 0 0 0 2px rgba(59,130,246,0.5), inset 0 1px 0 rgba(255,255,255,0.5);\
 }\
 .wctx-input-icon {\
   padding:0 16px 0 22px;\
@@ -1537,12 +1554,18 @@
   padding:32px 32px 120px;\
   display:none;\
   flex-direction:column;\
-  gap:20px;\
+  gap:12px;\
   max-width:760px;\
   width:100%;\
   margin:0 auto;\
+  scrollbar-width:thin;\
+  scrollbar-color:rgba(10,10,10,0.18) transparent;\
 }\
 .wctx-state-chat .wctx-messages { display:flex; }\
+.wctx-messages::-webkit-scrollbar { width:6px; }\
+.wctx-messages::-webkit-scrollbar-track { background:transparent; }\
+.wctx-messages::-webkit-scrollbar-thumb { background:rgba(10,10,10,0.18); border-radius:999px; }\
+.wctx-messages::-webkit-scrollbar-thumb:hover { background:rgba(10,10,10,0.3); }\
 \
 .wctx-msg {\
   max-width:82%;\
@@ -1556,13 +1579,14 @@
 }\
 .wctx-msg-user {\
   align-self:flex-end;\
-  background:none;\
-  color:rgba(10,10,10,0.7);\
-  padding:0;\
+  background:#3b82f6;\
+  color:#fff;\
+  padding:10px 16px;\
+  border-radius:14px 14px 4px 14px;\
   font-size:16px;\
-  line-height:1.6;\
+  line-height:1.55;\
   font-weight:500;\
-  text-align:right;\
+  text-align:left;\
   animation-duration:0.3s;\
 }\
 .wctx-msg-assistant {\
@@ -1570,9 +1594,16 @@
   font-size:16px;\
   line-height:1.7;\
   color:rgba(10,10,10,0.85);\
-  background:none;\
-  padding:0;\
+  background:rgba(255,255,255,0.35);\
+  border:1px solid rgba(255,255,255,0.4);\
+  padding:12px 16px;\
+  border-radius:14px 14px 14px 4px;\
   animation-duration:0.6s;\
+}\
+.wctx-msg-system {\
+  align-self:flex-start;\
+  font-size:13px;\
+  color:rgba(10,10,10,0.45);\
 }\
 .wctx-msg-assistant p { margin-bottom:10px; }\
 .wctx-msg-assistant p:last-child { margin-bottom:0; }\
@@ -1592,9 +1623,9 @@
   margin:10px 0;\
   border-radius:12px;\
 }\
-.wctx-msg-assistant a {\
-  color:rgba(10,10,10,0.85);\
-  text-decoration:none;\
+.wctx-msg-assistant a:not(.wctx-page-link):not(.wctx-action-btn) {\
+  color:#2563eb;\
+  text-decoration:underline;\
 }\
 .wctx-msg-assistant a.wctx-page-link {\
   display:inline-flex;\
@@ -1607,6 +1638,7 @@
   font-size:13px;\
   font-weight:600;\
   color:rgba(10,10,10,0.7);\
+  text-decoration:none;\
   cursor:pointer;\
   transition:all 0.2s;\
   backdrop-filter:blur(4px);\
@@ -1654,7 +1686,7 @@
 }\
 .wctx-typing-dot {\
   width:6px; height:6px; border-radius:50%;\
-  background:rgba(10,10,10,0.3);\
+  background:#3b82f6;\
   animation:wctx-dot-bounce 1.2s infinite;\
 }\
 .wctx-typing-dot:nth-child(2) { animation-delay:0.2s; }\
@@ -1702,8 +1734,8 @@
   box-shadow:0 4px 16px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.06);\
 }\
 #wctx-overlay.wctx-dark .wctx-input-frame:focus-within {\
-  border-color:rgba(255,255,255,0.2);\
-  box-shadow:0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1);\
+  border-color:rgba(59,130,246,0.5);\
+  box-shadow:0 4px 24px rgba(0,0,0,0.2), 0 0 0 2px rgba(59,130,246,0.5), inset 0 1px 0 rgba(255,255,255,0.1);\
 }\
 #wctx-overlay.wctx-dark .wctx-input-icon { color:rgba(255,255,255,0.35); }\
 #wctx-overlay.wctx-dark .wctx-chat-input { color:#fff; }\
@@ -1718,15 +1750,21 @@
 }\
 #wctx-overlay.wctx-dark .wctx-state-chat .wctx-input-zone { border-top:none; }\
 #wctx-overlay.wctx-dark .wctx-msg-user {\
-  background:none;\
-  color:rgba(255,255,255,0.6);\
+  background:#3b82f6;\
+  color:#fff;\
 }\
 #wctx-overlay.wctx-dark .wctx-msg-assistant {\
-  color:rgba(255,255,255,0.9);\
-  background:none;\
+  color:#f1f5f9;\
+  background:rgba(255,255,255,0.06);\
+  border-color:rgba(255,255,255,0.08);\
 }\
+#wctx-overlay.wctx-dark .wctx-msg-system { color:rgba(255,255,255,0.45); }\
+#wctx-overlay.wctx-dark .wctx-messages { scrollbar-color:rgba(255,255,255,0.16) transparent; }\
+#wctx-overlay.wctx-dark .wctx-messages::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.16); }\
+#wctx-overlay.wctx-dark .wctx-messages::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,0.28); }\
 #wctx-overlay.wctx-dark .wctx-msg-assistant code { background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.85); }\
-#wctx-overlay.wctx-dark .wctx-msg-assistant a { color:rgba(255,255,255,0.85); }\
+#wctx-overlay.wctx-dark .wctx-msg-assistant a:not(.wctx-page-link):not(.wctx-action-btn) { color:#60a5fa; }\
+#wctx-overlay.wctx-dark .wctx-msg-assistant a.wctx-action-btn { color:#60a5fa; }\
 #wctx-overlay.wctx-dark .wctx-msg-assistant a.wctx-page-link {\
   background:rgba(255,255,255,0.08);\
   border-color:rgba(255,255,255,0.15);\
@@ -1738,7 +1776,7 @@
   background:rgba(255,255,255,0.06);\
   border-color:rgba(255,255,255,0.08);\
 }\
-#wctx-overlay.wctx-dark .wctx-typing-dot { background:rgba(255,255,255,0.3); }\
+#wctx-overlay.wctx-dark .wctx-typing-dot { background:#60a5fa; }\
 #wctx-overlay.wctx-dark .wctx-owner-panel {\
   background:rgba(255,255,255,0.08);\
   border-color:rgba(255,255,255,0.12);\
@@ -1748,6 +1786,13 @@
 #wctx-overlay.wctx-dark .wctx-owner-action { color:rgba(255,255,255,0.7); }\
 #wctx-overlay.wctx-dark .wctx-owner-action:hover { background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.9); }\
 #wctx-overlay.wctx-dark .wctx-owner-action svg { color:rgba(255,255,255,0.4); }\
+\
+/* color-impaired mode: same max-contrast treatment as the bar bubbles */\
+#wctx-overlay.wctx-cb .wctx-msg-user { background:#000; color:#fff; border:2px solid #000; }\
+#wctx-overlay.wctx-cb .wctx-msg-assistant { background:#fff; color:#000; border:2px solid #000; }\
+#wctx-overlay.wctx-cb.wctx-dark .wctx-msg-user { background:#fff; color:#000; border-color:#fff; }\
+#wctx-overlay.wctx-cb.wctx-dark .wctx-msg-assistant { background:#000; color:#fff; border-color:#fff; }\
+#wctx-overlay.wctx-cb .wctx-msg-assistant a { text-decoration:underline; font-weight:700; }\
 \
 .wctx-onboard-overlay {\
   position:fixed; inset:0; z-index:1000001;\

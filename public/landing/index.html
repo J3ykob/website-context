@@ -162,32 +162,41 @@ nav.scrolled {
 
 /* ─── MacBook mockup ─── */
 .macbook {
-  width: calc(100% + 120px); max-width: 1200px; margin: 48px auto 0;
-  margin-left: -60px;
-  perspective: 1200px;
+  width: 100%; max-width: 840px; margin: 64px auto 0;
+  perspective: 1200px; position: relative;
+}
+.macbook::before {
+  content: ""; position: absolute; inset: -14% -18%;
+  background: radial-gradient(ellipse 60% 50% at 50% 45%, rgba(59,130,246,0.22) 0%, transparent 70%);
+  z-index: -1; pointer-events: none;
 }
 .macbook-screen {
-  background: #1a1a2e;
-  border-radius: 12px 12px 0 0;
-  border: 2px solid #2a2a3e;
+  background: #14141f;
+  border-radius: 16px 16px 0 0;
+  border: 1px solid rgba(255,255,255,0.14);
   border-bottom: none;
   overflow: hidden;
-  box-shadow: 0 -4px 60px -10px rgba(59,130,246,0.15), var(--shadow-lg);
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.45),
+    0 30px 90px -18px rgba(0,0,0,0.6),
+    0 0 120px -20px rgba(59,130,246,0.4);
   position: relative;
 }
 .macbook-topbar {
-  background: #12121e; padding: 8px 14px;
-  display: flex; align-items: center; gap: 6px;
-  border-bottom: 1px solid #2a2a3e;
+  background: linear-gradient(180deg, #181828 0%, #12121e 100%);
+  padding: 11px 16px;
+  display: flex; align-items: center; gap: 7px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
 }
-.macbook-dot { width: 8px; height: 8px; border-radius: 50%; }
+.macbook-dot { width: 10px; height: 10px; border-radius: 50%; }
 .macbook-dot.r { background: #ff5f57; }
 .macbook-dot.y { background: #febc2e; }
 .macbook-dot.g { background: #28c840; }
 .macbook-url {
   flex: 1; margin: 0 12px;
-  background: #0d0d18; border-radius: 6px; padding: 4px 12px;
-  font-size: 11px; color: #64748b; font-family: var(--sans);
+  background: #0d0d18; border-radius: 7px; padding: 5px 14px;
+  font-size: 12px; color: #64748b; font-family: var(--sans);
   text-align: center; border: 1px solid #1e1e30;
 }
 .macbook-url span { color: #94a3b8; }
@@ -225,8 +234,8 @@ nav.scrolled {
 
 /* ─── Widget bar inside mockup ─── */
 .mock-widget {
-  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
-  width: calc(100% - 32px); max-width: 380px;
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  width: calc(100% - 32px); max-width: 420px;
 }
 .mock-bar {
   display: flex; flex-direction: column;
@@ -295,47 +304,49 @@ nav.scrolled {
 @keyframes typing-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
 
 .macbook-base {
-  height: 14px;
+  height: 15px;
   background: linear-gradient(180deg, #2a2a3e 0%, #1e1e30 100%);
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 8px 8px;
   position: relative;
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.5);
 }
 .macbook-base::before {
   content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 80px; height: 4px; background: #3a3a4e; border-radius: 0 0 4px 4px;
+  width: 90px; height: 5px; background: #3a3a4e; border-radius: 0 0 5px 5px;
 }
 .macbook-shadow {
-  height: 20px; margin: 0 20px;
-  background: radial-gradient(ellipse at center, rgba(59,130,246,0.08) 0%, transparent 70%);
+  height: 32px; margin: 0 16px;
+  background: radial-gradient(ellipse at center, rgba(59,130,246,0.16) 0%, transparent 70%);
 }
 
 /* ─── Onboarding strip ─── */
 .onboarding-strip {
-  min-height: auto; padding: 20px 0;
-  background: rgba(59,130,246,0.08); border-top: 1px solid rgba(59,130,246,0.1);
-  border-bottom: 1px solid rgba(59,130,246,0.1);
+  min-height: auto; padding: 14px 0;
+  background: rgba(59,130,246,0.05); border-top: 1px solid rgba(59,130,246,0.12);
+  border-bottom: 1px solid rgba(59,130,246,0.12);
 }
 .onboarding-inner {
-  display: flex; align-items: center; gap: 20px;
+  display: flex; align-items: center; gap: 10px 20px;
   flex-wrap: wrap; justify-content: center;
 }
 .onboarding-pulse {
   width: 8px; height: 8px; border-radius: 50%;
-  background: #34d399; flex-shrink: 0;
+  background: #10b981; flex-shrink: 0;
   animation: pulse-green 2s ease-in-out infinite;
 }
-.onboarding-text { font-size: 13px; font-weight: 500; color: var(--text-2); }
-.onboarding-text strong { font-weight: 800; color: var(--text); }
+.onboarding-text { font-size: 13px; font-weight: 500; color: var(--text-2); white-space: nowrap; }
+.onboarding-text strong { font-family: var(--serif); font-weight: 400; font-size: 16px; color: var(--text); }
 .onboarding-bar-wrap {
-  flex: 1; min-width: 160px; max-width: 240px;
-  height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden;
+  flex: 1; min-width: 140px; max-width: 220px;
+  height: 4px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden;
 }
 .onboarding-bar-fill {
-  height: 100%; border-radius: 2px;
+  height: 100%; border-radius: 999px;
   background: linear-gradient(90deg, #3b82f6, #60a5fa);
   transition: width 1s ease;
 }
 .onboarding-recent { font-size: 12px; color: var(--text-3); }
+.onboarding-recent:empty { display: none; }
 .onboarding-recent span { font-weight: 600; color: var(--text-2); }
 .onboarding-hidden { display: none; }
 
@@ -359,13 +370,13 @@ section { padding: 100px 0; }
 .step {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 32px 24px; text-align: center;
-  transition: border-color 0.3s, box-shadow 0.3s;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
-.step:hover { border-color: var(--border-2); box-shadow: 0 4px 32px rgba(0,0,0,0.2); }
+.step:hover { border-color: rgba(255,255,255,0.16); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.35); }
 .step-num {
   width: 44px; height: 44px; margin: 0 auto 16px;
-  background: var(--blue-glow); border: 1px solid rgba(59,130,246,0.15);
-  border-radius: 14px; display: flex; align-items: center; justify-content: center;
+  background: var(--blue-glow); border: 1px solid rgba(59,130,246,0.18);
+  border-radius: 12px; display: flex; align-items: center; justify-content: center;
   font-family: var(--serif); font-size: 20px; color: var(--blue);
 }
 .step h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
@@ -377,12 +388,12 @@ section { padding: 100px 0; }
 .feature-card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 28px 24px;
-  transition: border-color 0.3s;
+  transition: opacity 0.7s ease, transform 0.25s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.feature-card:hover { border-color: var(--border-2); }
+.feature-card:hover { border-color: rgba(255,255,255,0.16); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.35); }
 .feature-icon {
-  width: 40px; height: 40px; background: var(--blue-glow);
-  border: 1px solid rgba(59,130,246,0.15); border-radius: 12px;
+  width: 44px; height: 44px; background: var(--blue-glow);
+  border: 1px solid rgba(59,130,246,0.18); border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
   margin-bottom: 16px; color: var(--blue);
 }
@@ -406,13 +417,23 @@ section { padding: 100px 0; }
 .testimonial {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 28px 24px;
+  display: flex; flex-direction: column;
+  transition: opacity 0.7s ease, transform 0.25s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.testimonial-stars { color: #f59e0b; font-size: 14px; margin-bottom: 12px; letter-spacing: 2px; }
-.testimonial-quote { font-size: 14px; color: var(--text-2); line-height: 1.7; margin-bottom: 18px; font-style: italic; }
-.testimonial-author { display: flex; align-items: center; gap: 10px; }
-.testimonial-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); }
-.testimonial-name { font-size: 13px; font-weight: 700; }
-.testimonial-role { font-size: 11px; color: var(--text-3); }
+.testimonial:hover { border-color: rgba(255,255,255,0.16); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.35); }
+.testimonial-stars { color: #f59e0b; font-size: 14px; margin-bottom: 16px; letter-spacing: 2px; }
+.testimonial-quote { font-size: 14px; color: var(--text-2); line-height: 1.7; margin-bottom: 24px; font-style: italic; }
+.testimonial-author {
+  display: flex; align-items: center; gap: 12px; margin-top: auto;
+  padding-top: 16px; border-top: 1px solid var(--border);
+}
+.testimonial-avatar {
+  width: 40px; height: 40px; border-radius: 50%; object-fit: cover;
+  border: 1px solid var(--border-2); flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.04);
+}
+.testimonial-name { font-size: 13px; font-weight: 700; line-height: 1.3; color: var(--text); }
+.testimonial-role { font-size: 12px; color: var(--text-3); line-height: 1.4; margin-top: 3px; }
 
 /* ─── Trust ─── */
 .trust-strip {
@@ -471,11 +492,21 @@ section { padding: 100px 0; }
   display: flex; justify-content: space-between; align-items: center;
 }
 .faq-q:hover { color: var(--blue); }
-.faq-q::after { content: "+"; font-size: 20px; color: var(--text-3); transition: transform 0.3s; }
-.faq-item.open .faq-q::after { transform: rotate(45deg); color: var(--blue); }
-.faq-a { max-height: 0; overflow: hidden; transition: max-height 0.35s ease; }
-.faq-item.open .faq-a { max-height: 200px; padding-bottom: 16px; }
-.faq-a p { font-size: 14px; color: var(--text-2); line-height: 1.7; }
+.faq-q { transition: color 0.2s ease; }
+.faq-item.open .faq-q { color: var(--blue); }
+.faq-q::after {
+  content: ""; width: 8px; height: 8px; flex-shrink: 0; margin-left: 16px;
+  border-right: 1.5px solid var(--text-3); border-bottom: 1.5px solid var(--text-3);
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 0.35s cubic-bezier(0.4,0,0.2,1), border-color 0.2s ease;
+}
+.faq-item.open .faq-q::after { transform: translateY(2px) rotate(-135deg); border-color: var(--blue); }
+.faq-a {
+  max-height: 0; overflow: hidden; opacity: 0; transform: translateY(-6px);
+  transition: max-height 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease, transform 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.faq-item.open .faq-a { max-height: 320px; opacity: 1; transform: translateY(0); }
+.faq-a p { font-size: 14px; color: var(--text-2); line-height: 1.7; padding-bottom: 20px; }
 
 /* ─── CTA ─── */
 .cta-section { text-align: center; border-top: 1px solid var(--border); }
@@ -483,12 +514,31 @@ section { padding: 100px 0; }
 .cta-section p { font-size: 15px; color: var(--text-2); margin-bottom: 32px; max-width: 420px; margin-left: auto; margin-right: auto; }
 
 /* ─── Footer ─── */
-footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: auto; }
-.footer-inner { max-width: 1080px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
-.footer-left { font-size: 12px; color: var(--text-3); }
-.footer-links { display: flex; gap: 16px; }
-.footer-links a { font-size: 12px; color: var(--text-3); text-decoration: none; }
-.footer-links a:hover { color: var(--text); }
+footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-height: auto; position: relative; z-index: 1; }
+.footer-inner { max-width: 1080px; margin: 0 auto; }
+.footer-grid {
+  display: grid; grid-template-columns: 1.6fr 1fr 1fr;
+  gap: 32px; padding-bottom: 32px;
+}
+.footer-logo {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 800; color: var(--text); text-decoration: none;
+}
+.footer-logo svg { width: 24px; height: 24px; flex-shrink: 0; }
+.footer-tagline { font-size: 13px; color: var(--text-3); margin-top: 12px; max-width: 280px; line-height: 1.6; }
+.footer-col-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text-3); margin-bottom: 12px;
+}
+.footer-col a {
+  display: block; font-size: 13px; color: var(--text-2);
+  text-decoration: none; padding: 6px 0; transition: color 0.15s ease;
+}
+.footer-col a:hover { color: var(--text); }
+.footer-bottom {
+  border-top: 1px solid var(--border); padding-top: 20px;
+  font-size: 12px; color: var(--text-3);
+}
 
 /* ─── Mobile ─── */
 @media(max-width:768px) {
@@ -499,6 +549,30 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
   .testimonials-grid { grid-template-columns: 1fr; }
   .pricing-grid { grid-template-columns: 1fr; }
   .nav-links a:not(.nav-cta):not(.lang-toggle) { display: none; }
+  .footer-grid { grid-template-columns: 1fr; gap: 28px; }
+  .footer-col a { padding: 10px 0; }
+}
+
+/* ─── Mobile: stacked signup form + mockup tuning ─── */
+@media(max-width:600px) {
+  .signup-form {
+    flex-direction: column; gap: 10px;
+    background: transparent; border: none; border-radius: 0; overflow: visible;
+  }
+  .signup-form:focus-within { border-color: transparent; box-shadow: none; }
+  .signup-form input {
+    width: 100%;
+    background: var(--surface-2); border: 1px solid var(--border-2);
+    border-radius: 10px; padding: 13px 16px; font-size: 16px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .signup-form input:focus { border-color: rgba(59,130,246,0.5); box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+  .signup-form button { width: 100%; min-height: 48px; border-radius: 10px; padding: 14px 20px; font-size: 14px; }
+  .macbook { margin-top: 28px; }
+  .fake-site { aspect-ratio: 4 / 3; }
+  .fake-hero-img { height: 90px; }
+  .fake-cards { display: none; }
+  .mock-widget { bottom: 10px; }
 }
 
 /* ─── Language toggle ─── */
@@ -818,11 +892,23 @@ footer { padding: 36px 28px; border-top: 1px solid var(--border); min-height: au
 
 <footer>
   <div class="footer-inner">
-    <div class="footer-left">© 2026 Whisp</div>
-    <div class="footer-links">
-      <a href="/dashboard">Dashboard</a>
-      <a href="mailto:hello@whisp.so">Contact</a>
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="/" class="footer-logo"><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1 -.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg> Whisp</a>
+        <p class="footer-tagline" data-i18n="footer.tagline">Your website, but it talks. An AI assistant that reads your site and answers visitors 24/7.</p>
+      </div>
+      <div class="footer-col">
+        <div class="footer-col-title" data-i18n="footer.product">Product</div>
+        <a href="/pricing" data-i18n="nav.pricing">Pricing</a>
+        <a href="/dashboard" data-i18n="footer.dashboard">Dashboard</a>
+        <a href="/auth/login" data-i18n="footer.login">Login</a>
+      </div>
+      <div class="footer-col">
+        <div class="footer-col-title" data-i18n="footer.contact">Contact</div>
+        <a href="mailto:jakub@whisp.so">jakub@whisp.so</a>
+      </div>
     </div>
+    <div class="footer-bottom">© 2026 Whisp</div>
   </div>
 </footer>
 
@@ -859,6 +945,8 @@ var i18n = {
     "faq.q5": "How accurate are the AI responses?", "faq.a5": "The AI only uses information from YOUR website. It never makes things up. When it can’t answer, it logs the question so you can add the missing info.",
     "faq.q6": "Can I customize the appearance?", "faq.a6": "The widget auto-adapts to your site’s colors. You can set brand name and accent color. Analytics Pro plan includes full white-label customization.",
     "cta.h": "Ready to try it?", "cta.p": "Join hundreds of businesses that turned their websites into conversations.",
+    "footer.tagline": "Your website, but it talks. An AI assistant that reads your site and answers visitors 24/7.",
+    "footer.product": "Product", "footer.dashboard": "Dashboard", "footer.login": "Login", "footer.contact": "Contact",
     "demo.convo": [
       { type: "user", text: "How much for same-day to Kraków?" },
       { type: "bot", text: "Same-day to Kraków starts at 89 PLN for parcels up to 5kg. Express (before 12:00) is 129 PLN. Want me to start a shipment?" },
@@ -896,6 +984,8 @@ var i18n = {
     "faq.q5": "Jak dokładne są odpowiedzi AI?", "faq.a5": "AI korzysta wyłącznie z informacji z TWOJEJ strony. Nigdy nie wymyśla odpowiedzi. Gdy nie może odpowiedzieć, zapisuje pytanie, żebyś mógł uzupełnić brakujące info.",
     "faq.q6": "Czy mogę dostosować wygląd?", "faq.a6": "Widget automatycznie dopasowuje się do kolorów Twojej strony. Możesz ustawić nazwę marki i kolor akcentu. Plan Pro zawiera pełną personalizację.",
     "cta.h": "Chcesz spróbować?", "cta.p": "Dołącz do firm, które zamieniły swoje strony w rozmowy.",
+    "footer.tagline": "Twoja strona, ale mówi. Asystent AI, który czyta Twoją stronę i odpowiada klientom 24/7.",
+    "footer.product": "Produkt", "footer.dashboard": "Panel", "footer.login": "Logowanie", "footer.contact": "Kontakt",
     "demo.convo": [
       { type: "user", text: "Ile kosztuje przesyłka same-day do Krakowa?" },
       { type: "bot", text: "Same-day do Krakowa od 89 PLN za paczki do 5kg. Express (przed 12:00) to 129 PLN. Mam zacząć wysyłkę?" },
@@ -1041,6 +1131,7 @@ function handleSignup(e) {
 
   function timeAgo(iso) {
     var diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (!isFinite(diff)) return 'recently';
     if (diff < 60) return 'just now';
     if (diff < 3600) return Math.floor(diff/60) + 'm ago';
     if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
@@ -1051,17 +1142,24 @@ function handleSignup(e) {
     fetch(BASE + '/api/onboarding-stats')
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        if (d.queued === 0) return;
+        // Graceful fallback: only reveal the strip on well-formed, non-zero data.
+        // On bad/empty payloads the strip stays hidden (or keeps its last good state).
+        if (!d || typeof d.queued !== 'number' || !(d.queued > 0)) return;
         strip.classList.remove('onboarding-hidden');
         elQueued.textContent = d.queued;
-        var pct = d.total > 0 ? Math.round((d.active / d.total) * 100) : 0;
-        elBar.style.width = pct + '%';
-        if (d.recentlyCompleted && d.recentlyCompleted.length > 0) {
+        var pct = (typeof d.total === 'number' && d.total > 0 && isFinite(d.active / d.total))
+          ? Math.round((d.active / d.total) * 100) : 0;
+        elBar.style.width = Math.max(4, Math.min(100, pct)) + '%';
+        if (d.recentlyCompleted && d.recentlyCompleted.length > 0 && d.recentlyCompleted[0].domain) {
           var r = d.recentlyCompleted[0];
-          elRecent.innerHTML = '<span>' + r.domain + '</span> joined ' + timeAgo(r.completedAt);
+          elRecent.textContent = '';
+          var dom = document.createElement('span');
+          dom.textContent = r.domain;
+          elRecent.appendChild(dom);
+          elRecent.appendChild(document.createTextNode(' joined ' + timeAgo(r.completedAt)));
         }
       })
-      .catch(function() {});
+      .catch(function() { /* network error: strip stays hidden / keeps last good state */ });
   }
   update();
   setInterval(update, 30000);

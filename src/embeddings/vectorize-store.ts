@@ -112,6 +112,61 @@ export class CloudflareVectorizeStore implements VectorStore {
     }));
   }
 
+  // Id-only similarity probe. returnMetadata:"none" lifts the topK cap from 20 to
+  // 100 — pair with getByIds() to list large result sets with metadata.
+  async searchIds(query: number[], topK: number = 100): Promise<string[]> {
+    const body = JSON.stringify({
+      vector: query,
+      topK,
+      returnValues: false,
+      returnMetadata: "none",
+      filter: { tenant: this.tenantId },
+    });
+    let resp = await fetch(`${BASE}/query`, { method: "POST", headers: headers(), body });
+    if (resp.status === 401 || resp.status === 403) {
+      await refreshCfToken();
+      resp = await fetch(`${BASE}/query`, { method: "POST", headers: headers(), body });
+    }
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Vectorize id query failed (HTTP ${resp.status}): ${err.slice(0, 200)}`);
+    }
+    const data = await resp.json() as any;
+    return (data.result?.matches || []).map((m: any) => String(m.id));
+  }
+
+  // Fetch vectors (with metadata) by bare chunk id. Used by the dashboard KB
+  // browser: /query caps topK at 20 when returnMetadata="all", so listings do a
+  // two-step — query ids with returnMetadata:"none" (topK up to 100 allowed),
+  // then hydrate metadata here. result is a flat array of {id, metadata, values}.
+  async getByIds(ids: string[]): Promise<SearchResult[]> {
+    if (ids.length === 0) return [];
+    const prefixed = ids.map((id) => (id.startsWith(`${this.tenantId}__`) ? id : `${this.tenantId}__${id}`));
+    const body = JSON.stringify({ ids: prefixed });
+    let resp = await fetch(`${BASE}/get_by_ids`, { method: "POST", headers: headers(), body });
+    if (resp.status === 401 || resp.status === 403) {
+      await refreshCfToken();
+      resp = await fetch(`${BASE}/get_by_ids`, { method: "POST", headers: headers(), body });
+    }
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Vectorize get_by_ids failed (HTTP ${resp.status}): ${err.slice(0, 200)}`);
+    }
+    const data = await resp.json() as any;
+    const vectors = Array.isArray(data.result) ? data.result : [];
+    return vectors.map((m: any) => ({
+      id: String(m.id).replace(`${this.tenantId}__`, ""),
+      content: m.metadata?.content || "",
+      metadata: {
+        title: m.metadata?.title || "",
+        url: m.metadata?.url || "",
+        type: m.metadata?.type || "",
+        headingHierarchy: (() => { try { return JSON.parse(m.metadata?.headingHierarchy || "[]"); } catch { return []; } })(),
+      },
+      score: 1,
+    }));
+  }
+
   async delete(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     const prefixed = ids.map(id => `${this.tenantId}__${id}`);
