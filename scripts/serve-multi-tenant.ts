@@ -6,7 +6,8 @@
  *
  * Optional env vars:
  *   PORT — server port (default: 3211)
- *   BGE_HOST — BGE embedding server host
+ *   BGE_URL — full base URL of the BGE embedding service (e.g. https://bge-embed.<acct>.workers.dev); takes precedence
+ *   BGE_HOST — BGE embedding server host (plain http)
  *   BGE_PORT — BGE embedding server port
  */
 
@@ -15,7 +16,7 @@ import { fileURLToPath } from "url";
 import { readFile, writeFile, appendFile } from "fs/promises";
 import { loadCfToken } from "../src/storage/cf-auth.js";
 import { CloudflareVectorizeStore } from "../src/embeddings/vectorize-store.js";
-import { BGEEmbeddingProvider } from "../src/embeddings/bge-provider.js";
+import { BGEEmbeddingProvider, bgeBaseUrl } from "../src/embeddings/bge-provider.js";
 import { createHash } from "crypto";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
@@ -1545,11 +1546,9 @@ async function runDeepHealthChecks(): Promise<{ ok: boolean; lowBalance: boolean
 
   // BGE embeddings
   try {
-    const host = process.env.BGE_HOST || "176.9.1.133";
-    const port = process.env.BGE_PORT || "7900";
     const h: Record<string, string> = { "Content-Type": "application/json" };
     if (process.env.BGE_API_KEY) h["X-API-Key"] = process.env.BGE_API_KEY;
-    const r = await fetch(`http://${host}:${port}/embed`, { method: "POST", headers: h, body: JSON.stringify({ texts: ["health"] }), signal: AbortSignal.timeout(8000) });
+    const r = await fetch(`${bgeBaseUrl()}/embed`, { method: "POST", headers: h, body: JSON.stringify({ texts: ["health"] }), signal: AbortSignal.timeout(8000) });
     checks.bge = { ok: r.ok, status: r.status };
   } catch (e: any) { checks.bge = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
 

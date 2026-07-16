@@ -15,10 +15,10 @@ services:
         sync: false
       - key: OPENROUTER_MODEL
         value: deepseek/deepseek-chat-v3
-      - key: BGE_HOST
-        value: 176.9.1.133
-      - key: BGE_PORT
-        value: "7900"
+      # BGE embeddings via Workers AI shim (workers/bge-embed) — the old GPU box
+      # (176.9.1.133) is gone. BGE_URL takes precedence over BGE_HOST/BGE_PORT.
+      - key: BGE_URL
+        value: "https://bge-embed.kubalol7982.workers.dev"
       - key: BGE_API_KEY
         sync: false
       - key: QDRANT_HOST
@@ -37,7 +37,21 @@ services:
         value: "3210"
       - key: RESEND_API_KEY
         sync: false
+      # Admin API auth. MUST be a strong (>=24 char) random string — generate with
+      # `openssl rand -hex 32`. If unset/weak, every /api/admin/* route fails closed.
+      - key: ADMIN_SECRET
+        sync: false
       - key: BROWSERLESS_TOKEN
+        sync: false
+      # Voice outreach (Twilio). AUTH_TOKEN is needed to validate webhook signatures;
+      # FROM_NUMBER + FORWARD_TO drive the call-back forwarding in /api/voice/incoming.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: VOICE_FORWARD_TO
         sync: false
 
   # Qdrant vector database (private, not exposed to internet)

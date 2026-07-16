@@ -1,11 +1,22 @@
 import type { EmbeddingProvider } from "./types.js";
 
 export interface BGEProviderConfig {
+  url?: string;
   host?: string;
   port?: number;
   batchSize?: number;
   model?: "bge-large-en-v1.5" | "bge-m3";
   apiKey?: string;
+}
+
+// Full-URL config (config.url / BGE_URL, e.g. an https:// Workers AI shim)
+// takes precedence over host:port, which only supports plain http.
+export function bgeBaseUrl(config: BGEProviderConfig = {}): string {
+  const url = config.url || process.env.BGE_URL;
+  if (url) return url.replace(/\/+$/, "");
+  const host = config.host || process.env.BGE_HOST || "176.9.1.133";
+  const port = config.port || parseInt(process.env.BGE_PORT || "7900");
+  return `http://${host}:${port}`;
 }
 
 export class BGEEmbeddingProvider implements EmbeddingProvider {
@@ -16,9 +27,7 @@ export class BGEEmbeddingProvider implements EmbeddingProvider {
   readonly modelName: string;
 
   constructor(config: BGEProviderConfig = {}) {
-    const host = config.host || process.env.BGE_HOST || "176.9.1.133";
-    const port = config.port || parseInt(process.env.BGE_PORT || "7900");
-    this.baseUrl = `http://${host}:${port}`;
+    this.baseUrl = bgeBaseUrl(config);
     this.batchSize = config.batchSize || 256;
     this.apiKey = config.apiKey || process.env.BGE_API_KEY || "";
     this.modelName = config.model || "bge-large-en-v1.5";
