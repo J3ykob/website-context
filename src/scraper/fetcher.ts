@@ -78,19 +78,30 @@ async function fetchStatic(
 
 let browserInstance: Browser | null = null;
 const BROWSERLESS_TOKEN = process.env.BROWSERLESS_TOKEN || "";
+// browserless v2 host (the v1 chrome.browserless.io domain is dead).
+export const BROWSERLESS_HOST = process.env.BROWSERLESS_HOST || "production-sfo.browserless.io";
+
+// Remote browserless when a token is set, otherwise (or if the remote connect
+// fails) the locally-installed Chromium — the Docker image ships one and points
+// PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH at it.
+export async function connectScrapeBrowser(): Promise<Browser> {
+  if (BROWSERLESS_TOKEN) {
+    try {
+      return await chromium.connectOverCDP(`wss://${BROWSERLESS_HOST}?token=${BROWSERLESS_TOKEN}`, { timeout: 20000 });
+    } catch (err) {
+      console.warn(`[fetcher] browserless connect failed (${(err as Error).message}), falling back to local Chromium`);
+    }
+  }
+  return chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+  });
+}
 
 async function getBrowser(): Promise<Browser> {
   if (!browserInstance || !browserInstance.isConnected()) {
-    if (BROWSERLESS_TOKEN) {
-      browserInstance = await chromium.connectOverCDP(
-        `wss://chrome.browserless.io?token=${BROWSERLESS_TOKEN}`
-      );
-    } else {
-      browserInstance = await chromium.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-      });
-    }
+    browserInstance = await connectScrapeBrowser();
   }
   return browserInstance;
 }

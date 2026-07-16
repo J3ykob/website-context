@@ -1585,9 +1585,12 @@ async function runDeepHealthChecks(): Promise<{ ok: boolean; lowBalance: boolean
 
   // Browserless (scrape dependency) — informational, only when configured. A dry
   // token silently produces 0-chunk scrapes + screenshot-less demos, so surface it.
+  // v2 host + /json/version (the v1 chrome.browserless.io domain and its /pressure
+  // endpoint are dead). Must match BROWSERLESS_HOST default in src/scraper/fetcher.ts.
   if (process.env.BROWSERLESS_TOKEN) {
     try {
-      const r = await fetch(`https://chrome.browserless.io/pressure?token=${process.env.BROWSERLESS_TOKEN}`, { signal: AbortSignal.timeout(8000) });
+      const blHost = process.env.BROWSERLESS_HOST || "production-sfo.browserless.io";
+      const r = await fetch(`https://${blHost}/json/version?token=${process.env.BROWSERLESS_TOKEN}`, { signal: AbortSignal.timeout(8000) });
       checks.browserless = { ok: r.ok, status: r.status };
     } catch (e: any) { checks.browserless = { ok: false, error: String(e?.message || e).slice(0, 120) }; }
   }

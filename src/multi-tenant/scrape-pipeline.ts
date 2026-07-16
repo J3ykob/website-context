@@ -261,15 +261,8 @@ export async function scrapeTenant(
   const screenshotPath = resolve(DATA_ROOT, tenantId, "screenshot.png");
   if (!existsSync(screenshotPath)) {
     try {
-      const { chromium } = await import("playwright");
-      const browserlessToken = process.env.BROWSERLESS_TOKEN || "";
-      const browser = browserlessToken
-        ? await chromium.connectOverCDP(`wss://chrome.browserless.io?token=${browserlessToken}`)
-        : await chromium.launch({
-            headless: true,
-            args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-            executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-          });
+      const { connectScrapeBrowser } = await import("../scraper/fetcher.js");
+      const browser = await connectScrapeBrowser();
       const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 2 });
       await page.goto(siteUrl, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
       await page.waitForTimeout(3000);
