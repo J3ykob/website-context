@@ -1295,6 +1295,11 @@ app.post("/api/onboard-demo", async (req, res) => {
       if (existing.status === "active") { res.json({ ready: true, tenantId: existing.id }); return; }
       if (["pending", "queued", "scraping"].includes(existing.status)) {
         if (email && existing.email !== email) updateTenant(existing.id, { email });
+        // No VPS pipeline anymore: a claimed pending tenant must actually be
+        // enqueued HERE or the claim hangs on "building" forever. "scraping" is
+        // left alone — it's either genuinely in-flight or gets reset to pending
+        // (and re-enqueued) by recoverStuckJobs on next boot.
+        if (existing.status !== "scraping") worker.enqueue(existing.id, existing.siteUrl || origin, MAX_PAGES);
         res.json({ building: true, tenantId: existing.id }); return;
       }
       // broken / error -> re-onboard

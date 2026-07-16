@@ -120,10 +120,20 @@ export class ScrapeWorker {
       console.log(`[worker] Reset ${stuck.length} stuck tenant(s) to pending`);
     }
 
-    // Scraping is handled by VPS now - don't auto-enqueue on startup
+    // Render owns scraping now (the VPS pipeline is gone) — re-enqueue pending
+    // tenants at boot so onboards interrupted by a deploy finish instead of
+    // hanging forever. Capped: a large pending backlog is a data problem to
+    // triage, not a boot workload — and every completion emails the stored
+    // address, so a mass drain must never happen implicitly.
+    const MAX_BOOT_ENQUEUE = 25;
     const pending = listTenants().filter((t) => t.status === "pending" && t.siteUrl);
-    if (pending.length > 0) {
-      console.log(`[worker] ${pending.length} pending tenant(s) - skipping auto-enqueue (VPS handles scraping)`);
+    for (const tenant of pending.slice(0, MAX_BOOT_ENQUEUE)) {
+      this.enqueue(tenant.id, tenant.siteUrl!, 15);
+    }
+    if (pending.length > MAX_BOOT_ENQUEUE) {
+      console.warn(`[worker] ${pending.length} pending tenant(s) exceeds boot cap ${MAX_BOOT_ENQUEUE} — enqueued the first ${MAX_BOOT_ENQUEUE}, remainder needs manual triage`);
+    } else if (pending.length > 0) {
+      console.log(`[worker] Re-enqueued ${pending.length} pending tenant(s) on boot`);
     }
   }
 
