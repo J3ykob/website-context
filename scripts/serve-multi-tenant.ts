@@ -666,39 +666,14 @@ body {\
 .demo-cta:hover { background:#2563eb; transform:translateY(-1px); box-shadow:0 4px 16px rgba(59,130,246,0.35); }\
 .demo-body {\
   flex:1; min-height:0; position:relative; z-index:1;\
-  display:flex; flex-direction:column; align-items:center;\
-  padding:28px 24px 0;\
 }\
-.demo-hero-copy { flex:none; text-align:center; max-width:720px; margin-bottom:24px; animation:fadeDown 0.5s ease 0.25s both; }\
-.demo-eyebrow { font-size:11px; font-weight:700; letter-spacing:0.16em; text-transform:uppercase; color:#3b82f6; margin-bottom:10px; }\
-.demo-title { font-family:"DM Serif Display",serif; font-weight:400; font-size:clamp(24px,3.4vw,38px); line-height:1.18; color:#f1f5f9; margin-bottom:10px; }\
-.demo-sub { font-size:15px; color:#94a3b8; line-height:1.6; max-width:560px; margin:0 auto; }\
-.demo-sub strong { color:#f1f5f9; font-weight:600; }\
-.browser-frame {\
-  width:100%; max-width:1140px; flex:1; min-height:0;\
-  display:flex; flex-direction:column;\
-  background:#111827; border:1px solid rgba(255,255,255,0.1); border-bottom:none;\
-  border-radius:16px 16px 0 0; overflow:hidden;\
-  box-shadow:0 8px 32px rgba(0,0,0,0.35);\
-  animation:riseIn 0.6s ease 0.35s both;\
+.demo-bg { position:absolute; inset:0; z-index:0; background:#0d1322; animation:bgIn 0.8s ease 0.15s both; }\
+@keyframes bgIn { from{opacity:0} to{opacity:1} }\
+.demo-bg img { width:100%; height:100%; object-fit:cover; object-position:top; display:block; }\
+.demo-fade {\
+  position:absolute; left:0; right:0; bottom:0; height:32%; z-index:1; pointer-events:none;\
+  background:linear-gradient(transparent, rgba(10,14,26,0.88));\
 }\
-@keyframes riseIn { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }\
-.browser-chrome {\
-  flex:none; position:relative; display:flex; align-items:center; gap:7px;\
-  padding:11px 16px; background:rgba(255,255,255,0.03); border-bottom:1px solid rgba(255,255,255,0.08);\
-}\
-.browser-dot { width:10px; height:10px; border-radius:999px; flex:none; }\
-.browser-dot.r { background:rgba(248,113,113,0.75); }\
-.browser-dot.y { background:rgba(245,158,11,0.75); }\
-.browser-dot.g { background:rgba(16,185,129,0.75); }\
-.browser-url {\
-  position:absolute; left:50%; transform:translateX(-50%);\
-  font-size:12px; color:#94a3b8; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);\
-  padding:4px 16px; border-radius:999px; max-width:55%;\
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\
-}\
-.browser-viewport { flex:1; min-height:0; position:relative; background:#0d1322; }\
-.browser-viewport img { width:100%; height:100%; object-fit:cover; object-position:top; display:block; }\
 .demo-bg-fallback {\
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;\
   background:linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);\
@@ -758,14 +733,8 @@ body {\
   .demo-domain { display:none; }\
   .demo-badge { display:none; }\
   .demo-cta { margin-left:auto; min-height:44px; padding:10px 14px; font-size:12px; }\
-  .demo-body { padding:16px 12px 0; }\
-  .demo-hero-copy { margin-bottom:14px; }\
-  .demo-title { font-size:21px; }\
-  .demo-sub { display:none; }\
-  .browser-url { max-width:70%; }\
   .demo-info { bottom:96px; padding:18px 20px; }\
 }\
-@media(max-height:560px) { .demo-hero-copy { display:none; } .demo-body { padding-top:16px; } }\
 </style>\
 </head>\
 <body>\
@@ -779,18 +748,8 @@ body {\
   <a class="demo-cta" href="/">Get this for your site</a>\
 </header>\
 <main class="demo-body">\
-  <div class="demo-hero-copy">\
-    <div class="demo-eyebrow">AI assistant preview</div>\
-    <h1 class="demo-title">The AI assistant for ' + brand + '</h1>\
-    <p class="demo-sub">A live preview of Whisp installed on <strong>' + tenant.domain + '</strong>. Everything it answers comes from the website&#39;s own content.</p>\
-  </div>\
-  <div class="browser-frame">\
-    <div class="browser-chrome">\
-      <span class="browser-dot r"></span><span class="browser-dot y"></span><span class="browser-dot g"></span>\
-      <span class="browser-url">' + tenant.domain + '</span>\
-    </div>\
-    <div class="browser-viewport" id="demo-bg"></div>\
-  </div>\
+  <div class="demo-bg" id="demo-bg"></div>\
+  <div class="demo-fade"></div>\
 <script>\
 (function(){\
   var bg=document.getElementById("demo-bg");\
