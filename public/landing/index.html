@@ -52,6 +52,55 @@ body {
     radial-gradient(ellipse 50% 50% at 20% 80%, rgba(59,130,246,0.06) 0%, transparent 50%);
 }
 
+/* ─── Film grain ─── */
+.grain {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: 0.045;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="160" height="160" filter="url(%23n)"/></svg>');
+}
+
+/* ─── 3D hero canvas: dot-wave floor with speech ripples ─── */
+.hero-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 2%, rgba(0,0,0,0.8) 22%, #000 46%);
+  mask-image: linear-gradient(to bottom, transparent 2%, rgba(0,0,0,0.8) 22%, #000 46%);
+}
+
+/* ─── Hero headline: arrives from depth ─── */
+.hero h1.reveal {
+  transform: perspective(900px) rotateX(16deg) translateY(30px);
+  filter: blur(10px);
+  transition: opacity 0.95s ease, transform 0.95s cubic-bezier(0.22,1,0.36,1), filter 0.95s ease;
+}
+.hero h1.reveal.visible {
+  transform: perspective(900px) rotateX(0deg) translateY(0);
+  filter: blur(0);
+}
+
+/* ─── MacBook 3D tilt + glare ─── */
+.macbook-tilt { transform-style: preserve-3d; will-change: transform; }
+.mac-glare {
+  position: absolute; inset: 0 -60%; z-index: 5; pointer-events: none;
+  background: linear-gradient(100deg, transparent 34%, rgba(255,255,255,0.05) 46%, rgba(147,197,253,0.09) 50%, transparent 62%);
+  mix-blend-mode: screen; will-change: transform;
+}
+
+/* ─── Card spotlight (cursor-tracked) ─── */
+.step, .feature-card, .testimonial, .price-card { position: relative; }
+@media (hover: hover) {
+  .step::after, .feature-card::after, .testimonial::after, .price-card::after {
+    content: ""; position: absolute; inset: 0; border-radius: var(--radius);
+    background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(59,130,246,0.12), transparent 65%);
+    opacity: 0; transition: opacity 0.35s ease; pointer-events: none;
+  }
+  .step:hover::after, .feature-card:hover::after, .testimonial:hover::after, .price-card:hover::after { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero h1.reveal { transform: none; filter: none; }
+  .hero h1 em { animation: none; }
+  .reveal { transition-duration: 0.01s; }
+}
+
 .container { max-width: 1080px; margin: 0 auto; padding: 0 28px; position: relative; z-index: 1; }
 
 .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.7s ease, transform 0.7s ease; }
@@ -118,7 +167,15 @@ nav.scrolled {
   font-weight: 400; line-height: 1.1;
   letter-spacing: -0.02em; margin-bottom: 20px;
 }
-.hero h1 em { font-style: italic; color: var(--blue); }
+.hero h1 em {
+  font-style: italic; color: var(--blue);
+  background: linear-gradient(100deg, #3b82f6 10%, #93c5fd 45%, #60a5fa 55%, #3b82f6 90%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: em-shimmer 5.5s ease-in-out infinite;
+}
+@keyframes em-shimmer { 0%,100% { background-position: 0% 0; } 50% { background-position: 100% 0; } }
 .hero-sub {
   font-size: 17px; color: var(--text-2);
   margin-bottom: 32px; line-height: 1.7;
@@ -589,6 +646,7 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
 <body>
 
 <div class="gradient-bg"></div>
+<div class="grain" aria-hidden="true"></div>
 
 <nav id="nav">
   <a href="/" class="nav-logo"><svg class="nav-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1 -.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg> Whisp</a>
@@ -604,6 +662,7 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
 
 <!-- Hero -->
 <section class="hero" id="signup">
+  <canvas class="hero-canvas" id="hero-canvas" aria-hidden="true"></canvas>
   <div class="container">
     <div class="hero-layout">
       <div class="hero-text">
@@ -621,6 +680,7 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
 
       <!-- MacBook mockup with fake site + widget -->
       <div class="macbook reveal" style="transition-delay:0.3s">
+        <div class="macbook-tilt" id="macbook-tilt">
         <div class="macbook-screen">
           <div class="macbook-topbar">
             <div class="macbook-dot r"></div>
@@ -655,9 +715,11 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
               </div>
             </div>
           </div>
+          <div class="mac-glare" id="mac-glare"></div>
         </div>
         <div class="macbook-base"></div>
         <div class="macbook-shadow"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1242,6 +1304,209 @@ var restartDemo;
   };
 
   setTimeout(runNext, 2000);
+})();
+
+// ─── Shared hero state: visibility + reduced motion ───
+var heroEl = document.querySelector('.hero');
+var heroVisible = true;
+var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+new IntersectionObserver(function(entries) {
+  heroVisible = entries[0].isIntersecting;
+}, { threshold: 0 }).observe(heroEl);
+
+// ─── 3D hero: WebGL dot-wave floor + speech ripples ───
+(function() {
+  var canvas = document.getElementById('hero-canvas');
+  if (!canvas) return;
+  var gl;
+  try { gl = canvas.getContext('webgl', { alpha: true, antialias: false, powerPreference: 'low-power' }); } catch (e) {}
+  if (!gl) { canvas.remove(); return; }
+
+  var VS = [
+    'precision mediump float;',
+    'attribute vec2 aGrid;',
+    'uniform float uTime; uniform float uAspect; uniform float uDpr; uniform vec2 uCam;',
+    'uniform vec3 uRipples[6];',
+    'varying float vFog; varying float vGlow;',
+    'void main() {',
+    '  float wx = (aGrid.x - 0.5) * 30.0;',
+    '  float wz = 2.5 + aGrid.y * 26.0;',
+    '  float wy = 0.32 * sin(wx * 0.42 + uTime * 0.55) * cos(wz * 0.33 - uTime * 0.38);',
+    '  wy += 0.14 * sin(wx * 1.1 - uTime * 0.3) * sin(wz * 0.8 + uTime * 0.45);',
+    '  float glow = 0.0;',
+    '  for (int i = 0; i < 6; i++) {',
+    '    vec3 r = uRipples[i];',
+    '    float age = uTime - r.z;',
+    '    if (age > 0.0 && age < 5.0) {',
+    '      float d = distance(vec2(wx, wz), r.xy);',
+    '      float wave = sin(d * 2.4 - age * 5.0) * exp(-d * 0.30) * exp(-age * 0.9);',
+    '      wy += 0.55 * wave;',
+    '      glow += max(0.0, wave) * 1.6;',
+    '    }',
+    '  }',
+    '  vec3 p = vec3(wx + uCam.x * wz * 0.12, wy - 1.28 + uCam.y * wz * 0.07, wz);',
+    '  float f = 1.55;',
+    '  gl_Position = vec4(p.x * f / uAspect, p.y * f, (p.z - 2.0) / 40.0, p.z);',
+    '  float depth = clamp((wz - 2.5) / 26.0, 0.0, 1.0);',
+    '  vFog = 1.0 - depth;',
+    '  vGlow = clamp(glow, 0.0, 1.0);',
+    '  gl_PointSize = (3.3 - depth * 2.5 + vGlow * 2.4) * uDpr;',
+    '}'
+  ].join('\n');
+
+  var FS = [
+    'precision mediump float;',
+    'varying float vFog; varying float vGlow;',
+    'void main() {',
+    '  vec2 c = gl_PointCoord - 0.5;',
+    '  float disc = smoothstep(0.5, 0.1, length(c));',
+    '  vec3 base = vec3(0.231, 0.510, 0.965);',
+    '  vec3 hot  = vec3(0.576, 0.827, 0.988);',
+    '  vec3 col = mix(base, hot, vGlow);',
+    '  float a = disc * vFog * (0.30 + vGlow * 0.65);',
+    '  gl_FragColor = vec4(col * a, a * 0.6);',
+    '}'
+  ].join('\n');
+
+  function shader(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) return null;
+    return s;
+  }
+  var vs = shader(gl.VERTEX_SHADER, VS), fs = shader(gl.FRAGMENT_SHADER, FS);
+  if (!vs || !fs) { canvas.remove(); return; }
+  var prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { canvas.remove(); return; }
+  gl.useProgram(prog);
+
+  var COLS = window.innerWidth < 640 ? 90 : 150;
+  var ROWS = window.innerWidth < 640 ? 70 : 95;
+  var pts = new Float32Array(COLS * ROWS * 2);
+  var k = 0;
+  for (var r = 0; r < ROWS; r++) for (var c = 0; c < COLS; c++) {
+    pts[k++] = c / (COLS - 1); pts[k++] = r / (ROWS - 1);
+  }
+  var buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, pts, gl.STATIC_DRAW);
+  var aGrid = gl.getAttribLocation(prog, 'aGrid');
+  gl.enableVertexAttribArray(aGrid);
+  gl.vertexAttribPointer(aGrid, 2, gl.FLOAT, false, 0, 0);
+
+  var uTime = gl.getUniformLocation(prog, 'uTime');
+  var uAspect = gl.getUniformLocation(prog, 'uAspect');
+  var uDprLoc = gl.getUniformLocation(prog, 'uDpr');
+  var uCam = gl.getUniformLocation(prog, 'uCam');
+  var uRipples = gl.getUniformLocation(prog, 'uRipples');
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.clearColor(0, 0, 0, 0);
+
+  var dpr = 1;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Speech ripples: 6 slots, round-robin (x, z, birth time)
+  var ripples = new Float32Array(18);
+  for (var i2 = 0; i2 < 6; i2++) ripples[i2 * 3 + 2] = -99;
+  var slot = 0, nextRipple = 1.2;
+  function spawnRipple(t) {
+    ripples[slot * 3] = (Math.random() - 0.5) * 22;
+    ripples[slot * 3 + 1] = 4 + Math.random() * 18;
+    ripples[slot * 3 + 2] = t;
+    slot = (slot + 1) % 6;
+  }
+
+  var mx = 0, my = 0, cx = 0, cy = 0;
+  if (!window.matchMedia('(pointer: coarse)').matches) {
+    window.addEventListener('pointermove', function(e) {
+      mx = (e.clientX / window.innerWidth - 0.5);
+      my = (e.clientY / window.innerHeight - 0.5);
+    }, { passive: true });
+  }
+
+  var start = performance.now();
+  function draw(t) {
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    cx += (mx - cx) * 0.04; cy += (my - cy) * 0.04;
+    gl.uniform1f(uTime, t);
+    gl.uniform1f(uAspect, canvas.width / Math.max(1, canvas.height));
+    gl.uniform1f(uDprLoc, dpr);
+    gl.uniform2f(uCam, cx * 0.8, cy * 0.5);
+    gl.uniform3fv(uRipples, ripples);
+    gl.drawArrays(gl.POINTS, 0, COLS * ROWS);
+  }
+
+  if (reducedMotion) {
+    // Static frame with a few frozen ripples — depth without motion.
+    spawnRipple(6.1); spawnRipple(5.4); spawnRipple(6.6);
+    draw(7.0);
+    return;
+  }
+
+  function loop(now) {
+    requestAnimationFrame(loop);
+    if (!heroVisible || document.hidden) return;
+    var t = (now - start) / 1000;
+    if (t > nextRipple) { spawnRipple(t); nextRipple = t + 1.4 + Math.random() * 1.2; }
+    draw(t);
+  }
+  requestAnimationFrame(loop);
+})();
+
+// ─── MacBook 3D tilt + glare sweep ───
+(function() {
+  var tilt = document.getElementById('macbook-tilt');
+  var glare = document.getElementById('mac-glare');
+  if (!tilt || reducedMotion || window.matchMedia('(pointer: coarse)').matches) return;
+  var tx = 0, ty = 0, cx = 0, cy = 0, lastMove = 0;
+  heroEl.addEventListener('pointermove', function(e) {
+    var r = heroEl.getBoundingClientRect();
+    tx = (e.clientX - r.left) / r.width - 0.5;
+    ty = (e.clientY - r.top) / r.height - 0.5;
+    lastMove = performance.now();
+  }, { passive: true });
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!heroVisible || document.hidden) return;
+    var gx = tx, gy = ty;
+    if (now - lastMove > 2500) {
+      var t = now / 1000;
+      gx = Math.sin(t * 0.5) * 0.06; gy = Math.cos(t * 0.4) * 0.05;
+    }
+    cx += (gx - cx) * 0.06; cy += (gy - cy) * 0.06;
+    tilt.style.transform = 'rotateY(' + (cx * 9).toFixed(2) + 'deg) rotateX(' + (-cy * 7).toFixed(2) + 'deg)';
+    if (glare) glare.style.transform = 'translateX(' + (cx * 90).toFixed(1) + '%)';
+  }
+  requestAnimationFrame(frame);
+})();
+
+// ─── Card spotlight follows cursor ───
+document.addEventListener('pointermove', function(e) {
+  var card = e.target && e.target.closest && e.target.closest('.step, .feature-card, .testimonial, .price-card');
+  if (!card) return;
+  var r = card.getBoundingClientRect();
+  card.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100).toFixed(1) + '%');
+  card.style.setProperty('--my', ((e.clientY - r.top) / r.height * 100).toFixed(1) + '%');
+}, { passive: true });
+
+// ─── Hero canvas fades out on scroll ───
+(function() {
+  var heroCanvas = document.getElementById('hero-canvas');
+  if (!heroCanvas) return;
+  window.addEventListener('scroll', function() {
+    heroCanvas.style.opacity = Math.max(0, 1 - window.scrollY / (window.innerHeight * 0.85)).toFixed(3);
+  }, { passive: true });
 })();
 </script>
 </body>
