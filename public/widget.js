@@ -12,6 +12,22 @@
   if (IS_OWNER) sessionStorage.setItem("wctx-owner", "1");
   if (sessionStorage.getItem("wctx-owner") === "1") IS_OWNER = true;
 
+  // Record token — minted by the dashboard (whisp.so/record), passed via
+  // ?wctx_rt=... when the owner opens their site in recording mode. Stored in
+  // sessionStorage so it survives navigation during a recording, and stripped
+  // from the URL so it never lands in shared links.
+  var RECORD_TOKEN = urlParams.get("wctx_rt") || "";
+  if (RECORD_TOKEN) {
+    try { sessionStorage.setItem("wctx-rt", RECORD_TOKEN); } catch (e) {}
+    try {
+      var cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("wctx_rt");
+      history.replaceState(null, "", cleanUrl.toString());
+    } catch (e) {}
+  } else {
+    RECORD_TOKEN = (function () { try { return sessionStorage.getItem("wctx-rt") || ""; } catch (e) { return ""; } })();
+  }
+
   // --- Adaptive Theme Detection ---
   var currentTheme = "light";
   var themeDebounceTimer = null;
@@ -669,11 +685,16 @@
       }
     });
 
-    // Record flow
+    // Record flow — needs the dashboard-minted record token (the endpoint is
+    // owner-gated). Without it, point the owner at the dashboard entry.
     overlay.querySelector("#wctx-action-record").addEventListener("click", function() {
       ownerPanel.classList.remove("open");
+      if (!RECORD_TOKEN) {
+        appendMsg("system", "Recording session missing or expired. Open this page from your dashboard: whisp.so/record");
+        return;
+      }
       minimizeToBar();
-      window.__flowRecorderConfig = { apiHost: API_HOST, tenantId: TENANT_ID };
+      window.__flowRecorderEndpoint = API_HOST + "/api/flows/record?rt=" + encodeURIComponent(RECORD_TOKEN);
       var rs = document.createElement("script");
       rs.src = API_HOST + "/recorder.js";
       document.head.appendChild(rs);
@@ -682,7 +703,7 @@
     // View flows
     overlay.querySelector("#wctx-action-flows").addEventListener("click", function() {
       ownerPanel.classList.remove("open");
-      fetch(API_HOST + "/api/flows?tenantId=" + TENANT_ID)
+      fetch(API_HOST + "/api/flows?rt=" + encodeURIComponent(RECORD_TOKEN))
         .then(function(r) { return r.json(); })
         .then(function(flows) {
           if (flows.length === 0) {

@@ -2056,7 +2056,18 @@ function mintRecordToken(tenantId: string): string {
 
 app.get("/api/dashboard/record-token", authMiddleware, (req, res) => {
   const tenantId = (req as any).tenantId;
-  res.json({ tenantId, recordToken: mintRecordToken(tenantId), expiresInMinutes: 60 });
+  const tenant = getTenant(tenantId);
+  res.json({ tenantId, recordToken: mintRecordToken(tenantId), expiresInMinutes: 60, siteUrl: (tenant && tenant.siteUrl) || "" });
+});
+
+// Owner-panel flow list (the widget's "View flows"). Gated by the same record
+// token — flow trigger phrases are owner intel, not visitor content.
+app.get("/api/flows", async (req, res) => {
+  const rt = String(req.query.rt || "");
+  const session = recordTokens.get(rt);
+  if (!session || session.exp < Date.now()) { res.status(401).json({ error: "Recording session expired" }); return; }
+  const flows = await getFlows(session.tenantId);
+  res.json(flows.map((f) => ({ id: f.id, name: f.name, status: f.status, steps: f.steps, triggerPhrases: f.triggerPhrases })));
 });
 
 app.post("/api/flows/record", async (req, res) => {
@@ -2135,16 +2146,16 @@ textarea{width:100%;height:88px;margin-top:18px;padding:12px;border-radius:10px;
   <div id="main" style="display:none">
     <h1>Record a flow on your website</h1>
     <p class="sub">Show the assistant how something is done on your site — a booking, a contact form, an order. Do it once; the AI learns the steps, names the flow and can guide every visitor through it.</p>
-    <ol>
-      <li><strong>Drag the blue button</strong> to your bookmarks bar.</li>
-      <li><strong>Open your website</strong> in a new tab.</li>
-      <li><strong>Click the bookmark</strong> — a recording panel appears.</li>
-      <li><strong>Perform the action</strong>, then press Stop. Done — the AI takes it from there.</li>
+    <label style="display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#7b8494;margin:0 0 7px">Page with your Whisp widget installed</label>
+    <input id="site-url" type="text" inputmode="url" autocapitalize="none" spellcheck="false" style="width:100%;padding:13px 15px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#f1f5f9;font-family:inherit;font-size:15px;margin-bottom:14px" />
+    <a class="bm" id="bm" href="#" target="_blank" rel="noopener">⏺ Open the page in recording mode</a>
+    <ol style="margin-top:22px">
+      <li><strong>The page opens</strong> with the widget in owner mode.</li>
+      <li>Click <strong>Owner → Record a flow</strong> in the widget.</li>
+      <li><strong>Perform the action</strong> (fill the form, click through), then press Stop.</li>
+      <li>Done — the AI names the flow and extracts its inputs automatically.</li>
     </ol>
-    <a class="bm" id="bm" href="#">⏺ Record for Whisp</a>
-    <p class="hint">Bookmarks bar hidden? Copy the snippet below and paste it into the browser console (F12) on your website instead.</p>
-    <textarea id="snippet" readonly onclick="this.select()"></textarea>
-    <p class="fine">The recording link is valid for 60 minutes and only works for your account. Recorded flows appear in your <a href="/dashboard" style="color:#60a5fa">dashboard</a>.</p>
+    <p class="fine">The recording session is valid for 60 minutes and only works for your account. Recorded flows appear in your <a href="/dashboard" style="color:#60a5fa">dashboard</a>.</p>
   </div>
   <div id="login">
     <h1>Log in first</h1>
@@ -2162,9 +2173,17 @@ textarea{width:100%;height:88px;margin-top:18px;padding:12px;border-radius:10px;
   fetch('${base}/api/dashboard/record-token', { headers: { 'Authorization': 'Bearer ' + token } })
     .then(function(r){ if (!r.ok) throw new Error('auth'); return r.json(); })
     .then(function(d){
-      var code = "(function(){if(window.__flowRecorderActive){alert('Recorder already active');return;}window.__flowRecorderEndpoint='${base}/api/flows/record?rt=" + d.recordToken + "';var s=document.createElement('script');s.src='${base}/recorder.js';document.body.appendChild(s);})();";
-      document.getElementById('bm').setAttribute('href', 'javascript:' + encodeURIComponent(code));
-      document.getElementById('snippet').value = code;
+      var input = document.getElementById('site-url');
+      input.value = d.siteUrl || '';
+      function buildHref(){
+        var u = (input.value || '').trim();
+        if (!u) return '#';
+        if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+        return u + (u.indexOf('?') === -1 ? '?' : '&') + 'wctx-owner=true&wctx_rt=' + encodeURIComponent(d.recordToken);
+      }
+      var bm = document.getElementById('bm');
+      bm.setAttribute('href', buildHref());
+      input.addEventListener('input', function(){ bm.setAttribute('href', buildHref()); });
       document.getElementById('main').style.display = 'block';
     })
     .catch(function(){ document.getElementById('err').style.display = 'block'; });
