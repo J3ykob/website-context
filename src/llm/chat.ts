@@ -46,6 +46,10 @@ export interface ChatResponse {
   // is an honest fallback, not grounded in the tenant's content. The server uses
   // this to log/quarantine demos that are active but effectively empty.
   grounded?: boolean;
+  // Set when the model flagged that site content does not cover the question
+  // ([[gap: ...]] marker or the log_unknown action) — the server logs it to the
+  // D1 gap journal that the dashboard's knowledge-gap view reads.
+  unknownQuestion?: string;
   navigateTo?: string;
   suggestedAction?: { flowId: string; flowName: string; description: string };
   flowSession?: {
@@ -512,6 +516,7 @@ export class WebsiteChat {
 
       if (result.action?.type === "log_unknown" && result.action.question) {
         this.logUnknownQuestion(result.action.question, lastUserMessage);
+        return { message: safeMessage, sources, unknownQuestion: result.action.question };
       }
 
       return { message: safeMessage, sources };
@@ -557,9 +562,12 @@ export class WebsiteChat {
       .replace(/One moment,? please!?\s*/gi, "")
       .trim();
 
+    const gapPlain = this.extractGapMarker(responseText);
+    responseText = gapPlain.text;
+
     const plainOutputCheck = validateOutput(responseText, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
-    return { message: plainOutputCheck.sanitized, sources };
+    return { message: plainOutputCheck.sanitized, sources, grounded: true, unknownQuestion: gapPlain.question || undefined };
   }
 
   // Parallel retrieval shared by chat() and chatStream(). Each Vectorize query is ~2s,
@@ -636,11 +644,31 @@ export class WebsiteChat {
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
     const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, inputValidation.sanitized);
 
+    // Stream with a holdback: once a potential [[...]] marker starts, stop
+    // forwarding tokens so the gap marker never flashes in the widget. If the
+    // withheld tail turns out not to be a marker it is flushed after the stream
+    // (the widget replaces the bubble with the final done-message anyway).
     let raw = "";
+    let emitted = 0;
+    let holding = false;
     await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
       raw += delta;
-      onToken(delta);
+      if (holding) return;
+      const idx = raw.indexOf("[[", Math.max(0, emitted - 1));
+      if (idx === -1) {
+        onToken(raw.slice(emitted));
+        emitted = raw.length;
+      } else {
+        if (idx > emitted) onToken(raw.slice(emitted, idx));
+        emitted = idx;
+        holding = true;
+      }
     });
+    const gapStream = this.extractGapMarker(raw);
+    raw = gapStream.text;
+    if (holding && !gapStream.question) {
+      onToken(raw.slice(Math.min(emitted, raw.length)));
+    }
 
     // Same final cleanup as the non-stream path (strip leaked tool syntax + validate).
     const cleaned = raw
@@ -654,7 +682,7 @@ export class WebsiteChat {
       .replace(/One moment,? please!?\s*/gi, "")
       .trim();
     const outputCheck = validateOutput(cleaned, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
-    return { message: outputCheck.sanitized, sources, grounded: true };
+    return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: gapStream.question || undefined };
   }
 
   // The chunks that actually become answerable context: relevant score, not
@@ -739,7 +767,7 @@ export class WebsiteChat {
 
 ## Guidelines:
 - When a user wants to see a specific page, provide a direct markdown link like [Page Name](https://domain.com/page). Do NOT output action tags, tool calls, or placeholders like [Action: Navigate] — just give the link.
-- Use log_unknown_question when the user asks something you genuinely cannot answer from the context. Still give your best response, but this logs the gap for the site owner to address.
+- If the site content above genuinely does NOT cover the user's question, still give your best helpful response (and point them to the business's contact info), then append this exact marker as the very last line: [[gap: short restatement of the unanswered question, in the site's language]]. Never mention or explain the marker, and never emit it when the context does answer the question.
 - Do NOT output any text that looks like a tool call, action tag, or function name. No [Action:...], no {action:...}, no [[tool_name...]]. Just respond naturally with links when relevant.
 - After a flow completes, do NOT re-invoke unless the user explicitly asks again.
 
@@ -787,6 +815,17 @@ ${contextBlocks}
   private getInstructionsOnly(systemPrompt: string): string {
     const contextStart = systemPrompt.indexOf("## Relevant Context:");
     return contextStart > 0 ? systemPrompt.slice(0, contextStart) : systemPrompt;
+  }
+
+  // [[gap: ...]] protocol — the plain-text paths have no tool channel, so the
+  // system prompt asks the model to append this marker when the site content
+  // does not cover the question. Extracted here, stripped from the visible
+  // message, and surfaced as unknownQuestion for the server's D1 gap journal.
+  private extractGapMarker(text: string): { text: string; question: string | null } {
+    const m = /\[\[\s*gap\s*:([^\]]{0,300})\]\]/i.exec(text);
+    if (!m) return { text, question: null };
+    const question = m[1].trim().slice(0, 200) || null;
+    return { text: text.replace(/\[\[\s*gap\s*:[^\]]*\]\]/gi, "").trim(), question };
   }
 
   private logUnknownQuestion(question: string, rawMessage: string): void {

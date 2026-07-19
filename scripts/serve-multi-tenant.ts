@@ -1492,10 +1492,13 @@ app.post("/api/chat", async (req, res) => {
         }).catch(() => {});
         recordExperimentEvent("widget-start-state", `${chatIpRaw}_${tenantId}`, "", "chat_start", { tenantId }).catch(() => {});
       }
-      // Capture gaps deterministically: an ungrounded answer = a question the KB
-      // couldn't answer. Logged to D1 unknown_questions (the store the dashboard reads).
-      if (response.grounded === false && !isSelfChat && lastUserContent.trim()) {
-        logUnknownQuestion(tenantId, lastUserContent.trim()).catch(() => {});
+      // Capture gaps: either the model flagged the question as uncovered
+      // ([[gap: ...]] marker / log_unknown action -> response.unknownQuestion)
+      // or the grounding gate fired (grounded === false). Logged to D1
+      // unknown_questions — the store the dashboard's gap view reads.
+      const gapQuestion = response.unknownQuestion || (response.grounded === false ? lastUserContent.trim() : "");
+      if (gapQuestion && !isSelfChat) {
+        logUnknownQuestion(tenantId, gapQuestion).catch(() => {});
       }
     };
 
