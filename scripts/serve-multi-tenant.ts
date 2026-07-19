@@ -494,20 +494,28 @@ async function reconcileTenantFromR2(requestedId: string): Promise<any | null> {
 
 // Self-serve onboarding page shown when a demo isn't live yet: lets the visitor claim the
 // site (we scrape it on demand) and get emailed when their assistant is ready.
-function buildOnboardPage(opts: { siteUrl: string; brand: string; state: "onboard" | "building"; baseUrl: string }): string {
+function buildOnboardPage(opts: { siteUrl: string; brand: string; state: "onboard" | "building"; baseUrl: string; tenantId?: string }): string {
   const safeBrand = (opts.brand || "this website").replace(/[<>]/g, "");
   const safeUrl = (opts.siteUrl || "").replace(/"/g, "&quot;");
+  const safeTid = (opts.tenantId || "").replace(/[^a-zA-Z0-9_-]/g, "");
   const building = opts.state === "building";
   const body = building
     ? `<div class="ok"><div class="spinner"></div>
         <h1>Building ${safeBrand}'s assistant...</h1>
-        <p class="sub">We're reading the website and training the AI now. This usually takes a few minutes - we'll email you the moment it's ready.</p></div>`
+        <p class="sub">We're reading the website and training the AI live - this page updates itself. Usually about 90 seconds. We'll also email you the link.</p>
+        <div class="prog-wrap">
+          <div class="prog-bar"><div class="prog-fill" id="prog-fill"></div></div>
+          <div class="pstep" id="ps1"><span class="pdot"></span><span>Queued</span></div>
+          <div class="pstep" id="ps2"><span class="pdot"></span><span>Reading &amp; indexing the website</span></div>
+          <div class="pstep" id="ps3"><span class="pdot"></span><span>Assistant ready</span></div>
+        </div>
+        <div id="perr"></div></div>`
     : `<div class="badge">Whisp AI</div>
         <h1>${safeBrand} doesn't have an AI assistant yet</h1>
         <p class="sub">We'll read the entire website and build a chat assistant that answers visitor questions 24/7 - a free, working preview in a few minutes.</p>
         <div id="err"></div>
         <label>Website</label>
-        <input id="url" type="url" value="${safeUrl}" placeholder="https://example.com" />
+        <input id="url" type="text" inputmode="url" autocapitalize="none" spellcheck="false" value="${safeUrl}" placeholder="example.com" />
         <label>Your email (we'll notify you when it's ready)</label>
         <input id="email" type="email" placeholder="you@company.com" />
         <button id="go" type="button">Build my AI assistant</button>
@@ -532,6 +540,17 @@ button:hover{background:#2563eb;transform:translateY(-1px)}button:disabled{opaci
 .spinner{width:34px;height:34px;border:3px solid rgba(255,255,255,0.15);border-top-color:#3b82f6;border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto 22px}
 @keyframes spin{to{transform:rotate(360deg)}}
 #err{color:#f87171;font-size:13px;margin:0 0 14px;display:none}
+.prog-wrap{margin:22px 0 4px;text-align:left}
+.prog-bar{height:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;margin-bottom:16px}
+.prog-fill{height:100%;width:2%;border-radius:999px;background:linear-gradient(90deg,#3b82f6,#60a5fa);transition:width 0.6s ease}
+.pstep{display:flex;align-items:center;gap:10px;font-size:13.5px;color:#5b6472;padding:5px 0}
+.pstep .pdot{width:9px;height:9px;border-radius:999px;background:rgba(255,255,255,0.15);flex:none;transition:background 0.3s ease}
+.pstep.on{color:#e7e9ee}
+.pstep.on .pdot{background:#3b82f6;animation:pulse-dot 1.6s ease infinite}
+.pstep.done{color:#9aa3b2}
+.pstep.done .pdot{background:#10b981;animation:none}
+@keyframes pulse-dot{0%,100%{box-shadow:0 0 0 3px rgba(59,130,246,0.25)}50%{box-shadow:0 0 0 7px rgba(59,130,246,0.05)}}
+#perr{color:#f87171;font-size:13px;margin-top:14px;display:none;text-align:center}
 </style></head>
 <body><div class="card" id="card">${body}</div>
 <script>
@@ -540,17 +559,56 @@ button:hover{background:#2563eb;transform:translateY(-1px)}button:disabled{opaci
   go.addEventListener('click', function(){
     var url=document.getElementById('url').value.trim(), email=document.getElementById('email').value.trim();
     var err=document.getElementById('err'); err.style.display='none';
+    if(url && !/^https?:\\/\\//i.test(url)) url='https://'+url;
     if(!url || !email){ err.textContent='Please enter your website and email.'; err.style.display='block'; return; }
     go.disabled=true; go.textContent='Starting...';
     fetch('${opts.baseUrl}/api/onboard-demo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({siteUrl:url,email:email})})
       .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
       .then(function(res){
-        if(res.d && res.d.ready && res.d.tenantId){ location.href='${opts.baseUrl}/demo/'+res.d.tenantId; return; }
+        if(res.ok && res.d && res.d.tenantId){ location.href='${opts.baseUrl}/demo/'+res.d.tenantId; return; }
         if(res.ok){ document.getElementById('card').innerHTML='<div class="ok"><div class="spinner"></div><h1>On it!</h1><p class="sub" style="margin-bottom:0">We are building your assistant now. We will email <strong style="color:#f1f5f9">'+email+'</strong> the moment it is ready - usually a few minutes.</p></div>'; }
         else { err.textContent=(res.d && res.d.error) || 'Something went wrong. Please try again.'; err.style.display='block'; go.disabled=false; go.textContent='Build my AI assistant'; }
       })
       .catch(function(){ err.textContent='Network error. Please try again.'; err.style.display='block'; go.disabled=false; go.textContent='Build my AI assistant'; });
   });
+})();
+(function(){
+  var tid='${safeTid}'; if(!tid || !document.getElementById('prog-fill')) return;
+  var fill=document.getElementById('prog-fill');
+  var steps=[document.getElementById('ps1'),document.getElementById('ps2'),document.getElementById('ps3')];
+  var perr=document.getElementById('perr');
+  var t0=Date.now(); var done=false;
+  function setStep(n){ for(var i=0;i<3;i++){ steps[i].className='pstep'+(i<n-1?' done':(i===n-1?' on':'')); } }
+  setStep(1);
+  var barTimer=setInterval(function(){
+    if(done) return;
+    var el=(Date.now()-t0)/1000;
+    var pct=Math.min(92, 100*(1-Math.exp(-el/40)));
+    fill.style.width=pct.toFixed(1)+'%';
+  },600);
+  function poll(){
+    if(done) return;
+    fetch('${opts.baseUrl}/api/tenants/'+tid+'/status')
+      .then(function(r){return r.json();})
+      .then(function(s){
+        if(s.status==='active'){
+          done=true; clearInterval(barTimer); fill.style.width='100%';
+          for(var i=0;i<3;i++) steps[i].className='pstep done';
+          setTimeout(function(){ location.href='${opts.baseUrl}/demo/'+tid; }, 900);
+          return;
+        }
+        if(s.status==='error'){
+          done=true; clearInterval(barTimer);
+          perr.textContent='Something went wrong while reading the site. Please try again in a few minutes.';
+          perr.style.display='block';
+          return;
+        }
+        setStep(s.status==='scraping' ? 2 : 1);
+        setTimeout(poll, 2500);
+      })
+      .catch(function(){ setTimeout(poll, 4000); });
+  }
+  setTimeout(poll, 1500);
 })();
 </script></body></html>`;
 }
@@ -578,7 +636,7 @@ app.get("/demo/:tenantId", async (req, res) => {
     const building = !!tenant && ["pending", "queued", "scraping"].includes(tenant.status);
     const guessUrl = (tenant && tenant.siteUrl) || ("https://" + reqId.replace(/_/g, "."));
     const guessBrand = (tenant && (tenant.brandName || tenant.domain)) || reqId.replace(/_/g, ".");
-    res.status(building ? 200 : 404).send(buildOnboardPage({ siteUrl: guessUrl, brand: guessBrand, state: building ? "building" : "onboard", baseUrl: obBase }));
+    res.status(building ? 200 : 404).send(buildOnboardPage({ siteUrl: guessUrl, brand: guessBrand, state: building ? "building" : "onboard", baseUrl: obBase, tenantId: tenant ? tenant.id : "" }));
     return;
   }
   const isReady = true;
@@ -1170,22 +1228,26 @@ app.post("/api/tenants", (req, res) => {
     }
   }
 
-  const { email, siteUrl } = req.body;
+  const { email } = req.body;
+  let siteUrl = String(req.body.siteUrl || "").trim();
   if (!email || !siteUrl) {
     res.status(400).json({ error: "email and siteUrl are required" });
     return;
   }
 
-  // Validate URL
+  // Accept bare domains ("example.com") — normalize to https://
+  if (!/^https?:\/\//i.test(siteUrl)) siteUrl = "https://" + siteUrl;
+  let parsedUrl: URL;
   try {
-    new URL(siteUrl);
+    parsedUrl = new URL(siteUrl);
+    if (!/^https?:$/.test(parsedUrl.protocol) || !parsedUrl.hostname.includes(".")) throw new Error("bad");
   } catch {
     res.status(400).json({ error: "Invalid siteUrl" });
     return;
   }
 
   // Check if domain already exists
-  const domain = new URL(siteUrl).hostname;
+  const domain = parsedUrl.hostname;
   const existing = getTenantByDomain(domain);
   if (existing) {
     res.status(409).json({ error: "A tenant for this domain already exists", tenantId: existing.id });
@@ -1202,8 +1264,10 @@ app.post("/api/tenants", (req, res) => {
     const setupToken = randomBytes(32).toString("hex");
     updateTenant(tenant.id, { apiKey, setupToken });
 
-    // Scraping is handled by VPS - don't enqueue on Render
-    // worker.enqueue(tenant.id, siteUrl);
+    // Render owns scraping now (the VPS pipeline is gone) — queue the on-demand
+    // scrape immediately, same bounded job as the claim flow. Without this the
+    // tenant sat in "pending" forever and the landing signup hung on "Scraping...".
+    worker.enqueue(tenant.id, siteUrl, 15);
 
     // Welcome / set-password email — ONLY for genuine self-serve signups (the public,
     // non-admin path). Outreach creates tenants via the admin path (?secret=); cold
@@ -1240,10 +1304,12 @@ app.post("/api/onboard-demo", async (req, res) => {
     res.status(429).json({ error: "Too many requests - please try again in a few minutes." });
     return;
   }
-  const { siteUrl, email } = req.body || {};
+  const { email } = req.body || {};
+  let siteUrl = String((req.body || {}).siteUrl || "").trim();
   if (!siteUrl || !email) { res.status(400).json({ error: "Website and email are required." }); return; }
+  if (!/^https?:\/\//i.test(siteUrl)) siteUrl = "https://" + siteUrl;
   let origin: string, domain: string;
-  try { const u = new URL(siteUrl); if (!/^https?:$/.test(u.protocol)) throw new Error("proto"); origin = u.origin; domain = u.hostname.replace(/^www\./, ""); }
+  try { const u = new URL(siteUrl); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw new Error("proto"); origin = u.origin; domain = u.hostname.replace(/^www\./, ""); }
   catch { res.status(400).json({ error: "Please enter a valid website URL (https://...)." }); return; }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) { res.status(400).json({ error: "Please enter a valid email address." }); return; }
 

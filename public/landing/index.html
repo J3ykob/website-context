@@ -670,7 +670,7 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
         <h1 class="reveal" style="transition-delay:0.1s" data-i18n="hero.h1" data-i18n-html="1">Your website,<br>but it <em>talks</em></h1>
         <p class="hero-sub reveal" style="transition-delay:0.2s" data-i18n="hero.sub">Visitors ask questions, your site answers. The AI reads every page and becomes your 24/7 assistant. No setup, no code knowledge needed.</p>
         <form class="signup-form reveal" style="transition-delay:0.3s" id="signup-form">
-          <input type="url" name="url" placeholder="https://your-site.com" required id="signup-url" />
+          <input type="text" inputmode="url" autocapitalize="none" spellcheck="false" name="url" placeholder="your-site.com" required id="signup-url" />
           <input type="email" name="email" placeholder="email" required id="signup-email" />
           <button type="submit" id="signup-btn" data-i18n="hero.btn">Start free</button>
         </form>
@@ -945,7 +945,7 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
     <h2 class="reveal" data-i18n="cta.h">Ready to try it?</h2>
     <p class="reveal" style="transition-delay:0.1s" data-i18n="cta.p">Join hundreds of businesses that turned their websites into conversations.</p>
     <form class="signup-form reveal" style="transition-delay:0.2s;margin:0 auto;max-width:440px" onsubmit="handleSignup(event)">
-      <input type="url" placeholder="https://your-site.com" required />
+      <input type="text" inputmode="url" autocapitalize="none" spellcheck="false" name="url" placeholder="your-site.com" required />
       <input type="email" placeholder="email" required />
       <button type="submit">Start free</button>
     </form>
@@ -1123,63 +1123,63 @@ document.querySelectorAll('.faq-q').forEach(function(btn) {
 var signupForm = document.getElementById('signup-form');
 signupForm.addEventListener('submit', handleSignup);
 
+function normalizeSiteUrl(raw) {
+  var u = (raw || '').trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  try {
+    var parsed = new URL(u);
+    if (!/^https?:$/.test(parsed.protocol) || parsed.hostname.indexOf('.') === -1) return '';
+    return u;
+  } catch (e) { return ''; }
+}
+
 function handleSignup(e) {
   e.preventDefault();
   var form = e.target;
-  var urlInput = form.querySelector('input[type="url"]');
+  var urlInput = form.querySelector('input[name="url"]');
   var emailInput = form.querySelector('input[type="email"]');
   var btn = form.querySelector('button');
   var status = document.getElementById('signup-status');
-  var siteUrl = urlInput.value.trim();
+  var pl = currentLang === 'pl';
+  var siteUrl = normalizeSiteUrl(urlInput.value);
   var email = emailInput.value.trim();
-  if (!siteUrl || !email) return;
+  if (!siteUrl) {
+    status.className = 'signup-status show error';
+    status.textContent = pl ? 'Podaj poprawny adres strony, np. twoja-firma.pl' : 'Enter a valid website address, e.g. your-site.com';
+    return;
+  }
+  if (!email) return;
   btn.disabled = true;
-  btn.textContent = 'Setting up...';
+  btn.textContent = pl ? 'Tworzę...' : 'Setting up...';
   status.className = 'signup-status show';
-  status.textContent = 'Creating your AI assistant...';
+  status.textContent = pl ? 'Tworzę Twojego asystenta AI...' : 'Creating your AI assistant...';
   fetch('/api/tenants', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: email, siteUrl: siteUrl }),
   })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (data.error) {
-      status.className = 'signup-status show error';
-      status.textContent = data.error;
-      btn.disabled = false;
-      btn.textContent = 'Start free';
+  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, code: r.status, d: d }; }); })
+  .then(function(res) {
+    var tenantId = res.d && (res.d.tenantId || res.d.id);
+    // 201 = created, 409 = domain already exists -> both have a tenant to show.
+    // The /demo page renders the right state: live progress while building,
+    // the live demo when ready, or the claim card.
+    if ((res.ok || res.code === 409) && tenantId) {
+      status.textContent = pl ? 'Gotowe - przenoszę na stronę postępu...' : 'Done - taking you to the live build page...';
+      window.location.href = '/demo/' + tenantId;
       return;
     }
-    var tenantId = data.id;
-    status.textContent = 'Scraping your website... This takes 1-2 minutes.';
-    var pollInterval = setInterval(function() {
-      fetch('/api/tenants/' + tenantId + '/status')
-        .then(function(r) { return r.json(); })
-        .then(function(s) {
-          if (s.status === 'active') {
-            clearInterval(pollInterval);
-            status.className = 'signup-status show';
-            status.innerHTML = '✓ Your AI assistant is ready! <a href="/dashboard" style="color:var(--blue);text-decoration:underline;font-weight:700">Go to dashboard →</a>';
-            btn.textContent = 'Done!';
-          } else if (s.status === 'error') {
-            clearInterval(pollInterval);
-            status.className = 'signup-status show error';
-            status.textContent = 'Something went wrong. Please try again.';
-            btn.disabled = false;
-            btn.textContent = 'Start free';
-          } else {
-            status.textContent = 'Scraping your website... (' + (s.status || 'processing') + ')';
-          }
-        })
-        .catch(function() {});
-    }, 3000);
+    status.className = 'signup-status show error';
+    status.textContent = (res.d && res.d.error) || (pl ? 'Coś poszło nie tak. Spróbuj ponownie.' : 'Something went wrong. Please try again.');
+    btn.disabled = false;
+    btn.textContent = pl ? 'Zacznij za darmo' : 'Start free';
   })
   .catch(function(err) {
     status.className = 'signup-status show error';
-    status.textContent = 'Network error. Please try again.';
+    status.textContent = pl ? 'Błąd sieci. Spróbuj ponownie.' : 'Network error. Please try again.';
     btn.disabled = false;
-    btn.textContent = 'Start free';
+    btn.textContent = pl ? 'Zacznij za darmo' : 'Start free';
   });
 }
 
