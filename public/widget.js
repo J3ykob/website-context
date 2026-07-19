@@ -169,14 +169,31 @@
   overlay.innerHTML = buildHTML();
   document.body.appendChild(overlay);
 
-  // Restore messages from sessionStorage so chat survives navigation
-  var savedMsgs = sessionStorage.getItem("wctx-messages");
-  var messages = savedMsgs ? JSON.parse(savedMsgs) : [];
+  // ---- Chat content persistence ----
+  // Per-tenant key (localStorage is per-origin natively, but all demos share the
+  // whisp.so origin — the old global key leaked conversations between sites) with
+  // a TTL (default 3 days). Visitor SETTINGS stay shared; chat CONTENT does not.
+  // Config: __wctx.persistChat = false disables, __wctx.chatTtlDays overrides TTL.
+  var PERSIST_CHAT = config.persistChat !== false;
+  var CHAT_TTL_MS = (Number(config.chatTtlDays) > 0 ? Number(config.chatTtlDays) : 3) * 24 * 60 * 60 * 1000;
+  var CHAT_KEY = "wctx-chat:" + TENANT_ID;
+  // One-time cleanup of the legacy cross-site keys.
+  try { sessionStorage.removeItem("wctx-messages"); sessionStorage.removeItem("wctx-session-id"); } catch (e) {}
+  var savedChat = (function () {
+    if (!PERSIST_CHAT) return null;
+    try {
+      var d = JSON.parse(localStorage.getItem(CHAT_KEY));
+      if (!d || !d.t || Date.now() - d.t > CHAT_TTL_MS) { localStorage.removeItem(CHAT_KEY); return null; }
+      return d;
+    } catch (e) { return null; }
+  })();
+  var messages = (savedChat && savedChat.m) || [];
   var state = messages.length > 0 ? "chat" : "idle";
   var isLoading = false;
 
   function persistMessages() {
-    sessionStorage.setItem("wctx-messages", JSON.stringify(messages.slice(-20)));
+    if (!PERSIST_CHAT) return;
+    try { localStorage.setItem(CHAT_KEY, JSON.stringify({ t: Date.now(), m: messages.slice(-20), s: sessionId })); } catch (e) {}
   }
 
   var els = {
@@ -964,10 +981,12 @@
     }
   }, 3000);
 
-  var sessionId = sessionStorage.getItem("wctx-session-id");
+  // Session id rides along with the per-tenant chat state (same TTL), so a
+  // restored conversation keeps its server-side session; it is persisted by
+  // persistMessages() together with the content.
+  var sessionId = (savedChat && savedChat.s) || null;
   if (!sessionId) {
     sessionId = "session_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-    sessionStorage.setItem("wctx-session-id", sessionId);
   }
   var activeFlowSession = null;
 
