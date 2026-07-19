@@ -5,6 +5,7 @@
  */
 
 import type { VectorStore, VectorEntry, SearchResult } from "./types.js";
+import { createHash } from "crypto";
 import { getCfToken, refreshCfToken } from "../storage/cf-auth.js";
 
 const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
@@ -37,6 +38,31 @@ export class CloudflareVectorizeStore implements VectorStore {
     this.tenantId = config.tenantId;
   }
 
+  // Vectorize caps vector ids at 64 BYTES — anything longer 400s the WHOLE
+  // insert batch (long domains / tunnel hosts produced 87-char ids and every
+  // chunk of the tenant failed to embed). The legacy scheme
+  // `${tenantId}__${chunkId}` is kept whenever it fits (every existing vector
+  // uses it); longer tenant ids get a deterministic md5 prefix. Those tenants
+  // could never store a vector before, so nothing is orphaned. ALL
+  // prefixing/unprefixing must go through vecId()/bareId().
+  private idPrefix(): string {
+    const legacy = `${this.tenantId}__`;
+    if (Buffer.byteLength(legacy) <= 32) return legacy; // 32 + 32-char md5 chunk id = 64
+    return "t" + createHash("md5").update(this.tenantId).digest("hex").slice(0, 24) + "__";
+  }
+  private vecId(chunkId: string): string {
+    const id = this.idPrefix() + chunkId;
+    if (Buffer.byteLength(id) <= 64) return id;
+    return this.idPrefix() + createHash("md5").update(chunkId).digest("hex");
+  }
+  private bareId(vectorId: string): string {
+    const hashed = this.idPrefix();
+    const legacy = `${this.tenantId}__`;
+    if (vectorId.startsWith(hashed)) return vectorId.slice(hashed.length);
+    if (vectorId.startsWith(legacy)) return vectorId.slice(legacy.length);
+    return vectorId;
+  }
+
   async upsert(entries: VectorEntry[]): Promise<void> {
     if (entries.length === 0) return;
 
@@ -48,7 +74,7 @@ export class CloudflareVectorizeStore implements VectorStore {
 
     for (const batch of batches) {
       const ndjson = batch.map(e => JSON.stringify({
-        id: `${this.tenantId}__${e.id}`,
+        id: this.vecId(e.id),
         values: e.vector,
         metadata: fitMetadata({
           tenant: this.tenantId,
@@ -114,7 +140,7 @@ export class CloudflareVectorizeStore implements VectorStore {
     const matches = data.result?.matches || [];
 
     return matches.map((m: any) => ({
-      id: m.id.replace(`${this.tenantId}__`, ""),
+      id: this.bareId(m.id),
       content: m.metadata?.content || "",
       metadata: {
         title: m.metadata?.title || "",
@@ -155,7 +181,7 @@ export class CloudflareVectorizeStore implements VectorStore {
   // then hydrate metadata here. result is a flat array of {id, metadata, values}.
   async getByIds(ids: string[]): Promise<SearchResult[]> {
     if (ids.length === 0) return [];
-    const prefixed = ids.map((id) => (id.startsWith(`${this.tenantId}__`) ? id : `${this.tenantId}__${id}`));
+    const prefixed = ids.map((id) => this.vecId(this.bareId(id)));
     // get_by_ids caps at 20 ids per request (error 40007) — batch and fan out.
     const batches: string[][] = [];
     for (let i = 0; i < prefixed.length; i += 20) batches.push(prefixed.slice(i, i + 20));
@@ -175,7 +201,7 @@ export class CloudflareVectorizeStore implements VectorStore {
     }));
     const vectors = perBatch.flat();
     return vectors.map((m: any) => ({
-      id: String(m.id).replace(`${this.tenantId}__`, ""),
+      id: this.bareId(String(m.id)),
       content: m.metadata?.content || "",
       metadata: {
         title: m.metadata?.title || "",
@@ -189,7 +215,7 @@ export class CloudflareVectorizeStore implements VectorStore {
 
   async delete(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    const prefixed = ids.map(id => `${this.tenantId}__${id}`);
+    const prefixed = ids.map((id) => this.vecId(id));
     const resp = await fetch(`${BASE}/delete_by_ids`, {
       method: "POST",
       headers: headers(),
@@ -239,8 +265,7 @@ export class CloudflareVectorizeStore implements VectorStore {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     // Surfaced ids are prefixed (`<tenant>__<chunkId>`); keepIds are the bare
     // chunkIds the caller upserted. Strip before comparing so keep actually keeps.
-    const prefix = `${this.tenantId}__`;
-    const bare = (id: string): string => (id.startsWith(prefix) ? id.slice(prefix.length) : id);
+    const bare = (id: string): string => this.bareId(id);
 
     const seen = new Set<string>();
     let drained = false;
