@@ -11,7 +11,10 @@ import { closeBrowser } from "../scraper/index.js";
 import { sendBotReadyEmail } from "./email.js";
 
 const MAX_RETRIES = 3;
-const JOB_TIMEOUT_MS = 3 * 60 * 1000;
+// 6 min, not 3: a content-rich site (multilingual + PDFs, ~90 chunks) takes
+// ~2.5 min end-to-end - wierzynek.pl's first attempt was killed at 180s AFTER
+// the vectors were already verified queryable, wasting a complete scrape.
+const JOB_TIMEOUT_MS = 6 * 60 * 1000;
 const COOLDOWN_MS = 10_000; // 10s between jobs for GC / memory recovery
 
 interface QueuedJob {
