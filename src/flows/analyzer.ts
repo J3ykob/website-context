@@ -69,12 +69,19 @@ Return ONLY the JSON object, no markdown, no explanation.`;
 
 export async function analyzeRecordedFlow(
   rawFlow: RawRecordedFlow,
-  options: { model?: string } = {}
+  options: {
+    model?: string;
+    // Injectable LLM call — the multi-tenant server passes an OpenRouter-backed
+    // generate (the Claude CLI default only works on a dev machine).
+    generate?: (system: string, prompt: string) => Promise<string>;
+  } = {}
 ): Promise<AnalyzedFlow> {
-  const cli = new ClaudeCLIProvider({
-    mode: "local",
-    model: options.model || "sonnet",
-  });
+  const generate =
+    options.generate ||
+    (async (system: string, prompt: string) => {
+      const cli = new ClaudeCLIProvider({ mode: "local", model: options.model || "sonnet" });
+      return cli.generate(system, prompt);
+    });
 
   const prompt = `${ANALYSIS_PROMPT}
 
@@ -82,7 +89,7 @@ Here is the raw recorded flow from ${rawFlow.startUrl} (recorded at ${rawFlow.re
 
 ${JSON.stringify(rawFlow.steps, null, 2)}`;
 
-  const response = await cli.generate(
+  const response = await generate(
     "You are a precise JSON generator. Output only valid JSON, nothing else.",
     prompt
   );

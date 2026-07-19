@@ -60,6 +60,8 @@ import {
   deleteFlow,
   updateFlow,
 } from "../src/flows/flow-store.js";
+import { analyzeRecordedFlow } from "../src/flows/analyzer.js";
+import { OpenRouterProvider } from "../src/llm/openrouter-provider.js";
 import {
   detectPlatform,
   extractMessage,
@@ -2014,6 +2016,137 @@ app.put("/api/dashboard/flows/:id", authMiddleware, async (req, res) => {
   } else {
     res.status(404).json({ error: "Not found" });
   }
+});
+
+// --- Flow recording (owner-only) -------------------------------------------
+// The dashboard's "Record flow" button opens /record, which mints a short-lived
+// record token bound to the owner's tenant. The bookmarklet injects recorder.js
+// on the owner's own site; the recorder POSTs the captured steps here with that
+// token. The LLM then names/parameterizes the flow — no metadata prompts.
+const recordTokens = new Map<string, { tenantId: string; exp: number }>();
+function mintRecordToken(tenantId: string): string {
+  for (const [k, v] of recordTokens) if (v.exp < Date.now()) recordTokens.delete(k);
+  const rt = randomBytes(24).toString("hex");
+  recordTokens.set(rt, { tenantId, exp: Date.now() + 60 * 60 * 1000 });
+  return rt;
+}
+
+app.get("/api/dashboard/record-token", authMiddleware, (req, res) => {
+  const tenantId = (req as any).tenantId;
+  res.json({ tenantId, recordToken: mintRecordToken(tenantId), expiresInMinutes: 60 });
+});
+
+app.post("/api/flows/record", async (req, res) => {
+  const rt = String(req.query.rt || req.headers["x-record-token"] || "");
+  const session = recordTokens.get(rt);
+  if (!session || session.exp < Date.now()) {
+    res.status(401).json({ error: "Recording session expired — open whisp.so/record again" });
+    return;
+  }
+  const tenantId = session.tenantId;
+  const raw = req.body || {};
+  const rawSteps = Array.isArray(raw.steps) ? raw.steps : [];
+  if (rawSteps.length === 0) { res.status(400).json({ error: "No steps recorded" }); return; }
+  if (rawSteps.length > 200) { res.status(400).json({ error: "Too many steps" }); return; }
+
+  const flowId = String(raw.id || `flow_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64) || `flow_${Date.now()}`;
+  const now = new Date().toISOString();
+  // Raw fallback: recorded steps saved as a draft — visible in the dashboard even
+  // if the LLM analysis fails, so a recording is never silently lost.
+  const fallbackFlow = {
+    id: flowId,
+    name: String(raw.name || "Recorded flow (needs review)").slice(0, 120),
+    description: "Automatically recorded flow — review and activate in the dashboard.",
+    triggerPhrases: [],
+    steps: rawSteps.map((s: any, i: number) => ({
+      id: String(s.id || `step_${i}`), order: s.order ?? i, action: s.action,
+      target: s.target || {}, value: s.value, description: s.description || "", timeout: s.timeout || 10000,
+    })),
+    requiredInputs: Array.isArray(raw.requiredInputs) ? raw.requiredInputs : [],
+    createdAt: String(raw.createdAt || now), updatedAt: now, status: "draft" as const,
+  };
+
+  try {
+    const or = new OpenRouterProvider({ maxTokens: 4096, temperature: 0.2 });
+    const analyzed = await analyzeRecordedFlow(
+      { id: flowId, steps: rawSteps, startUrl: String(raw.startUrl || req.headers.referer || ""), recordedAt: fallbackFlow.createdAt },
+      { generate: async (system, prompt) => (await or.chat([{ role: "system", content: system }, { role: "user", content: prompt }])).content }
+    );
+    await saveFlow(tenantId, analyzed.flow);
+    try {
+      const chat = await tenantManager.getChatForTenant(tenantId);
+      chat.loadFlows((await getFlows(tenantId)).filter((f) => f.status === "active"));
+    } catch { /* chat instance not cached yet — flows load on demand */ }
+    console.log(`[flows] ${tenantId}: recorded + analyzed "${analyzed.flow.name}" (${analyzed.flow.steps.length} steps)`);
+    res.json({ ok: true, flowId: analyzed.flow.id, name: analyzed.flow.name, status: analyzed.flow.status });
+  } catch (err: any) {
+    console.error(`[flows] ${tenantId}: LLM analysis failed (${err?.message}) — saving raw draft`);
+    await saveFlow(tenantId, fallbackFlow as any);
+    res.json({ ok: true, flowId: fallbackFlow.id, name: fallbackFlow.name, status: "draft", analysisFailed: true });
+  }
+});
+
+app.get("/record", (req, res) => {
+  const base = process.env.BASE_URL || "https://" + (req.get("host") || "whisp.so");
+  res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Record a flow - Whisp</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0a0e1a;color:#e7e9ee;font-family:'Archivo',-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{width:100%;max-width:560px;background:rgba(22,24,34,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px 36px;box-shadow:0 8px 32px rgba(0,0,0,0.35)}
+.badge{display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#60a5fa;margin-bottom:18px}
+h1{font-family:'DM Serif Display',Georgia,serif;font-weight:400;font-size:27px;line-height:1.25;margin:0 0 12px}
+p.sub{font-size:14.5px;color:#9aa3b2;line-height:1.6;margin:0 0 24px}
+ol{margin:0 0 24px;padding-left:20px;font-size:14px;color:#9aa3b2;line-height:1.8}
+ol strong{color:#e7e9ee}
+.bm{display:inline-block;padding:13px 22px;border-radius:10px;background:#3b82f6;color:#fff;font-weight:600;font-size:14px;text-decoration:none;cursor:grab}
+.bm:hover{background:#2563eb}
+.hint{font-size:12px;color:#5b6472;margin-top:10px;line-height:1.5}
+textarea{width:100%;height:88px;margin-top:18px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#9aa3b2;font-family:ui-monospace,monospace;font-size:11px;resize:none}
+#login,#err{display:none;text-align:center}
+#login a{color:#60a5fa}
+.fine{font-size:12px;color:#5b6472;margin-top:18px;border-top:1px solid rgba(255,255,255,0.08);padding-top:14px;line-height:1.6}
+</style></head>
+<body><div class="card">
+  <div class="badge">Whisp — Flow recorder</div>
+  <div id="main" style="display:none">
+    <h1>Record a flow on your website</h1>
+    <p class="sub">Show the assistant how something is done on your site — a booking, a contact form, an order. Do it once; the AI learns the steps, names the flow and can guide every visitor through it.</p>
+    <ol>
+      <li><strong>Drag the blue button</strong> to your bookmarks bar.</li>
+      <li><strong>Open your website</strong> in a new tab.</li>
+      <li><strong>Click the bookmark</strong> — a recording panel appears.</li>
+      <li><strong>Perform the action</strong>, then press Stop. Done — the AI takes it from there.</li>
+    </ol>
+    <a class="bm" id="bm" href="#">⏺ Record for Whisp</a>
+    <p class="hint">Bookmarks bar hidden? Copy the snippet below and paste it into the browser console (F12) on your website instead.</p>
+    <textarea id="snippet" readonly onclick="this.select()"></textarea>
+    <p class="fine">The recording link is valid for 60 minutes and only works for your account. Recorded flows appear in your <a href="/dashboard" style="color:#60a5fa">dashboard</a>.</p>
+  </div>
+  <div id="login">
+    <h1>Log in first</h1>
+    <p class="sub">Recording is owner-only. <a href="/auth/login">Log in to your dashboard</a>, then come back here.</p>
+  </div>
+  <div id="err">
+    <h1>Session expired</h1>
+    <p class="sub"><a href="/auth/login">Log in again</a> and reopen this page.</p>
+  </div>
+</div>
+<script>
+(function(){
+  var token = localStorage.getItem('wctx-dashboard-token');
+  if (!token) { document.getElementById('login').style.display = 'block'; return; }
+  fetch('${base}/api/dashboard/record-token', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r){ if (!r.ok) throw new Error('auth'); return r.json(); })
+    .then(function(d){
+      var code = "(function(){if(window.__flowRecorderActive){alert('Recorder already active');return;}window.__flowRecorderEndpoint='${base}/api/flows/record?rt=" + d.recordToken + "';var s=document.createElement('script');s.src='${base}/recorder.js';document.body.appendChild(s);})();";
+      document.getElementById('bm').setAttribute('href', 'javascript:' + encodeURIComponent(code));
+      document.getElementById('snippet').value = code;
+      document.getElementById('main').style.display = 'block';
+    })
+    .catch(function(){ document.getElementById('err').style.display = 'block'; });
+})();
+</script></body></html>`);
 });
 
 app.delete("/api/dashboard/flows/:id", authMiddleware, async (req, res) => {

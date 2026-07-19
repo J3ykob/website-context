@@ -9,7 +9,10 @@ const DEFAULT_OPTIONS: Required<CrawlOptions> = {
   rateLimit: 1000,
   includePatterns: [],
   excludePatterns: [
-    /\.(pdf|zip|tar|gz|mp4|mp3|avi|mov|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2|ttf|eot)$/i,
+    // (\?|$) not $: binary links often carry cache-buster query strings
+    // (".pdf?rand=123" slipped past a $-anchored pattern and raw PDF bytes
+    // ended up chunked into the knowledge base).
+    /\.(pdf|zip|tar|gz|mp4|mp3|avi|mov|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2|ttf|eot|docx?|xlsx?|pptx?)(\?|$)/i,
     /\?(utm_|fbclid|gclid)/i,
     /\/(wp-admin|wp-login|admin|login|logout|cart|checkout)\//i,
   ],
@@ -67,6 +70,14 @@ export async function crawlSite(
 
       if (fetchResult.statusCode >= 400) {
         failures.push(normalizedUrl);
+        continue;
+      }
+
+      // Content-type is the authority, extensions are just a fast pre-filter:
+      // anything that isn't an HTML-ish document gets skipped, never chunked.
+      const ctype = (fetchResult.headers["content-type"] || "").toLowerCase();
+      if (ctype && !/text\/html|application\/xhtml|text\/plain/.test(ctype)) {
+        console.log(`  [SKIP] non-HTML content-type (${ctype.split(";")[0]}): ${normalizedUrl}`);
         continue;
       }
 
