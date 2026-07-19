@@ -651,7 +651,7 @@
       </div>
       <div class="topbar-right">
         <a class="btn btn-outline" id="open-site-btn" href="#" target="_blank">Open site</a>
-        <button class="btn btn-dark" onclick="window.open('/record','_blank')">Record flow</button>
+        <button class="btn btn-dark" onclick="startRecording()">Record flow</button>
         <button class="btn btn-outline" onclick="logout()">Logout</button>
       </div>
     </div>
@@ -691,7 +691,7 @@
 
         <div class="section-head" style="margin-top:32px">
           <span class="section-title">Skills</span>
-          <button class="btn btn-sm btn-outline" onclick="window.open('/record','_blank')">Record new</button>
+          <button class="btn btn-sm btn-outline" onclick="startRecording()">Record new</button>
         </div>
         <div class="card" id="skills-panel"><div class="loading"></div></div>
       </div>
@@ -723,6 +723,20 @@
   <script>
     // ─── Auth Gate ────
     var AUTH_TOKEN = localStorage.getItem("wctx-dashboard-token");
+
+    // One-click flow recording: mint a record token and open the owner's site
+    // with the widget in recording mode. /record stays as the fallback (lets
+    // you type a custom URL, e.g. a staging/localhost copy of the site).
+    async function startRecording() {
+      try {
+        var r = await authFetch(API + "/api/dashboard/record-token");
+        var d = await r.json();
+        var u = (d && d.siteUrl) || "";
+        if (!u || !d.recordToken) { window.open('/record', '_blank'); return; }
+        if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+        window.open(u + (u.indexOf('?') === -1 ? '?' : '&') + 'wctx-owner=true&wctx_rt=' + encodeURIComponent(d.recordToken), '_blank');
+      } catch (e) { window.open('/record', '_blank'); }
+    }
     if (!AUTH_TOKEN) {
       window.location.href = "/auth/login";
     }
@@ -924,7 +938,7 @@
       if (!flows.length) {
         panel.innerHTML = emptyState('zap', '',
           'No skills yet - record a flow on your site and the assistant learns to walk visitors through it.',
-          'Record your first flow', "window.open('/record','_blank')", true);
+          'Record your first flow', "startRecording()", true);
         return;
       }
 
