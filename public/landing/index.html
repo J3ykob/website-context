@@ -1339,7 +1339,9 @@ new IntersectionObserver(function(entries) {
     '    float age = uTime - r.z;',
     '    if (age > 0.0 && age < 5.0) {',
     '      float d = distance(vec2(wx, wz), r.xy);',
-    '      float wave = sin(d * 2.4 - age * 5.0) * exp(-d * 0.30) * exp(-age * 0.9);',
+    '      float env = smoothstep(0.0, 0.35, age) * (1.0 - smoothstep(3.8, 5.0, age));',
+    '      float front = d - age * 2.2;',
+    '      float wave = sin(d * 2.4 - age * 5.0) * exp(-front * front * 0.35) * env;',
     '      wy += 0.55 * wave;',
     '      glow += max(0.0, wave) * 1.6;',
     '    }',
@@ -1435,7 +1437,6 @@ new IntersectionObserver(function(entries) {
     }, { passive: true });
   }
 
-  var start = performance.now();
   function draw(t) {
     gl.clear(gl.COLOR_BUFFER_BIT);
     cx += (mx - cx) * 0.04; cy += (my - cy) * 0.04;
@@ -1454,12 +1455,15 @@ new IntersectionObserver(function(entries) {
     return;
   }
 
+  var last = 0, animT = 0;
   function loop(now) {
     requestAnimationFrame(loop);
-    if (!heroVisible || document.hidden) return;
-    var t = (now - start) / 1000;
-    if (t > nextRipple) { spawnRipple(t); nextRipple = t + 1.4 + Math.random() * 1.2; }
-    draw(t);
+    if (!heroVisible || document.hidden) { last = now; return; }
+    var dt = Math.min(now - last, 50);
+    last = now;
+    animT += dt / 1000;
+    if (animT > nextRipple) { spawnRipple(animT); nextRipple = animT + 1.4 + Math.random() * 1.2; }
+    draw(animT);
   }
   requestAnimationFrame(loop);
 })();
