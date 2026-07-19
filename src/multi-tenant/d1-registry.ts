@@ -162,13 +162,14 @@ export function ensureTenant(id: string, email: string, domain: string, siteUrl:
 }
 
 const UPDATE_COL_MAP: Record<string, string> = {
-  email: "email", brandName: "brand_name", status: "status", lastScrapedAt: "last_scraped_at",
-  pagesCount: "pages_count", chunksCount: "chunks_count", settings: "settings_json",
-  ownerPasswordHash: "owner_password_hash", apiKey: "api_key", setupToken: "setup_token",
+  email: "email", siteUrl: "site_url", brandName: "brand_name", status: "status",
+  lastScrapedAt: "last_scraped_at", pagesCount: "pages_count", chunksCount: "chunks_count",
+  settings: "settings_json", ownerPasswordHash: "owner_password_hash", apiKey: "api_key",
+  setupToken: "setup_token",
 };
 
 export function updateTenant(id: string, updates: Partial<{
-  email: string; brandName: string | null; status: TenantRecord["status"];
+  email: string; siteUrl: string; brandName: string | null; status: TenantRecord["status"];
   lastScrapedAt: string | null; pagesCount: number; chunksCount: number;
   settings: any; ownerPasswordHash: string | null; apiKey: string | null; setupToken: string | null;
 }>): void {

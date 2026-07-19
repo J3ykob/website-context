@@ -1748,10 +1748,11 @@ app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   const maxPages = parseInt(req.query.maxPages as string) || 20;
   const siteUrl = (req.query.siteUrl as string) || tenant.siteUrl || `https://${tenant.domain}`;
   if (!tenant.siteUrl && siteUrl) updateTenant(tenant.id, { siteUrl });
-  // Scraping handled by VPS - just update status
-  updateTenant(tenant.id, { status: "active" });
+  // Render owns scraping now — this endpoint used to only flip status ("VPS
+  // handles scraping") and silently never rescraped anything.
+  worker.enqueuePriority(tenant.id, siteUrl, maxPages);
   tenantManager.evictTenant(tenant.id);
-  res.json({ ok: true, status: "scraping", maxPages });
+  res.json({ ok: true, queued: true, maxPages });
 });
 
 // Admin flush queue — stop scraping pending domains so only priority ones get scraped
