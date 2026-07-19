@@ -16,6 +16,20 @@ const headers = () => ({
   "Content-Type": "application/json",
 });
 
+// Vectorize caps per-vector metadata at 10 KiB of COMPACT JSON (error 40016) and
+// rejects the whole insert batch when one vector exceeds it. Slicing chars is not
+// enough: UTF-8 multibyte (Polish diacritics) + JSON escaping (\n, quotes) can
+// double the byte count. Budget the serialized object in bytes and trim content.
+const METADATA_BYTE_BUDGET = 9800;
+function fitMetadata(meta: Record<string, string>): Record<string, string> {
+  let content = meta.content || "";
+  for (;;) {
+    const size = Buffer.byteLength(JSON.stringify({ ...meta, content }));
+    if (size <= METADATA_BYTE_BUDGET || content.length === 0) return { ...meta, content };
+    content = content.slice(0, Math.max(0, content.length - Math.max(64, size - METADATA_BYTE_BUDGET)));
+  }
+}
+
 export class CloudflareVectorizeStore implements VectorStore {
   private tenantId: string;
 
@@ -36,14 +50,14 @@ export class CloudflareVectorizeStore implements VectorStore {
       const ndjson = batch.map(e => JSON.stringify({
         id: `${this.tenantId}__${e.id}`,
         values: e.vector,
-        metadata: {
+        metadata: fitMetadata({
           tenant: this.tenantId,
           content: e.content.slice(0, 5000),
-          title: (e.metadata.title as string) || "",
-          url: (e.metadata.url as string) || "",
+          title: ((e.metadata.title as string) || "").slice(0, 300),
+          url: ((e.metadata.url as string) || "").slice(0, 500),
           type: (e.metadata.type as string) || "",
-          headingHierarchy: JSON.stringify(e.metadata.headingHierarchy || []),
-        },
+          headingHierarchy: JSON.stringify(e.metadata.headingHierarchy || []).slice(0, 500),
+        }),
       })).join("\n");
 
       const resp = await fetch(`${BASE}/insert`, {

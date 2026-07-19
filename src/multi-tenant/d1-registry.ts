@@ -161,6 +161,12 @@ export function ensureTenant(id: string, email: string, domain: string, siteUrl:
   return rec;
 }
 
+const UPDATE_COL_MAP: Record<string, string> = {
+  email: "email", brandName: "brand_name", status: "status", lastScrapedAt: "last_scraped_at",
+  pagesCount: "pages_count", chunksCount: "chunks_count", settings: "settings_json",
+  ownerPasswordHash: "owner_password_hash", apiKey: "api_key", setupToken: "setup_token",
+};
+
 export function updateTenant(id: string, updates: Partial<{
   email: string; brandName: string | null; status: TenantRecord["status"];
   lastScrapedAt: string | null; pagesCount: number; chunksCount: number;
@@ -170,7 +176,24 @@ export function updateTenant(id: string, updates: Partial<{
   if (!rec) return;
   Object.assign(rec, updates);
   rec.updatedAt = new Date().toISOString();
-  upsert(rec, "updateTenant");
+  // Persist ONLY the changed columns. The old full-record INSERT OR REPLACE let two
+  // near-simultaneous updates race over D1: whichever HTTP request landed LAST won
+  // the entire row. createTenant + the setupToken update fire ~1ms apart; when the
+  // create landed second, D1 kept setup_token=NULL, the 60s hydrate then poisoned
+  // the cache, and every password-setup email link was dead (2026-07-19). Partial
+  // UPDATEs of disjoint fields commute, so ordering no longer matters.
+  const sets: string[] = [];
+  const params: any[] = [];
+  for (const [k, v] of Object.entries(updates)) {
+    const col = UPDATE_COL_MAP[k];
+    if (!col || v === undefined) continue;
+    sets.push(`${col} = ?`);
+    params.push(k === "settings" ? JSON.stringify(v || {}) : v);
+  }
+  if (sets.length === 0) return;
+  sets.push("updated_at = ?");
+  params.push(rec.updatedAt, id);
+  persist(`UPDATE tenants SET ${sets.join(", ")} WHERE id = ?`, params, "updateTenant");
 }
 
 export function deleteTenant(id: string): void {
