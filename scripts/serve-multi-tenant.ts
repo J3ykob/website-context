@@ -1992,6 +1992,25 @@ app.post("/api/dashboard/context-notes", authMiddleware, async (req, res) => {
   res.status(201).json(notes[notes.length - 1]);
 });
 
+// Owners must be able to remove a wrong/outdated note — a bad answer the bot
+// keeps repeating is worse than the original gap. Index-addressed (notes have
+// no ids); the dashboard passes the array index it rendered.
+app.delete("/api/dashboard/context-notes/:index", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const idx = parseInt(req.params.index, 10);
+  const notesPath = resolve(__dirname, `../data/${tenantId}/context_notes.json`);
+  if (!existsSync(notesPath) || !Number.isInteger(idx) || idx < 0) { res.status(404).json({ error: "Not found" }); return; }
+  const notes: any[] = JSON.parse(await readFile(notesPath, "utf-8"));
+  if (idx >= notes.length) { res.status(404).json({ error: "Not found" }); return; }
+  const [removed] = notes.splice(idx, 1);
+  await writeFile(notesPath, JSON.stringify(notes, null, 2));
+  try {
+    const chat = await tenantManager.getChatForTenant(tenantId);
+    chat.setContextNotes(notes);
+  } catch { /* tenant may not be cached yet */ }
+  res.json({ ok: true, removed });
+});
+
 // Flows list
 app.get("/api/dashboard/flows", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
