@@ -1,5 +1,6 @@
 import { fetchPage, closeBrowser } from "./fetcher.js";
 import { extractPage } from "./extractor.js";
+import { fetchPdfAsPage } from "./pdf.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
 
 const DEFAULT_OPTIONS: Required<CrawlOptions> = {
@@ -11,8 +12,10 @@ const DEFAULT_OPTIONS: Required<CrawlOptions> = {
   excludePatterns: [
     // (\?|$) not $: binary links often carry cache-buster query strings
     // (".pdf?rand=123" slipped past a $-anchored pattern and raw PDF bytes
-    // ended up chunked into the knowledge base).
-    /\.(pdf|zip|tar|gz|mp4|mp3|avi|mov|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2|ttf|eot|docx?|xlsx?|pptx?)(\?|$)/i,
+    // ended up chunked into the knowledge base). PDFs are NOT excluded here —
+    // they take the text-extraction path in the crawl loop (menus/price lists
+    // often live in PDFs).
+    /\.(zip|tar|gz|mp4|mp3|avi|mov|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2|ttf|eot|docx?|xlsx?|pptx?)(\?|$)/i,
     /\?(utm_|fbclid|gclid)/i,
     /\/(wp-admin|wp-login|admin|login|logout|cart|checkout)\//i,
   ],
@@ -63,6 +66,19 @@ export async function crawlSite(
 
       console.log(`  [${pages.length + 1}/${opts.maxPages}] Crawling: ${normalizedUrl} (depth: ${item.depth})`);
 
+      // PDFs take a dedicated extraction path (text via unpdf), never the HTML fetcher.
+      if (/\.pdf(\?|$)/i.test(normalizedUrl)) {
+        const pdfPage = await fetchPdfAsPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
+        if (pdfPage) {
+          pages.push(pdfPage);
+          staticCount++;
+          console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`);
+        } else {
+          console.log(`  [PDF] skipped (too large, scanned, or unreadable): ${normalizedUrl}`);
+        }
+        continue;
+      }
+
       const fetchResult = await fetchPage(normalizedUrl, {
         timeout: opts.timeout,
         userAgent: opts.userAgent,
@@ -74,8 +90,14 @@ export async function crawlSite(
       }
 
       // Content-type is the authority, extensions are just a fast pre-filter:
-      // anything that isn't an HTML-ish document gets skipped, never chunked.
+      // PDFs served without a .pdf extension still get the extraction path,
+      // any other non-HTML document is skipped, never chunked.
       const ctype = (fetchResult.headers["content-type"] || "").toLowerCase();
+      if (ctype.includes("application/pdf")) {
+        const pdfPage = await fetchPdfAsPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
+        if (pdfPage) { pages.push(pdfPage); staticCount++; console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`); }
+        continue;
+      }
       if (ctype && !/text\/html|application\/xhtml|text\/plain/.test(ctype)) {
         console.log(`  [SKIP] non-HTML content-type (${ctype.split(";")[0]}): ${normalizedUrl}`);
         continue;
