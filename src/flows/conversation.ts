@@ -163,7 +163,7 @@ export async function processUserInput(
   }
 
   if (session.status === "choosing") {
-    return handleModeChoice(session, msg);
+    return handleModeChoice(session, msg, generate);
   }
 
   if (session.status === "collecting") {
@@ -252,10 +252,10 @@ Return only valid JSON, nothing else.`;
     }
 
     // Nothing extracted — maybe the visitor is stating HOW they want it done
-    // ("guide me through", "do it for me") mid-collection. Record the choice and
-    // keep collecting; the mode question at the end is then skipped.
+    // mid-collection. Classify and record; the mode question is then skipped.
     if (Object.keys(session.collectedInputs).length === collectedBefore) {
-      const midChoice = parseModeChoice(userMessage);
+      const midIntent = await classifyModeChoice(userMessage, generate);
+      const midChoice = midIntent === "guided" || midIntent === "highlight" ? midIntent : null;
       if (midChoice) {
         session.executionMode = midChoice;
         const stillReq = session.remainingInputs.filter((i) => i.required !== false).map((i) => i.label).join(", ");
@@ -272,7 +272,8 @@ Return only valid JSON, nothing else.`;
   } catch {
     // LLM parse failed — check for a mode statement before force-parsing the
     // message as a field value.
-    const fallbackChoice = parseModeChoice(userMessage);
+    const fbIntent = await classifyModeChoice(userMessage, generate);
+    const fallbackChoice = fbIntent === "guided" || fbIntent === "highlight" ? fbIntent : null;
     if (fallbackChoice) {
       session.executionMode = fallbackChoice;
       const stillReq = session.remainingInputs.filter((i) => i.required !== false).map((i) => i.label).join(", ");
@@ -359,40 +360,54 @@ Return only valid JSON, nothing else.`;
   };
 }
 
-function parseModeChoice(msg: string): "guided" | "highlight" | null {
-  const m = " " + msg.toLowerCase() + " ";
-  const show = ["show", "highlight", "guide", "myself", "i'll do", "i will do", "pokaz", "pokaż", "poprowadz", "poprowadź", " sam ", " sama ", "ja to"];
-  const auto = ["do it", "fill", "for me", "automat", "you do", "zrob", "zrób", "wypelnij", "wypełnij", "za mnie", "ty to", "yes", "tak"];
-  if (show.some((w) => m.includes(w))) return "highlight";
-  if (auto.some((w) => m.includes(w))) return "guided";
-  return null;
+// Classify the visitor's reply to the auto-vs-tour question with the LLM (no
+// keyword lists — works in any language and phrasing). Returns "guided" (bot
+// fills it), "highlight" (visitor does it, bot points), "cancel", or "unclear".
+async function classifyModeChoice(
+  message: string,
+  generate?: (system: string, prompt: string) => Promise<string>
+): Promise<"guided" | "highlight" | "cancel" | "unclear"> {
+  if (!generate) return "unclear";
+  const prompt = `The assistant asked the user: "Should I fill in the form for you automatically, or show you where everything goes so you do it yourself?"
+
+Classify the user's reply into exactly one of:
+- "auto"      = they want the assistant to do it / fill it in for them
+- "self"      = they want to be shown / guided / do it themselves
+- "cancel"    = they no longer want to proceed / stop / never mind
+- "unclear"   = none of the above, or ambiguous
+
+User's reply: "${message}"
+
+Respond with ONLY the single word: auto, self, cancel, or unclear.`;
+  try {
+    const raw = (await generate("You are a precise intent classifier. Reply with one word only.", prompt)).toLowerCase();
+    if (/\bauto\b/.test(raw)) return "guided";
+    if (/\bself\b/.test(raw)) return "highlight";
+    if (/\bcancel\b/.test(raw)) return "cancel";
+    return "unclear";
+  } catch {
+    return "unclear";
+  }
 }
 
 async function handleModeChoice(
   session: FlowSession,
-  userMessage: string
+  userMessage: string,
+  generate?: (system: string, prompt: string) => Promise<string>
 ): Promise<ConversationResponse> {
-  const lower = userMessage.toLowerCase().trim();
-  const cancelWords = ["cancel", "stop", "quit", "nevermind", "never mind", "anuluj", "przerwij", "rezygnuje", "rezygnuję"];
-  if (cancelWords.some((w) => lower === w || lower.startsWith(w + " "))) {
+  const intent = await classifyModeChoice(userMessage, generate);
+  if (intent === "cancel") {
     session.status = "failed";
     return { message: "No problem — I've cancelled that. What else can I help you with?", session, complete: true };
   }
-  const choice = parseModeChoice(userMessage);
-  if (!choice) {
-    // Second chance, then fall back to the flow's own default.
-    const fallback = session.flow.executionMode === "highlight" ? "highlight" : null;
-    if (fallback) {
-      session.executionMode = fallback;
-      session.status = "executing";
-      return { message: "I'll show you where everything goes — follow the highlights on the page.", session, complete: false };
-    }
+  if (intent === "unclear") {
     return {
-      message: 'Just tell me: "do it for me" or "show me how".',
+      message: 'Just let me know — should I fill it in for you, or show you where everything goes?',
       session,
       complete: false,
     };
   }
+  const choice: "guided" | "highlight" = intent;
   session.executionMode = choice;
   // HIGHLIGHT mode is a guided TOUR: no chat collection at all — the visitor
   // types into the real fields themselves, the executor highlights each one and
