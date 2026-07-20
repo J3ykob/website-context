@@ -851,6 +851,20 @@ ${contextBlocks}
     const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
     const msg = norm(message);
     if (!msg) return null;
+    const msgWords = msg.split(" ");
+    // Stem-ish word match: exact substring, one word a prefix of the other
+    // (book/booking), or a shared prefix >= 6 chars (reserve/reservation,
+    // rezerwacja/rezerwowac) — inflected languages need the fuzz.
+    const wordHit = (w: string): boolean => {
+      if (msg.includes(w)) return true;
+      return msgWords.some((mw) => {
+        if (mw.length < 4 || w.length < 4) return false;
+        const shorter = mw.length <= w.length ? mw : w;
+        const longer = mw.length <= w.length ? w : mw;
+        if (longer.startsWith(shorter)) return true;
+        return mw.length >= 6 && w.length >= 6 && mw.slice(0, 6) === w.slice(0, 6);
+      });
+    };
     let best: { flow: FlowDefinition; score: number } | null = null;
     for (const flow of this.context.flows) {
       if (flow.status !== "active") continue;
@@ -862,9 +876,9 @@ ${contextBlocks}
         else {
           const words = p.split(" ").filter((w) => w.length > 2);
           if (words.length >= 2) {
-            const hits = words.filter((w) => msg.includes(w)).length;
+            const hits = words.filter(wordHit).length;
             const ratio = hits / words.length;
-            if (ratio >= 0.75) score = ratio * 0.9;
+            if (hits >= 2 && ratio >= 0.6) score = ratio * 0.9;
           }
         }
         if (score > 0 && (!best || score > best.score)) best = { flow, score };

@@ -31,7 +31,7 @@ Analyze the recording and return a JSON object with these fields:
 {
   "name": "Short skill name (e.g., 'Submit Application', 'Contact Form', 'Place Order')",
   "description": "One paragraph describing what this flow does, written for an end user",
-  "triggerPhrases": ["5-10 natural phrases a user might say to trigger this flow, e.g., 'I want to apply', 'submit my application', 'sign up for the challenge'"],
+  "triggerPhrases": ["8-12 natural phrases a user might say to trigger this flow - IMPORTANT: include phrases BOTH in the website's own language AND in English, e.g. for a Polish site: 'chcę zarezerwować stolik', 'rezerwacja stolika', 'I want to book a table'"],
   "requiredInputs": [
     {
       "name": "variableName",
