@@ -711,6 +711,12 @@
         <div class="section-title">Add Knowledge</div>
         <input type="text" id="new-chunk-title" placeholder="Title (optional)" />
         <textarea id="new-chunk-content" placeholder="Write the knowledge content..." rows="5"></textarea>
+        <div style="border-top:1px solid var(--line);margin:14px 0 12px;padding-top:12px">
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:8px">Or upload a document — PDF, Excel (.xlsx), CSV, Word (.docx), TXT</div>
+          <input type="file" id="kb-file-input" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md" style="display:none" />
+          <button class="btn btn-sm btn-outline" id="kb-file-btn" type="button" onclick="document.getElementById('kb-file-input').click()">Choose file…</button>
+          <span id="kb-file-status" style="font-size:12px;color:var(--text-3);margin-left:10px"></span>
+        </div>
         <div class="modal-actions">
           <button class="btn btn-sm btn-outline" onclick="closeChunkModal()">Cancel</button>
           <button class="btn btn-sm btn-dark" onclick="saveNewChunk()">Save</button>
@@ -1058,7 +1064,27 @@
     function deleteChunk(id) { if (!confirm("Delete this chunk?")) return; authFetch(API+"/api/dashboard/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
     function openChunkModal() { document.getElementById("add-chunk-modal").classList.add("open"); }
     document.getElementById("add-chunk-btn").addEventListener("click", openChunkModal);
-    function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; }
+    function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; var st=document.getElementById("kb-file-status"); if(st) st.textContent=""; var fi=document.getElementById("kb-file-input"); if(fi) fi.value=""; }
+    // Upload a document (PDF/XLSX/CSV/DOCX/TXT) — extracted, chunked and embedded server-side.
+    document.getElementById("kb-file-input").addEventListener("change", function() {
+      var f = this.files && this.files[0]; if (!f) return;
+      var status = document.getElementById("kb-file-status");
+      var btn = document.getElementById("kb-file-btn");
+      status.textContent = "Reading " + f.name + "…"; btn.disabled = true;
+      fetch(API + "/api/dashboard/knowledge-file?filename=" + encodeURIComponent(f.name), {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + AUTH_TOKEN, "Content-Type": "application/octet-stream" },
+        body: f
+      }).then(function(r){ return r.json().then(function(d){ return {ok:r.ok, d:d}; }); })
+      .then(function(res){
+        btn.disabled = false;
+        if (!res.ok) { status.textContent = res.d.error || "Could not process file"; return; }
+        status.textContent = "";
+        closeChunkModal();
+        alert("Added " + res.d.added + " knowledge entries from " + f.name + ". They're indexed now and answerable within about a minute.");
+        setTimeout(loadChunks, 1500);
+      }).catch(function(){ btn.disabled = false; status.textContent = "Upload failed - please try again."; });
+    });
     function saveNewChunk() {
       var t=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();
       if (!c) return;

@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import { readFile, writeFile, appendFile } from "fs/promises";
 import { loadCfToken } from "../src/storage/cf-auth.js";
 import { CloudflareVectorizeStore } from "../src/embeddings/vectorize-store.js";
+import { extractFile } from "../src/knowledge/extract-file.js";
 import { BGEEmbeddingProvider, bgeBaseUrl } from "../src/embeddings/bge-provider.js";
 import { createHash } from "crypto";
 import { existsSync, mkdirSync } from "fs";
@@ -2308,6 +2309,59 @@ app.post("/api/dashboard/chunks", authMiddleware, async (req, res) => {
     console.error(`[chunks] POST failed for ${tenantId}: ${e?.message}`);
     res.status(500).json({ error: "Failed to add chunk" });
   }
+});
+
+// Upload a document (PDF / XLSX / CSV / DOCX / TXT / MD) into the knowledge base.
+// Extracts text, splits into blocks, embeds each, and stores them as "manual_"
+// chunks (immune to rescrape cleanup, like typed manual entries). Raw binary
+// body; filename via ?filename= (Content-Type is a hint).
+app.post("/api/dashboard/knowledge-file", authMiddleware, (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const filename = String(req.query.filename || (req.headers["x-filename"] as string) || "upload").slice(0, 200);
+  const MAX_UPLOAD = 15 * 1024 * 1024; // 15MB
+  const parts: Buffer[] = [];
+  let size = 0, tooBig = false;
+  req.on("data", (c: Buffer) => {
+    size += c.length;
+    if (size > MAX_UPLOAD) { tooBig = true; return; }
+    parts.push(c);
+  });
+  req.on("end", async () => {
+    if (tooBig) { res.status(413).json({ error: "File too large (max 15MB)" }); return; }
+    const buffer = Buffer.concat(parts);
+    if (buffer.length === 0) { res.status(400).json({ error: "Empty file" }); return; }
+    try {
+      const { kind, blocks, charCount } = await extractFile(buffer, filename, req.headers["content-type"]);
+      if (blocks.length === 0) {
+        res.status(422).json({ error: "No readable text found (scanned image PDF, or empty document)" });
+        return;
+      }
+      const store = new CloudflareVectorizeStore({ tenantId });
+      const baseTitle = filename.replace(/\.[a-z0-9]+$/i, "").slice(0, 160);
+      // Embed in batches; store each block as its own manual chunk.
+      const provider = bgeProvider();
+      const B = 32;
+      let added = 0;
+      for (let i = 0; i < blocks.length; i += B) {
+        const batch = blocks.slice(i, i + B);
+        const vectors = await provider.embed(batch.map((b) => `${baseTitle}\n\n${b}`));
+        const entries = batch.map((content, j) => ({
+          id: "manual_" + createHash("md5").update(filename + "|" + (i + j) + "|" + content.slice(0, 40) + "|" + randomBytes(4).toString("hex")).digest("hex").slice(0, 24),
+          vector: vectors[j],
+          content,
+          metadata: { title: `${baseTitle} (${kind.toUpperCase()})`.slice(0, 200), url: "", type: "manual", headingHierarchy: [] as string[] },
+        }));
+        await store.upsert(entries);
+        added += entries.length;
+      }
+      console.log(`[knowledge-file] ${tenantId}: ${filename} (${kind}, ${charCount} chars) -> ${added} chunks`);
+      res.status(201).json({ ok: true, kind, added, filename: baseTitle });
+    } catch (e: any) {
+      console.error(`[knowledge-file] ${tenantId}: ${e?.message}`);
+      res.status(400).json({ error: e?.message || "Could not process file" });
+    }
+  });
+  req.on("error", () => { if (!res.headersSent) res.status(400).json({ error: "Upload failed" }); });
 });
 
 app.post("/api/dashboard/rescrape", authMiddleware, (req, res) => {
