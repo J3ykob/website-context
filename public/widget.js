@@ -628,7 +628,7 @@
           setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
         }
         if (data.flowSession && data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
-          setTimeout(function() { launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}, data.flowSession.executionMode); }, 800);
+          setTimeout(function() { launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}, data.flowSession.executionMode, !data.flowSession.complete); }, 800);
         } else if (data.flowSession && data.flowSession.active) {
           barInput.placeholder = "Provide the requested info...";
         }
@@ -1121,7 +1121,7 @@
           activeFlowSession = data.flowSession;
           if (data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
             setTimeout(function() {
-              launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}, data.flowSession.executionMode);
+              launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}, data.flowSession.executionMode, !data.flowSession.complete);
             }, 800);
             activeFlowSession = null;
           } else if (data.flowSession.active) {
@@ -1154,11 +1154,13 @@
     els.input.focus();
   }
 
-  function launchGuidedExecution(steps, inputs, mode) {
+  var guidedPartial = false;
+  function launchGuidedExecution(steps, inputs, mode, partial) {
+    guidedPartial = !!partial;
     // Hide overlay, show the actual website
     minimizeToBar();
 
-    appendMsg("system", mode === "highlight"
+    if (!partial) appendMsg("system", mode === "highlight"
       ? "Switching to the website — I'll highlight each step and you do it yourself."
       : "Switching to the website — I'll fill in what I can and highlight anything that needs your input.");
 
@@ -1193,10 +1195,15 @@
         fab.querySelector("button").innerHTML = '<span class="wctx-fab-dot"></span>Navigating...';
         break;
       case "done":
+        if (guidedPartial) {
+          // Incremental batch landed — stay in the bar, keep the conversation going.
+          fab.querySelector("button").innerHTML = '<span class="wctx-fab-dot"></span>✓ On the page — continue below';
+          break;
+        }
         fab.querySelector("button").innerHTML = '<span class="wctx-fab-dot"></span>Done! Back to chat';
         setTimeout(function() {
           openFullChat();
-          appendMsg("assistant", "All done! I filled in the form and you clicked submit. Is there anything else I can help with?");
+          appendMsg("assistant", "All done! Is there anything else I can help with?");
         }, 2000);
         break;
       case "aborted":

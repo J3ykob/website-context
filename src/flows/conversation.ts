@@ -1,4 +1,4 @@
-import type { FlowDefinition, FlowInput } from "../context/types.js";
+import type { FlowDefinition, FlowInput, FlowStep } from "../context/types.js";
 import { executeFlow, type ExecutionResult, type ExecutionOptions } from "./executor.js";
 import { ClaudeCLIProvider } from "../llm/claude-cli-provider.js";
 
@@ -82,11 +82,17 @@ export interface FlowSession {
   status: "collecting" | "confirming" | "choosing" | "executing" | "done" | "failed";
   result?: ExecutionResult;
   executionMode?: "background" | "guided" | "highlight";
+  // Step ids already sent to the widget for live (incremental) execution.
+  executedStepIds?: string[];
+  executedInputNames?: string[];
 }
 
 export interface ConversationResponse {
   message: string;
   session: FlowSession;
+  // Steps the widget should execute RIGHT NOW (incremental live execution —
+  // each collected input lands on the page immediately).
+  liveSteps?: FlowStep[];
   /** When true, the flow has finished executing (success or failure) */
   complete: boolean;
 }
@@ -94,6 +100,30 @@ export interface ConversationResponse {
 /**
  * Starts a new flow session and returns the first question to ask the user.
  */
+function sortedSteps(flow: FlowDefinition): FlowStep[] {
+  return [...flow.steps].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+function stepsBoundToInputs(flow: FlowDefinition, names: string[]): FlowStep[] {
+  if (names.length === 0) return [];
+  return sortedSteps(flow).filter((st) => typeof st.value === "string" && names.some((n) => (st.value as string).includes(`{{${n}}}`)));
+}
+function leadingSetupSteps(flow: FlowDefinition): FlowStep[] {
+  const out: FlowStep[] = [];
+  for (const st of sortedSteps(flow)) {
+    if (typeof st.value === "string" && /\{\{.+?\}\}/.test(st.value)) break;
+    out.push(st);
+  }
+  return out;
+}
+function unexecutedSteps(session: FlowSession): FlowStep[] {
+  const done = new Set(session.executedStepIds || []);
+  return sortedSteps(session.flow).filter((st) => !done.has(st.id));
+}
+function markExecuted(session: FlowSession, steps: FlowStep[]): void {
+  if (steps.length === 0) return;
+  session.executedStepIds = [...(session.executedStepIds || []), ...steps.map((st) => st.id)];
+}
+
 export function startFlowSession(flow: FlowDefinition): ConversationResponse {
   const session: FlowSession = {
     flowId: flow.id,
@@ -103,23 +133,12 @@ export function startFlowSession(flow: FlowDefinition): ConversationResponse {
     status: "collecting",
   };
 
-  if (session.remainingInputs.length === 0) {
-    // No inputs needed — ask HOW the visitor wants it done (auto vs guided tour).
-    session.status = "choosing";
-    return {
-      message: `I can do "${flow.name}" right now. Should I do it for you automatically, or show you where to click so you do it yourself?`,
-      session,
-      complete: false,
-    };
-  }
-
-  const firstInput = session.remainingInputs[0];
-  const inputList = flow.requiredInputs
-    .map((i) => `- ${i.label} (${i.type})`)
-    .join("\n");
-
+  // Mode question comes FIRST — from then on every collected input lands on the
+  // page immediately (live incremental execution), so the visitor must pick
+  // auto-fill vs highlight before collection starts.
+  session.status = "choosing";
   return {
-    message: `I'll help you with "${flow.name}". I need a few details:\n${inputList}\n\nLet's start — what is your ${firstInput.label.toLowerCase()}?`,
+    message: `Sure — I can help with "${flow.name}". Should I fill things in for you as we go, or show you where everything goes so you do it yourself?`,
     session,
     complete: false,
   };
@@ -208,6 +227,7 @@ Return only valid JSON, nothing else.`;
     const extracted = JSON.parse(jsonStr) as Record<string, string>;
 
     const collectedBefore = Object.keys(session.collectedInputs).length;
+    const newlyCollected: string[] = [];
     const sanitizationErrors: string[] = [];
     for (const [name, value] of Object.entries(extracted)) {
       if (value && remaining.some((i) => i.name === name)) {
@@ -216,6 +236,7 @@ Return only valid JSON, nothing else.`;
         if (result.valid) {
           session.collectedInputs[name] = result.value;
           session.remainingInputs = session.remainingInputs.filter((i) => i.name !== name);
+          newlyCollected.push(name);
         } else {
           sanitizationErrors.push(result.error || `Invalid value for ${inputDef.label}`);
         }
@@ -280,6 +301,16 @@ Return only valid JSON, nothing else.`;
     }
   }
 
+  // Live incremental execution: the steps bound to just-collected inputs go to
+  // the widget NOW, so each answer visibly lands on the page.
+  const newlyCollectedAll = Object.keys(session.collectedInputs).filter(
+    (n) => !(session.executedInputNames || (session.executedInputNames = [])).includes(n)
+  );
+  const liveNow = stepsBoundToInputs(session.flow, newlyCollectedAll)
+    .filter((st) => !(session.executedStepIds || []).includes(st.id));
+  markExecuted(session, liveNow);
+  session.executedInputNames = [...(session.executedInputNames || []), ...newlyCollectedAll];
+
   // Still need more? Only REQUIRED inputs gate completion — optional fields
   // (e.g. "Special notes") are picked up when the visitor volunteers them, but
   // never block the flow (they used to trap the session in collecting forever).
@@ -290,6 +321,7 @@ Return only valid JSON, nothing else.`;
       message: `I still need: ${still}. Could you provide ${stillRequired.length === 1 ? "it" : "them"}?`,
       session,
       complete: false,
+      liveSteps: liveNow.length ? liveNow : undefined,
     };
   }
   session.remainingInputs = [];
@@ -306,12 +338,16 @@ Return only valid JSON, nothing else.`;
 
   if (session.executionMode === "highlight" || session.executionMode === "guided") {
     session.status = "executing";
+    const finalBatch = unexecutedSteps(session);
+    markExecuted(session, finalBatch);
+    const merged = liveNow.length ? [...liveNow, ...finalBatch.filter((st) => !liveNow.some((l) => l.id === st.id))] : finalBatch;
     return {
       message: session.executionMode === "highlight"
-        ? `Got it!\n${summary}\n\nI'll show you where everything goes — follow the highlights on the page.`
-        : `Got it!\n${summary}\n\nI'll fill it in for you now — switching to the page.`,
+        ? `Got it!\n${summary}\n\nLast bit — follow the highlights to finish up.`
+        : `Got it!\n${summary}\n\nFinishing up on the page now.`,
       session,
       complete: false,
+      liveSteps: merged,
     };
   }
 
@@ -358,13 +394,33 @@ async function handleModeChoice(
     };
   }
   session.executionMode = choice;
-  session.status = "executing";
+  const stillRequired = session.remainingInputs.filter((i) => i.required !== false);
+  if (stillRequired.length === 0) {
+    session.status = "executing";
+    const live = unexecutedSteps(session);
+    markExecuted(session, live);
+    return {
+      message: choice === "highlight"
+        ? "I'll show you where everything goes — follow the highlights on the page."
+        : "I'll fill it in for you now — switching to the page.",
+      session,
+      complete: false,
+      liveSteps: live,
+    };
+  }
+  session.status = "collecting";
+  // Run any setup steps (navigation etc.) that come before the first field.
+  const lead = leadingSetupSteps(session.flow).filter((st) => !(session.executedStepIds || []).includes(st.id));
+  markExecuted(session, lead);
+  const first = stillRequired[0];
   return {
-    message: choice === "highlight"
-      ? "I'll show you where everything goes — follow the highlights on the page."
-      : "I'll fill it in for you now — switching to the page.",
+    message: (choice === "highlight"
+      ? "Okay — I'll point at each field as you give me the details."
+      : "Okay — I'll fill each field in as you give it to me.")
+      + ` First: ${first.label}?`,
     session,
     complete: false,
+    liveSteps: lead.length ? lead : undefined,
   };
 }
 

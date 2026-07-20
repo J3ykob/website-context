@@ -346,6 +346,7 @@ export class WebsiteChat {
         this.flowSessions.delete(effectiveSessionKey);
       }
 
+      const liveSteps = result.liveSteps && result.liveSteps.length ? result.liveSteps : undefined;
       return {
         message: result.message,
         sources: [],
@@ -355,8 +356,10 @@ export class WebsiteChat {
           flowId: result.session.flowId,
           complete: result.complete || readyToExecute,
           executionMode: (result.session.executionMode || result.session.flow.executionMode) === "highlight" ? "highlight" : "guided",
-          guidedSteps: readyToExecute ? result.session.flow.steps : undefined,
-          guidedInputs: readyToExecute ? result.session.collectedInputs : undefined,
+          // Live incremental execution: whatever the conversation says should run
+          // NOW (per-input batches while collecting, the remainder on completion).
+          guidedSteps: liveSteps || (readyToExecute ? result.session.flow.steps : undefined),
+          guidedInputs: (liveSteps || readyToExecute) ? result.session.collectedInputs : undefined,
         },
       };
     }
@@ -364,25 +367,13 @@ export class WebsiteChat {
     // Deterministic trigger check BEFORE any LLM call (see matchFlowTrigger).
     const triggeredFlow = this.matchFlowTrigger(inputValidation.sanitized);
     if (triggeredFlow) {
-      const requiredMissing = triggeredFlow.requiredInputs.filter((i) => i.required);
-      if (requiredMissing.length === 0) {
-        // No inputs to collect — still let the VISITOR pick auto vs highlight.
-        this.beginFlowSession(effectiveSessionKey, triggeredFlow);
-        const zeroSession = this.flowSessions.get(effectiveSessionKey)!;
-        zeroSession.status = "choosing";
-        return {
-          message: `Sure — I can do "${triggeredFlow.name}" right now. Should I do it for you automatically, or show you where to click so you do it yourself?`,
-          sources: [],
-          flowSession: { active: true, status: "choosing", flowId: triggeredFlow.id, complete: false },
-        };
-      }
-      this.beginFlowSession(effectiveSessionKey, triggeredFlow);
-      const session = this.flowSessions.get(effectiveSessionKey)!;
-      const first = session.remainingInputs[0];
+      // Mode question comes first (startFlowSession) — live incremental
+      // execution needs the visitor's auto/highlight choice before collecting.
+      const started = this.beginFlowSession(effectiveSessionKey, triggeredFlow);
       return {
-        message: `Sure — I can help with that. ${first ? `First: ${first.label}?` : ""}`,
+        message: started.message,
         sources: [],
-        flowSession: { active: true, status: "collecting", flowId: triggeredFlow.id, complete: false },
+        flowSession: { active: true, status: "choosing", flowId: triggeredFlow.id, complete: false },
       };
     }
 
