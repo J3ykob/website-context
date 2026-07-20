@@ -787,11 +787,9 @@ Excerpts from the website:
 ${context}
 """
 
-Do these excerpts contain ANY information relevant to answering the visitor's question — even partially?
-- Reply "yes" if the excerpts mention the topic or contain information that helps answer it, even if not a complete answer.
-- Reply "no" ONLY if the excerpts are unrelated to the question or contain nothing at all that could help (e.g. asking about revenue, staff vacation, or a service the business clearly doesn't discuss).
-
-Be generous with "yes" — only say "no" when there is genuinely nothing relevant.
+Can this question be answered HONESTLY from the excerpts — either directly, or by fairly summarizing / describing what the excerpts show?
+- Reply "yes" if the answer is present, OR if the excerpts contain concrete examples or evidence you can honestly describe to address the question. For a descriptive question like "what do you do / what services", excerpts that describe specific projects or work ARE an answer — you can say "we do work such as these projects". Meta-summarising the available material counts as answering.
+- Reply "no" ONLY when answering would require a SPECIFIC fact that is simply not in the excerpts — an exact number, price, date, headcount, policy — or the excerpts are about an entirely unrelated topic. Never invent such specifics.
 
 Reply with ONLY one word: yes or no.`;
     try {
@@ -890,6 +888,7 @@ Reply with ONLY one word: yes or no.`;
 - Do NOT output any text that looks like a tool call, action tag, or function name. No [Action:...], no {action:...}, no [[tool_name...]]. Just respond naturally with links when relevant.
 - After a flow completes, do NOT re-invoke unless the user explicitly asks again.
 - PRECISION over guessing: never state a specific figure (team size, headcount, prices, quantities, dates) unless it is stated in the context as a general fact about the business. A number that appears inside a specific project, case study, or example describes ONLY that project — never generalize it into a company-wide fact (e.g. "2 people worked on project X" does NOT mean the team has 2 people). If you don't have the exact figure asked for, say so plainly, give the closest real information you do have, point to contact for the precise answer, and append the [[gap: ...]] marker.
+- SYNTHESISE for descriptive questions: when asked what you do, what you offer, who you are, or for examples of your work, and the context contains projects or case studies, answer by describing them ("we build/deliver work such as ..."). Concrete examples ARE a valid answer to a general question — don't refuse just because there is no single summary sentence. This does NOT license inventing specific figures (see above).
 
 ## Website Pages:
 ${siteInfo}
