@@ -2032,10 +2032,10 @@ app.put("/api/dashboard/flows/:id", authMiddleware, async (req, res) => {
   const u = await updateFlow(tenantId, flowId, req.body);
   if (u) {
     // Reload flows in cached chat instance
-    try {
-      const chat = await tenantManager.getChatForTenant(tenantId);
-      chat.loadFlows((await getFlows(tenantId)).filter((f) => f.status === "active"));
-    } catch { /* ignore */ }
+    // Evict so the next chat rebuilds the instance with the current flow set.
+    // (loadFlows hot-patching raced with in-flight requests and left stale
+    // matcher state — a flow list that didn't reflect create/delete.)
+    tenantManager.evictTenant(tenantId);
     res.json(u);
   } else {
     res.status(404).json({ error: "Not found" });
@@ -2125,10 +2125,10 @@ app.post("/api/flows/record", async (req, res) => {
       { generate: async (system, prompt) => (await or.chat([{ role: "system", content: system }, { role: "user", content: prompt }])).content }
     );
     await saveFlow(tenantId, analyzed.flow);
-    try {
-      const chat = await tenantManager.getChatForTenant(tenantId);
-      chat.loadFlows((await getFlows(tenantId)).filter((f) => f.status === "active"));
-    } catch { /* chat instance not cached yet — flows load on demand */ }
+    // Evict so the next chat rebuilds the instance with the current flow set.
+    // (loadFlows hot-patching raced with in-flight requests and left stale
+    // matcher state — a flow list that didn't reflect create/delete.)
+    tenantManager.evictTenant(tenantId);
     console.log(`[flows] ${tenantId}: recorded + analyzed "${analyzed.flow.name}" (${analyzed.flow.steps.length} steps)`);
     res.json({ ok: true, flowId: analyzed.flow.id, name: analyzed.flow.name, status: analyzed.flow.status });
   } catch (err: any) {
@@ -2213,10 +2213,10 @@ app.delete("/api/dashboard/flows/:id", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   const flowId = req.params.id as string;
   if (await deleteFlow(tenantId, flowId)) {
-    try {
-      const chat = await tenantManager.getChatForTenant(tenantId);
-      chat.loadFlows((await getFlows(tenantId)).filter((f) => f.status === "active"));
-    } catch { /* ignore */ }
+    // Evict so the next chat rebuilds the instance with the current flow set.
+    // (loadFlows hot-patching raced with in-flight requests and left stale
+    // matcher state — a flow list that didn't reflect create/delete.)
+    tenantManager.evictTenant(tenantId);
     res.json({ ok: true });
   } else {
     res.status(404).json({ error: "Not found" });
