@@ -810,6 +810,7 @@ export class WebsiteChat {
 - If the site content above genuinely does NOT cover the user's question, still give your best helpful response (and point them to the business's contact info), then append this exact marker as the very last line: [[gap: short restatement of the unanswered question, in the site's language]]. Never mention or explain the marker, and never emit it when the context does answer the question.
 - Do NOT output any text that looks like a tool call, action tag, or function name. No [Action:...], no {action:...}, no [[tool_name...]]. Just respond naturally with links when relevant.
 - After a flow completes, do NOT re-invoke unless the user explicitly asks again.
+- PRECISION over guessing: never state a specific figure (team size, headcount, prices, quantities, dates) unless it is stated in the context as a general fact about the business. A number that appears inside a specific project, case study, or example describes ONLY that project — never generalize it into a company-wide fact (e.g. "2 people worked on project X" does NOT mean the team has 2 people). If you don't have the exact figure asked for, say so plainly, give the closest real information you do have, point to contact for the precise answer, and append the [[gap: ...]] marker.
 
 ## Website Pages:
 ${siteInfo}
