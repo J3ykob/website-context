@@ -570,12 +570,14 @@ export class WebsiteChat {
     // business (the worst possible first impression). Return an honest fallback
     // and flag grounded:false so the server can log/quarantine the tenant.
     // (We're past all flow paths here, so flow-only demos are unaffected.)
-    if (this.filterContextChunks(retrievedChunks, lastUserMessage).length === 0) {
+    const usableChunks = this.filterContextChunks(retrievedChunks, lastUserMessage);
+    if (usableChunks.length === 0 || !(await this.isAnswerable(lastUserMessage, usableChunks))) {
       return {
         message:
-          "I don't have the details to answer that accurately right now, and I'd rather not guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.",
+          "I don't have that information in what I can see about us, so I don't want to guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.",
         sources: [],
         grounded: false,
+        unknownQuestion: lastUserMessage.trim() || undefined,
       };
     }
 
@@ -674,11 +676,14 @@ export class WebsiteChat {
     const retrievedChunks = await this.retrieveContext(inputValidation.sanitized);
     const sources = [...new Map(retrievedChunks.map((c) => [c.metadata.url as string, { url: c.metadata.url as string, title: c.metadata.title as string }])).values()];
 
-    // Grounding gate — identical to chat(): no usable context → honest fallback, no LLM.
-    if (this.filterContextChunks(retrievedChunks, inputValidation.sanitized).length === 0) {
-      const msg = "I don't have the details to answer that accurately right now, and I'd rather not guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.";
+    // Grounding gate + hard anti-hallucination check — before any tokens stream,
+    // so there is nothing to retract: no usable context OR the excerpts don't
+    // directly answer the question → honest refusal + logged gap, no generation.
+    const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
+    if (usableStream.length === 0 || !(await this.isAnswerable(inputValidation.sanitized, usableStream))) {
+      const msg = "I don't have that information in what I can see about us, so I don't want to guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.";
       onToken(msg);
-      return { message: msg, sources: [], grounded: false };
+      return { message: msg, sources: [], grounded: false, unknownQuestion: inputValidation.sanitized.trim() || undefined };
     }
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -723,6 +728,37 @@ export class WebsiteChat {
       .trim();
     const outputCheck = validateOutput(cleaned, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
     return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: gapStream.question || undefined };
+  }
+
+  // Hard anti-hallucination gate: a focused binary check that the retrieved
+  // excerpts DIRECTLY answer the question, run before generation. Unlike the
+  // soft prompt guideline (which competes with the model's urge to be helpful),
+  // this is a dedicated yes/no decision — if "no", the bot refuses and the
+  // question is logged as a knowledge gap instead of a confabulated answer.
+  // Fails OPEN (returns true) on error so a transient blip never over-refuses.
+  private async isAnswerable(question: string, chunks: { content: string; metadata: Record<string, unknown> }[]): Promise<boolean> {
+    if (chunks.length === 0) return false;
+    const context = chunks.slice(0, 6).map((c) => (c.content || "").slice(0, 700)).join("\n---\n");
+    const prompt = `A visitor asked: "${question}"
+
+Excerpts from the website:
+"""
+${context}
+"""
+
+Do these excerpts contain information that DIRECTLY and SPECIFICALLY answers the visitor's question?
+- "yes" = the actual answer is present in the excerpts.
+- "no"  = the excerpts are about other topics, only tangentially related, or answering would require guessing or inferring a fact that is not stated. A number/detail about a DIFFERENT thing (a specific project, another product/service) does NOT answer a general question.
+
+Reply with ONLY one word: yes or no.`;
+    try {
+      const raw = (await this.backend.generate("You judge whether the provided context directly answers a question. Reply yes or no only.", [{ role: "user", content: prompt }], 4)).toLowerCase();
+      if (/\bno\b/.test(raw)) return false;
+      if (/\byes\b/.test(raw)) return true;
+      return true; // ambiguous -> don't over-refuse
+    } catch {
+      return true; // fail open
+    }
   }
 
   // The chunks that actually become answerable context: relevant score, not
