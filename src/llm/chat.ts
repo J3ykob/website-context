@@ -269,7 +269,7 @@ export class WebsiteChat {
   hasActiveFlowSession(sessionKey: string): boolean {
     const session = this.flowSessions.get(sessionKey);
     if (!session) return false;
-    return session.status === "collecting" || session.status === "confirming" || session.status === "executing";
+    return session.status === "collecting" || session.status === "confirming" || session.status === "choosing" || session.status === "executing";
   }
 
   /** Get the active flow session for a key */
