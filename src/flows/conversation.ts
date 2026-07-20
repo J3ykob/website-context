@@ -246,15 +246,19 @@ Return only valid JSON, nothing else.`;
     }
   }
 
-  // Still need more?
-  if (session.remainingInputs.length > 0) {
-    const still = session.remainingInputs.map((i) => i.label).join(", ");
+  // Still need more? Only REQUIRED inputs gate completion — optional fields
+  // (e.g. "Special notes") are picked up when the visitor volunteers them, but
+  // never block the flow (they used to trap the session in collecting forever).
+  const stillRequired = session.remainingInputs.filter((i) => i.required !== false);
+  if (stillRequired.length > 0) {
+    const still = stillRequired.map((i) => i.label).join(", ");
     return {
-      message: `I still need: ${still}. Could you provide ${session.remainingInputs.length === 1 ? "it" : "them"}?`,
+      message: `I still need: ${still}. Could you provide ${stillRequired.length === 1 ? "it" : "them"}?`,
       session,
       complete: false,
     };
   }
+  session.remainingInputs = [];
 
   // All collected — let the VISITOR choose how it happens: the bot does it for
   // them, or highlights each step so they do it themselves.
