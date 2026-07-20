@@ -6,7 +6,7 @@ set -euo pipefail
 
 source ~/.gtm-os/.env
 CAMPAIGN_ID="662a6fc0-01aa-4032-8963-e3ddb9ec061f"
-FROM="Kuba <kuba@flowstock.so>"
+FROM="Jakub <jakub@whisp.so>"
 EMAILS_FILE="./data/campaigns/warsaw-smb-emails.json"
 DB="$HOME/.gtm-os/gtm-os.db"
 DRY_RUN="${1:-}"

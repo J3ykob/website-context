@@ -21,29 +21,34 @@ Only sends email if demo is confirmed working.
 import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 import time
 
 WHISP_API = "https://whisp.so"
-RESEND_KEY = "re_ZS8Wfrja_D6jSS8gGfBmiVbQBAXLXp5mG"
+RESEND_KEY = os.environ.get("RESEND_API_KEY")
+if not RESEND_KEY:
+    sys.exit("RESEND_API_KEY environment variable is required")
 FROM = "Jakub <jakub@whisp.so>"
 SCRAPE_TIMEOUT = 300  # 5 min max wait per tenant
 SCRAPE_POLL_INTERVAL = 10
 
 
 def api_call(method, url, data=None, headers=None):
-    cmd = ["curl", "-s", "-X", method, url]
+    cmd = ["curl", "-s", "--connect-timeout", "10", "-X", method, url]
     if headers:
         for k, v in headers.items():
             cmd.extend(["-H", f"{k}: {v}"])
     if data:
         cmd.extend(["-H", "Content-Type: application/json", "-d", json.dumps(data)])
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
     try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         return json.loads(r.stdout)
+    except subprocess.TimeoutExpired:
+        return {"error": "timeout"}
     except:
-        return {"error": r.stdout[:100]}
+        return {"error": "request failed"}
 
 
 def get_tenant_status(tenant_id):

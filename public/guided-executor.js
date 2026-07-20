@@ -11,9 +11,13 @@
 
   var aborted = false;
   var highlightEl = null;
+  // "auto" fills the form for the user; "highlight" only points — every step is
+  // highlighted with an instruction and the USER performs it themselves.
+  var MODE = "auto";
 
-  function execute(steps, inputs) {
+  function execute(steps, inputs, mode) {
     aborted = false;
+    MODE = mode === "highlight" ? "highlight" : "auto";
     runSteps(steps, inputs, 0);
   }
 
@@ -55,6 +59,7 @@
               steps: steps,
               inputs: inputs,
               nextIndex: index + 1,
+              mode: MODE,
             }));
 
             // Try Next.js / SPA router first
@@ -80,7 +85,7 @@
             var isSubmit = clickEl.tagName === "BUTTON" || clickEl.type === "submit" ||
               (step.target.text && /submit|send|confirm|place order|pay|sign/i.test(step.target.text));
 
-            if (isLastStep || isSubmit || step.requiresUserAction) {
+            if (MODE === "highlight" || isLastStep || isSubmit || step.requiresUserAction) {
               clickEl.scrollIntoView({ behavior: "smooth", block: "center" });
               await sleep(400);
               flashHighlight(clickEl, "user");
@@ -120,7 +125,7 @@
         case "type":
           var typeEl = findElement(step.target);
           if (typeEl) {
-            if (value && !isUserActionRequired(step, value)) {
+            if (MODE !== "highlight" && value && !isUserActionRequired(step, value)) {
               flashHighlight(typeEl, "auto");
               typeEl.scrollIntoView({ behavior: "smooth", block: "center" });
               await sleep(300);
@@ -143,7 +148,7 @@
               notify("user-action-needed", {
                 index: index,
                 field: step.description || step.target.css || "this field",
-                message: "Please fill in this field",
+                message: value ? 'Type here: "' + value + '"' : "Please fill in this field",
               });
               await waitForUserInput(typeEl);
               removeHighlight();
@@ -153,7 +158,21 @@
 
         case "select":
           var selectEl = findElement(step.target);
-          if (selectEl && value) {
+          if (selectEl && MODE === "highlight") {
+            flashHighlight(selectEl, "user");
+            selectEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            notify("user-action-needed", {
+              index: index,
+              field: step.description || "this dropdown",
+              message: value ? 'Choose: "' + value + '"' : "Pick an option here",
+            });
+            await new Promise(function(resolve) {
+              function onPick() { selectEl.removeEventListener("change", onPick); resolve(); }
+              selectEl.addEventListener("change", onPick);
+              setTimeout(function() { selectEl.removeEventListener("change", onPick); resolve(); }, 120000);
+            });
+            removeHighlight();
+          } else if (selectEl && value) {
             flashHighlight(selectEl, "auto");
             selectEl.scrollIntoView({ behavior: "smooth", block: "center" });
             await sleep(300);

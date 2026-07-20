@@ -16,7 +16,7 @@
 import { readFileSync } from "fs";
 
 const BASE_URL = process.env.BASE_URL || "https://whisp.so";
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "whisp-admin-2026";
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
 const RESEND_KEY = process.env.RESEND_API_KEY || "";
 const FROM = "Jakub <jakub@whisp.so>";
 const SEND = process.argv.includes("--send");

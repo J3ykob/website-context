@@ -57,7 +57,7 @@ export interface ChatResponse {
     status: FlowSession["status"];
     flowId: string;
     complete: boolean;
-    executionMode?: "background" | "guided";
+    executionMode?: "background" | "guided" | "highlight";
     guidedSteps?: any[];
     guidedInputs?: Record<string, string>;
   };
@@ -337,7 +337,9 @@ export class WebsiteChat {
     // If there's an active flow session collecting remaining inputs
     if (this.hasActiveFlowSession(effectiveSessionKey)) {
       const session = this.flowSessions.get(effectiveSessionKey)!;
-      const result = await processUserInput(session, lastUserMessage);
+      const result = await processUserInput(session, lastUserMessage, async (system, prompt) =>
+        this.backend.generate(system, [{ role: "user", content: prompt }], 512)
+      );
 
       const readyToExecute = result.session.status === "executing";
       if (result.complete || readyToExecute) {
@@ -352,7 +354,7 @@ export class WebsiteChat {
           status: result.session.status,
           flowId: result.session.flowId,
           complete: result.complete || readyToExecute,
-          executionMode: "guided",
+          executionMode: result.session.flow.executionMode === "highlight" ? "highlight" : "guided",
           guidedSteps: readyToExecute ? result.session.flow.steps : undefined,
           guidedInputs: readyToExecute ? result.session.collectedInputs : undefined,
         },
@@ -370,7 +372,8 @@ export class WebsiteChat {
           sources: [],
           flowSession: {
             active: false, status: "executing", flowId: triggeredFlow.id, complete: true,
-            executionMode: "guided", guidedSteps: triggeredFlow.steps, guidedInputs: {},
+            executionMode: triggeredFlow.executionMode === "highlight" ? "highlight" : "guided",
+            guidedSteps: triggeredFlow.steps, guidedInputs: {},
           },
         };
       }
@@ -502,7 +505,7 @@ export class WebsiteChat {
                 status: "executing",
                 flowId: flow.id,
                 complete: true,
-                executionMode: "guided",
+                executionMode: flow.executionMode === "highlight" ? "highlight" : "guided",
                 guidedSteps: flow.steps,
                 guidedInputs: providedInputs,
               },

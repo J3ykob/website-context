@@ -131,7 +131,11 @@ export function startFlowSession(flow: FlowDefinition): ConversationResponse {
  */
 export async function processUserInput(
   session: FlowSession,
-  userMessage: string
+  userMessage: string,
+  // Injectable LLM call — the multi-tenant server passes an OpenRouter-backed
+  // generate; the Claude CLI default only works on a dev machine (on prod it
+  // threw and the fallback treated the WHOLE message as one field's value).
+  generate?: (system: string, prompt: string) => Promise<string>
 ): Promise<ConversationResponse> {
   const msg = userMessage.trim();
 
@@ -140,7 +144,7 @@ export async function processUserInput(
   }
 
   if (session.status === "collecting") {
-    return handleInputCollection(session, msg);
+    return handleInputCollection(session, msg, generate);
   }
 
   // If already done or failed, just return state
@@ -155,13 +159,30 @@ export async function processUserInput(
 
 async function handleInputCollection(
   session: FlowSession,
-  userMessage: string
+  userMessage: string,
+  generate?: (system: string, prompt: string) => Promise<string>
 ): Promise<ConversationResponse> {
+  // Escape hatch — a collection session must never trap the visitor (any
+  // message used to be force-parsed as the next field value, with no way out).
+  const lower = userMessage.toLowerCase().trim();
+  const cancelWords = ["cancel", "stop", "quit", "exit", "nevermind", "never mind", "forget it", "anuluj", "przerwij", "rezygnuje", "rezygnuję", "nie chce", "nie chcę"];
+  if (cancelWords.some((w) => lower === w || lower.startsWith(w + " ") || lower.endsWith(" " + w))) {
+    session.status = "failed";
+    return {
+      message: "No problem — I've cancelled that. What else can I help you with?",
+      session,
+      complete: true,
+    };
+  }
+
   // Use LLM to extract all possible values from the user's message
   const allNeeded = session.flow.requiredInputs;
   const remaining = session.remainingInputs;
 
-  const cli = new ClaudeCLIProvider({ mode: "local", model: "haiku" });
+  const llmGenerate = generate || (async (system: string, prompt: string) => {
+    const cli = new ClaudeCLIProvider({ mode: "local", model: "haiku" });
+    return cli.generate(system, prompt);
+  });
 
   const inputSpec = remaining.map((i) => `- "${i.name}" (${i.type}): ${i.label} — ${i.description || ""}`).join("\n");
 
@@ -175,7 +196,7 @@ User's message: "${userMessage}"
 Return only valid JSON, nothing else.`;
 
   try {
-    const response = await cli.generate("You are a JSON extractor. Output only valid JSON.", parsePrompt);
+    const response = await llmGenerate("You are a JSON extractor. Output only valid JSON.", parsePrompt);
     let jsonStr = response.trim();
     const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (jsonMatch) jsonStr = jsonMatch[1].trim();
@@ -198,7 +219,7 @@ Return only valid JSON, nothing else.`;
 
     if (sanitizationErrors.length > 0) {
       return {
-        message: sanitizationErrors.join("\n") + "\n\nCould you please provide valid values?",
+        message: sanitizationErrors.join("\n") + "\n\nCould you please provide valid values? (You can also say \"cancel\" to stop.)",
         session,
         complete: false,
       };
@@ -213,7 +234,7 @@ Return only valid JSON, nothing else.`;
         session.remainingInputs = session.remainingInputs.filter((i) => i.name !== current.name);
       } else {
         return {
-          message: result.error || `That doesn't look right. Could you try again?`,
+          message: (result.error || `That doesn't look right. Could you try again?`) + ` (Or say "cancel" to stop.)`,
           session,
           complete: false,
         };
@@ -242,8 +263,11 @@ Return only valid JSON, nothing else.`;
     })
     .join("\n");
 
+  const highlightMode = session.flow.executionMode === "highlight";
   return {
-    message: `Got it! I'll fill in the form for you now.\n${summary}`,
+    message: highlightMode
+      ? `Got it! I'll highlight each field on the page — you fill it in yourself.\n${summary}`
+      : `Got it! I'll fill in the form for you now.\n${summary}`,
     session,
     complete: false,
   };

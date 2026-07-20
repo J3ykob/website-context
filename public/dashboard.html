@@ -1050,19 +1050,19 @@
     function editChunk(id) {
       var el = document.getElementById("chunk-text-"+id);
       if (el.contentEditable==="true") {
-        authFetch(API+"/api/chunks/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:el.innerText.trim()})}).then(function(){
+        authFetch(API+"/api/dashboard/chunks/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:el.innerText.trim()})}).then(function(){
           el.contentEditable="false"; el.style.background=""; el.style.border=""; el.parentElement.querySelector(".btn-tiny").textContent="Edit";
         });
       } else { el.contentEditable="true"; el.focus(); el.style.background="rgba(245,158,11,0.06)"; el.style.border="1px solid rgba(245,158,11,0.2)"; el.parentElement.querySelector(".btn-tiny").textContent="Save"; }
     }
-    function deleteChunk(id) { if (!confirm("Delete this chunk?")) return; authFetch(API+"/api/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
+    function deleteChunk(id) { if (!confirm("Delete this chunk?")) return; authFetch(API+"/api/dashboard/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
     function openChunkModal() { document.getElementById("add-chunk-modal").classList.add("open"); }
     document.getElementById("add-chunk-btn").addEventListener("click", openChunkModal);
     function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; }
     function saveNewChunk() {
       var t=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();
       if (!c) return;
-      authFetch(API+"/api/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:t})}).then(function(r){
+      authFetch(API+"/api/dashboard/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:t})}).then(function(r){
         if (!r.ok) throw new Error("save failed");
         closeChunkModal();
         alert("Added to the knowledge base. New material is indexed now and becomes answerable within about a minute.");

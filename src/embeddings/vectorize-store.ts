@@ -274,8 +274,11 @@ export class CloudflareVectorizeStore implements VectorStore {
       for (let pass = 0; pass < 250; pass++) {
         const surfaced = await queryIds(randProbe());
         if (surfaced === null) { await sleep(2000); continue; }
-        // NEVER delete a kept id — that is the race-proofing invariant.
-        const ids = keepIds.size ? surfaced.filter((id) => !keepIds.has(bare(id))) : surfaced;
+        // NEVER delete a kept id — that is the race-proofing invariant. Owner-added
+        // "manual_" chunks are immune to every bulk cleanup (they're not part of
+        // any scrape's tracked set, so no cleanup path should ever eat them).
+        let ids = surfaced.filter((id) => !bare(id).startsWith("manual_"));
+        if (keepIds.size) ids = ids.filter((id) => !keepIds.has(bare(id)));
         if (ids.length === 0) { lowStreak += 2; if (lowStreak >= 10) break; await sleep(1500); continue; }
         const fresh = ids.filter((id) => !seen.has(id)).length;
         await fetch(`${BASE}/delete_by_ids`, { method: "POST", headers: headers(), body: JSON.stringify({ ids }) });

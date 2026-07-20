@@ -58,6 +58,7 @@ const INPUT = arg("--input");
 const DRY_RUN = process.argv.includes("--dry-run");
 const FORCE = process.argv.includes("--force");
 const POLL = !process.argv.includes("--no-poll");
+const RECORD = !process.argv.includes("--no-record");
 const LIMIT = parseInt(arg("--limit", "0") || "0");
 const DELAY_SEC = Math.max(1, parseInt(arg("--delay", "8") || "8"));
 const AUDIO = (arg("--audio", "whisp-pitch-pl.wav") || "whisp-pitch-pl.wav").replace(/[^a-zA-Z0-9._-]/g, "");
@@ -74,7 +75,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const authHeader = "Basic " + Buffer.from(`${SID}:${TOKEN}`).toString("base64");
 
 // --- Campaign log (keyed by E.164 number) ---
-interface CallRecord { calledAt: string; callSid?: string; status?: string; answeredBy?: string; duration?: number; company?: string; }
+interface CallRecord { calledAt: string; callSid?: string; status?: string; answeredBy?: string; duration?: number; price?: number; company?: string; }
 let log: Record<string, CallRecord> = {};
 try { log = JSON.parse(readFileSync(LOG_PATH, "utf-8")); } catch {}
 function saveLog() { writeFileSync(LOG_PATH, JSON.stringify(log, null, 2)); }
@@ -168,6 +169,13 @@ async function placeCall(to: string): Promise<{ sid?: string; status?: string; e
     StatusCallback: `${BASE_URL}/api/voice/status`,
   });
   body.append("StatusCallbackEvent", "completed");
+  if (RECORD) {
+    // Record both legs on separate channels: ch1 = our pitch, ch2 = the prospect.
+    // Lets us transcribe the prospect's side to learn what lands / what they object to.
+    body.append("Record", "true");
+    body.append("RecordingChannels", "dual");
+    body.append("RecordingTrack", "both");
+  }
   try {
     const r = await fetch(url, { method: "POST", headers: { Authorization: authHeader, "Content-Type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(20000) });
     const j: any = await r.json();
@@ -176,12 +184,14 @@ async function placeCall(to: string): Promise<{ sid?: string; status?: string; e
   } catch (e: any) { return { error: e?.message || "request failed" }; }
 }
 
-async function pollOutcome(sid: string): Promise<{ status?: string; answeredBy?: string; duration?: number }> {
+async function pollOutcome(sid: string): Promise<{ status?: string; answeredBy?: string; duration?: number; price?: number }> {
   try {
     const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${SID}/Calls/${sid}.json`, { headers: { Authorization: authHeader }, signal: AbortSignal.timeout(15000) });
     if (!r.ok) return {};
     const j: any = await r.json();
-    return { status: j.status, answeredBy: j.answered_by || undefined, duration: j.duration ? parseInt(j.duration) : undefined };
+    // Twilio reports price as a negative string (cost), and only a little AFTER the call ends.
+    const price = j.price != null && j.price !== "" ? Math.abs(parseFloat(j.price)) : undefined;
+    return { status: j.status, answeredBy: j.answered_by || undefined, duration: j.duration ? parseInt(j.duration) : undefined, price };
   } catch { return {}; }
 }
 
@@ -253,21 +263,30 @@ async function main() {
 
   console.log(`\nPlaced: ${ok}   Failed: ${failed}`);
 
-  // Poll Twilio for final per-call outcomes (status + answered-by + duration).
+  // Poll Twilio for final per-call outcomes, retrying each call until it reaches a
+  // terminal state (a 40s recording outlasts a single poll). Up to ~3 min total.
   if (POLL && placed.length) {
-    console.log(`\nWaiting 30s for calls to complete, then polling outcomes…`);
-    await sleep(30000);
-    const tally: Record<string, number> = {};
-    for (const { to, sid } of placed) {
-      const o = await pollOutcome(sid);
-      if (o.status) {
-        log[to] = { ...log[to], status: o.status, answeredBy: o.answeredBy, duration: o.duration };
-        tally[o.status] = (tally[o.status] || 0) + 1;
+    // Poll each call until Twilio reports a final price (which populates a little AFTER the
+    // call ends), so we can total the spend. Caps at ~3.5 min.
+    const pending = new Map(placed.map(p => [p.sid, p.to]));
+    console.log(`\nPolling outcomes + cost for ${pending.size} call(s)…`);
+    for (let round = 0; round < 14 && pending.size; round++) {
+      await sleep(15000);
+      for (const [sid, to] of [...pending]) {
+        const o = await pollOutcome(sid);
+        if (o.status) log[to] = { ...log[to], status: o.status, answeredBy: o.answeredBy, duration: o.duration, price: o.price ?? log[to]?.price };
+        if (o.price != null) pending.delete(sid);
       }
+      saveLog();
     }
-    saveLog();
-    console.log("Outcomes:", Object.entries(tally).map(([k, v]) => `${k}=${v}`).join("  ") || "(pending)");
-    console.log("(answered-by/voicemail detail per number is in data/voice-campaign-log.json)");
+    const tally: Record<string, number> = {};
+    for (const { to } of placed) { const s = log[to]?.status || "unknown"; tally[s] = (tally[s] || 0) + 1; }
+    console.log("Outcomes:", Object.entries(tally).map(([k, v]) => `${k}=${v}`).join("  "));
+    const runCost = placed.reduce((s, p) => s + (log[p.to]?.price || 0), 0);
+    const totalCost = Object.values(log).reduce((s, e) => s + (e.price || 0), 0);
+    const priced = placed.filter(p => log[p.to]?.price != null).length;
+    console.log(`Cost this run: $${runCost.toFixed(4)} USD  (${priced}/${placed.length} priced${pending.size ? `, ${pending.size} still computing` : ""})`);
+    console.log(`Cumulative logged cost: $${totalCost.toFixed(4)} USD across ${Object.values(log).filter(e => e.price != null).length} priced calls`);
   }
 }
 

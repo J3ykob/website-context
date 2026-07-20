@@ -16,9 +16,9 @@ async function main() {
   console.log(`${r.pages}p ${r.chunks}c`);
   const u = await uploadTenantFiles(tid, resolve(__dirname, "../data"));
   console.log(`R2: ${u} files`);
-  await fetch(`https://whisp.so/api/admin/update-tenant/${tid}?secret=whisp-admin-2026`, {
+  await fetch(`https://whisp.so/api/admin/update-tenant/${tid}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Admin-Secret": process.env.ADMIN_SECRET || "" },
     body: JSON.stringify({ status: "active", chunksCount: r.chunks, pagesCount: r.pages, domain, siteUrl: `https://${domain}` }),
   });
   console.log("Done");

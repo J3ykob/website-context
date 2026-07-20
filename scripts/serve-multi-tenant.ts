@@ -33,6 +33,7 @@ import {
   logUnknownQuestion,
   getUnknownQuestions,
   clearUnknownQuestions,
+  clearUnknownQuestions,
 } from "../src/storage/conversation-store.js";
 import { randomBytes, createHmac, timingSafeEqual } from "crypto";
 import {
@@ -2243,6 +2244,70 @@ app.put("/api/dashboard/widget-settings", authMiddleware, (req, res) => {
   const updated = { ...current, ...req.body };
   updateTenant(tenantId, { settings: updated });
   res.json({ ok: true, settings: updated });
+});
+
+// Clear the knowledge-gap journal (port of DELETE /api/unknown-questions from
+// the single-tenant serve.ts; gaps live in D1 now).
+app.delete("/api/dashboard/unknown-questions", authMiddleware, async (req, res) => {
+  await clearUnknownQuestions((req as any).tenantId);
+  res.json({ ok: true });
+});
+
+// ─── KB editing: port of the single-tenant chunk CRUD (serve.ts, f1aa79d^)
+// onto Vectorize. Edit re-embeds in place (same id, same metadata); delete
+// removes the vector; manual adds use a "manual_" id prefix that every bulk
+// cleanup path leaves alone (see vectorize-store.deleteAll). A rescrape rebuilds
+// scraped chunks from the site (edits to those don't survive it — permanent
+// owner knowledge belongs in manual chunks or context notes).
+app.put("/api/dashboard/chunks/:id", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const content = String((req.body || {}).content || "").trim();
+  if (!content) { res.status(400).json({ error: "content required" }); return; }
+  if (content.length > 8000) { res.status(400).json({ error: "content too long (max 8000 chars)" }); return; }
+  try {
+    const store = new CloudflareVectorizeStore({ tenantId });
+    const existing = await store.getByIds([req.params.id]);
+    if (existing.length === 0) { res.status(404).json({ error: "Chunk not found" }); return; }
+    const vector = (await bgeProvider().embed([content]))[0];
+    await store.upsert([{ id: req.params.id, vector, content, metadata: existing[0].metadata as Record<string, unknown> }]);
+    res.json({ ok: true, id: req.params.id });
+  } catch (e: any) {
+    console.error(`[chunks] PUT failed for ${tenantId}: ${e?.message}`);
+    res.status(500).json({ error: "Failed to update chunk" });
+  }
+});
+
+app.delete("/api/dashboard/chunks/:id", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  try {
+    const store = new CloudflareVectorizeStore({ tenantId });
+    await store.delete([req.params.id]);
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error(`[chunks] DELETE failed for ${tenantId}: ${e?.message}`);
+    res.status(500).json({ error: "Failed to delete chunk" });
+  }
+});
+
+app.post("/api/dashboard/chunks", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const { content, title, url } = req.body || {};
+  const text = String(content || "").trim();
+  if (!text) { res.status(400).json({ error: "content required" }); return; }
+  if (text.length > 8000) { res.status(400).json({ error: "content too long (max 8000 chars)" }); return; }
+  try {
+    const id = "manual_" + createHash("md5").update(text + "|" + randomBytes(6).toString("hex")).digest("hex").slice(0, 24);
+    const store = new CloudflareVectorizeStore({ tenantId });
+    const vector = (await bgeProvider().embed([title ? `${title}\n\n${text}` : text]))[0];
+    await store.upsert([{
+      id, vector, content: text,
+      metadata: { title: String(title || "Manual entry").slice(0, 200), url: String(url || ""), type: "manual", headingHierarchy: [] },
+    }]);
+    res.status(201).json({ ok: true, id });
+  } catch (e: any) {
+    console.error(`[chunks] POST failed for ${tenantId}: ${e?.message}`);
+    res.status(500).json({ error: "Failed to add chunk" });
+  }
 });
 
 app.post("/api/dashboard/rescrape", authMiddleware, (req, res) => {

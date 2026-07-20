@@ -145,7 +145,7 @@ export interface FlowDefinition {
   updatedAt: string;
   lastTestedAt?: string;
   status: "draft" | "active" | "disabled";
-  executionMode?: "background" | "guided" | "auto";
+  executionMode?: "background" | "guided" | "auto" | "highlight";
 }
 
 export interface FlowStep {

@@ -150,7 +150,8 @@
         gs.onload = function() {
           window.__wctxGuided.execute(
             guidedState.steps.slice(guidedState.nextIndex),
-            guidedState.inputs
+            guidedState.inputs,
+            guidedState.mode
           );
         };
         document.head.appendChild(gs);
@@ -627,7 +628,7 @@
           setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
         }
         if (data.flowSession && data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
-          setTimeout(function() { launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}); }, 800);
+          setTimeout(function() { launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}, data.flowSession.executionMode); }, 800);
         } else if (data.flowSession && data.flowSession.active) {
           barInput.placeholder = "Provide the requested info...";
         }
@@ -1120,7 +1121,7 @@
           activeFlowSession = data.flowSession;
           if (data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
             setTimeout(function() {
-              launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {});
+              launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}, data.flowSession.executionMode);
             }, 800);
             activeFlowSession = null;
           } else if (data.flowSession.active) {
@@ -1153,20 +1154,22 @@
     els.input.focus();
   }
 
-  function launchGuidedExecution(steps, inputs) {
+  function launchGuidedExecution(steps, inputs, mode) {
     // Hide overlay, show the actual website
     minimizeToBar();
 
-    appendMsg("system", "Switching to the website — I'll fill in what I can and highlight anything that needs your input.");
+    appendMsg("system", mode === "highlight"
+      ? "Switching to the website — I'll highlight each step and you do it yourself."
+      : "Switching to the website — I'll fill in what I can and highlight anything that needs your input.");
 
     // Inject guided executor script
     if (!window.__wctxGuided) {
       var s = document.createElement("script");
       s.src = API_HOST + "/guided-executor.js";
-      s.onload = function() { window.__wctxGuided.execute(steps, inputs); };
+      s.onload = function() { window.__wctxGuided.execute(steps, inputs, mode); };
       document.head.appendChild(s);
     } else {
-      window.__wctxGuided.execute(steps, inputs);
+      window.__wctxGuided.execute(steps, inputs, mode);
     }
   }
 
