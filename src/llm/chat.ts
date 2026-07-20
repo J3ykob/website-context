@@ -588,7 +588,10 @@ export class WebsiteChat {
     // skips the extra answerability call — the anti-hallucination check only runs
     // on weak/borderline retrieval, exactly where confabulation risk is real.
     const topScore = usableChunks.length ? Math.max(...usableChunks.map((c) => c.score)) : 0;
-    if (usableChunks.length === 0 || (topScore < 0.62 && !(await this.isAnswerable(lastUserMessage, usableChunks)))) {
+    const gateRan = usableChunks.length > 0 && topScore < 0.62;
+    const gateAns = gateRan ? await this.isAnswerable(lastUserMessage, usableChunks) : true;
+    console.log(`[gate] "${lastUserMessage.slice(0,40)}" chunks=${usableChunks.length} top=${topScore.toFixed(3)} ran=${gateRan} answerable=${gateAns} topContent="${(usableChunks[0]?.content||'').slice(0,60).replace(/\n/g,' ')}"`);
+    if (usableChunks.length === 0 || (gateRan && !gateAns)) {
       return {
         message: this.refusal(lastUserMessage),
         sources: [],
