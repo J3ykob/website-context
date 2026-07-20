@@ -359,6 +359,31 @@ export class WebsiteChat {
       };
     }
 
+    // Deterministic trigger check BEFORE any LLM call (see matchFlowTrigger).
+    const triggeredFlow = this.matchFlowTrigger(inputValidation.sanitized);
+    if (triggeredFlow) {
+      const requiredMissing = triggeredFlow.requiredInputs.filter((i) => i.required);
+      if (requiredMissing.length === 0) {
+        this.recentlyCompletedFlows.set(effectiveSessionKey, triggeredFlow.id);
+        return {
+          message: `Sure — starting "${triggeredFlow.name}" now. I'll guide you through it right on the page.`,
+          sources: [],
+          flowSession: {
+            active: false, status: "executing", flowId: triggeredFlow.id, complete: true,
+            executionMode: "guided", guidedSteps: triggeredFlow.steps, guidedInputs: {},
+          },
+        };
+      }
+      this.beginFlowSession(effectiveSessionKey, triggeredFlow);
+      const session = this.flowSessions.get(effectiveSessionKey)!;
+      const first = session.remainingInputs[0];
+      return {
+        message: `Sure — I can help with that. ${first ? `First: ${first.label}?` : ""}`,
+        sources: [],
+        flowSession: { active: true, status: "collecting", flowId: triggeredFlow.id, complete: false },
+      };
+    }
+
     const retrievedChunks = await this.retrieveContext(lastUserMessage);
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -815,6 +840,37 @@ ${contextBlocks}
   private getInstructionsOnly(systemPrompt: string): string {
     const contextStart = systemPrompt.indexOf("## Relevant Context:");
     return contextStart > 0 ? systemPrompt.slice(0, contextStart) : systemPrompt;
+  }
+
+  // Deterministic flow triggering — the production backend (OpenRouter) has
+  // neither tool-calling nor structured output, so invocation must NOT depend
+  // on the LLM electing to emit an action (it roleplayed "reservation received"
+  // instead — a false promise). Trigger phrases (LLM-generated at analysis
+  // time) are matched directly against the user message.
+  private matchFlowTrigger(message: string): FlowDefinition | null {
+    const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+    const msg = norm(message);
+    if (!msg) return null;
+    let best: { flow: FlowDefinition; score: number } | null = null;
+    for (const flow of this.context.flows) {
+      if (flow.status !== "active") continue;
+      for (const phrase of flow.triggerPhrases || []) {
+        const p = norm(phrase);
+        if (!p) continue;
+        let score = 0;
+        if (p.length >= 8 && msg.includes(p)) score = 1;
+        else {
+          const words = p.split(" ").filter((w) => w.length > 2);
+          if (words.length >= 2) {
+            const hits = words.filter((w) => msg.includes(w)).length;
+            const ratio = hits / words.length;
+            if (ratio >= 0.75) score = ratio * 0.9;
+          }
+        }
+        if (score > 0 && (!best || score > best.score)) best = { flow, score };
+      }
+    }
+    return best ? best.flow : null;
   }
 
   // [[gap: ...]] protocol — the plain-text paths have no tool channel, so the
