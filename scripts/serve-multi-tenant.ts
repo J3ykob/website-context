@@ -2046,12 +2046,28 @@ app.put("/api/dashboard/flows/:id", authMiddleware, async (req, res) => {
 // record token bound to the owner's tenant. The bookmarklet injects recorder.js
 // on the owner's own site; the recorder POSTs the captured steps here with that
 // token. The LLM then names/parameterizes the flow — no metadata prompts.
-const recordTokens = new Map<string, { tenantId: string; exp: number }>();
+// Stateless HMAC tokens — an in-memory map died on every deploy (zero-downtime
+// deploys are frequent here), silently 401-ing recordings mid-session. Signed
+// with ADMIN_SECRET (mandatory, strong); survives restarts and horizontal scale.
 function mintRecordToken(tenantId: string): string {
-  for (const [k, v] of recordTokens) if (v.exp < Date.now()) recordTokens.delete(k);
-  const rt = randomBytes(24).toString("hex");
-  recordTokens.set(rt, { tenantId, exp: Date.now() + 60 * 60 * 1000 });
-  return rt;
+  const payload = `${tenantId}.${Date.now() + 60 * 60 * 1000}`;
+  const sig = createHmac("sha256", ADMIN_SECRET).update(payload).digest("hex").slice(0, 32);
+  return Buffer.from(payload).toString("base64url") + "." + sig;
+}
+function validateRecordToken(rt: string): string | null {
+  try {
+    const dot = rt.lastIndexOf(".");
+    if (dot <= 0) return null;
+    const b64 = rt.slice(0, dot), sig = rt.slice(dot + 1);
+    const payload = Buffer.from(b64, "base64url").toString();
+    const expect = createHmac("sha256", ADMIN_SECRET).update(payload).digest("hex").slice(0, 32);
+    if (!safeStrEq(sig, expect)) return null;
+    const i = payload.lastIndexOf(".");
+    const tenantId = payload.slice(0, i);
+    const exp = Number(payload.slice(i + 1));
+    if (!tenantId || !Number.isFinite(exp) || exp < Date.now()) return null;
+    return tenantId;
+  } catch { return null; }
 }
 
 app.get("/api/dashboard/record-token", authMiddleware, (req, res) => {
@@ -2064,20 +2080,21 @@ app.get("/api/dashboard/record-token", authMiddleware, (req, res) => {
 // token — flow trigger phrases are owner intel, not visitor content.
 app.get("/api/flows", async (req, res) => {
   const rt = String(req.query.rt || "");
-  const session = recordTokens.get(rt);
-  if (!session || session.exp < Date.now()) { res.status(401).json({ error: "Recording session expired" }); return; }
-  const flows = await getFlows(session.tenantId);
+  const tokenTenant = validateRecordToken(rt);
+  if (!tokenTenant) { res.status(401).json({ error: "Recording session expired" }); return; }
+  const flows = await getFlows(tokenTenant);
   res.json(flows.map((f) => ({ id: f.id, name: f.name, status: f.status, steps: f.steps, triggerPhrases: f.triggerPhrases })));
 });
 
 app.post("/api/flows/record", async (req, res) => {
   const rt = String(req.query.rt || req.headers["x-record-token"] || "");
-  const session = recordTokens.get(rt);
-  if (!session || session.exp < Date.now()) {
+  const tokenTenant = validateRecordToken(rt);
+  if (!tokenTenant) {
+    console.warn(`[flows] record POST rejected: invalid/expired token`);
     res.status(401).json({ error: "Recording session expired — open whisp.so/record again" });
     return;
   }
-  const tenantId = session.tenantId;
+  const tenantId = tokenTenant;
   const raw = req.body || {};
   const rawSteps = Array.isArray(raw.steps) ? raw.steps : [];
   if (rawSteps.length === 0) { res.status(400).json({ error: "No steps recorded" }); return; }
