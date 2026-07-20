@@ -60,6 +60,7 @@ export interface ChatResponse {
     executionMode?: "background" | "guided" | "highlight";
     guidedSteps?: any[];
     guidedInputs?: Record<string, string>;
+    formActions?: any[];
   };
 }
 
@@ -269,7 +270,7 @@ export class WebsiteChat {
   hasActiveFlowSession(sessionKey: string): boolean {
     const session = this.flowSessions.get(sessionKey);
     if (!session) return false;
-    return session.status === "collecting" || session.status === "confirming" || session.status === "choosing" || session.status === "executing";
+    return session.status === "collecting" || session.status === "confirming" || session.status === "choosing" || session.status === "touring" || session.status === "executing";
   }
 
   /** Get the active flow session for a key */
@@ -312,7 +313,7 @@ export class WebsiteChat {
     }
   }
 
-  async chat(messages: ChatMessage[], sessionKey?: string): Promise<ChatResponse> {
+  async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>): Promise<ChatResponse> {
     const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
     const effectiveSessionKey = sessionKey || "default";
 
@@ -338,28 +339,25 @@ export class WebsiteChat {
     if (this.hasActiveFlowSession(effectiveSessionKey)) {
       const session = this.flowSessions.get(effectiveSessionKey)!;
       const result = await processUserInput(session, lastUserMessage, async (system, prompt) =>
-        this.backend.generate(system, [{ role: "user", content: prompt }], 512)
+        this.backend.generate(system, [{ role: "user", content: prompt }], 512), formState
       );
 
-      const readyToExecute = result.session.status === "executing";
-      if (result.complete || readyToExecute) {
-        this.flowSessions.delete(effectiveSessionKey);
-      }
+      // Touring stays alive (advances turn by turn); executing means the widget
+      // now owns the remaining on-page actions, so we hand off and drop it.
+      const done = result.complete || result.session.status === "executing";
+      if (done) this.flowSessions.delete(effectiveSessionKey);
 
-      const liveSteps = result.liveSteps && result.liveSteps.length ? result.liveSteps : undefined;
+      const formActions = result.formActions && result.formActions.length ? result.formActions : undefined;
       return {
         message: result.message,
         sources: [],
         flowSession: {
-          active: !result.complete && !readyToExecute,
+          active: !done,
           status: result.session.status,
           flowId: result.session.flowId,
-          complete: result.complete || readyToExecute,
+          complete: done,
           executionMode: (result.session.executionMode || result.session.flow.executionMode) === "highlight" ? "highlight" : "guided",
-          // Live incremental execution: whatever the conversation says should run
-          // NOW (per-input batches while collecting, the remainder on completion).
-          guidedSteps: liveSteps || (readyToExecute ? result.session.flow.steps : undefined),
-          guidedInputs: (liveSteps || readyToExecute) ? result.session.collectedInputs : undefined,
+          formActions,
         },
       };
     }
@@ -623,7 +621,7 @@ export class WebsiteChat {
   // token-by-token via onToken(delta) (first token ~1s vs ~3.5s for the full answer).
   // Flow/tool/structured cases and backends without streaming defer to chat() and are
   // emitted whole. Returns the canonical (cleaned + validated) full response.
-  async chatStream(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void): Promise<ChatResponse> {
+  async chatStream(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void, formState?: Record<string, string>): Promise<ChatResponse> {
     if (!this.backend.generateStream) {
       const r = await this.chat(messages, sessionKey);
       onToken(r.message);
@@ -644,7 +642,7 @@ export class WebsiteChat {
 
     // Flows / tool-calls don't stream cleanly — defer to the full path, emit whole.
     if (this.hasActiveFlowSession(effectiveSessionKey) || this.context.flows.some((f) => f.status === "active")) {
-      const r = await this.chat(messages, sessionKey);
+      const r = await this.chat(messages, sessionKey, formState);
       onToken(r.message);
       return r;
     }

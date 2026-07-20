@@ -141,21 +141,8 @@
     sessionStorage.removeItem("wctx-guided-state");
     try {
       var guidedState = JSON.parse(pendingGuided);
-      // Don't show the chat overlay — go straight to guided execution
-      window.addEventListener("load", function() {
-        // Inject guided executor and resume
-        window.__flowRecorderConfig = { apiHost: API_HOST, tenantId: TENANT_ID };
-        var gs = document.createElement("script");
-        gs.src = API_HOST + "/guided-executor.js";
-        gs.onload = function() {
-          window.__wctxGuided.execute(
-            guidedState.steps.slice(guidedState.nextIndex),
-            guidedState.inputs,
-            guidedState.mode
-          );
-        };
-        document.head.appendChild(gs);
-      });
+      // (v2 execution is chat-driven; no serialized cross-page resume needed.)
+      void guidedState;
       // Still load the widget below, but start minimized
       // We'll set a flag so the widget starts in bar mode
       var START_MINIMIZED = true;
@@ -627,11 +614,7 @@
         if (data.navigateTo) {
           setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
         }
-        if (data.flowSession && data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
-          setTimeout(function() { launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}, data.flowSession.executionMode, !data.flowSession.complete); }, 800);
-        } else if (data.flowSession && data.flowSession.active) {
-          barInput.placeholder = "Provide the requested info...";
-        }
+        handleFlowSession(data.flowSession);
       },
       onError: function(msg) {
         var t = document.getElementById("wctx-bar-thinking"); if (t) t.remove();
@@ -1012,6 +995,39 @@
   }
   var activeFlowSession = null;
 
+  // ─── Flow form controller bridge (executor v2) ─────────────────────────────
+  var wctxFlowActive = false;
+  var wctxFlowFields = {}; // name -> target (accumulated from formActions)
+  function ensureExecutor(cb) {
+    if (window.__wctxGuided && window.__wctxGuided.v === 2) { cb(); return; }
+    var existing = document.getElementById("wctx-executor-js");
+    if (!existing) {
+      var gs = document.createElement("script");
+      gs.id = "wctx-executor-js";
+      gs.src = API_HOST + "/guided-executor.js";
+      gs.onload = function() { cb(); };
+      document.head.appendChild(gs);
+    } else {
+      var t = setInterval(function() { if (window.__wctxGuided && window.__wctxGuided.v === 2) { clearInterval(t); cb(); } }, 60);
+      setTimeout(function() { clearInterval(t); }, 5000);
+    }
+  }
+  function readFormState() {
+    if (!wctxFlowActive || !window.__wctxGuided || !window.__wctxGuided.v) return undefined;
+    var fields = Object.keys(wctxFlowFields).map(function(n) { return { name: n, target: wctxFlowFields[n] }; });
+    if (!fields.length) return undefined;
+    try { return window.__wctxGuided.readState(fields); } catch (e) { return undefined; }
+  }
+  function applyFormActions(actions) {
+    if (!actions || !actions.length) return;
+    wctxFlowActive = true;
+    actions.forEach(function(a) { if (a.name && a.target) wctxFlowFields[a.name] = a.target; });
+    minimizeToBar(); // reveal the page behind the chat bar
+    ensureExecutor(function() {
+      window.__wctxGuided.apply(actions);
+    });
+  }
+
   // Keep the posted history under the server's per-request caps (<=50 messages and
   // <=32768 total content chars), trimming oldest first but always keeping the newest.
   function trimHistory(msgs) {
@@ -1030,7 +1046,7 @@
     fetch(API_HOST + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: trimHistory(messages), tenantId: TENANT_ID, sessionId: sessionId, stream: true }),
+      body: JSON.stringify({ messages: trimHistory(messages), tenantId: TENANT_ID, sessionId: sessionId, stream: true, formState: readFormState() }),
     })
     .then(function(r) {
       var ct = r.headers.get("content-type") || "";
@@ -1117,21 +1133,7 @@
         if (data.navigateTo) {
           setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
         }
-        if (data.flowSession) {
-          activeFlowSession = data.flowSession;
-          if (data.flowSession.guidedSteps && data.flowSession.guidedSteps.length > 0) {
-            setTimeout(function() {
-              launchGuidedExecution(data.flowSession.guidedSteps, data.flowSession.guidedInputs || {}, data.flowSession.executionMode, !data.flowSession.complete);
-            }, 800);
-            activeFlowSession = null;
-          } else if (data.flowSession.active) {
-            els.input.placeholder = "Provide the requested info...";
-          }
-          if (data.flowSession.complete && !data.flowSession.guidedSteps) {
-            activeFlowSession = null;
-            els.input.placeholder = "Tell me what you need…";
-          }
-        }
+        handleFlowSession(data.flowSession);
       },
       onError: function(msg) {
         setLoading(false);
@@ -1154,63 +1156,38 @@
     els.input.focus();
   }
 
-  var guidedPartial = false;
-  function launchGuidedExecution(steps, inputs, mode, partial) {
-    guidedPartial = !!partial;
-    // Hide overlay, show the actual website
-    minimizeToBar();
-
-    if (!partial) appendMsg("system", mode === "highlight"
-      ? "Switching to the website — I'll highlight each step and you do it yourself."
-      : "Switching to the website — I'll fill in what I can and highlight anything that needs your input.");
-
-    // Inject guided executor script
-    if (!window.__wctxGuided) {
-      var s = document.createElement("script");
-      s.src = API_HOST + "/guided-executor.js";
-      s.onload = function() { window.__wctxGuided.execute(steps, inputs, mode); };
-      document.head.appendChild(s);
+  // Central flow-session handler: apply any on-page form actions, keep chat active.
+  function handleFlowSession(fs) {
+    if (!fs) return;
+    if (fs.formActions && fs.formActions.length) {
+      applyFormActions(fs.formActions);
+    }
+    if (fs.complete) {
+      // Flow finished (or handed off to the page) — normal chat resumes.
+      wctxFlowActive = fs.formActions && fs.formActions.some(function(a){ return a.op === "submit"; });
+      activeFlowSession = null;
+      els.input.placeholder = "Tell me what you need…";
+      if (typeof barInput !== "undefined" && barInput) barInput.placeholder = "Tell me what you need…";
     } else {
-      window.__wctxGuided.execute(steps, inputs, mode);
+      activeFlowSession = fs;
+      els.input.placeholder = "Reply here…";
+      if (typeof barInput !== "undefined" && barInput) barInput.placeholder = "Reply here…";
     }
   }
 
-  // Listen for guided executor events
+  // Executor v2 events (field-set / field-highlight / submit-ready / op-error).
   window.addEventListener("message", function(e) {
     if (!e.data || e.data.channel !== "wctx-guided") return;
-    var type = e.data.type;
-    var data = e.data.data || {};
-
-    switch (type) {
-      case "step-start":
-        fab.querySelector("button").innerHTML = '<span class="wctx-fab-dot"></span>Filling in... step ' + (data.index + 1) + '/' + data.total;
+    var btn = fab.querySelector("button");
+    switch (e.data.type) {
+      case "field-set":
+        if (btn) btn.innerHTML = '<span class="wctx-fab-dot"></span>✓ Filled — continue in chat';
         break;
-      case "user-action-needed":
-        fab.querySelector("button").innerHTML = '👆 ' + (data.message || "Your action needed");
+      case "field-highlight":
+        if (btn) btn.innerHTML = '👆 Fill the highlighted field, then say "done"';
         break;
-      case "step-done":
-        fab.querySelector("button").innerHTML = '<span class="wctx-fab-dot"></span>Filling in... step ' + (data.index + 1) + '/' + data.total;
-        break;
-      case "navigating":
-        fab.querySelector("button").innerHTML = '<span class="wctx-fab-dot"></span>Navigating...';
-        break;
-      case "done":
-        if (guidedPartial) {
-          // Incremental batch landed — stay in the bar, keep the conversation going.
-          fab.querySelector("button").innerHTML = '<span class="wctx-fab-dot"></span>✓ On the page — continue below';
-          break;
-        }
-        fab.querySelector("button").innerHTML = '<span class="wctx-fab-dot"></span>Done! Back to chat';
-        setTimeout(function() {
-          openFullChat();
-          appendMsg("assistant", "All done! Is there anything else I can help with?");
-        }, 2000);
-        break;
-      case "aborted":
-        openFullChat();
-        appendMsg("system", "Flow was cancelled.");
-        break;
-      case "step-error":
+      case "submit-ready":
+        if (btn) btn.innerHTML = '👆 Click the highlighted button to finish';
         break;
     }
   });

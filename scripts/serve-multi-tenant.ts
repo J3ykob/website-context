@@ -1412,7 +1412,7 @@ let lastChatError: { tenantId: string; cause: string; msg: string; at: string } 
 
 app.post("/api/chat", async (req, res) => {
   try {
-    const { messages, sessionId, tenantId } = req.body;
+    const { messages, sessionId, tenantId, formState } = req.body;
     if (!messages || !Array.isArray(messages)) {
       res.status(400).json({ error: "messages required" });
       return;
@@ -1513,7 +1513,7 @@ app.post("/api/chat", async (req, res) => {
       try {
         const full = await chat.chatStream(messages, sessionKey, (delta) => {
           res.write(`data: ${JSON.stringify({ delta })}\n\n`);
-        });
+        }, formState && typeof formState === "object" ? formState : undefined);
         res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null })}\n\n`);
         res.end();
         logResponse(full);
@@ -1530,7 +1530,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     {
-      const response = await chat.chat(messages, sessionKey);
+      const response = await chat.chat(messages, sessionKey, formState && typeof formState === "object" ? formState : undefined);
       logResponse(response);
       res.json(response);
     }

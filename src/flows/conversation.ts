@@ -79,12 +79,36 @@ export interface FlowSession {
   flow: FlowDefinition;
   collectedInputs: Record<string, string>;
   remainingInputs: FlowInput[];
-  status: "collecting" | "confirming" | "choosing" | "executing" | "done" | "failed";
+  status: "collecting" | "confirming" | "choosing" | "touring" | "executing" | "done" | "failed";
   result?: ExecutionResult;
   executionMode?: "background" | "guided" | "highlight";
   // Step ids already sent to the widget for live (incremental) execution.
   executedStepIds?: string[];
   executedInputNames?: string[];
+  // Highlight tour: which field the visitor is currently on.
+  tourIndex?: number;
+}
+
+// A form field derived from the recording — the unit the LLM operates on. The
+// flow is described as its fields; the bot chooses set/highlight/get per field.
+export interface FlowField {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+  target: Record<string, string>;
+}
+
+// One operation the widget performs on the real form. "set" fills it, "highlight"
+// points at it for the visitor, "submit" waits for the final click.
+export interface FormAction {
+  op: "set" | "highlight" | "submit";
+  name?: string;
+  label?: string;
+  value?: string;
+  fieldType?: string;
+  instruction?: string;
+  target?: Record<string, string>;
 }
 
 export interface ConversationResponse {
@@ -93,6 +117,8 @@ export interface ConversationResponse {
   // Steps the widget should execute RIGHT NOW (incremental live execution —
   // each collected input lands on the page immediately).
   liveSteps?: FlowStep[];
+  // Field operations for the widget's form controller (v2 execution model).
+  formActions?: FormAction[];
   /** When true, the flow has finished executing (success or failure) */
   complete: boolean;
 }
@@ -122,6 +148,32 @@ function unexecutedSteps(session: FlowSession): FlowStep[] {
 function markExecuted(session: FlowSession, steps: FlowStep[]): void {
   if (steps.length === 0) return;
   session.executedStepIds = [...(session.executedStepIds || []), ...steps.map((st) => st.id)];
+}
+
+// Derive the ordered field registry from the recording: each required input
+// mapped to the recorded step that fills it (selector + type).
+export function flowFields(flow: FlowDefinition): FlowField[] {
+  const steps = sortedSteps(flow);
+  return flow.requiredInputs.map((inp) => {
+    const st = steps.find((s2) => typeof s2.value === "string" && (s2.value as string).includes(`{{${inp.name}}}`));
+    return {
+      name: inp.name,
+      label: inp.label,
+      type: inp.type || (st && st.action === "select" ? "select" : "text"),
+      required: inp.required !== false,
+      target: (st && (st.target as Record<string, string>)) || {},
+    };
+  });
+}
+function submitAction(flow: FlowDefinition): FormAction | null {
+  const submit = sortedSteps(flow).find((s2) => s2.action === "click");
+  if (!submit) return null;
+  return { op: "submit", target: submit.target as Record<string, string>, instruction: "Click to finish" };
+}
+function setActionFor(session: FlowSession, name: string): FormAction | null {
+  const field = flowFields(session.flow).find((f) => f.name === name);
+  if (!field || !session.collectedInputs[name]) return null;
+  return { op: "set", name, label: field.label, value: session.collectedInputs[name], fieldType: field.type, target: field.target };
 }
 
 export function startFlowSession(flow: FlowDefinition): ConversationResponse {
@@ -154,7 +206,10 @@ export async function processUserInput(
   // Injectable LLM call — the multi-tenant server passes an OpenRouter-backed
   // generate; the Claude CLI default only works on a dev machine (on prod it
   // threw and the fallback treated the WHOLE message as one field's value).
-  generate?: (system: string, prompt: string) => Promise<string>
+  generate?: (system: string, prompt: string) => Promise<string>,
+  // Live form state (field name -> current on-page value), sent by the widget
+  // on every turn so the bot always knows what is already filled.
+  formState?: Record<string, string>
 ): Promise<ConversationResponse> {
   const msg = userMessage.trim();
 
@@ -164,6 +219,10 @@ export async function processUserInput(
 
   if (session.status === "choosing") {
     return handleModeChoice(session, msg, generate);
+  }
+
+  if (session.status === "touring") {
+    return handleTour(session, msg, formState || {}, generate);
   }
 
   if (session.status === "collecting") {
@@ -302,19 +361,15 @@ Return only valid JSON, nothing else.`;
     }
   }
 
-  // Live incremental execution: the steps bound to just-collected inputs go to
-  // the widget NOW, so each answer visibly lands on the page.
+  // GUIDED (auto) mode: each just-collected input is filled on the page NOW via
+  // a "set" form action (date/select coercion happens in the widget controller).
   const newlyCollectedAll = Object.keys(session.collectedInputs).filter(
     (n) => !(session.executedInputNames || (session.executedInputNames = [])).includes(n)
   );
-  const liveNow = stepsBoundToInputs(session.flow, newlyCollectedAll)
-    .filter((st) => !(session.executedStepIds || []).includes(st.id));
-  markExecuted(session, liveNow);
+  const liveSets: FormAction[] = newlyCollectedAll.map((n) => setActionFor(session, n)).filter((a): a is FormAction => !!a);
   session.executedInputNames = [...(session.executedInputNames || []), ...newlyCollectedAll];
 
-  // Still need more? Only REQUIRED inputs gate completion — optional fields
-  // (e.g. "Special notes") are picked up when the visitor volunteers them, but
-  // never block the flow (they used to trap the session in collecting forever).
+  // Only REQUIRED inputs gate completion — optionals are captured if volunteered.
   const stillRequired = session.remainingInputs.filter((i) => i.required !== false);
   if (stillRequired.length > 0) {
     const still = stillRequired.map((i) => i.label).join(", ");
@@ -322,14 +377,11 @@ Return only valid JSON, nothing else.`;
       message: `I still need: ${still}. Could you provide ${stillRequired.length === 1 ? "it" : "them"}?`,
       session,
       complete: false,
-      liveSteps: liveNow.length ? liveNow : undefined,
+      formActions: liveSets.length ? liveSets : undefined,
     };
   }
   session.remainingInputs = [];
 
-  // All collected — let the VISITOR choose how it happens: the bot does it for
-  // them, or highlights each step so they do it themselves. If they already
-  // said so mid-collection, don't ask again.
   const summary = Object.entries(session.collectedInputs)
     .map(([key, val]) => {
       const input = allNeeded.find((i) => i.name === key);
@@ -337,26 +389,146 @@ Return only valid JSON, nothing else.`;
     })
     .join("\n");
 
-  if (session.executionMode === "highlight" || session.executionMode === "guided") {
+  session.status = "executing";
+  const submit = submitAction(session.flow);
+  return {
+    message: `Got it!\n${summary}\n\nFilling it in on the page${submit ? " — just click the highlighted button to confirm" : ""}.`,
+    session,
+    complete: false,
+    formActions: submit ? [...liveSets, submit] : liveSets,
+  };
+}
+
+// ─── Highlight tour: one field at a time, chat-driven ────────────────────────
+function tourFields(session: FlowSession): FlowField[] {
+  return flowFields(session.flow).filter((f) => f.required);
+}
+function highlightAction(field: FlowField, instruction: string): FormAction {
+  return { op: "highlight", name: field.name, label: field.label, fieldType: field.type, target: field.target, instruction };
+}
+function fieldInstruction(field: FlowField): string {
+  if (field.type === "select") return `Choose ${field.label.toLowerCase()} here`;
+  if (field.type === "date") return `Pick ${field.label.toLowerCase()} here`;
+  return `Type your ${field.label.toLowerCase()} here`;
+}
+
+function startTour(session: FlowSession): ConversationResponse {
+  session.status = "touring";
+  session.tourIndex = 0;
+  const fields = tourFields(session);
+  if (fields.length === 0) {
     session.status = "executing";
-    const finalBatch = unexecutedSteps(session);
-    markExecuted(session, finalBatch);
-    const merged = liveNow.length ? [...liveNow, ...finalBatch.filter((st) => !liveNow.some((l) => l.id === st.id))] : finalBatch;
+    const submit = submitAction(session.flow);
+    return { message: "Everything's ready — just click the highlighted button to finish.", session, complete: false, formActions: submit ? [submit] : [] };
+  }
+  const f = fields[0];
+  return {
+    message: `Let's do it together. ${f.label} first — I've highlighted the field on the page. Fill it in, then tell me "done" and I'll point you to the next one.`,
+    session,
+    complete: false,
+    formActions: [highlightAction(f, fieldInstruction(f))],
+  };
+}
+
+// Classify what the visitor wants mid-tour, using the LLM (no keyword lists).
+async function classifyTourIntent(
+  message: string,
+  fieldLabel: string,
+  generate?: (system: string, prompt: string) => Promise<string>
+): Promise<"next" | "back" | "cancel" | "fill" | "other"> {
+  if (!generate) return "next";
+  const prompt = `A visitor is filling a web form one field at a time. The current field is "${fieldLabel}". They just said: "${message}"
+
+Classify their intent into exactly one word:
+- "next"   = they finished this field / want to move on (done, ok, next, ready, filled it)
+- "back"   = they want to go back to the previous field / change something earlier
+- "cancel" = they want to stop / abandon the form
+- "fill"   = they are giving YOU a value to put in for them instead of typing it themselves
+- "other"  = a question or anything else
+
+Respond with ONLY the single word.`;
+  try {
+    const raw = (await generate("You classify intent. One word only.", prompt)).toLowerCase();
+    for (const k of ["cancel", "back", "fill", "next", "other"] as const) if (new RegExp(`\\b${k}\\b`).test(raw)) return k;
+    return "next";
+  } catch { return "next"; }
+}
+
+async function handleTour(
+  session: FlowSession,
+  userMessage: string,
+  formState: Record<string, string>,
+  generate?: (system: string, prompt: string) => Promise<string>
+): Promise<ConversationResponse> {
+  const fields = tourFields(session);
+  let idx = session.tourIndex ?? 0;
+  const current = fields[idx];
+  const intent = await classifyTourIntent(userMessage, current ? current.label : "", generate);
+
+  if (intent === "cancel") {
+    session.status = "failed";
+    return { message: "No problem — I've stopped. Anything else I can help with?", session, complete: true };
+  }
+
+  if (intent === "fill") {
+    // Visitor asked the bot to fill this field — extract a value and set it.
+    const val = userMessage.replace(/^[^:]*:/, "").trim() || userMessage.trim();
+    const clean = sanitizeFlowInput(val, session.flow.requiredInputs.find((i) => i.name === current.name) || { name: current.name, label: current.label, type: current.type as any, required: true, description: "" });
+    if (clean.valid) {
+      session.collectedInputs[current.name] = clean.value;
+      return {
+        message: `Done — I filled in ${current.label} for you. Say "next" when you're ready to continue.`,
+        session,
+        complete: false,
+        formActions: [{ op: "set", name: current.name, label: current.label, value: clean.value, fieldType: current.type, target: current.target }],
+      };
+    }
+  }
+
+  if (intent === "back") {
+    idx = Math.max(0, idx - 1);
+    session.tourIndex = idx;
+    const f = fields[idx];
     return {
-      message: session.executionMode === "highlight"
-        ? `Got it!\n${summary}\n\nLast bit — follow the highlights to finish up.`
-        : `Got it!\n${summary}\n\nFinishing up on the page now.`,
+      message: `Sure — back to ${f.label}. I've highlighted it again.`,
       session,
       complete: false,
-      liveSteps: merged,
+      formActions: [highlightAction(f, fieldInstruction(f))],
     };
   }
 
-  session.status = "choosing";
+  // intent "next"/"other": advance if the current field looks filled on the page.
+  const filled = current ? (formState[current.name] || "").trim().length > 0 : true;
+  if (current && !filled && intent !== "other") {
+    return {
+      message: `I don't see ${current.label} filled in yet — go ahead and complete it on the page, then tell me "done". (Or say "skip" and I'll fill it for you.)`,
+      session,
+      complete: false,
+      formActions: [highlightAction(current, fieldInstruction(current))],
+    };
+  }
+
+  idx += 1;
+  session.tourIndex = idx;
+  if (idx < fields.length) {
+    const f = fields[idx];
+    const ack = current ? `Great, ${current.label} is set. ` : "";
+    return {
+      message: `${ack}Next: ${f.label}. I've highlighted it — fill it in and say "done".`,
+      session,
+      complete: false,
+      formActions: [highlightAction(f, fieldInstruction(f))],
+    };
+  }
+
+  // All fields done — highlight submit.
+  session.status = "executing";
+  const submit = submitAction(session.flow);
   return {
-    message: `Got it!\n${summary}\n\nShould I fill this in for you automatically, or show you where everything goes so you do it yourself?`,
+    message: "That's everything! I've highlighted the button to finish — click it whenever you're ready.",
     session,
     complete: false,
+    formActions: submit ? [submit] : [],
   };
 }
 
@@ -409,31 +581,21 @@ async function handleModeChoice(
   }
   const choice: "guided" | "highlight" = intent;
   session.executionMode = choice;
-  // HIGHLIGHT mode is a guided TOUR: no chat collection at all — the visitor
-  // types into the real fields themselves, the executor highlights each one and
-  // advances on their input. Collecting values first just to ask the visitor to
-  // retype them made no sense (live feedback, 2026-07-20).
+  // HIGHLIGHT mode is a chat-driven TOUR: highlight ONE field, wait for the
+  // visitor to fill it and say "done", read the form state back, then advance.
   if (choice === "highlight") {
-    session.status = "executing";
-    const tour = unexecutedSteps(session);
-    markExecuted(session, tour);
-    return {
-      message: "Follow the highlights on the page — I'll walk you through each field, one at a time.",
-      session,
-      complete: false,
-      liveSteps: tour,
-    };
+    return startTour(session);
   }
   const stillRequired = session.remainingInputs.filter((i) => i.required !== false);
   if (stillRequired.length === 0) {
     session.status = "executing";
-    const live = unexecutedSteps(session);
-    markExecuted(session, live);
+    const submit = submitAction(session.flow);
+    const sets = flowFields(session.flow).map((f) => setActionFor(session, f.name)).filter((a): a is FormAction => !!a);
     return {
-      message: "I'll fill it in for you now — switching to the page.",
+      message: "Filling it in for you now — just click the highlighted button to confirm.",
       session,
       complete: false,
-      liveSteps: live,
+      formActions: submit ? [...sets, submit] : sets,
     };
   }
   session.status = "collecting";
