@@ -217,6 +217,9 @@ export class WebsiteChat {
   private systemPromptExtra: string;
   private contextNotes: { question: string; answer: string; addedAt: string }[] = [];
   private flowSessions: Map<string, FlowSession> = new Map();
+  // When a message plausibly matches 2+ flows, we ask which one and remember
+  // the candidates until the visitor picks (multi-flow disambiguation).
+  private pendingDisambig: Map<string, { flows: FlowDefinition[]; at: number }> = new Map();
   private recentlyCompletedFlows: Map<string, string> = new Map(); // sessionKey → flowId
 
   constructor(
@@ -362,16 +365,37 @@ export class WebsiteChat {
       };
     }
 
+    // If we previously asked "which flow did you mean?", resolve that first.
+    const pending = this.pendingDisambig.get(effectiveSessionKey);
+    if (pending && Date.now() - pending.at < 5 * 60 * 1000) {
+      const picked = await this.pickFromCandidates(inputValidation.sanitized, pending.flows);
+      this.pendingDisambig.delete(effectiveSessionKey);
+      if (picked) {
+        const started = this.beginFlowSession(effectiveSessionKey, picked);
+        return { message: started.message, sources: [], flowSession: { active: true, status: "choosing", flowId: picked.id, complete: false } };
+      }
+      // else fall through to normal chat (they didn't pick either)
+    }
+
     // Deterministic trigger check BEFORE any LLM call (see matchFlowTrigger).
-    const triggeredFlow = this.matchFlowTrigger(inputValidation.sanitized);
-    if (triggeredFlow) {
-      // Mode question comes first (startFlowSession) — live incremental
-      // execution needs the visitor's auto/highlight choice before collecting.
-      const started = this.beginFlowSession(effectiveSessionKey, triggeredFlow);
+    const matches = this.matchFlowTrigger(inputValidation.sanitized);
+    if (matches.length > 0) {
+      const top = matches[0], runner = matches[1];
+      // Ambiguous: two flows score comparably -> ask which one instead of guessing.
+      if (runner && runner.score >= 0.55 && top.score - runner.score < 0.2) {
+        const cands = matches.filter((m) => m.score >= 0.55).slice(0, 3).map((m) => m.flow);
+        this.pendingDisambig.set(effectiveSessionKey, { flows: cands, at: Date.now() });
+        const names = cands.map((f) => `"${f.name}"`).join(" or ");
+        return {
+          message: `I can help with a couple of things here — did you want ${names}? Just tell me which.`,
+          sources: [],
+        };
+      }
+      const started = this.beginFlowSession(effectiveSessionKey, top.flow);
       return {
         message: started.message,
         sources: [],
-        flowSession: { active: true, status: "choosing", flowId: triggeredFlow.id, complete: false },
+        flowSession: { active: true, status: "choosing", flowId: top.flow.id, complete: false },
       };
     }
 
@@ -838,10 +862,10 @@ ${contextBlocks}
   // on the LLM electing to emit an action (it roleplayed "reservation received"
   // instead — a false promise). Trigger phrases (LLM-generated at analysis
   // time) are matched directly against the user message.
-  private matchFlowTrigger(message: string): FlowDefinition | null {
+  private matchFlowTrigger(message: string): { flow: FlowDefinition; score: number }[] {
     const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
     const msg = norm(message);
-    if (!msg) return null;
+    if (!msg) return [];
     const msgWords = msg.split(" ");
     // Stem-ish word match: exact substring, one word a prefix of the other
     // (book/booking), or a shared prefix >= 6 chars (reserve/reservation,
@@ -856,7 +880,7 @@ ${contextBlocks}
         return mw.length >= 6 && w.length >= 6 && mw.slice(0, 6) === w.slice(0, 6);
       });
     };
-    let best: { flow: FlowDefinition; score: number } | null = null;
+    const byFlow = new Map<string, { flow: FlowDefinition; score: number }>();
     for (const flow of this.context.flows) {
       if (flow.status !== "active") continue;
       for (const phrase of flow.triggerPhrases || []) {
@@ -872,10 +896,24 @@ ${contextBlocks}
             if (hits >= 2 && ratio >= 0.6) score = ratio * 0.9;
           }
         }
-        if (score > 0 && (!best || score > best.score)) best = { flow, score };
+        if (score > 0 && (!byFlow.has(flow.id) || score > byFlow.get(flow.id)!.score)) byFlow.set(flow.id, { flow, score });
       }
     }
-    return best ? best.flow : null;
+    return Array.from(byFlow.values()).sort((a, b) => b.score - a.score);
+  }
+
+  // LLM picks which candidate flow the visitor meant (or none) — used to resolve
+  // an ambiguous first message that matched multiple flows.
+  private async pickFromCandidates(message: string, flows: FlowDefinition[]): Promise<FlowDefinition | null> {
+    if (flows.length === 0) return null;
+    if (flows.length === 1) return flows[0];
+    const list = flows.map((f, i) => `${i + 1}. ${f.name} — ${f.description || ""}`).join("\n");
+    const prompt = `The visitor was asked which task they want. Options:\n${list}\n\nTheir reply: "${message}"\n\nWhich option number do they mean? Reply with ONLY the number, or "0" if none/unclear.`;
+    try {
+      const raw = await this.backend.generate("You map a reply to an option number. One number only.", [{ role: "user", content: prompt }], 8);
+      const n = parseInt((raw.match(/\d+/) || ["0"])[0], 10);
+      return n >= 1 && n <= flows.length ? flows[n - 1] : null;
+    } catch { return null; }
   }
 
   // [[gap: ...]] protocol — the plain-text paths have no tool channel, so the
