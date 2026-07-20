@@ -413,9 +413,17 @@ export class WebsiteChat {
     }
 
     const retrievedChunks = await this.retrieveContext(lastUserMessage);
+    const usableChunksC = this.filterContextChunks(retrievedChunks, lastUserMessage);
+    // Truly nothing retrieved -> honest refuse + gap, no LLM (there is no context
+    // at all to reason over). Otherwise the small model's verdict becomes an
+    // advisory the big model weighs (see buildSystemPrompt).
+    if (usableChunksC.length === 0) {
+      return { message: this.refusal(lastUserMessage), sources: [], grounded: false, unknownQuestion: lastUserMessage.trim() || undefined };
+    }
+    const factCheckC = await this.factCheck(lastUserMessage, usableChunksC);
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
-    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage);
+    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage, factCheckC);
 
     const sources = [...new Map(
       retrievedChunks.map((c) => [
@@ -583,20 +591,6 @@ export class WebsiteChat {
     // business (the worst possible first impression). Return an honest fallback
     // and flag grounded:false so the server can log/quarantine the tenant.
     // (We're past all flow paths here, so flow-only demos are unaffected.)
-    const usableChunks = this.filterContextChunks(retrievedChunks, lastUserMessage);
-    // Fast path: a strong direct retrieval match (high cosine) is trusted and
-    // skips the extra answerability call — the anti-hallucination check only runs
-    // on weak/borderline retrieval, exactly where confabulation risk is real.
-    const topScore = usableChunks.length ? Math.max(...usableChunks.map((c) => c.score)) : 0;
-    if (usableChunks.length === 0 || (topScore < 0.62 && !(await this.isAnswerable(lastUserMessage, usableChunks)))) {
-      return {
-        message: this.refusal(lastUserMessage),
-        sources: [],
-        grounded: false,
-        unknownQuestion: lastUserMessage.trim() || undefined,
-      };
-    }
-
     // Fallback: plain text generation (no flows active or backend doesn't support tools)
     let responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
 
@@ -704,15 +698,15 @@ export class WebsiteChat {
     // so there is nothing to retract: no usable context OR the excerpts don't
     // directly answer the question → honest refusal + logged gap, no generation.
     const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
-    const topStream = usableStream.length ? Math.max(...usableStream.map((c) => c.score)) : 0;
-    if (usableStream.length === 0 || (topStream < 0.62 && !(await this.isAnswerable(inputValidation.sanitized, usableStream)))) {
+    if (usableStream.length === 0) {
       const msg = this.refusal(inputValidation.sanitized);
       onToken(msg);
       return { message: msg, sources: [], grounded: false, unknownQuestion: inputValidation.sanitized.trim() || undefined };
     }
+    const factCheckS = await this.factCheck(inputValidation.sanitized, usableStream);
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
-    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, inputValidation.sanitized);
+    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, inputValidation.sanitized, factCheckS);
 
     // Stream with a holdback: once a potential [[...]] marker starts, stop
     // forwarding tokens so the gap marker never flashes in the widget. If the
@@ -777,8 +771,12 @@ export class WebsiteChat {
   // this is a dedicated yes/no decision — if "no", the bot refuses and the
   // question is logged as a knowledge gap instead of a confabulated answer.
   // Fails OPEN (returns true) on error so a transient blip never over-refuses.
-  private async isAnswerable(question: string, chunks: { content: string; metadata: Record<string, unknown> }[]): Promise<boolean> {
-    if (chunks.length === 0) return false;
+  private async factCheck(question: string, chunks: { content: string; metadata: Record<string, unknown>; score?: number }[]): Promise<"confirmed" | "no_confirmation"> {
+    if (chunks.length === 0) return "no_confirmation";
+    // Fast path: strong direct retrieval (high cosine) is trusted — skip the
+    // small model entirely and report the sources as relevant.
+    const topScore = Math.max(...chunks.map((c) => (c as any).score || 0));
+    if (topScore >= 0.62) return "confirmed";
     const context = chunks.slice(0, 6).map((c) => (c.content || "").slice(0, 700)).join("\n---\n");
     const prompt = `A visitor asked: "${question}"
 
@@ -794,11 +792,10 @@ Can this question be answered HONESTLY from the excerpts — either directly, or
 Reply with ONLY one word: yes or no.`;
     try {
       const raw = (await this.fastClassify("You judge whether the provided context directly answers a question. Reply yes or no only.", prompt)).toLowerCase();
-      if (/\bno\b/.test(raw)) return false;
-      if (/\byes\b/.test(raw)) return true;
-      return true; // ambiguous -> don't over-refuse
+      if (/\bno\b/.test(raw)) return "no_confirmation";
+      return "confirmed"; // yes or ambiguous -> confirmed (fail open; big model is final judge)
     } catch {
-      return true; // fail open
+      return "confirmed"; // fail open
     }
   }
 
@@ -830,7 +827,10 @@ Reply with ONLY one word: yes or no.`;
   private buildSystemPrompt(
     chunks: { content: string; metadata: Record<string, unknown>; score: number }[],
     recentlyCompletedFlowId?: string,
-    userQuery?: string
+    userQuery?: string,
+    // Advisory verdict from the small fact-check model — the big model is the
+    // final judge and is told to interpret this hint in BOTH directions.
+    factCheck?: "confirmed" | "no_confirmation"
   ): string {
     const siteInfo = this.context.siteMap
       .slice(0, 20)
@@ -893,6 +893,13 @@ Reply with ONLY one word: yes or no.`;
 ## Website Pages:
 ${siteInfo}
 ${skillsSection}${renderOfficialInfo(this.context.businessProfile)}
+${factCheck ? `
+## Fact-check (advisory — YOU are the final judge):
+A fast, deliberately strict fact-checking model reviewed the sources above for this exact question and concluded: **the sources ${factCheck === "confirmed" ? "appear to contain relevant information for it" : "do NOT clearly contain a direct answer"}**.
+This checker is small and strict, so read its verdict with judgment, in both directions:
+- It frequently UNDERVALUES descriptive questions you can answer by summarising examples (e.g. describing the projects/work in the sources to explain "what we do" or "what we offer"). If you can answer honestly this way, DO answer — even when the checker said no.
+- It can also be too lenient. Even if it said the info is there, never state a specific fact (a number, price, date, headcount, policy) that is not actually in the sources.
+- Only when a truthful answer would require a specific fact that is genuinely absent: briefly say you don't have that exact detail, point the visitor to contact us, and end your reply with the marker [[gap: <the unanswered question, in the site's language>]].` : ""}
 
 ## Relevant Context:
 ${contextBlocks}
