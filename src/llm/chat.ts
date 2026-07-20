@@ -571,10 +571,13 @@ export class WebsiteChat {
     // and flag grounded:false so the server can log/quarantine the tenant.
     // (We're past all flow paths here, so flow-only demos are unaffected.)
     const usableChunks = this.filterContextChunks(retrievedChunks, lastUserMessage);
-    if (usableChunks.length === 0 || !(await this.isAnswerable(lastUserMessage, usableChunks))) {
+    // Fast path: a strong direct retrieval match (high cosine) is trusted and
+    // skips the extra answerability call — the anti-hallucination check only runs
+    // on weak/borderline retrieval, exactly where confabulation risk is real.
+    const topScore = usableChunks.length ? Math.max(...usableChunks.map((c) => c.score)) : 0;
+    if (usableChunks.length === 0 || (topScore < 0.62 && !(await this.isAnswerable(lastUserMessage, usableChunks)))) {
       return {
-        message:
-          "I don't have that information in what I can see about us, so I don't want to guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.",
+        message: this.refusal(lastUserMessage),
         sources: [],
         grounded: false,
         unknownQuestion: lastUserMessage.trim() || undefined,
@@ -680,8 +683,9 @@ export class WebsiteChat {
     // so there is nothing to retract: no usable context OR the excerpts don't
     // directly answer the question → honest refusal + logged gap, no generation.
     const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
-    if (usableStream.length === 0 || !(await this.isAnswerable(inputValidation.sanitized, usableStream))) {
-      const msg = "I don't have that information in what I can see about us, so I don't want to guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.";
+    const topStream = usableStream.length ? Math.max(...usableStream.map((c) => c.score)) : 0;
+    if (usableStream.length === 0 || (topStream < 0.62 && !(await this.isAnswerable(inputValidation.sanitized, usableStream)))) {
+      const msg = this.refusal(inputValidation.sanitized);
       onToken(msg);
       return { message: msg, sources: [], grounded: false, unknownQuestion: inputValidation.sanitized.trim() || undefined };
     }
@@ -728,6 +732,16 @@ export class WebsiteChat {
       .trim();
     const outputCheck = validateOutput(cleaned, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
     return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: gapStream.question || undefined };
+  }
+
+  // Refusal in the visitor's language — an English refusal on a Polish site
+  // breaks the "we speak as you" voice, and the gate now fires more often.
+  private refusal(question: string): string {
+    const q = question.toLowerCase();
+    const isPolish = /[ąćęłńóśźż]/.test(q) || /\b(czy|jak|ile|gdzie|jaki|jaka|macie|kiedy|dlaczego|kto|co)\b/.test(q);
+    return isPolish
+      ? "Nie mam tej informacji w tym, co wiem o nas, więc nie chcę zgadywać. Najlepiej skontaktuj się z nami bezpośrednio - chętnie pomożemy."
+      : "I don't have that information in what I can see about us, so I don't want to guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.";
   }
 
   // Hard anti-hallucination gate: a focused binary check that the retrieved
