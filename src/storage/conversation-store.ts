@@ -117,12 +117,19 @@ export async function logMessage(
   meta: { flowInvoked?: string | null; navigatedTo?: string | null; hadToolCall?: boolean; sourcePages?: string[]; domain?: string } = {}
 ): Promise<void> {
   try {
-    const id = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+    // id is INTEGER PRIMARY KEY AUTOINCREMENT — do NOT supply it. Passing a UUID
+    // string here (pre-fix) failed the datatype check on every insert, and the
+    // catch below silently swallowed it: conversation logging was dead fleet-wide
+    // from 2026-06-05 until this fix (only unknown_questions kept logging).
     await query(
-      "INSERT INTO chat_messages (id, tenant_id, session_id, role, content, domain, created_at, flow_invoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, tenantId, sessionId, role, content, meta.domain || null, new Date().toISOString(), meta.flowInvoked || null]
+      "INSERT INTO chat_messages (tenant_id, session_id, role, content, domain, created_at, flow_invoked) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [tenantId, sessionId, role, content, meta.domain || null, new Date().toISOString(), meta.flowInvoked || null]
     );
-  } catch { /* logging never breaks chat */ }
+  } catch (e: any) {
+    // Never break chat — but surface it so a silent logging failure can't hide
+    // for weeks again.
+    console.error(`[logMessage] insert failed (${tenantId}): ${String(e?.message || e).slice(0, 160)}`);
+  }
 }
 
 // ─── Reads ───────────────────────────────────────────────────────────────────
