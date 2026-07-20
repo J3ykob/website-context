@@ -207,6 +207,7 @@ Return only valid JSON, nothing else.`;
 
     const extracted = JSON.parse(jsonStr) as Record<string, string>;
 
+    const collectedBefore = Object.keys(session.collectedInputs).length;
     const sanitizationErrors: string[] = [];
     for (const [name, value] of Object.entries(extracted)) {
       if (value && remaining.some((i) => i.name === name)) {
@@ -228,8 +229,41 @@ Return only valid JSON, nothing else.`;
         complete: false,
       };
     }
+
+    // Nothing extracted — maybe the visitor is stating HOW they want it done
+    // ("guide me through", "do it for me") mid-collection. Record the choice and
+    // keep collecting; the mode question at the end is then skipped.
+    if (Object.keys(session.collectedInputs).length === collectedBefore) {
+      const midChoice = parseModeChoice(userMessage);
+      if (midChoice) {
+        session.executionMode = midChoice;
+        const stillReq = session.remainingInputs.filter((i) => i.required !== false).map((i) => i.label).join(", ");
+        return {
+          message: (midChoice === "highlight"
+            ? "Got it — I'll show you where everything goes once we have the details."
+            : "Got it — I'll fill it in for you once we have the details.")
+            + (stillReq ? ` I still need: ${stillReq}.` : ""),
+          session,
+          complete: false,
+        };
+      }
+    }
   } catch {
-    // LLM parse failed — fall back to treating the whole message as the current field's value
+    // LLM parse failed — check for a mode statement before force-parsing the
+    // message as a field value.
+    const fallbackChoice = parseModeChoice(userMessage);
+    if (fallbackChoice) {
+      session.executionMode = fallbackChoice;
+      const stillReq = session.remainingInputs.filter((i) => i.required !== false).map((i) => i.label).join(", ");
+      return {
+        message: (fallbackChoice === "highlight"
+          ? "Got it — I'll show you where everything goes once we have the details."
+          : "Got it — I'll fill it in for you once we have the details.")
+          + (stillReq ? ` I still need: ${stillReq}.` : ""),
+        session,
+        complete: false,
+      };
+    }
     if (remaining.length > 0) {
       const current = remaining[0];
       const result = sanitizeFlowInput(userMessage.trim(), current);
@@ -261,9 +295,8 @@ Return only valid JSON, nothing else.`;
   session.remainingInputs = [];
 
   // All collected — let the VISITOR choose how it happens: the bot does it for
-  // them, or highlights each step so they do it themselves.
-  session.status = "choosing";
-
+  // them, or highlights each step so they do it themselves. If they already
+  // said so mid-collection, don't ask again.
   const summary = Object.entries(session.collectedInputs)
     .map(([key, val]) => {
       const input = allNeeded.find((i) => i.name === key);
@@ -271,6 +304,18 @@ Return only valid JSON, nothing else.`;
     })
     .join("\n");
 
+  if (session.executionMode === "highlight" || session.executionMode === "guided") {
+    session.status = "executing";
+    return {
+      message: session.executionMode === "highlight"
+        ? `Got it!\n${summary}\n\nI'll show you where everything goes — follow the highlights on the page.`
+        : `Got it!\n${summary}\n\nI'll fill it in for you now — switching to the page.`,
+      session,
+      complete: false,
+    };
+  }
+
+  session.status = "choosing";
   return {
     message: `Got it!\n${summary}\n\nShould I fill this in for you automatically, or show you where everything goes so you do it yourself?`,
     session,
