@@ -394,15 +394,28 @@ async function handleModeChoice(
     };
   }
   session.executionMode = choice;
+  // HIGHLIGHT mode is a guided TOUR: no chat collection at all — the visitor
+  // types into the real fields themselves, the executor highlights each one and
+  // advances on their input. Collecting values first just to ask the visitor to
+  // retype them made no sense (live feedback, 2026-07-20).
+  if (choice === "highlight") {
+    session.status = "executing";
+    const tour = unexecutedSteps(session);
+    markExecuted(session, tour);
+    return {
+      message: "Follow the highlights on the page — I'll walk you through each field, one at a time.",
+      session,
+      complete: false,
+      liveSteps: tour,
+    };
+  }
   const stillRequired = session.remainingInputs.filter((i) => i.required !== false);
   if (stillRequired.length === 0) {
     session.status = "executing";
     const live = unexecutedSteps(session);
     markExecuted(session, live);
     return {
-      message: choice === "highlight"
-        ? "I'll show you where everything goes — follow the highlights on the page."
-        : "I'll fill it in for you now — switching to the page.",
+      message: "I'll fill it in for you now — switching to the page.",
       session,
       complete: false,
       liveSteps: live,
@@ -414,10 +427,7 @@ async function handleModeChoice(
   markExecuted(session, lead);
   const first = stillRequired[0];
   return {
-    message: (choice === "highlight"
-      ? "Okay — I'll point at each field as you give me the details."
-      : "Okay — I'll fill each field in as you give it to me.")
-      + ` First: ${first.label}?`,
+    message: `Okay — I'll fill each field in as you give it to me. First: ${first.label}?`,
     session,
     complete: false,
     liveSteps: lead.length ? lead : undefined,

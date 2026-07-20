@@ -39,6 +39,9 @@
 
     try {
       var value = substituteVars(step.value, inputs);
+      // Unfilled {{variables}} (highlight tour has no collected values) must not
+      // leak into tooltips or fields — treat as "no value".
+      if (value && /\{\{.*?\}\}/.test(value)) value = "";
 
       switch (step.action) {
         case "navigate":
