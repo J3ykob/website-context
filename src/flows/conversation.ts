@@ -79,9 +79,9 @@ export interface FlowSession {
   flow: FlowDefinition;
   collectedInputs: Record<string, string>;
   remainingInputs: FlowInput[];
-  status: "collecting" | "confirming" | "executing" | "done" | "failed";
+  status: "collecting" | "confirming" | "choosing" | "executing" | "done" | "failed";
   result?: ExecutionResult;
-  executionMode?: "background" | "guided";
+  executionMode?: "background" | "guided" | "highlight";
 }
 
 export interface ConversationResponse {
@@ -104,10 +104,10 @@ export function startFlowSession(flow: FlowDefinition): ConversationResponse {
   };
 
   if (session.remainingInputs.length === 0) {
-    // No inputs needed — go straight to confirmation
-    session.status = "confirming";
+    // No inputs needed — ask HOW the visitor wants it done (auto vs guided tour).
+    session.status = "choosing";
     return {
-      message: `I can run "${flow.name}" for you. There are no additional details needed. Should I go ahead and execute it?`,
+      message: `I can do "${flow.name}" right now. Should I do it for you automatically, or show you where to click so you do it yourself?`,
       session,
       complete: false,
     };
@@ -141,6 +141,10 @@ export async function processUserInput(
 
   if (session.status === "confirming") {
     return handleConfirmation(session, msg);
+  }
+
+  if (session.status === "choosing") {
+    return handleModeChoice(session, msg);
   }
 
   if (session.status === "collecting") {
@@ -252,9 +256,9 @@ Return only valid JSON, nothing else.`;
     };
   }
 
-  // All collected — execute
-  session.status = "executing";
-  session.executionMode = "guided";
+  // All collected — let the VISITOR choose how it happens: the bot does it for
+  // them, or highlights each step so they do it themselves.
+  session.status = "choosing";
 
   const summary = Object.entries(session.collectedInputs)
     .map(([key, val]) => {
@@ -263,11 +267,53 @@ Return only valid JSON, nothing else.`;
     })
     .join("\n");
 
-  const highlightMode = session.flow.executionMode === "highlight";
   return {
-    message: highlightMode
-      ? `Got it! I'll highlight each field on the page — you fill it in yourself.\n${summary}`
-      : `Got it! I'll fill in the form for you now.\n${summary}`,
+    message: `Got it!\n${summary}\n\nShould I fill this in for you automatically, or show you where everything goes so you do it yourself?`,
+    session,
+    complete: false,
+  };
+}
+
+function parseModeChoice(msg: string): "guided" | "highlight" | null {
+  const m = " " + msg.toLowerCase() + " ";
+  const show = ["show", "highlight", "guide", "myself", "i'll do", "i will do", "pokaz", "pokaż", "poprowadz", "poprowadź", " sam ", " sama ", "ja to"];
+  const auto = ["do it", "fill", "for me", "automat", "you do", "zrob", "zrób", "wypelnij", "wypełnij", "za mnie", "ty to", "yes", "tak"];
+  if (show.some((w) => m.includes(w))) return "highlight";
+  if (auto.some((w) => m.includes(w))) return "guided";
+  return null;
+}
+
+async function handleModeChoice(
+  session: FlowSession,
+  userMessage: string
+): Promise<ConversationResponse> {
+  const lower = userMessage.toLowerCase().trim();
+  const cancelWords = ["cancel", "stop", "quit", "nevermind", "never mind", "anuluj", "przerwij", "rezygnuje", "rezygnuję"];
+  if (cancelWords.some((w) => lower === w || lower.startsWith(w + " "))) {
+    session.status = "failed";
+    return { message: "No problem — I've cancelled that. What else can I help you with?", session, complete: true };
+  }
+  const choice = parseModeChoice(userMessage);
+  if (!choice) {
+    // Second chance, then fall back to the flow's own default.
+    const fallback = session.flow.executionMode === "highlight" ? "highlight" : null;
+    if (fallback) {
+      session.executionMode = fallback;
+      session.status = "executing";
+      return { message: "I'll show you where everything goes — follow the highlights on the page.", session, complete: false };
+    }
+    return {
+      message: 'Just tell me: "do it for me" or "show me how".',
+      session,
+      complete: false,
+    };
+  }
+  session.executionMode = choice;
+  session.status = "executing";
+  return {
+    message: choice === "highlight"
+      ? "I'll show you where everything goes — follow the highlights on the page."
+      : "I'll fill it in for you now — switching to the page.",
     session,
     complete: false,
   };

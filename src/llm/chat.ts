@@ -354,7 +354,7 @@ export class WebsiteChat {
           status: result.session.status,
           flowId: result.session.flowId,
           complete: result.complete || readyToExecute,
-          executionMode: result.session.flow.executionMode === "highlight" ? "highlight" : "guided",
+          executionMode: (result.session.executionMode || result.session.flow.executionMode) === "highlight" ? "highlight" : "guided",
           guidedSteps: readyToExecute ? result.session.flow.steps : undefined,
           guidedInputs: readyToExecute ? result.session.collectedInputs : undefined,
         },
@@ -366,15 +366,14 @@ export class WebsiteChat {
     if (triggeredFlow) {
       const requiredMissing = triggeredFlow.requiredInputs.filter((i) => i.required);
       if (requiredMissing.length === 0) {
-        this.recentlyCompletedFlows.set(effectiveSessionKey, triggeredFlow.id);
+        // No inputs to collect — still let the VISITOR pick auto vs highlight.
+        this.beginFlowSession(effectiveSessionKey, triggeredFlow);
+        const zeroSession = this.flowSessions.get(effectiveSessionKey)!;
+        zeroSession.status = "choosing";
         return {
-          message: `Sure — starting "${triggeredFlow.name}" now. I'll guide you through it right on the page.`,
+          message: `Sure — I can do "${triggeredFlow.name}" right now. Should I do it for you automatically, or show you where to click so you do it yourself?`,
           sources: [],
-          flowSession: {
-            active: false, status: "executing", flowId: triggeredFlow.id, complete: true,
-            executionMode: triggeredFlow.executionMode === "highlight" ? "highlight" : "guided",
-            guidedSteps: triggeredFlow.steps, guidedInputs: {},
-          },
+          flowSession: { active: true, status: "choosing", flowId: triggeredFlow.id, complete: false },
         };
       }
       this.beginFlowSession(effectiveSessionKey, triggeredFlow);
