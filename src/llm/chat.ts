@@ -379,6 +379,7 @@ export class WebsiteChat {
 
     // Deterministic trigger check BEFORE any LLM call (see matchFlowTrigger).
     const matches = this.matchFlowTrigger(inputValidation.sanitized);
+    console.log(`[flowmatch] "${inputValidation.sanitized.slice(0,40)}" activeFlows=${this.context.flows.filter(f=>f.status==="active").map(f=>f.id).join(",")} matches=${matches.map(m=>m.flow.id+":"+m.score.toFixed(2)).join(",")}`);
     if (matches.length > 0) {
       const top = matches[0], runner = matches[1];
       // Ambiguous: two flows score comparably -> ask which one instead of guessing.
