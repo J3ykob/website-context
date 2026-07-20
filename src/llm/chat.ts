@@ -779,9 +779,11 @@ Excerpts from the website:
 ${context}
 """
 
-Do these excerpts contain information that DIRECTLY and SPECIFICALLY answers the visitor's question?
-- "yes" = the actual answer is present in the excerpts.
-- "no"  = the excerpts are about other topics, only tangentially related, or answering would require guessing or inferring a fact that is not stated. A number/detail about a DIFFERENT thing (a specific project, another product/service) does NOT answer a general question.
+Do these excerpts contain ANY information relevant to answering the visitor's question — even partially?
+- Reply "yes" if the excerpts mention the topic or contain information that helps answer it, even if not a complete answer.
+- Reply "no" ONLY if the excerpts are unrelated to the question or contain nothing at all that could help (e.g. asking about revenue, staff vacation, or a service the business clearly doesn't discuss).
+
+Be generous with "yes" — only say "no" when there is genuinely nothing relevant.
 
 Reply with ONLY one word: yes or no.`;
     try {
