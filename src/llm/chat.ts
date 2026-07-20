@@ -377,26 +377,26 @@ export class WebsiteChat {
       // else fall through to normal chat (they didn't pick either)
     }
 
-    // Deterministic trigger check BEFORE any LLM call (see matchFlowTrigger).
-    const matches = this.matchFlowTrigger(inputValidation.sanitized);
-    if (matches.length > 0) {
-      const top = matches[0], runner = matches[1];
-      // Ambiguous: two flows score comparably -> ask which one instead of guessing.
-      if (runner && runner.score >= 0.55 && top.score - runner.score < 0.2) {
-        const cands = matches.filter((m) => m.score >= 0.55).slice(0, 3).map((m) => m.flow);
-        this.pendingDisambig.set(effectiveSessionKey, { flows: cands, at: Date.now() });
-        const names = cands.map((f) => `"${f.name}"`).join(" or ");
+    // Flow triggering is an LLM DECISION, not a keyword matcher: the model sees
+    // the active flows (name + description) and picks which the visitor wants to
+    // start, none, or several (ambiguous). Robust across languages/phrasings.
+    const activeFlows = this.context.flows.filter((f) => f.status === "active");
+    if (activeFlows.length > 0) {
+      const picked = await this.classifyFlowIntent(inputValidation.sanitized, activeFlows);
+      if (picked.length === 1) {
+        const started = this.beginFlowSession(effectiveSessionKey, picked[0]);
         return {
-          message: `I can help with a couple of things here — did you want ${names}? Just tell me which.`,
+          message: started.message,
           sources: [],
+          flowSession: { active: true, status: "choosing", flowId: picked[0].id, complete: false },
         };
       }
-      const started = this.beginFlowSession(effectiveSessionKey, top.flow);
-      return {
-        message: started.message,
-        sources: [],
-        flowSession: { active: true, status: "choosing", flowId: top.flow.id, complete: false },
-      };
+      if (picked.length > 1) {
+        this.pendingDisambig.set(effectiveSessionKey, { flows: picked.slice(0, 3), at: Date.now() });
+        const names = picked.slice(0, 3).map((f) => `"${f.name}"`).join(" or ");
+        return { message: `I can help with a couple of things here — did you want ${names}? Just tell me which.`, sources: [] };
+      }
+      // picked.length === 0 -> not a flow request; fall through to normal chat.
     }
 
     const retrievedChunks = await this.retrieveContext(lastUserMessage);
@@ -862,44 +862,33 @@ ${contextBlocks}
   // on the LLM electing to emit an action (it roleplayed "reservation received"
   // instead — a false promise). Trigger phrases (LLM-generated at analysis
   // time) are matched directly against the user message.
-  private matchFlowTrigger(message: string): { flow: FlowDefinition; score: number }[] {
-    const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-    const msg = norm(message);
-    if (!msg) return [];
-    const msgWords = msg.split(" ");
-    // Stem-ish word match: exact substring, one word a prefix of the other
-    // (book/booking), or a shared prefix >= 6 chars (reserve/reservation,
-    // rezerwacja/rezerwowac) — inflected languages need the fuzz.
-    const wordHit = (w: string): boolean => {
-      if (msg.includes(w)) return true;
-      return msgWords.some((mw) => {
-        if (mw.length < 4 || w.length < 4) return false;
-        const shorter = mw.length <= w.length ? mw : w;
-        const longer = mw.length <= w.length ? w : mw;
-        if (longer.startsWith(shorter)) return true;
-        return mw.length >= 6 && w.length >= 6 && mw.slice(0, 6) === w.slice(0, 6);
-      });
-    };
-    const byFlow = new Map<string, { flow: FlowDefinition; score: number }>();
-    for (const flow of this.context.flows) {
-      if (flow.status !== "active") continue;
-      for (const phrase of flow.triggerPhrases || []) {
-        const p = norm(phrase);
-        if (!p) continue;
-        let score = 0;
-        if (p.length >= 8 && msg.includes(p)) score = 1;
-        else {
-          const words = p.split(" ").filter((w) => w.length > 2);
-          if (words.length >= 2) {
-            const hits = words.filter(wordHit).length;
-            const ratio = hits / words.length;
-            if (hits >= 2 && ratio >= 0.6) score = ratio * 0.9;
-          }
-        }
-        if (score > 0 && (!byFlow.has(flow.id) || score > byFlow.get(flow.id)!.score)) byFlow.set(flow.id, { flow, score });
-      }
-    }
-    return Array.from(byFlow.values()).sort((a, b) => b.score - a.score);
+  // LLM flow classifier — replaces the old deterministic phrase matcher. Given
+  // the visitor's message and the active flows, decide which flow (if any) they
+  // want to START. Returns [] (just chatting / a question), [flow] (one clear
+  // intent), or [flowA, flowB] (genuinely ambiguous -> caller disambiguates).
+  private async classifyFlowIntent(message: string, flows: FlowDefinition[]): Promise<FlowDefinition[]> {
+    if (flows.length === 0) return [];
+    const list = flows.map((f, i) => `${i + 1}. ${f.name} — ${f.description || ""}`).join("\n");
+    const prompt = `This website can perform these actions for a visitor:
+${list}
+
+The visitor said: "${message}"
+
+Decide: does the visitor want to START one of these actions right now (e.g. "book a table", "chcę zamówić kuriera"), or are they just asking a question / chatting / asking about price or info?
+
+Reply with ONLY:
+- the action's number (e.g. "2") if they clearly want to start exactly one,
+- two numbers separated by a comma (e.g. "1,3") if it's genuinely ambiguous between actions,
+- "0" if they are just asking a question, greeting, or none apply.
+
+Answer:`;
+    let raw = "";
+    try {
+      raw = await this.backend.generate("You route a message to an action. Reply with numbers only, or 0.", [{ role: "user", content: prompt }], 8);
+    } catch { return []; }
+    const nums = (raw.match(/\d+/g) || []).map((n) => parseInt(n, 10)).filter((n) => n >= 1 && n <= flows.length);
+    const uniq = Array.from(new Set(nums));
+    return uniq.map((n) => flows[n - 1]);
   }
 
   // LLM picks which candidate flow the visitor meant (or none) — used to resolve
