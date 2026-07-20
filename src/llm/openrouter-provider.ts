@@ -29,7 +29,7 @@ export class OpenRouterProvider {
     this.siteName = config.siteName || "website-context";
   }
 
-  async chat(messages: OpenRouterMessage[]): Promise<{ content: string; usage: { prompt_tokens: number; completion_tokens: number } }> {
+  async chat(messages: OpenRouterMessage[], overrides?: { model?: string; maxTokens?: number; temperature?: number }): Promise<{ content: string; usage: { prompt_tokens: number; completion_tokens: number } }> {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -39,10 +39,10 @@ export class OpenRouterProvider {
         "X-Title": this.siteName,
       },
       body: JSON.stringify({
-        model: this.model,
+        model: overrides?.model || this.model,
         messages,
-        max_tokens: this.maxTokens,
-        temperature: this.temperature,
+        max_tokens: overrides?.maxTokens ?? this.maxTokens,
+        temperature: overrides?.temperature ?? this.temperature,
       }),
     });
 

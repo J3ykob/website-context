@@ -99,6 +99,8 @@ interface LLMBackend {
   generate(system: string, messages: ChatMessage[], maxTokens: number): Promise<string>;
   generateStream?(system: string, messages: ChatMessage[], maxTokens: number, onToken: (delta: string) => void): Promise<string>;
   generateStructured?(system: string, messages: ChatMessage[], maxTokens: number, schema: object): Promise<StructuredResponse>;
+  // Tiny classification calls (yes/no, pick-a-number) on a small, fast model.
+  classify?(system: string, prompt: string): Promise<string>;
   generateWithTools?(system: string, messages: ChatMessage[], maxTokens: number, mcpConfig: MCPServerConfig): Promise<GenerateWithToolsResult>;
 }
 
@@ -141,6 +143,17 @@ class OpenRouterBackend implements LLMBackend {
       ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     ];
     const result = await this.provider.chatStream(orMessages, onToken);
+    return result.content;
+  }
+
+  // Small, fast model for internal classification (answerability gate, flow/mode
+  // intent) — a big model is overkill for a one-word decision and adds latency.
+  async classify(system: string, prompt: string): Promise<string> {
+    const model = process.env.OPENROUTER_FAST_MODEL || "google/gemini-flash-1.5-8b";
+    const result = await this.provider.chat(
+      [{ role: "system", content: system }, { role: "user", content: prompt }],
+      { model, maxTokens: 8, temperature: 0 },
+    );
     return result.content;
   }
 }
@@ -734,6 +747,12 @@ export class WebsiteChat {
     return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: gapStream.question || undefined };
   }
 
+  // Route tiny classification through the small fast model when available.
+  private async fastClassify(system: string, prompt: string): Promise<string> {
+    if (this.backend.classify) return this.backend.classify(system, prompt);
+    return this.backend.generate(system, [{ role: "user", content: prompt }], 8);
+  }
+
   // Refusal in the visitor's language — an English refusal on a Polish site
   // breaks the "we speak as you" voice, and the gate now fires more often.
   private refusal(question: string): string {
@@ -766,7 +785,7 @@ Do these excerpts contain information that DIRECTLY and SPECIFICALLY answers the
 
 Reply with ONLY one word: yes or no.`;
     try {
-      const raw = (await this.backend.generate("You judge whether the provided context directly answers a question. Reply yes or no only.", [{ role: "user", content: prompt }], 4)).toLowerCase();
+      const raw = (await this.fastClassify("You judge whether the provided context directly answers a question. Reply yes or no only.", prompt)).toLowerCase();
       if (/\bno\b/.test(raw)) return false;
       if (/\byes\b/.test(raw)) return true;
       return true; // ambiguous -> don't over-refuse
@@ -935,7 +954,7 @@ Reply with ONLY:
 Answer:`;
     let raw = "";
     try {
-      raw = await this.backend.generate("You route a message to an action. Reply with numbers only, or 0.", [{ role: "user", content: prompt }], 8);
+      raw = await this.fastClassify("You route a message to an action. Reply with numbers only, or 0.", prompt);
     } catch { return []; }
     const nums = (raw.match(/\d+/g) || []).map((n) => parseInt(n, 10)).filter((n) => n >= 1 && n <= flows.length);
     const uniq = Array.from(new Set(nums));
@@ -950,7 +969,7 @@ Answer:`;
     const list = flows.map((f, i) => `${i + 1}. ${f.name} — ${f.description || ""}`).join("\n");
     const prompt = `The visitor was asked which task they want. Options:\n${list}\n\nTheir reply: "${message}"\n\nWhich option number do they mean? Reply with ONLY the number, or "0" if none/unclear.`;
     try {
-      const raw = await this.backend.generate("You map a reply to an option number. One number only.", [{ role: "user", content: prompt }], 8);
+      const raw = await this.fastClassify("You map a reply to an option number. One number only.", prompt);
       const n = parseInt((raw.match(/\d+/) || ["0"])[0], 10);
       return n >= 1 && n <= flows.length ? flows[n - 1] : null;
     } catch { return null; }
