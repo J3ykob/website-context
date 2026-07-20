@@ -588,10 +588,7 @@ export class WebsiteChat {
     // skips the extra answerability call — the anti-hallucination check only runs
     // on weak/borderline retrieval, exactly where confabulation risk is real.
     const topScore = usableChunks.length ? Math.max(...usableChunks.map((c) => c.score)) : 0;
-    const gateRan = usableChunks.length > 0 && topScore < 0.62;
-    const gateAns = gateRan ? await this.isAnswerable(lastUserMessage, usableChunks) : true;
-    console.log(`[gate] "${lastUserMessage.slice(0,40)}" chunks=${usableChunks.length} top=${topScore.toFixed(3)} ran=${gateRan} answerable=${gateAns} topContent="${(usableChunks[0]?.content||'').slice(0,60).replace(/\n/g,' ')}"`);
-    if (usableChunks.length === 0 || (gateRan && !gateAns)) {
+    if (usableChunks.length === 0 || (topScore < 0.62 && !(await this.isAnswerable(lastUserMessage, usableChunks)))) {
       return {
         message: this.refusal(lastUserMessage),
         sources: [],
@@ -646,6 +643,14 @@ export class WebsiteChat {
     ];
     if (pricingKeywords.test(lastUserMessage)) {
       tasks.push(searchContext("cennik cena koszt price pricing rates fees tariff", this.embeddingProvider, this.store, { topK: 5 }));
+    }
+    // Identity/about boost: content-heavy sites (many project case-studies) drown
+    // the homepage "who we are / what we do" content, so retrieval surfaces
+    // project pages for "czym się zajmujecie" / "od kiedy". A dedicated pass for
+    // about/services terms brings the authoritative identity content into range.
+    const identityKeywords = /\b(o nas|o firmie|czym si[eę] zajmuj|kim jeste[sś]|co robicie|co oferuj|jakie us[lł]ug|od kiedy|od jak dawna|about us?|who are you|what do you (do|offer)|your services|since when|how long have)\b/i;
+    if (identityKeywords.test(lastUserMessage)) {
+      tasks.push(searchContext("o nas o firmie czym się zajmujemy nasze usługi oferta zespół od kiedy działamy about us what we do our services company", this.embeddingProvider, this.store, { topK: 5 }));
     }
     if (langKeyTerms.length > 2) {
       tasks.push(searchContext(langKeyTerms, this.embeddingProvider, this.store, { topK: Math.floor(this.topK / 2) }));
