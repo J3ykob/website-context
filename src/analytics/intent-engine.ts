@@ -160,7 +160,8 @@ export async function analyzeIntents(tenantId: string, opts: { force?: boolean }
       intents.push({
         question: canonical,
         count: c.count,
-        gapCount: gapMap.get(c.intentId) || 0,
+        // gap matches are a proxy; never show more "unanswered" than times asked
+        gapCount: Math.min(gapMap.get(c.intentId) || 0, c.count),
         examples: members.slice(1, 3),
       });
     }
