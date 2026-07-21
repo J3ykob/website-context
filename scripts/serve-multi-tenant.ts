@@ -64,6 +64,7 @@ import {
 } from "../src/flows/flow-store.js";
 import { analyzeRecordedFlow } from "../src/flows/analyzer.js";
 import { OpenRouterProvider } from "../src/llm/openrouter-provider.js";
+import { analyzeIntents, invalidateIntents } from "../src/analytics/intent-engine.js";
 import {
   detectPlatform,
   extractMessage,
@@ -1963,6 +1964,16 @@ app.get("/api/dashboard/unknown-questions", authMiddleware, async (req, res) => 
   res.json(await getUnknownQuestions(tenantId));
 });
 
+// Intent engine — the themes visitors most ask about (cached; ?force=1 recomputes)
+app.get("/api/dashboard/intents", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  try {
+    res.json(await analyzeIntents(tenantId, { force: req.query.force === "1" }));
+  } catch {
+    res.json({ themes: [], totalQuestions: 0, sampleSize: 0, truncated: false, analyzedAt: new Date().toISOString() });
+  }
+});
+
 // Context notes
 app.get("/api/dashboard/context-notes", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
@@ -2250,7 +2261,9 @@ app.put("/api/dashboard/widget-settings", authMiddleware, (req, res) => {
 // Clear the knowledge-gap journal (port of DELETE /api/unknown-questions from
 // the single-tenant serve.ts; gaps live in D1 now).
 app.delete("/api/dashboard/unknown-questions", authMiddleware, async (req, res) => {
-  await clearUnknownQuestions((req as any).tenantId);
+  const tenantId = (req as any).tenantId;
+  await clearUnknownQuestions(tenantId);
+  invalidateIntents(tenantId); // gap counts feed the intent analysis — refresh it
   res.json({ ok: true });
 });
 
