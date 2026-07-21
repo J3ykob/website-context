@@ -253,3 +253,86 @@ export async function getUnknownQuestions(tenantId: string): Promise<UnknownQues
 export async function clearUnknownQuestions(tenantId: string): Promise<void> {
   try { await query("DELETE FROM unknown_questions WHERE tenant_id = ?", [tenantId]); } catch { /* ignore */ }
 }
+
+// ─── Intent clustering (scalable "what people ask") ──────────────────────────
+// A visitor question is embedded once and assigned to a cluster (chat_messages
+// .intent_id). Cluster anchors live in `question_intents`. Counts are DERIVED
+// from the assignments (GROUP BY) — idempotent, never double-counts on re-runs
+// or across horizontally-scaled instances. Embeddings are stored as JSON text;
+// at very large anchor counts this moves to Vectorize ANN.
+export interface IntentAnchorRow { id: string; canonical: string; embedding: number[] }
+export interface IntentClusterRow { intentId: string; count: number }
+
+let intentSchemaReady = false;
+export async function ensureIntentSchema(): Promise<void> {
+  if (intentSchemaReady) return;
+  try { await query("CREATE TABLE IF NOT EXISTS question_intents (id TEXT PRIMARY KEY, tenant_id TEXT, canonical TEXT, embedding TEXT, created_at TEXT)", []); } catch { /* ok */ }
+  try { await query("ALTER TABLE chat_messages ADD COLUMN intent_id TEXT", []); } catch { /* column already exists */ }
+  try { await query("CREATE INDEX IF NOT EXISTS idx_msg_intent ON chat_messages(tenant_id, intent_id)", []); } catch { /* ok */ }
+  intentSchemaReady = true;
+}
+
+/** Visitor messages not yet assigned to a cluster (the incremental work-list). */
+export async function getUnassignedUserMessages(tenantId: string, limit = 400): Promise<{ id: string; content: string }[]> {
+  try {
+    const rows = await query(
+      "SELECT id, content FROM chat_messages WHERE tenant_id = ? AND role = 'user' AND intent_id IS NULL ORDER BY created_at DESC LIMIT ?",
+      [tenantId, limit]
+    );
+    return rows.map((r: any) => ({ id: String(r.id), content: r.content || "" }));
+  } catch { return []; }
+}
+
+export async function getIntentAnchors(tenantId: string): Promise<IntentAnchorRow[]> {
+  try {
+    const rows = await query("SELECT id, canonical, embedding FROM question_intents WHERE tenant_id = ?", [tenantId]);
+    return rows.map((r: any) => {
+      let emb: number[] = [];
+      try { emb = JSON.parse(r.embedding || "[]"); } catch { /* skip malformed */ }
+      return { id: String(r.id), canonical: r.canonical || "", embedding: emb };
+    }).filter((a: IntentAnchorRow) => a.embedding.length > 0);
+  } catch { return []; }
+}
+
+export async function insertIntentAnchor(tenantId: string, id: string, canonical: string, embedding: number[]): Promise<void> {
+  try {
+    await query(
+      "INSERT INTO question_intents (id, tenant_id, canonical, embedding, created_at) VALUES (?, ?, ?, ?, ?)",
+      [id, tenantId, canonical, JSON.stringify(embedding), new Date().toISOString()]
+    );
+  } catch (e: any) { console.error(`[intent] anchor insert failed: ${String(e?.message || e).slice(0, 120)}`); }
+}
+
+/** Assign many messages to one cluster in a single UPDATE. */
+export async function assignMessagesToIntent(tenantId: string, messageIds: string[], intentId: string): Promise<void> {
+  if (!messageIds.length) return;
+  try {
+    const placeholders = messageIds.map(() => "?").join(",");
+    await query(
+      `UPDATE chat_messages SET intent_id = ? WHERE tenant_id = ? AND id IN (${placeholders})`,
+      [intentId, tenantId, ...messageIds]
+    );
+  } catch (e: any) { console.error(`[intent] assign failed: ${String(e?.message || e).slice(0, 120)}`); }
+}
+
+/** Cluster sizes (frequency) — the ranking. */
+export async function getIntentClusters(tenantId: string, limit = 40): Promise<IntentClusterRow[]> {
+  try {
+    const rows = await query(
+      "SELECT intent_id AS iid, COUNT(*) AS cnt FROM chat_messages WHERE tenant_id = ? AND role = 'user' AND intent_id IS NOT NULL GROUP BY intent_id ORDER BY cnt DESC LIMIT ?",
+      [tenantId, limit]
+    );
+    return rows.map((r: any) => ({ intentId: String(r.iid), count: Number(r.cnt || 0) }));
+  } catch { return []; }
+}
+
+/** Members of one cluster, longest first (longest = most complete phrasing). */
+export async function getIntentMembers(tenantId: string, intentId: string, limit = 5): Promise<string[]> {
+  try {
+    const rows = await query(
+      "SELECT content FROM chat_messages WHERE tenant_id = ? AND intent_id = ? AND role = 'user' ORDER BY LENGTH(content) DESC LIMIT ?",
+      [tenantId, intentId, limit]
+    );
+    return rows.map((r: any) => r.content || "").filter(Boolean);
+  } catch { return []; }
+}

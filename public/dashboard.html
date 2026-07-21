@@ -204,9 +204,9 @@
     .intent-row { padding: 13px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
     .intent-row:last-child { border-bottom: none; }
     .intent-row:hover .intent-label { color: var(--blue); }
-    .intent-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .intent-label { font-size:14px; font-weight:600; color:var(--text); transition:color .15s; }
-    .intent-meta { display:flex; align-items:center; gap:10px; white-space:nowrap; }
+    .intent-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+    .intent-label { font-size:14px; font-weight:600; color:var(--text); transition:color .15s; flex:1; line-height:1.4; }
+    .intent-meta { display:flex; align-items:center; gap:10px; white-space:nowrap; padding-top:1px; }
     .intent-count { font-size:13px; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
     .intent-gap-badge { font-size:11px; color:var(--amber); background:rgba(245,158,11,0.13); padding:1px 8px; border-radius:999px; font-weight:600; }
     .intent-bar-track { height:6px; border-radius:999px; background:rgba(255,255,255,0.06); margin-top:9px; }
@@ -937,41 +937,36 @@
 
     function renderIntents(data) {
       var panel = document.getElementById("intents-panel");
-      var themes = (data && data.themes) || [];
+      var intents = (data && data.intents) || [];
       var badge = document.getElementById("intents-badge");
-      if (!themes.length) {
+      if (!intents.length) {
         if (badge) badge.style.display = "none";
         panel.innerHTML = emptyState('chat', '',
-          'Not enough questions yet - once visitors start chatting with your bot, the top themes they ask about show up here.');
+          'Not enough questions yet - once visitors start chatting with your bot, the questions they ask most show up here.');
         return;
       }
-      if (badge) { badge.textContent = themes.length; badge.style.display = ""; }
-      var max = themes.reduce(function(m, t){ return Math.max(m, t.count || 0); }, 1);
-      var rows = themes.map(function(t) {
+      if (badge) { badge.textContent = intents.length; badge.style.display = ""; }
+      var max = intents.reduce(function(m, t){ return Math.max(m, t.count || 0); }, 1);
+      var rows = intents.map(function(t) {
         var pct = Math.max(6, Math.round((t.count || 0) / max * 100));
-        var gapFlex = Math.max(0, t.gapCount || 0);
-        var ansFlex = Math.max(0, (t.count || 0) - gapFlex);
         var examples = (t.examples || []).map(function(e){ return '<li>' + esc(e) + '</li>'; }).join("");
-        return '<div class="intent-row" onclick="this.classList.toggle(\'open\')">' +
+        var expandable = examples ? ' onclick="this.classList.toggle(\'open\')"' : '';
+        return '<div class="intent-row"' + expandable + '>' +
           '<div class="intent-head">' +
-            '<span class="intent-label">' + esc(t.label) + '</span>' +
+            '<span class="intent-label">' + esc(t.question) + '</span>' +
             '<span class="intent-meta">' +
-              (gapFlex > 0 ? '<span class="intent-gap-badge">' + gapFlex + ' gap' + (gapFlex > 1 ? 's' : '') + '</span>' : '') +
-              '<span class="intent-count">' + (t.count || 0) + '</span>' +
+              (t.gapCount > 0 ? '<span class="intent-gap-badge">' + t.gapCount + ' unanswered</span>' : '') +
+              '<span class="intent-count">&times;' + (t.count || 0) + '</span>' +
             '</span>' +
           '</div>' +
-          '<div class="intent-bar-track"><div class="intent-bar" style="width:' + pct + '%">' +
-            (gapFlex > 0 ? '<span class="seg gap" style="flex:' + gapFlex + '"></span>' : '') +
-            (ansFlex > 0 ? '<span class="seg ans" style="flex:' + ansFlex + '"></span>' : '') +
-          '</div></div>' +
+          '<div class="intent-bar-track"><div class="intent-bar" style="width:' + pct + '%"><span class="seg ans" style="flex:1"></span></div></div>' +
           (examples ? '<ul class="intent-examples">' + examples + '</ul>' : '') +
         '</div>';
       }).join("");
-      var n = data.totalQuestions || 0;
+      var n = data.totalQuestions || 0, d = data.distinctIntents || intents.length;
       var foot = '<div class="intent-foot">' +
-        '<span>' + n + ' question' + (n !== 1 ? 's' : '') + ' analysed' + (data.truncated ? ' (most recent ' + data.sampleSize + ')' : '') + '</span>' +
-        '<span class="dotlegend"><span class="sw" style="background:var(--blue)"></span>answered</span>' +
-        '<span class="dotlegend"><span class="sw" style="background:var(--amber)"></span>knowledge gap</span>' +
+        '<span>' + n + ' question' + (n !== 1 ? 's' : '') + ' asked · ' + d + ' distinct intent' + (d !== 1 ? 's' : '') + '</span>' +
+        '<span class="dotlegend"><span class="sw" style="background:var(--amber)"></span>unanswered = the bot had no answer</span>' +
       '</div>';
       panel.innerHTML = rows + foot;
     }
