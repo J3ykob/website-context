@@ -747,6 +747,14 @@
           <button class="btn btn-sm btn-outline" id="kb-file-btn" type="button" onclick="document.getElementById('kb-file-input').click()">Choose file…</button>
           <span id="kb-file-status" style="font-size:12px;color:var(--text-3);margin-left:10px"></span>
         </div>
+        <div style="border-top:1px solid var(--line);margin:2px 0 12px;padding-top:12px">
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:8px">Or import from a web page — a blog post, article, or any public URL</div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="kb-url-input" placeholder="https://example.com/blog/post" style="flex:1;margin:0" />
+            <button class="btn btn-sm btn-outline" type="button" id="kb-url-btn" onclick="importFromUrl()">Import</button>
+          </div>
+          <span id="kb-url-status" style="font-size:12px;color:var(--text-3);display:block;margin-top:8px"></span>
+        </div>
         <div class="modal-actions">
           <button class="btn btn-sm btn-outline" onclick="closeChunkModal()">Cancel</button>
           <button class="btn btn-sm btn-dark" onclick="saveNewChunk()">Save</button>
@@ -1147,7 +1155,7 @@
     function deleteChunk(id) { if (!confirm("Delete this chunk?")) return; authFetch(API+"/api/dashboard/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
     function openChunkModal() { document.getElementById("add-chunk-modal").classList.add("open"); }
     document.getElementById("add-chunk-btn").addEventListener("click", openChunkModal);
-    function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; var st=document.getElementById("kb-file-status"); if(st) st.textContent=""; var fi=document.getElementById("kb-file-input"); if(fi) fi.value=""; }
+    function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; var st=document.getElementById("kb-file-status"); if(st) st.textContent=""; var fi=document.getElementById("kb-file-input"); if(fi) fi.value=""; var ui=document.getElementById("kb-url-input"); if(ui) ui.value=""; var us=document.getElementById("kb-url-status"); if(us) us.textContent=""; }
     // Upload a document (PDF/XLSX/CSV/DOCX/TXT) — extracted, chunked and embedded server-side.
     document.getElementById("kb-file-input").addEventListener("change", function() {
       var f = this.files && this.files[0]; if (!f) return;
@@ -1168,6 +1176,26 @@
         setTimeout(loadChunks, 1500);
       }).catch(function(){ btn.disabled = false; status.textContent = "Upload failed - please try again."; });
     });
+    function importFromUrl() {
+      var url = (document.getElementById("kb-url-input").value || "").trim();
+      var st = document.getElementById("kb-url-status");
+      var btn = document.getElementById("kb-url-btn");
+      if (!url) { st.style.color = "var(--amber)"; st.textContent = "Enter a URL first."; return; }
+      st.style.color = "var(--text-3)"; st.textContent = "Fetching and reading the page…";
+      btn.disabled = true;
+      authFetch(API + "/api/dashboard/scrape-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url }) })
+        .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+        .then(function(res){
+          btn.disabled = false;
+          if (!res.ok) { st.style.color = "var(--amber)"; st.textContent = (res.d && res.d.error) || "Could not import that URL."; return; }
+          st.style.color = "var(--green)";
+          st.textContent = "Added " + res.d.added + " item" + (res.d.added !== 1 ? "s" : "") + " from “" + (res.d.title || url) + "”.";
+          document.getElementById("kb-url-input").value = "";
+          loadChunks();
+        })
+        .catch(function(){ btn.disabled = false; st.style.color = "var(--amber)"; st.textContent = "Import failed - try again."; });
+    }
+
     function saveNewChunk() {
       var t=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();
       if (!c) return;

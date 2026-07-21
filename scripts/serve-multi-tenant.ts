@@ -18,6 +18,8 @@ import { loadCfToken } from "../src/storage/cf-auth.js";
 import { CloudflareVectorizeStore } from "../src/embeddings/vectorize-store.js";
 import { extractFile } from "../src/knowledge/extract-file.js";
 import { BGEEmbeddingProvider, bgeBaseUrl } from "../src/embeddings/bge-provider.js";
+import { fetchPage } from "../src/scraper/fetcher.js";
+import { extractPage } from "../src/scraper/extractor.js";
 import { createHash } from "crypto";
 import { existsSync, mkdirSync } from "fs";
 import express from "express";
@@ -2386,6 +2388,74 @@ app.post("/api/dashboard/rescrape", authMiddleware, (req, res) => {
   worker.enqueue(tenantId, tenant.siteUrl, maxPages);
 
   res.json({ ok: true, message: "Rescrape job queued" });
+});
+
+// Turn extracted content blocks into ~1500-char text chunks for embedding.
+function pageBlockText(b: any): string {
+  if (b?.type === "list" && Array.isArray(b.items)) return (b.content ? b.content + "\n" : "") + b.items.map((i: string) => `- ${i}`).join("\n");
+  if (b?.type === "table" && Array.isArray(b.rows)) return (b.content ? b.content + "\n" : "") + b.rows.map((r: string[]) => r.join(" | ")).join("\n");
+  return b?.content || "";
+}
+function pageToChunks(blocks: any[], maxChars = 1500): string[] {
+  const out: string[] = [];
+  let buf = "";
+  for (const b of blocks || []) {
+    const t = pageBlockText(b).trim();
+    if (!t) continue;
+    if (buf && buf.length + t.length + 2 > maxChars) { out.push(buf); buf = ""; }
+    buf = buf ? buf + "\n\n" + t : t;
+    if (buf.length >= maxChars) { out.push(buf); buf = ""; }
+  }
+  if (buf.trim()) out.push(buf.trim());
+  return out.filter((c) => c.length > 20);
+}
+
+// Import a single web page (blog post, article, any URL, any domain) into the KB.
+// Reuses the scraper's fetch (static -> browserless fallback) + extractor, then
+// stores as "manual_" chunks like the file upload. Login-walled platforms
+// (Facebook/Instagram/etc.) are rejected with a copy-paste hint — they serve
+// bots an empty JS shell, so there is genuinely nothing to extract.
+const BLOCKED_HOSTS = /(^|\.)(facebook|fb|instagram|linkedin|twitter|x|tiktok)\.com$/i;
+app.post("/api/dashboard/scrape-url", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  let url = String(req.body?.url || "").trim();
+  if (!url) { res.status(400).json({ error: "No URL provided" }); return; }
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch { res.status(400).json({ error: "That doesn't look like a valid URL." }); return; }
+  if (BLOCKED_HOSTS.test(host)) {
+    res.status(422).json({ error: "This platform blocks scraping behind a login wall, so there's nothing to read. Copy the text and add it as a document or a manual entry instead." });
+    return;
+  }
+  try {
+    const fetchResult = await fetchPage(url, { timeout: 20000 });
+    if (fetchResult.statusCode >= 400) { res.status(422).json({ error: `The page returned ${fetchResult.statusCode} — it may be private or gone.` }); return; }
+    const page = extractPage(fetchResult);
+    const chunks = pageToChunks(page.content);
+    if (chunks.length === 0) { res.status(422).json({ error: "No readable text found there (the page may be login-walled, image-only, or script-rendered)." }); return; }
+    const store = new CloudflareVectorizeStore({ tenantId });
+    const baseTitle = (page.title || host).slice(0, 160);
+    const provider = bgeProvider();
+    const B = 32;
+    let added = 0;
+    for (let i = 0; i < chunks.length; i += B) {
+      const batch = chunks.slice(i, i + B);
+      const vectors = await provider.embed(batch.map((c) => `${baseTitle}\n\n${c}`));
+      const entries = batch.map((content, j) => ({
+        id: "manual_" + createHash("md5").update(url + "|" + (i + j) + "|" + content.slice(0, 40) + "|" + randomBytes(4).toString("hex")).digest("hex").slice(0, 24),
+        vector: vectors[j],
+        content,
+        metadata: { title: `${baseTitle} (URL)`.slice(0, 200), url: fetchResult.finalUrl, type: "manual", headingHierarchy: [] as string[] },
+      }));
+      await store.upsert(entries);
+      added += entries.length;
+    }
+    console.log(`[scrape-url] ${tenantId}: ${url} (${fetchResult.renderMethod}) -> ${added} chunks`);
+    res.status(201).json({ ok: true, url: fetchResult.finalUrl, title: baseTitle, added });
+  } catch (e: any) {
+    console.error(`[scrape-url] ${tenantId}: ${e?.message}`);
+    res.status(400).json({ error: "Could not fetch that URL — check the address and that the page is public." });
+  }
 });
 
 // Chunks
