@@ -76,38 +76,46 @@ export async function nextInterviewQuestion(
   return { question: q.slice(0, 400), done: false };
 }
 
+export interface SynthesisResult {
+  chunks: KBChunk[];        // KB fact blocks (embedded + stored)
+  tagline: string;          // short line for the micro-site
+  suggestions: string[];    // example customer questions for the micro-site
+}
+
 /**
- * Turn the finished interview into clean, self-contained KB chunks — each a
- * titled fact block in the business's own "we/us" voice and language. These are
- * embedded and stored as manual chunks by the caller.
+ * Turn the finished interview into (a) clean KB chunks — titled fact blocks in the
+ * business's own "we/us" voice — and (b) a small website card (tagline + suggested
+ * questions) for the auto-generated micro-site. One LLM call.
  */
-export async function synthesizeKB(businessName: string, transcript: InterviewTurn[]): Promise<KBChunk[]> {
+export async function synthesizeKB(businessName: string, transcript: InterviewTurn[]): Promise<SynthesisResult> {
   const provider = new OpenRouterProvider();
   const system =
-    "You convert an onboarding interview into an AI assistant's knowledge base. " +
-    "Output STRICT JSON only: {\"chunks\":[{\"title\":\"...\",\"content\":\"...\"}]}. " +
-    "Each chunk is a self-contained fact block the assistant can retrieve to answer customers. " +
-    "Write in the business's OWN voice (we/our/us) and in the SAME language as the interview (default Polish). " +
-    "Cover everything the owner said: what they offer, hours, location/area, contact & booking, pricing, and common Q&A. " +
-    "Do NOT invent facts the owner did not give. 4-10 chunks, each 1-4 sentences. Titles are short.";
+    "You convert an onboarding interview into an AI assistant's knowledge base AND a short website card. " +
+    "Output STRICT JSON only: {\"tagline\":\"...\",\"suggestions\":[\"...\"],\"chunks\":[{\"title\":\"...\",\"content\":\"...\"}]}. " +
+    "chunks: self-contained fact blocks the assistant retrieves to answer customers, in the business's OWN voice (we/our/us), same language as the interview (default Polish), covering what they offer, hours, location/area, contact & booking, pricing, and common Q&A. 4-10 chunks, 1-4 sentences each, short titles. Do NOT invent facts the owner did not give. " +
+    "tagline: one short catchy line (max 8 words) in the business's language. " +
+    "suggestions: 3-4 short example questions a customer might ask, in the business's language.";
   const prompt =
-    `Business name: ${businessName}\n\nInterview:\n${transcriptText(transcript)}\n\nReturn the JSON knowledge base now.`;
+    `Business name: ${businessName}\n\nInterview:\n${transcriptText(transcript)}\n\nReturn the JSON now.`;
 
   let content = "";
   try {
     const r = await provider.chat(
       [ { role: "system", content: system }, { role: "user", content: prompt } ],
-      { maxTokens: 1600, temperature: 0.3 }
+      { maxTokens: 1800, temperature: 0.3 }
     );
     content = r.content || "";
-  } catch { return []; }
+  } catch { return { chunks: [], tagline: "", suggestions: [] }; }
 
   const parsed = extractJson(content);
-  const raw: any[] = Array.isArray(parsed?.chunks) ? parsed.chunks : [];
-  return raw
-    .map((c) => ({ title: String(c?.title || "").trim().slice(0, 120), content: String(c?.content || "").trim().slice(0, 2000) }))
-    .filter((c) => c.content.length > 10)
+  const chunks = (Array.isArray(parsed?.chunks) ? parsed.chunks : [])
+    .map((c: any) => ({ title: String(c?.title || "").trim().slice(0, 120), content: String(c?.content || "").trim().slice(0, 2000) }))
+    .filter((c: KBChunk) => c.content.length > 10)
     .slice(0, 12);
+  const tagline = String(parsed?.tagline || "").trim().slice(0, 80);
+  const suggestions = (Array.isArray(parsed?.suggestions) ? parsed.suggestions : [])
+    .map((s: any) => String(s).trim()).filter(Boolean).slice(0, 4);
+  return { chunks, tagline, suggestions };
 }
 
 function extractJson(text: string): any {

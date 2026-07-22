@@ -111,13 +111,13 @@
   <!-- DONE -->
   <section id="done" class="done hidden">
     <div class="check">✓</div>
-    <h1>Gotowe - Twój bot już umie odpowiadać.</h1>
-    <p class="lede">Zbudowaliśmy bazę wiedzy z naszej rozmowy (<span id="done-count">kilka</span> tematów). Przetestuj, jak odpowiada Twoim klientom.</p>
+    <h1>Gotowe - masz stronę i asystenta.</h1>
+    <p class="lede">Z naszej rozmowy zbudowaliśmy Twoją stronę i bota (<span id="done-count">kilka</span> sekcji wiedzy). Zobacz, jak wygląda i jak odpowiada klientom.</p>
     <div class="row">
-      <a class="btn" id="try-btn" href="#">Przetestuj swojego bota</a>
+      <a class="btn" id="try-btn" href="#">Zobacz swoją stronę</a>
       <a class="btn btn-ghost" id="dash-btn" href="/dashboard">Przejdź do panelu</a>
     </div>
-    <div class="hint" style="margin-top:22px">Chcesz dodać coś jeszcze? W panelu dorzucisz cennik, zdjęcia menu albo dowolny link.</div>
+    <div class="hint" style="margin-top:22px">Chcesz dodać coś jeszcze? W panelu dorzucisz cennik, zdjęcie menu albo dowolny link.</div>
   </section>
 </div>
 
@@ -182,7 +182,7 @@
       if (!r.ok){ cerr.textContent = d.error || "Coś poszło nie tak."; return; }
       if (d.done){
         document.getElementById("done-count").textContent = d.chunksAdded || "kilka";
-        document.getElementById("try-btn").href = d.botUrl || ("/demo/" + tenantId);
+        document.getElementById("try-btn").href = d.siteUrl || d.botUrl || ("/site/" + tenantId);
         show("done");
         return;
       }

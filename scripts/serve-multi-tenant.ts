@@ -886,10 +886,22 @@ app.get("/site/:tenantId", (req, res) => {
   const baseUrl = process.env.BASE_URL || "https://" + host;
   const brand = tenant.brandName || tenant.domain;
   const settings = tenant.settings || {};
-  const tagline = settings.tagline || "Ask me anything";
+  const siteCard = settings.siteCard || null;
+  const tagline = (siteCard && siteCard.tagline) || settings.tagline || "Zapytaj mnie o wszystko";
   const accentColor = settings.accentColor || "#3b82f6";
   const theme = settings.siteTheme || "dark";
   const bgDark = theme === "dark";
+  const escHtml = (s: string) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Auto-generated micro-site: visible info sections + suggestion chips from the KB.
+  const sectionsHtml = siteCard && Array.isArray(siteCard.sections) && siteCard.sections.length
+    ? `<section class="site-info" id="site-info">` +
+      siteCard.sections.map((s: any) => `<div class="info-card"><h3>${escHtml(s.label)}</h3><p>${escHtml(s.text)}</p></div>`).join("") +
+      `</section>`
+    : "";
+  const suggestionChips = (siteCard && Array.isArray(siteCard.suggestions) && siteCard.suggestions.length
+    ? siteCard.suggestions
+    : ["What services do you offer?", "What are your hours?", "How can I contact you?"]
+  ).map((q: string) => `<div class="site-suggestion">${escHtml(q)}</div>`).join("");
 
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -1077,6 +1089,18 @@ body {
 }
 .site-powered a { color: ${bgDark ? '#475569' : '#9ca3af'}; text-decoration: none; }
 
+.site-info {
+  max-width: 660px; margin: 4px auto 48px; padding: 0 24px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px;
+}
+.info-card {
+  background: ${bgDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'};
+  border: 1px solid ${bgDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};
+  border-radius: 14px; padding: 16px 18px;
+}
+.info-card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: ${accentColor}; margin-bottom: 8px; font-weight: 700; }
+.info-card p { font-size: 14px; line-height: 1.55; color: ${bgDark ? '#cbd5e1' : '#374151'}; white-space: pre-wrap; }
+
 @media(max-width:600px) {
   .site-title { font-size: 32px; }
   .site-nav a:not(:last-child) { display: none; }
@@ -1108,11 +1132,11 @@ body {
   </div>
 
   <div class="site-suggestions" id="suggestions">
-    <div class="site-suggestion">What services do you offer?</div>
-    <div class="site-suggestion">What are your hours?</div>
-    <div class="site-suggestion">How can I contact you?</div>
+    ${suggestionChips}
   </div>
 </main>
+
+${sectionsHtml}
 
 <div class="site-messages" id="messages"></div>
 
@@ -1159,6 +1183,7 @@ body {
     hero.style.paddingBottom = "0";
     suggestions.style.display = "none";
     document.getElementById("hero-prompt").style.display = "none";
+    var si = document.getElementById("site-info"); if (si) si.style.display = "none";
     msgsEl.classList.add("active");
     inputBar.classList.add("active");
     barInput.focus();
@@ -1386,8 +1411,9 @@ app.post("/api/interview/message", async (req, res) => {
     const step = await nextInterviewQuestion(name, transcript);
     if (!step.done) { res.json({ done: false, question: step.question }); return; }
 
-    // Interview complete — synthesize the KB, embed, store as manual chunks, activate.
-    const chunks = await synthesizeKB(name, transcript);
+    // Interview complete — synthesize the KB + micro-site card, embed, store, activate.
+    const kb = await synthesizeKB(name, transcript);
+    const chunks = kb.chunks;
     if (chunks.length === 0) { res.json({ done: false, question: "Doprecyzuj jeszcze, co dokładnie oferujecie i jak można się z Wami skontaktować?" }); return; }
     const store = new CloudflareVectorizeStore({ tenantId: tenant.id });
     const provider = bgeProvider();
@@ -1404,9 +1430,15 @@ app.post("/api/interview/message", async (req, res) => {
       await store.upsert(entries);
       added += entries.length;
     }
-    updateTenant(tenant.id, { status: "active", chunksCount: added });
-    console.log(`[interview] ${tenant.id}: built KB from interview -> ${added} chunks`);
-    res.json({ done: true, tenantId: tenant.id, chunksAdded: added, botUrl: `/demo/${tenant.id}` });
+    // Auto-generated micro-site: KB sections become visible info, plus tagline + suggestions.
+    const siteCard = {
+      tagline: kb.tagline || undefined,
+      suggestions: kb.suggestions,
+      sections: chunks.map((c) => ({ label: c.title, text: c.content })),
+    };
+    updateTenant(tenant.id, { status: "active", chunksCount: added, settings: { ...(tenant.settings || {}), siteCard } });
+    console.log(`[interview] ${tenant.id}: built KB from interview -> ${added} chunks + micro-site`);
+    res.json({ done: true, tenantId: tenant.id, chunksAdded: added, botUrl: `/demo/${tenant.id}`, siteUrl: `/site/${tenant.id}` });
   } catch (e: any) {
     console.error(`[interview/message] ${tenant.id}: ${e?.message}`);
     res.status(500).json({ error: "Coś poszło nie tak. Spróbuj jeszcze raz." });
