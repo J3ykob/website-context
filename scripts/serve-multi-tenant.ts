@@ -42,6 +42,7 @@ import { randomBytes, createHmac, timingSafeEqual } from "crypto";
 import {
   runMigrations,
   createTenant,
+  createManualTenant,
   ensureTenant,
   getTenant,
   getTenantByDomain,
@@ -67,6 +68,7 @@ import {
 import { analyzeRecordedFlow } from "../src/flows/analyzer.js";
 import { OpenRouterProvider } from "../src/llm/openrouter-provider.js";
 import { analyzeIntents, invalidateIntents } from "../src/analytics/intent-engine.js";
+import { nextInterviewQuestion, synthesizeKB, type InterviewTurn } from "../src/onboarding/interview.js";
 import {
   detectPlatform,
   extractMessage,
@@ -1350,6 +1352,66 @@ app.post("/api/onboard-demo", async (req, res) => {
   }
 });
 
+// ─── Interview-based onboarding (businesses with no scrapable website) ───────
+// The owner is interviewed and their answers become the KB — no scrape. Public
+// (a brand-new business has no password yet); IP rate-limited like signup. The
+// client holds the transcript and sends it each turn (server stays stateless).
+app.post("/api/interview/start", async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  if (!checkSignupRate(ip)) { res.status(429).json({ error: "Za dużo prób. Spróbuj za chwilę." }); return; }
+  const businessName = String(req.body?.businessName || "").trim();
+  const email = String(req.body?.email || "").trim();
+  if (businessName.length < 2) { res.status(400).json({ error: "Podaj nazwę firmy." }); return; }
+  try {
+    const tenant = createManualTenant(email, businessName);
+    const step = await nextInterviewQuestion(businessName, []);
+    res.status(201).json({ tenantId: tenant.id, businessName: tenant.brandName, question: step.question || "Czym zajmuje się Twoja firma i co oferujecie klientom?" });
+  } catch (e: any) {
+    console.error(`[interview/start] ${e?.message}`);
+    res.status(500).json({ error: "Nie udało się rozpocząć onboardingu." });
+  }
+});
+
+app.post("/api/interview/message", async (req, res) => {
+  const tenant = getTenant(String(req.body?.tenantId || ""));
+  if (!tenant) { res.status(404).json({ error: "Nie znaleziono sesji onboardingu." }); return; }
+  const rawTurns: any[] = Array.isArray(req.body?.transcript) ? req.body.transcript : [];
+  const transcript: InterviewTurn[] = rawTurns
+    .filter((m) => m && (m.role === "assistant" || m.role === "user") && typeof m.content === "string")
+    .map((m) => ({ role: m.role as "assistant" | "user", content: String(m.content).slice(0, 2000) }))
+    .slice(-40);
+  const name = tenant.brandName || tenant.id;
+  try {
+    const step = await nextInterviewQuestion(name, transcript);
+    if (!step.done) { res.json({ done: false, question: step.question }); return; }
+
+    // Interview complete — synthesize the KB, embed, store as manual chunks, activate.
+    const chunks = await synthesizeKB(name, transcript);
+    if (chunks.length === 0) { res.json({ done: false, question: "Doprecyzuj jeszcze, co dokładnie oferujecie i jak można się z Wami skontaktować?" }); return; }
+    const store = new CloudflareVectorizeStore({ tenantId: tenant.id });
+    const provider = bgeProvider();
+    let added = 0;
+    for (let i = 0; i < chunks.length; i += 32) {
+      const batch = chunks.slice(i, i + 32);
+      const vectors = await provider.embed(batch.map((c) => `${c.title}\n\n${c.content}`));
+      const entries = batch.map((c, j) => ({
+        id: "manual_" + createHash("md5").update(tenant.id + "|" + c.title + "|" + (i + j) + "|" + randomBytes(4).toString("hex")).digest("hex").slice(0, 24),
+        vector: vectors[j],
+        content: c.content,
+        metadata: { title: c.title.slice(0, 200), url: "", type: "manual", headingHierarchy: [] as string[] },
+      }));
+      await store.upsert(entries);
+      added += entries.length;
+    }
+    updateTenant(tenant.id, { status: "active", chunksCount: added });
+    console.log(`[interview] ${tenant.id}: built KB from interview -> ${added} chunks`);
+    res.json({ done: true, tenantId: tenant.id, chunksAdded: added, botUrl: `/demo/${tenant.id}` });
+  } catch (e: any) {
+    console.error(`[interview/message] ${tenant.id}: ${e?.message}`);
+    res.status(500).json({ error: "Coś poszło nie tak. Spróbuj jeszcze raz." });
+  }
+});
+
 // Diagnostic: tests THIS server's (Render's) email path — the same RESEND_API_KEY + FROM
 // the bot-ready email uses — so we can tell whether a missing/wrong Render key is why the
 // onboarding callback email never arrives (the worker swallows the Resend error).
@@ -1935,6 +1997,11 @@ app.get("/auth/setup", (_, res) => {
 // Dashboard HTML (auth handled client-side via localStorage token)
 app.get("/dashboard", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/dashboard.html"));
+});
+
+// Interview-based onboarding for businesses with no website (FB-only, phone-only).
+app.get("/build", (_, res) => {
+  res.sendFile(resolve(__dirname, "../public/build.html"));
 });
 
 // Stats

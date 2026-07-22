@@ -151,6 +151,24 @@ export function createTenant(email: string, siteUrl: string): TenantRecord {
   return rec;
 }
 
+// Create a tenant for a business with NO website (interview-based onboarding).
+// Id comes from the business name (not a domain); a synthetic .whisp.site domain
+// keeps the byDomain index unique. No scrape is queued — the KB is built by the
+// interview. Starts "pending"; caller flips to "active" once chunks are stored.
+export function createManualTenant(email: string, businessName: string): TenantRecord {
+  const base = businessName.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "biz";
+  let id = base, n = 1;
+  while (byId.has(id)) id = `${base}_${n++}`;
+  const domain = `${id.replace(/_/g, "-")}.whisp.site`;
+  const rec = newRecord(id, email, domain, "", "pending");
+  rec.brandName = businessName.trim().slice(0, 120);
+  byId.set(id, rec);
+  byDomain.set(domain, id);
+  upsert(rec, "createManualTenant");
+  return rec;
+}
+
 export function ensureTenant(id: string, email: string, domain: string, siteUrl: string): TenantRecord | null {
   const existing = byId.get(id);
   if (existing) return existing;

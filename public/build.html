@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Zbuduj swojego bota - Whisp</title>
+<style>
+  :root{
+    --bg:#0a0e1a; --surface:#111827; --card:rgba(255,255,255,0.03);
+    --line:rgba(255,255,255,0.08); --line-bright:rgba(255,255,255,0.16);
+    --text:#f1f5f9; --text-2:#94a3b8; --text-3:#64748b;
+    --green:#10b981; --amber:#f59e0b; --blue:#3b82f6; --blue-hover:#2563eb;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;} html,body{margin:0;height:100%;}
+  body{
+    background:
+      radial-gradient(900px 500px at 80% -10%, rgba(59,130,246,0.10), transparent 60%),
+      var(--bg);
+    color:var(--text); font-family:var(--font); line-height:1.5;
+    -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; min-height:100%;
+  }
+  .wrap{width:100%; max-width:660px; margin:0 auto; padding:24px 20px 40px; flex:1; display:flex; flex-direction:column;}
+  .brand{font-weight:800; letter-spacing:-0.02em; font-size:20px; margin-bottom:auto; padding:8px 0;}
+  .brand b{color:var(--blue);}
+
+  /* Start view */
+  .hero{margin:auto 0;}
+  .eyebrow{font-size:12px; letter-spacing:0.18em; text-transform:uppercase; color:var(--blue); font-weight:600; margin-bottom:14px;}
+  h1{font-size:clamp(26px,5vw,36px); line-height:1.15; letter-spacing:-0.02em; margin:0 0 12px; text-wrap:balance;}
+  .lede{color:var(--text-2); font-size:16px; max-width:52ch; margin:0 0 28px;}
+  .field{margin-bottom:12px;}
+  label{display:block; font-size:12px; color:var(--text-3); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;}
+  input, textarea{
+    width:100%; background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    color:var(--text); font-family:inherit; font-size:15px; padding:13px 15px; outline:none; transition:border-color .15s, box-shadow .15s;
+  }
+  input:focus, textarea:focus{border-color:var(--blue); box-shadow:0 0 0 3px rgba(59,130,246,0.25);}
+  input::placeholder, textarea::placeholder{color:var(--text-3);}
+  .btn{
+    background:linear-gradient(135deg,var(--blue),var(--blue-hover)); color:#fff; border:none;
+    border-radius:12px; font-family:inherit; font-size:15px; font-weight:600; padding:13px 22px; cursor:pointer;
+    transition:transform .12s, opacity .15s;
+  }
+  .btn:hover{transform:translateY(-1px);} .btn:disabled{opacity:.5; cursor:default; transform:none;}
+  .btn-block{width:100%; margin-top:6px;}
+  .hint{font-size:12.5px; color:var(--text-3); margin-top:14px;}
+
+  /* Chat view */
+  .chat-head{display:flex; align-items:center; gap:10px; padding:4px 2px 16px; border-bottom:1px solid var(--line); margin-bottom:18px;}
+  .avatar{width:34px; height:34px; border-radius:10px; background:linear-gradient(135deg,var(--blue),var(--blue-hover)); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; color:#fff;}
+  .chat-head .who{font-weight:700; font-size:15px;} .chat-head .sub{font-size:12px; color:var(--text-3);}
+  .msgs{flex:1; display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding:4px 2px 10px;}
+  .msg{max-width:82%; padding:12px 16px; border-radius:16px; font-size:15px; white-space:pre-wrap;}
+  .msg.bot{align-self:flex-start; background:var(--surface); border:1px solid var(--line); border-bottom-left-radius:5px;}
+  .msg.me{align-self:flex-end; background:linear-gradient(135deg,var(--blue),var(--blue-hover)); color:#fff; border-bottom-right-radius:5px;}
+  .typing{align-self:flex-start; display:flex; gap:4px; padding:14px 16px;}
+  .typing span{width:7px; height:7px; border-radius:50%; background:var(--text-3); animation:blink 1.2s infinite both;}
+  .typing span:nth-child(2){animation-delay:.2s;} .typing span:nth-child(3){animation-delay:.4s;}
+  @keyframes blink{0%,80%,100%{opacity:.25;} 40%{opacity:1;}}
+  .composer{display:flex; gap:10px; align-items:flex-end; padding-top:16px; border-top:1px solid var(--line); margin-top:8px;}
+  .composer textarea{resize:none; max-height:140px; border-radius:14px;}
+  .composer .btn{padding:13px 20px; align-self:stretch;}
+
+  /* Done view */
+  .done{margin:auto 0; text-align:center;}
+  .check{width:64px; height:64px; border-radius:50%; background:rgba(16,185,129,0.14); color:var(--green); display:flex; align-items:center; justify-content:center; margin:0 auto 20px; font-size:32px;}
+  .done h1{margin-bottom:10px;} .done .lede{margin:0 auto 26px;}
+  .row{display:flex; gap:12px; justify-content:center; flex-wrap:wrap;}
+  .btn-ghost{background:transparent; border:1px solid var(--line-bright); color:var(--text);}
+  .err{color:var(--amber); font-size:13.5px; margin-top:10px; min-height:18px;}
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">Whisp<b>.</b></div>
+
+  <!-- START -->
+  <section id="start" class="hero">
+    <div class="eyebrow">Bez strony? Bez problemu.</div>
+    <h1>Zbuduj bota dla swojej firmy w 5 minut - samą rozmową.</h1>
+    <p class="lede">Nie masz strony internetowej? Nie szkodzi. Zadam Ci kilka prostych pytań o Twój biznes, a na końcu dostaniesz gotowego asystenta, który odpowiada Twoim klientom - 24/7.</p>
+    <div class="field">
+      <label for="biz">Nazwa firmy</label>
+      <input id="biz" type="text" placeholder="np. Barber King Kraków" autocomplete="organization" />
+    </div>
+    <div class="field">
+      <label for="mail">E-mail (żeby zapisać dostęp - opcjonalnie)</label>
+      <input id="mail" type="email" placeholder="ty@firma.pl" autocomplete="email" />
+    </div>
+    <button class="btn btn-block" id="start-btn" onclick="startInterview()">Zacznij rozmowę</button>
+    <div class="err" id="start-err"></div>
+    <div class="hint">Odpowiadaj krótko i po swojemu. To trwa kilka minut.</div>
+  </section>
+
+  <!-- CHAT -->
+  <section id="chat" class="hero hidden" style="display:flex; flex-direction:column; flex:1;">
+    <div class="chat-head">
+      <div class="avatar" id="chat-initial">W</div>
+      <div><div class="who" id="chat-name">Twoja firma</div><div class="sub">Onboarding - zadaję pytania, Ty odpowiadasz</div></div>
+    </div>
+    <div class="msgs" id="msgs"></div>
+    <div class="composer">
+      <textarea id="answer" rows="1" placeholder="Twoja odpowiedź…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAnswer();}"></textarea>
+      <button class="btn" id="send-btn" onclick="sendAnswer()">Wyślij</button>
+    </div>
+    <div class="err" id="chat-err"></div>
+  </section>
+
+  <!-- DONE -->
+  <section id="done" class="done hidden">
+    <div class="check">✓</div>
+    <h1>Gotowe - Twój bot już umie odpowiadać.</h1>
+    <p class="lede">Zbudowaliśmy bazę wiedzy z naszej rozmowy (<span id="done-count">kilka</span> tematów). Przetestuj, jak odpowiada Twoim klientom.</p>
+    <div class="row">
+      <a class="btn" id="try-btn" href="#">Przetestuj swojego bota</a>
+      <a class="btn btn-ghost" id="dash-btn" href="/dashboard">Przejdź do panelu</a>
+    </div>
+    <div class="hint" style="margin-top:22px">Chcesz dodać coś jeszcze? W panelu dorzucisz cennik, zdjęcia menu albo dowolny link.</div>
+  </section>
+</div>
+
+<script>
+  var API = "";
+  var tenantId = null;
+  var transcript = []; // [{role:'assistant'|'user', content}]
+
+  function show(id){ ["start","chat","done"].forEach(function(s){ document.getElementById(s).classList.toggle("hidden", s!==id); }); }
+  function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  function addMsg(role, text){
+    var box = document.getElementById("msgs");
+    var el = document.createElement("div");
+    el.className = "msg " + (role === "assistant" ? "bot" : "me");
+    el.textContent = text;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+  }
+  function typing(on){
+    var box = document.getElementById("msgs");
+    var ex = document.getElementById("typing-el");
+    if (on){ if (ex) return; var t=document.createElement("div"); t.className="typing"; t.id="typing-el"; t.innerHTML="<span></span><span></span><span></span>"; box.appendChild(t); box.scrollTop=box.scrollHeight; }
+    else if (ex){ ex.remove(); }
+  }
+
+  async function startInterview(){
+    var biz = document.getElementById("biz").value.trim();
+    var mail = document.getElementById("mail").value.trim();
+    var err = document.getElementById("start-err");
+    err.textContent = "";
+    if (biz.length < 2){ err.textContent = "Podaj nazwę firmy."; return; }
+    var btn = document.getElementById("start-btn"); btn.disabled = true; btn.textContent = "Chwileczkę…";
+    try {
+      var r = await fetch(API + "/api/interview/start", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ businessName: biz, email: mail }) });
+      var d = await r.json();
+      if (!r.ok){ err.textContent = d.error || "Nie udało się zacząć."; btn.disabled=false; btn.textContent="Zacznij rozmowę"; return; }
+      tenantId = d.tenantId;
+      document.getElementById("chat-name").textContent = d.businessName || biz;
+      document.getElementById("chat-initial").textContent = (biz[0]||"W").toUpperCase();
+      show("chat");
+      transcript.push({ role:"assistant", content: d.question });
+      addMsg("assistant", d.question);
+      document.getElementById("answer").focus();
+    } catch(e){ err.textContent = "Błąd połączenia. Spróbuj ponownie."; btn.disabled=false; btn.textContent="Zacznij rozmowę"; }
+  }
+
+  async function sendAnswer(){
+    var ta = document.getElementById("answer");
+    var text = ta.value.trim();
+    if (!text) return;
+    var send = document.getElementById("send-btn");
+    var cerr = document.getElementById("chat-err"); cerr.textContent = "";
+    ta.value = ""; ta.style.height = "auto";
+    addMsg("user", text);
+    transcript.push({ role:"user", content: text });
+    send.disabled = true; typing(true);
+    try {
+      var r = await fetch(API + "/api/interview/message", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ tenantId: tenantId, transcript: transcript }) });
+      var d = await r.json();
+      typing(false); send.disabled = false;
+      if (!r.ok){ cerr.textContent = d.error || "Coś poszło nie tak."; return; }
+      if (d.done){
+        document.getElementById("done-count").textContent = d.chunksAdded || "kilka";
+        document.getElementById("try-btn").href = d.botUrl || ("/demo/" + tenantId);
+        show("done");
+        return;
+      }
+      transcript.push({ role:"assistant", content: d.question });
+      addMsg("assistant", d.question);
+      ta.focus();
+    } catch(e){ typing(false); send.disabled=false; cerr.textContent = "Błąd połączenia. Spróbuj ponownie."; }
+  }
+
+  // auto-grow textarea
+  document.getElementById("answer").addEventListener("input", function(){ this.style.height="auto"; this.style.height=Math.min(this.scrollHeight,140)+"px"; });
+</script>
+</body>
+</html>

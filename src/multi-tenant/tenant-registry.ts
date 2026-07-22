@@ -15,6 +15,7 @@ export {
   getTenantByDomain,
   listTenants,
   createTenant,
+  createManualTenant,
   ensureTenant,
   updateTenant,
   deleteTenant,
