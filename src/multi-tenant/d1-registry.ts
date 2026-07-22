@@ -90,13 +90,29 @@ const byDomain = new Map<string, string>();
 
 export async function hydrateRegistry(): Promise<number> {
   const rows = (await query("SELECT * FROM tenants")) as TenantRow[];
-  byId.clear();
-  byDomain.clear();
+  const freshById = new Map<string, TenantRecord>();
+  const freshByDomain = new Map<string, string>();
   for (const row of rows) {
     const rec = rowToRecord(row);
-    byId.set(rec.id, rec);
-    byDomain.set(rec.domain, rec.id);
+    freshById.set(rec.id, rec);
+    freshByDomain.set(rec.domain, rec.id);
   }
+  // Preserve very-recently-written records not yet visible in this D1 snapshot: a
+  // just-created tenant's write-through can still be in flight when the periodic
+  // refresh fires, and a blind clear+reload would drop it — 404-ing the tenant
+  // mid-onboarding (e.g. between /api/interview/start and the first /message).
+  const now = Date.now();
+  const GRACE_MS = 10 * 60 * 1000;
+  for (const [id, rec] of byId) {
+    if (!freshById.has(id) && Date.parse(rec.updatedAt) > now - GRACE_MS) {
+      freshById.set(id, rec);
+      freshByDomain.set(rec.domain, id);
+    }
+  }
+  byId.clear();
+  byDomain.clear();
+  for (const [id, rec] of freshById) byId.set(id, rec);
+  for (const [d, id] of freshByDomain) byDomain.set(d, id);
   return byId.size;
 }
 
