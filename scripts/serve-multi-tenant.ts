@@ -17,6 +17,7 @@ import { readFile, writeFile, appendFile } from "fs/promises";
 import { loadCfToken } from "../src/storage/cf-auth.js";
 import { CloudflareVectorizeStore } from "../src/embeddings/vectorize-store.js";
 import { extractFile } from "../src/knowledge/extract-file.js";
+import { isImageUpload, extractImage, imageTextToBlocks } from "../src/knowledge/extract-image.js";
 import { BGEEmbeddingProvider, bgeBaseUrl } from "../src/embeddings/bge-provider.js";
 import { fetchPage } from "../src/scraper/fetcher.js";
 import { extractPage } from "../src/scraper/extractor.js";
@@ -2413,9 +2414,16 @@ app.post("/api/dashboard/knowledge-file", authMiddleware, (req, res) => {
     const buffer = Buffer.concat(parts);
     if (buffer.length === 0) { res.status(400).json({ error: "Empty file" }); return; }
     try {
-      const { kind, blocks, charCount } = await extractFile(buffer, filename, req.headers["content-type"]);
+      let kind: string, blocks: string[], charCount: number;
+      if (isImageUpload(filename, req.headers["content-type"])) {
+        // Photo of a menu / price list / sign — transcribe via the vision model.
+        const img = await extractImage(buffer, filename, req.headers["content-type"]);
+        kind = "image"; blocks = imageTextToBlocks(img.text); charCount = img.charCount;
+      } else {
+        ({ kind, blocks, charCount } = await extractFile(buffer, filename, req.headers["content-type"]));
+      }
       if (blocks.length === 0) {
-        res.status(422).json({ error: "No readable text found (scanned image PDF, or empty document)" });
+        res.status(422).json({ error: "No readable text found (blurry photo, scanned-image PDF, or empty document)" });
         return;
       }
       const store = new CloudflareVectorizeStore({ tenantId });

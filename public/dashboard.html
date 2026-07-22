@@ -742,8 +742,8 @@
         <input type="text" id="new-chunk-title" placeholder="Title (optional)" />
         <textarea id="new-chunk-content" placeholder="Write the knowledge content..." rows="5"></textarea>
         <div style="border-top:1px solid var(--line);margin:14px 0 12px;padding-top:12px">
-          <div style="font-size:12px;color:var(--text-3);margin-bottom:8px">Or upload a document — PDF, Excel (.xlsx), CSV, Word (.docx), TXT</div>
-          <input type="file" id="kb-file-input" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md" style="display:none" />
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:8px">Or upload a document or a photo — PDF, Excel, CSV, Word, TXT, or a photo of a menu / price list (JPG, PNG)</div>
+          <input type="file" id="kb-file-input" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.jpg,.jpeg,.png,.webp,.heic,image/*" style="display:none" />
           <button class="btn btn-sm btn-outline" id="kb-file-btn" type="button" onclick="document.getElementById('kb-file-input').click()">Choose file…</button>
           <span id="kb-file-status" style="font-size:12px;color:var(--text-3);margin-left:10px"></span>
         </div>
