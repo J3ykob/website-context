@@ -12,6 +12,7 @@ import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { WebsiteChat } from "../llm/chat.js";
 import { getFlows } from "../flows/flow-store.js";
+import { getTenant } from "./tenant-registry.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -58,7 +59,7 @@ export class TenantManager {
 
     // Load context metadata from disk or R2
     const metaPath = resolve(DATA_ROOT, tenantId, "context-meta.json");
-    let metaRaw: string;
+    let metaRaw: string | null = null;
     if (existsSync(metaPath)) {
       metaRaw = await readFile(metaPath, "utf-8");
     } else {
@@ -67,19 +68,32 @@ export class TenantManager {
         const { downloadTenantFile } = await import("../storage/r2.js");
         console.log(`[tenant-manager] Fetching context-meta from R2 for ${tenantId}`);
         const r2Data = await downloadTenantFile(tenantId, "context-meta.json");
-        if (!r2Data) {
-          throw new Error(`No context metadata found for tenant ${tenantId} in R2 or disk.`);
+        if (r2Data) {
+          metaRaw = r2Data.toString("utf-8");
+          // Cache locally for next time
+          const { mkdirSync } = await import("fs");
+          const dir = resolve(DATA_ROOT, tenantId);
+          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+          await writeFile(metaPath, metaRaw);
+          console.log(`[tenant-manager] Cached ${tenantId} context-meta from R2`);
         }
-        metaRaw = r2Data.toString("utf-8");
-        // Cache locally for next time
-        const { mkdirSync } = await import("fs");
-        const dir = resolve(DATA_ROOT, tenantId);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        await writeFile(metaPath, metaRaw);
-        console.log(`[tenant-manager] Cached ${tenantId} context-meta from R2`);
       } catch (r2err: any) {
-        throw new Error(`Failed to load context for ${tenantId}: ${r2err.message}`);
+        console.warn(`[tenant-manager] R2 context-meta load failed for ${tenantId}: ${r2err.message}`);
       }
+    }
+    // No scrape metadata — an interview / manual tenant with no website. Synthesize a
+    // minimal context so the bot still runs; retrieval works off Vectorize (the KB was
+    // built by the interview / manual uploads, not a crawl).
+    if (!metaRaw) {
+      const t = getTenant(tenantId);
+      if (!t) throw new Error(`No context metadata and no tenant record for ${tenantId}`);
+      const now = new Date().toISOString();
+      metaRaw = JSON.stringify({
+        tenantId,
+        siteUrl: /^https?:/i.test(t.siteUrl) ? t.siteUrl : `https://${t.domain}`,
+        siteMap: [], flows: [], pages: [],
+        lastScrapedAt: now, pagesCount: 0, chunksCount: t.chunksCount, officialInfo: null,
+      });
     }
     const meta = JSON.parse(metaRaw) as {
       tenantId: string;
@@ -120,6 +134,13 @@ export class TenantManager {
     // Per-tenant vector store — Cloudflare Vectorize (the only store in production).
     const store = new CloudflareVectorizeStore({ tenantId });
 
+    // A tenant with no pages is an interview / no-website business — give it an
+    // identity from its brand name rather than the synthetic hostname.
+    const brand = context.siteMap.length === 0 ? (getTenant(tenantId)?.brandName || "") : "";
+    const systemPromptExtra = brand
+      ? `You ARE "${brand}". This business has no separate website — you are its assistant. Always speak as ${brand} using "we/our/us", and only discuss this business.`
+      : `This assistant is deployed on ${new URL(meta.siteUrl).hostname}. Never reference or provide information about any other website or domain.`;
+
     // Create WebsiteChat with OpenRouter
     const chat = new WebsiteChat(this.bgeProvider, store, context, {
       llmProvider: "openrouter",
@@ -128,7 +149,7 @@ export class TenantManager {
         model: process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-001",
         siteUrl: meta.siteUrl,
       },
-      systemPromptExtra: `This assistant is deployed on ${new URL(meta.siteUrl).hostname}. Never reference or provide information about any other website or domain.`,
+      systemPromptExtra,
     });
 
     // Load ONLY owner-curated context notes (context_notes.json). We deliberately no
