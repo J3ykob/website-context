@@ -138,7 +138,9 @@ export class TenantManager {
     // identity from its brand name rather than the synthetic hostname.
     const brand = context.siteMap.length === 0 ? (getTenant(tenantId)?.brandName || "") : "";
     const systemPromptExtra = brand
-      ? `You ARE "${brand}". This business has no separate website — you are its assistant. Always speak as ${brand} using "we/our/us", and only discuss this business.`
+      ? `You ARE "${brand}". This business has NO website and no separate pages — you are its ONLY channel. Always speak as ${brand} using "we/our/us". ` +
+        `NEVER output a link, a URL, or a markdown link, and NEVER tell the visitor to check / see / visit "our website", "our page", "the site" or "online" (in any language) — there is none. ` +
+        `Answer with the facts directly, or give the phone number. For anything that changes day to day (e.g. a daily special), say it's best to call. Only discuss this business.`
       : `This assistant is deployed on ${new URL(meta.siteUrl).hostname}. Never reference or provide information about any other website or domain.`;
 
     // Create WebsiteChat with OpenRouter

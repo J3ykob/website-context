@@ -93,6 +93,7 @@ export async function synthesizeKB(businessName: string, transcript: InterviewTu
     "You convert an onboarding interview into an AI assistant's knowledge base AND a short website card. " +
     "Output STRICT JSON only: {\"tagline\":\"...\",\"suggestions\":[\"...\"],\"chunks\":[{\"title\":\"...\",\"content\":\"...\"}]}. " +
     "chunks: self-contained fact blocks the assistant retrieves to answer customers, in the business's OWN voice (we/our/us), same language as the interview (default Polish), covering what they offer, hours, location/area, contact & booking, pricing, and common Q&A. 4-10 chunks, 1-4 sentences each, short titles. Do NOT invent facts the owner did not give. " +
+    "This business has NO separate website — NEVER write 'check our website', 'see our page', 'na naszej stronie', 'sprawdź na stronie' or any reference to a website / online page / link; state each fact directly or point to the phone number. For anything that changes daily (e.g. a daily special), say to call. " +
     "tagline: one short catchy line (max 8 words) in the business's language. " +
     "suggestions: 3-4 short example questions a customer might ask, in the business's language.";
   const prompt =
