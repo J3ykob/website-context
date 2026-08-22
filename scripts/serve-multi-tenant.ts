@@ -1713,6 +1713,39 @@ app.get("/api/dashboard/intents", authMiddleware, async (req, res) => {
   }
 });
 
+// Owner edits to the auto-generated micro-site (inline edit mode on /site).
+// Accepts { siteCard: {...}, accentColor?, siteTheme? } — accent/theme are read
+// from the top level OR from inside siteCard, whichever the client sends.
+app.put("/api/dashboard/site-card", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const tenant = getTenant(tenantId);
+  if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
+  const b = (req.body && req.body.siteCard) || {};
+  const top = req.body || {};
+  const str = (v: any, n: number) => (typeof v === "string" ? v.trim() : "").slice(0, n);
+  const sections = Array.isArray(b.sections)
+    ? b.sections.slice(0, 24).map((s: any) => ({ label: str(s?.label, 120), text: str(s?.text, 2000) })).filter((s: any) => s.label || s.text)
+    : [];
+  const suggestions = Array.isArray(b.suggestions)
+    ? b.suggestions.slice(0, 6).map((s: any) => str(s, 160)).filter(Boolean)
+    : [];
+  const siteCard: any = {
+    tagline: str(b.tagline, 120) || undefined,
+    eyebrow: str(b.eyebrow, 80) || undefined,
+    phone: str(b.phone, 40) || undefined,
+    suggestions,
+    sections,
+  };
+  const settings = { ...(tenant.settings || {}) };
+  settings.siteCard = siteCard;
+  const accent = b.accentColor || top.accentColor;
+  const theme = b.siteTheme || top.siteTheme;
+  if (typeof accent === "string" && /^#[0-9a-fA-F]{3,8}$/.test(accent)) settings.accentColor = accent;
+  if (theme === "dark" || theme === "light") settings.siteTheme = theme;
+  updateTenant(tenantId, { settings });
+  res.json({ ok: true });
+});
+
 // Context notes
 app.get("/api/dashboard/context-notes", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
