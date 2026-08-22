@@ -621,6 +621,43 @@ export function renderSitePage(tenant: SiteTenant, baseUrl: string): string {
   }
 })();
 </script>
+<script>
+/* AI prompt-to-site — owner-only bar. Describe a change; an LLM rewrites the site. */
+(function(){
+  var API=${JSON.stringify(baseUrl)}, TENANT=${JSON.stringify(tenant.id)}, tok=null;
+  try{ tok=localStorage.getItem("wctx-dashboard-token"); if(!tok||localStorage.getItem("wctx-tenant-id")!==TENANT) return; }catch(e){ return; }
+  function showToast(t){var x=document.createElement("div");x.id="wctx-ai-toast";x.textContent=t;document.body.appendChild(x);setTimeout(function(){if(x.parentNode)x.parentNode.removeChild(x);},7000);}
+  try{ var sm=sessionStorage.getItem("wctx-ai-summary"); if(sm){ sessionStorage.removeItem("wctx-ai-summary"); showToast("\\u2728 "+sm); } }catch(e){}
+  var css=document.createElement("style");
+  css.textContent="#wctx-ai-bar{position:fixed;left:0;right:0;bottom:0;z-index:9999;display:flex;flex-direction:column;align-items:center;padding:0 12px 14px;pointer-events:none;}"
+   +".aib-inner{pointer-events:auto;display:flex;gap:8px;align-items:center;width:100%;max-width:720px;background:var(--paper,#fbf7ef);border:1px solid var(--line,rgba(0,0,0,.12));border-radius:16px;padding:8px 8px 8px 14px;box-shadow:0 10px 40px -12px rgba(0,0,0,.4);}"
+   +".aib-spark{font-size:16px;line-height:1;}"
+   +"#aib-input{flex:1;border:none;background:none;outline:none;font:inherit;font-size:14px;color:var(--ink,#241d16);padding:8px 4px;}"
+   +"#aib-go{border:none;border-radius:11px;background:var(--accent,#bb5a30);color:#fff;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;cursor:pointer;white-space:nowrap;}"
+   +"#aib-go:disabled{opacity:.55;cursor:default;}"
+   +".aib-undo{border:1px solid var(--line,rgba(0,0,0,.14));background:none;color:var(--ink-soft,#6f6455);border-radius:11px;font:inherit;font-size:13px;padding:9px 12px;cursor:pointer;}"
+   +".aib-status{pointer-events:auto;font-size:12.5px;color:var(--ink-soft,#6f6455);margin-top:8px;text-align:center;min-height:15px;}"
+   +"#wctx-ai-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;z-index:10000;background:var(--ink,#241d16);color:var(--paper,#fbf7ef);padding:12px 18px;border-radius:12px;font-size:14px;max-width:560px;text-align:center;box-shadow:0 12px 44px -10px rgba(0,0,0,.5);}";
+  document.head.appendChild(css);
+  var bar=document.createElement("div"); bar.id="wctx-ai-bar";
+  bar.innerHTML='<div class="aib-inner"><span class="aib-spark">\\u2728</span><input id="aib-input" placeholder="Opisz zmian\\u0119: np. przytulny klimat, dodaj sekcj\\u0119 o nas, akcent oliwkowy" autocomplete="off"/><button id="aib-go" type="button">Przeprojektuj</button><button id="aib-undo" type="button" class="aib-undo" title="Cofnij ostatni\\u0105 zmian\\u0119 AI">Cofnij</button></div><div id="aib-status" class="aib-status"></div>';
+  document.body.appendChild(bar);
+  var input=document.getElementById("aib-input"),go=document.getElementById("aib-go"),undo=document.getElementById("aib-undo"),status=document.getElementById("aib-status");
+  function req(path,body){return fetch(API+path,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},body:JSON.stringify(body||{})});}
+  function generate(){var p=(input.value||"").trim();if(!p){input.focus();return;}go.disabled=true;status.textContent="Projektuj\\u0119 Twoj\\u0105 stron\\u0119\\u2026";
+    req("/api/dashboard/site-generate",{prompt:p}).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});}).then(function(res){
+      if(!res.ok){go.disabled=false;status.textContent=(res.d&&res.d.error)||"Nie uda\\u0142o si\\u0119. Spr\\u00f3buj ponownie.";return;}
+      try{sessionStorage.setItem("wctx-ai-summary",res.d.changeSummary||"Zaktualizowano stron\\u0119.");}catch(e){}
+      location.reload();
+    }).catch(function(){go.disabled=false;status.textContent="B\\u0142\\u0105d po\\u0142\\u0105czenia.";});}
+  go.addEventListener("click",generate);
+  input.addEventListener("keydown",function(e){if(e.key==="Enter")generate();});
+  undo.addEventListener("click",function(){undo.disabled=true;status.textContent="Cofam\\u2026";
+    req("/api/dashboard/site-revert",{}).then(function(r){return r.json();}).then(function(d){
+      if(d&&d.reverted){location.reload();}else{undo.disabled=false;status.textContent="Nic do cofni\\u0119cia.";}
+    }).catch(function(){undo.disabled=false;status.textContent="B\\u0142\\u0105d.";});});
+})();
+</script>
 </body>
 </html>`;
 }

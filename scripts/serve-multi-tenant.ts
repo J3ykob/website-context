@@ -71,6 +71,7 @@ import { OpenRouterProvider } from "../src/llm/openrouter-provider.js";
 import { analyzeIntents, invalidateIntents } from "../src/analytics/intent-engine.js";
 import { nextInterviewQuestion, synthesizeKB, type InterviewTurn } from "../src/onboarding/interview.js";
 import { renderSitePage } from "../src/site/render-site.js";
+import { generateSiteSpec } from "../src/site/generate.js";
 import {
   detectPlatform,
   extractMessage,
@@ -1744,6 +1745,56 @@ app.put("/api/dashboard/site-card", authMiddleware, async (req, res) => {
   if (theme === "dark" || theme === "light") settings.siteTheme = theme;
   updateTenant(tenantId, { settings });
   res.json({ ok: true });
+});
+
+// AI prompt-to-site: owner describes a change, an LLM rewrites the design spec.
+// Stashes the previous state (settings.sitePrev) so a single-level undo works.
+app.post("/api/dashboard/site-generate", authMiddleware, async (req, res) => {
+  const tenant = getTenant((req as any).tenantId);
+  if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
+  const prompt = String(req.body?.prompt || "").trim();
+  if (prompt.length < 2) { res.status(400).json({ error: "Opisz, co zmienić." }); return; }
+  const s = tenant.settings || {};
+  const c = s.siteCard || {};
+  const current = {
+    theme: s.siteTheme === "dark" ? "dark" as const : "light" as const,
+    accent: s.accentColor || "#bb5a30",
+    tagline: c.tagline || "", eyebrow: c.eyebrow || "", phone: c.phone || "",
+    sections: Array.isArray(c.sections) ? c.sections : [],
+    suggestions: Array.isArray(c.suggestions) ? c.suggestions : [],
+  };
+  try {
+    const spec = await generateSiteSpec(tenant.brandName || tenant.domain, current, prompt);
+    const settings = { ...s };
+    settings.sitePrev = { siteCard: s.siteCard || null, accentColor: s.accentColor || null, siteTheme: s.siteTheme || null };
+    settings.siteCard = {
+      tagline: spec.tagline || undefined, eyebrow: spec.eyebrow || undefined, phone: spec.phone || undefined,
+      suggestions: spec.suggestions, sections: spec.sections,
+    };
+    settings.accentColor = spec.accent;
+    settings.siteTheme = spec.theme;
+    updateTenant(tenant.id, { settings });
+    console.log(`[site-generate] ${tenant.id}: "${prompt.slice(0, 60)}" -> ${spec.changeSummary.slice(0, 80)}`);
+    res.json({ ok: true, changeSummary: spec.changeSummary });
+  } catch (e: any) {
+    console.error(`[site-generate] ${tenant.id}: ${e?.message}`);
+    res.status(502).json({ error: "Nie udało się wygenerować. Spróbuj ponownie." });
+  }
+});
+
+// Undo the last AI generation (restore settings.sitePrev).
+app.post("/api/dashboard/site-revert", authMiddleware, async (req, res) => {
+  const tenant = getTenant((req as any).tenantId);
+  if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
+  const s = tenant.settings || {};
+  if (!s.sitePrev) { res.json({ ok: true, reverted: false }); return; }
+  const settings = { ...s };
+  settings.siteCard = s.sitePrev.siteCard || undefined;
+  settings.accentColor = s.sitePrev.accentColor || undefined;
+  settings.siteTheme = s.sitePrev.siteTheme || undefined;
+  delete settings.sitePrev;
+  updateTenant(tenant.id, { settings });
+  res.json({ ok: true, reverted: true });
 });
 
 // Context notes
