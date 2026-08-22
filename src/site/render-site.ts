@@ -53,7 +53,106 @@ function normHex(raw: string): string {
   return "";
 }
 
+// Free-form HTML mode: the page body is LLM-generated (already sanitized on save).
+// We inject the real Whisp chat where {{WHISP_CHAT}} sits, plus the owner AI bar.
+function renderCustomHtml(tenant: SiteTenant, baseUrl: string, editToken: string, siteHtml: string): string {
+  const brand = tenant.brandName || tenant.domain || "Nasza firma";
+  const settings = tenant.settings || {};
+  const accent = /^#[0-9a-fA-F]{6}$/.test(settings.accentColor || "") ? settings.accentColor : "#bb5a30";
+  const dark = settings.siteTheme === "dark";
+  const cardBg = dark ? "#211b15" : "#ffffff";
+  const cardInk = dark ? "#f3ece0" : "#241d16";
+  const cardLine = dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.10)";
+  const botBg = dark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)";
+  const chatBlock =
+    `<div class="whisp-chat" data-whisp><div class="wc-title">✨ Zapytaj nas o cokolwiek</div>` +
+    `<div class="wc-msgs" data-wc-msgs></div>` +
+    `<div class="wc-row"><input class="wc-input" data-wc-input placeholder="Napisz pytanie…" autocomplete="off"/>` +
+    `<button class="wc-send" data-wc-send type="button" aria-label="Wyślij">→</button></div></div>`;
+  const body = String(siteHtml).split("{{WHISP_CHAT}}").join(chatBlock);
+
+  return `<!DOCTYPE html>
+<html lang="pl" data-theme="${dark ? "dark" : "light"}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(brand)}</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--accent:${accent};}
+  *{box-sizing:border-box;} html,body{margin:0;padding:0;}
+  .whisp-chat{max-width:600px;margin:26px auto;background:${cardBg};border:1px solid ${cardLine};border-radius:16px;padding:16px 16px 14px;box-shadow:0 12px 44px -16px rgba(0,0,0,.35);font-family:"Instrument Sans",system-ui,sans-serif;}
+  .wc-title{font-weight:600;font-size:15px;margin-bottom:10px;color:${cardInk};}
+  .wc-msgs{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;}
+  .wc-msgs:empty{display:none;}
+  .wc-msg{max-width:88%;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.5;white-space:pre-wrap;}
+  .wc-user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px;}
+  .wc-bot{align-self:flex-start;background:${botBg};color:${cardInk};border-bottom-left-radius:4px;}
+  .wc-bot a{color:var(--accent);} .wc-bot strong{font-weight:600;}
+  .wc-row{display:flex;gap:8px;margin-top:10px;}
+  .wc-input{flex:1;border:1px solid ${cardLine};background:transparent;color:${cardInk};border-radius:11px;padding:11px 13px;font:inherit;font-size:14px;outline:none;}
+  .wc-send{border:none;border-radius:11px;background:var(--accent);color:#fff;font-size:18px;width:46px;cursor:pointer;line-height:1;}
+  #wctx-ai-bar{position:fixed;left:0;right:0;bottom:0;z-index:9999;display:flex;flex-direction:column;align-items:center;padding:0 12px 14px;pointer-events:none;font-family:"Instrument Sans",system-ui,sans-serif;}
+  .aib-inner{pointer-events:auto;display:flex;gap:8px;align-items:center;width:100%;max-width:720px;background:${cardBg};border:1px solid ${cardLine};border-radius:16px;padding:8px 8px 8px 14px;box-shadow:0 10px 40px -12px rgba(0,0,0,.4);}
+  #aib-input{flex:1;border:none;background:none;outline:none;font:inherit;font-size:14px;color:${cardInk};padding:8px 4px;}
+  #aib-go{border:none;border-radius:11px;background:var(--accent);color:#fff;font:inherit;font-weight:600;font-size:14px;padding:9px 16px;cursor:pointer;white-space:nowrap;}
+  #aib-go:disabled{opacity:.55;} .aib-undo{border:1px solid ${cardLine};background:none;color:${cardInk};border-radius:11px;font:inherit;font-size:13px;padding:9px 12px;cursor:pointer;}
+  .aib-status{pointer-events:auto;font-size:12.5px;color:${cardInk};opacity:.75;margin-top:8px;text-align:center;min-height:15px;}
+  #wctx-ai-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;z-index:10000;background:${cardInk};color:${cardBg};padding:12px 18px;border-radius:12px;font-size:14px;max-width:560px;text-align:center;box-shadow:0 12px 44px -10px rgba(0,0,0,.5);}
+</style>
+</head>
+<body>
+${body}
+<div style="text-align:center;padding:22px 16px;font-size:12px;opacity:.55;font-family:'Instrument Sans',system-ui,sans-serif">Strona i asystent od <a href="https://whisp.so" style="color:inherit">Whisp</a></div>
+<script>
+(function(){
+  var API=${JSON.stringify(baseUrl)}, TENANT=${JSON.stringify(tenant.id)}, SES="site-"+Math.random().toString(36).slice(2);
+  function md(t){return String(t||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>").replace(/\\[([^\\]]+)\\]\\((https?:[^)]+)\\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');}
+  document.querySelectorAll("[data-whisp]").forEach(function(box){
+    var msgs=box.querySelector("[data-wc-msgs]"),inp=box.querySelector("[data-wc-input]"),btn=box.querySelector("[data-wc-send]"),hist=[];
+    function add(role,text){var d=document.createElement("div");d.className="wc-msg wc-"+role;if(role==="bot")d.innerHTML=md(text);else d.textContent=text;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;}
+    function send(){var t=(inp.value||"").trim();if(!t)return;inp.value="";add("user",t);hist.push({role:"user",content:t});var typ=add("bot","…");btn.disabled=true;
+      fetch(API+"/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:hist,tenantId:TENANT,sessionId:SES})}).then(function(r){return r.json().catch(function(){return{};});}).then(function(d){btn.disabled=false;var m=(d&&typeof d.message==="string"&&d.message.trim())?d.message:"Przepraszam, spróbuj ponownie za moment.";typ.innerHTML=md(m);hist.push({role:"assistant",content:m});msgs.scrollTop=msgs.scrollHeight;}).catch(function(){btn.disabled=false;typ.textContent="Błąd połączenia.";});}
+    if(btn)btn.addEventListener("click",send); if(inp)inp.addEventListener("keydown",function(e){if(e.key==="Enter")send();});
+  });
+})();
+</script>
+<script>
+/* owner AI bar */
+(function(){
+  var API=${JSON.stringify(baseUrl)}, TENANT=${JSON.stringify(tenant.id)}, EDIT_TOKEN=${JSON.stringify(editToken)}, tok=null;
+  try{ tok=localStorage.getItem("wctx-dashboard-token"); }catch(e){}
+  var sameTenant=false; try{ sameTenant=(localStorage.getItem("wctx-tenant-id")===TENANT); }catch(e){}
+  if(!EDIT_TOKEN && !(tok&&sameTenant)) return;
+  function showToast(t){var x=document.createElement("div");x.id="wctx-ai-toast";x.textContent=t;document.body.appendChild(x);setTimeout(function(){if(x.parentNode)x.parentNode.removeChild(x);},7000);}
+  try{ var sm=sessionStorage.getItem("wctx-ai-summary"); if(sm){ sessionStorage.removeItem("wctx-ai-summary"); showToast("✨ "+sm); } }catch(e){}
+  var bar=document.createElement("div"); bar.id="wctx-ai-bar";
+  bar.innerHTML='<div class="aib-inner"><span style="font-size:16px">✨</span><input id="aib-input" placeholder="Opisz zmianę: np. usuń sekcję kontakt, dwie kolumny, ciemny motyw" autocomplete="off"/><button id="aib-go" type="button">Przeprojektuj</button><button id="aib-undo" type="button" class="aib-undo">Cofnij</button></div><div id="aib-status" class="aib-status"></div>';
+  document.body.appendChild(bar);
+  var input=document.getElementById("aib-input"),go=document.getElementById("aib-go"),undo=document.getElementById("aib-undo"),st=document.getElementById("aib-status");
+  function req(path,body){var h={"Content-Type":"application/json"};if(EDIT_TOKEN){h["X-Edit-Token"]=EDIT_TOKEN;}else{h["Authorization"]="Bearer "+tok;}return fetch(API+path,{method:"POST",headers:h,body:JSON.stringify(body||{})});}
+  function gen(){var p=(input.value||"").trim();if(!p)return;go.disabled=true;st.textContent="Przeprojektowuję Twoją stronę…";
+    req("/api/dashboard/site-generate",{prompt:p}).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});}).then(function(res){
+      if(!res.ok){go.disabled=false;st.textContent=(res.d&&res.d.error)||"Nie udało się. Spróbuj ponownie.";return;}
+      try{sessionStorage.setItem("wctx-ai-summary",res.d.changeSummary||"Zaktualizowano stronę.");}catch(e){}
+      location.reload();
+    }).catch(function(){go.disabled=false;st.textContent="Błąd połączenia.";});}
+  go.addEventListener("click",gen); input.addEventListener("keydown",function(e){if(e.key==="Enter")gen();});
+  undo.addEventListener("click",function(){undo.disabled=true;st.textContent="Cofam…";
+    req("/api/dashboard/site-revert",{}).then(function(r){return r.json();}).then(function(d){if(d&&d.reverted){location.reload();}else{undo.disabled=false;st.textContent="Nic do cofnięcia.";}}).catch(function(){undo.disabled=false;st.textContent="Błąd.";});});
+})();
+</script>
+</body>
+</html>`;
+}
+
 export function renderSitePage(tenant: SiteTenant, baseUrl: string, editToken: string = ""): string {
+  const _s = tenant.settings || {};
+  if (typeof _s.siteHtml === "string" && _s.siteHtml.trim().length > 0) {
+    return renderCustomHtml(tenant, baseUrl, editToken, _s.siteHtml);
+  }
   const brand = tenant.brandName || tenant.domain || "Nasza firma";
   const settings = tenant.settings || {};
   const card = settings.siteCard || {};

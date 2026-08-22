@@ -8,6 +8,7 @@
  * so a generated result renders with no code changes.
  */
 import { OpenRouterProvider } from "../llm/openrouter-provider.js";
+import { sanitizeSiteHtml } from "./sanitize-html.js";
 
 export interface CurrentSite {
   theme: "light" | "dark";
@@ -47,6 +48,51 @@ const SYSTEM = (brand: string) =>
   `- The Whisp chat assistant and contact details are injected by the system — never mention or remove them.\n` +
   `Schema:\n` +
   `{"theme":"light|dark","accent":"#rrggbb","tagline":"...","eyebrow":"...","phone":"...","sections":[{"label":"...","text":"..."}],"suggestions":["..."],"changeSummary":"one sentence, in the site's language: what changed and what stayed"}`;
+
+// ─── Free-form HTML mode (true prompt-to-site) ───────────────────────────────
+export interface HtmlResult { html: string; changeSummary: string }
+
+function factsBlock(brand: string, card: any): string {
+  const c = card || {};
+  const lines = [`Business name: ${brand}`];
+  if (c.tagline) lines.push(`Tagline: ${c.tagline}`);
+  if (c.eyebrow) lines.push(`Short label: ${c.eyebrow}`);
+  if (c.phone) lines.push(`Phone: ${c.phone}`);
+  (Array.isArray(c.sections) ? c.sections : []).forEach((s: any) => {
+    if (s && (s.label || s.text)) lines.push(`- ${s.label || ""}: ${s.text || ""}`);
+  });
+  return lines.join("\n");
+}
+
+const HTML_SYSTEM = (brand: string) =>
+  `You are a web designer for "${brand}", a local business whose ONLY website is this single page. You output or edit its page BODY as HTML.\n` +
+  `OUTPUT: ONLY HTML — the inner HTML of the page body. Include exactly ONE <style> block with CSS for a beautiful, cohesive, RESPONSIVE design (mobile-first). NO <script>, NO <form>, NO external JS or trackers. End your output with a single HTML comment: <!--SUMMARY: one sentence, in the site's language, of what you changed-->.\n` +
+  `WHISP ASSISTANT (critical): include the EXACT token {{WHISP_CHAT}} once, on its own line, where the AI chat assistant belongs (e.g. a hero "ask us anything" area). The system swaps it for a real working assistant — never wrap it in a link, style it, or remove it.\n` +
+  `FACTS: use ONLY the facts given below. NEVER invent prices, hours, address, or phone. If asked for something you don't have, leave it out.\n` +
+  `LANGUAGE: write in the site's language (default Polish).\n` +
+  `EDITING: if a CURRENT PAGE is provided, change EXACTLY what the instruction asks and keep everything else intact. If none is provided, build a complete, elegant one-page site from the facts.`;
+
+export async function generateSiteHtml(brand: string, card: any, currentHtml: string, prompt: string): Promise<HtmlResult> {
+  const provider = new OpenRouterProvider();
+  const user =
+    `FACTS:\n${factsBlock(brand, card)}\n\n` +
+    `CURRENT PAGE HTML:\n${(currentHtml && currentHtml.trim()) ? currentHtml.slice(0, 30000) : "(none yet — build it fresh)"}\n\n` +
+    `OWNER INSTRUCTION:\n"${String(prompt).slice(0, 600)}"\n\nReturn the page body HTML now.`;
+
+  const { content } = await provider.chat(
+    [ { role: "system", content: HTML_SYSTEM(brand) }, { role: "user", content: user } ],
+    { maxTokens: 5000, temperature: 0.5 }
+  );
+
+  let raw = String(content || "").replace(/```html/gi, "").replace(/```/g, "").trim();
+  const m = raw.match(/<!--\s*SUMMARY:\s*([\s\S]*?)-->/i);
+  const changeSummary = ((m && m[1]) || "").trim().slice(0, 220) || "Zaktualizowano stronę.";
+  let html = sanitizeSiteHtml(raw); // sanitize also strips all comments
+  if (!/\{\{WHISP_CHAT\}\}/.test(html)) {
+    html += '\n<div style="max-width:640px;margin:40px auto;padding:0 20px">{{WHISP_CHAT}}</div>';
+  }
+  return { html, changeSummary };
+}
 
 export async function generateSiteSpec(brand: string, current: CurrentSite, prompt: string): Promise<SiteSpec> {
   const provider = new OpenRouterProvider();

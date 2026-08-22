@@ -71,7 +71,7 @@ import { OpenRouterProvider } from "../src/llm/openrouter-provider.js";
 import { analyzeIntents, invalidateIntents } from "../src/analytics/intent-engine.js";
 import { nextInterviewQuestion, synthesizeKB, type InterviewTurn } from "../src/onboarding/interview.js";
 import { renderSitePage } from "../src/site/render-site.js";
-import { generateSiteSpec } from "../src/site/generate.js";
+import { generateSiteSpec, generateSiteHtml } from "../src/site/generate.js";
 import {
   detectPlatform,
   extractMessage,
@@ -1758,27 +1758,19 @@ app.post("/api/dashboard/site-generate", ownerAuth, async (req, res) => {
   const prompt = String(req.body?.prompt || "").trim();
   if (prompt.length < 2) { res.status(400).json({ error: "Opisz, co zmienić." }); return; }
   const s = tenant.settings || {};
-  const c = s.siteCard || {};
-  const current = {
-    theme: s.siteTheme === "dark" ? "dark" as const : "light" as const,
-    accent: s.accentColor || "#bb5a30",
-    tagline: c.tagline || "", eyebrow: c.eyebrow || "", phone: c.phone || "",
-    sections: Array.isArray(c.sections) ? c.sections : [],
-    suggestions: Array.isArray(c.suggestions) ? c.suggestions : [],
-  };
   try {
-    const spec = await generateSiteSpec(tenant.brandName || tenant.domain, current, prompt);
+    // Free-form HTML: the LLM rewrites the actual page (edit real markup), so
+    // arbitrary edits ("remove this section", "two columns") work. Output is
+    // sanitized inside generateSiteHtml; facts come from siteCard, not the model.
+    const currentHtml = typeof s.siteHtml === "string" ? s.siteHtml : "";
+    const { html, changeSummary } = await generateSiteHtml(tenant.brandName || tenant.domain, s.siteCard || {}, currentHtml, prompt);
+    if (!html || html.trim().length < 20) { res.status(502).json({ error: "Nie udało się wygenerować. Spróbuj inaczej." }); return; }
     const settings = { ...s };
-    settings.sitePrev = { siteCard: s.siteCard || null, accentColor: s.accentColor || null, siteTheme: s.siteTheme || null };
-    settings.siteCard = {
-      tagline: spec.tagline || undefined, eyebrow: spec.eyebrow || undefined, phone: spec.phone || undefined,
-      suggestions: spec.suggestions, sections: spec.sections,
-    };
-    settings.accentColor = spec.accent;
-    settings.siteTheme = spec.theme;
+    settings.sitePrev = { siteHtml: s.siteHtml || null, siteCard: s.siteCard || null, accentColor: s.accentColor || null, siteTheme: s.siteTheme || null };
+    settings.siteHtml = html;
     updateTenant(tenant.id, { settings });
-    console.log(`[site-generate] ${tenant.id}: "${prompt.slice(0, 60)}" -> ${spec.changeSummary.slice(0, 80)}`);
-    res.json({ ok: true, changeSummary: spec.changeSummary });
+    console.log(`[site-generate] ${tenant.id}: "${prompt.slice(0, 60)}" -> ${changeSummary.slice(0, 80)}`);
+    res.json({ ok: true, changeSummary });
   } catch (e: any) {
     console.error(`[site-generate] ${tenant.id}: ${e?.message}`);
     res.status(502).json({ error: "Nie udało się wygenerować. Spróbuj ponownie." });
@@ -1792,6 +1784,7 @@ app.post("/api/dashboard/site-revert", ownerAuth, async (req, res) => {
   const s = tenant.settings || {};
   if (!s.sitePrev) { res.json({ ok: true, reverted: false }); return; }
   const settings = { ...s };
+  settings.siteHtml = s.sitePrev.siteHtml || undefined;
   settings.siteCard = s.sitePrev.siteCard || undefined;
   settings.accentColor = s.sitePrev.accentColor || undefined;
   settings.siteTheme = s.sitePrev.siteTheme || undefined;
