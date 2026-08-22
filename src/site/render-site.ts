@@ -53,7 +53,7 @@ function normHex(raw: string): string {
   return "";
 }
 
-export function renderSitePage(tenant: SiteTenant, baseUrl: string): string {
+export function renderSitePage(tenant: SiteTenant, baseUrl: string, editToken: string = ""): string {
   const brand = tenant.brandName || tenant.domain || "Nasza firma";
   const settings = tenant.settings || {};
   const card = settings.siteCard || {};
@@ -624,8 +624,10 @@ export function renderSitePage(tenant: SiteTenant, baseUrl: string): string {
 <script>
 /* AI prompt-to-site — owner-only bar. Describe a change; an LLM rewrites the site. */
 (function(){
-  var API=${JSON.stringify(baseUrl)}, TENANT=${JSON.stringify(tenant.id)}, tok=null;
-  try{ tok=localStorage.getItem("wctx-dashboard-token"); if(!tok||localStorage.getItem("wctx-tenant-id")!==TENANT) return; }catch(e){ return; }
+  var API=${JSON.stringify(baseUrl)}, TENANT=${JSON.stringify(tenant.id)}, EDIT_TOKEN=${JSON.stringify(editToken)}, tok=null;
+  try{ tok=localStorage.getItem("wctx-dashboard-token"); }catch(e){}
+  var sameTenant=false; try{ sameTenant=(localStorage.getItem("wctx-tenant-id")===TENANT); }catch(e){}
+  if(!EDIT_TOKEN && !(tok&&sameTenant)) return;
   function showToast(t){var x=document.createElement("div");x.id="wctx-ai-toast";x.textContent=t;document.body.appendChild(x);setTimeout(function(){if(x.parentNode)x.parentNode.removeChild(x);},7000);}
   try{ var sm=sessionStorage.getItem("wctx-ai-summary"); if(sm){ sessionStorage.removeItem("wctx-ai-summary"); showToast("\\u2728 "+sm); } }catch(e){}
   var css=document.createElement("style");
@@ -643,7 +645,7 @@ export function renderSitePage(tenant: SiteTenant, baseUrl: string): string {
   bar.innerHTML='<div class="aib-inner"><span class="aib-spark">\\u2728</span><input id="aib-input" placeholder="Opisz zmian\\u0119: np. przytulny klimat, dodaj sekcj\\u0119 o nas, akcent oliwkowy" autocomplete="off"/><button id="aib-go" type="button">Przeprojektuj</button><button id="aib-undo" type="button" class="aib-undo" title="Cofnij ostatni\\u0105 zmian\\u0119 AI">Cofnij</button></div><div id="aib-status" class="aib-status"></div>';
   document.body.appendChild(bar);
   var input=document.getElementById("aib-input"),go=document.getElementById("aib-go"),undo=document.getElementById("aib-undo"),status=document.getElementById("aib-status");
-  function req(path,body){return fetch(API+path,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},body:JSON.stringify(body||{})});}
+  function req(path,body){var h={"Content-Type":"application/json"};if(EDIT_TOKEN){h["X-Edit-Token"]=EDIT_TOKEN;}else{h["Authorization"]="Bearer "+tok;}return fetch(API+path,{method:"POST",headers:h,body:JSON.stringify(body||{})});}
   function generate(){var p=(input.value||"").trim();if(!p){input.focus();return;}go.disabled=true;status.textContent="Projektuj\\u0119 Twoj\\u0105 stron\\u0119\\u2026";
     req("/api/dashboard/site-generate",{prompt:p}).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});}).then(function(res){
       if(!res.ok){go.disabled=false;status.textContent=(res.d&&res.d.error)||"Nie uda\\u0142o si\\u0119. Spr\\u00f3buj ponownie.";return;}

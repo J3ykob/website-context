@@ -885,7 +885,9 @@ app.get("/site/:tenantId", (req, res) => {
   }
   const host = req.get("host") || "whisp.so";
   const baseUrl = process.env.BASE_URL || "https://" + host;
-  res.send(renderSitePage(tenant as any, baseUrl));
+  const editParam = String(req.query.edit || "");
+  const editToken = editParam && validateEditToken(editParam) === tenant.id ? editParam : "";
+  res.send(renderSitePage(tenant as any, baseUrl, editToken));
 });
 
 // Create tenant
@@ -1076,7 +1078,8 @@ app.post("/api/interview/message", async (req, res) => {
     };
     updateTenant(tenant.id, { status: "active", chunksCount: added, settings: { ...(tenant.settings || {}), siteCard } });
     console.log(`[interview] ${tenant.id}: built KB from interview -> ${added} chunks + micro-site`);
-    res.json({ done: true, tenantId: tenant.id, chunksAdded: added, botUrl: `/demo/${tenant.id}`, siteUrl: `/site/${tenant.id}` });
+    const editUrl = `/site/${tenant.id}?edit=${mintEditToken(tenant.id)}`;
+    res.json({ done: true, tenantId: tenant.id, chunksAdded: added, botUrl: `/demo/${tenant.id}`, siteUrl: `/site/${tenant.id}`, editUrl });
   } catch (e: any) {
     console.error(`[interview/message] ${tenant.id}: ${e?.message}`);
     res.status(500).json({ error: "Coś poszło nie tak. Spróbuj jeszcze raz." });
@@ -1717,7 +1720,7 @@ app.get("/api/dashboard/intents", authMiddleware, async (req, res) => {
 // Owner edits to the auto-generated micro-site (inline edit mode on /site).
 // Accepts { siteCard: {...}, accentColor?, siteTheme? } — accent/theme are read
 // from the top level OR from inside siteCard, whichever the client sends.
-app.put("/api/dashboard/site-card", authMiddleware, async (req, res) => {
+app.put("/api/dashboard/site-card", ownerAuth, async (req, res) => {
   const tenantId = (req as any).tenantId;
   const tenant = getTenant(tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
@@ -1749,7 +1752,7 @@ app.put("/api/dashboard/site-card", authMiddleware, async (req, res) => {
 
 // AI prompt-to-site: owner describes a change, an LLM rewrites the design spec.
 // Stashes the previous state (settings.sitePrev) so a single-level undo works.
-app.post("/api/dashboard/site-generate", authMiddleware, async (req, res) => {
+app.post("/api/dashboard/site-generate", ownerAuth, async (req, res) => {
   const tenant = getTenant((req as any).tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
   const prompt = String(req.body?.prompt || "").trim();
@@ -1783,7 +1786,7 @@ app.post("/api/dashboard/site-generate", authMiddleware, async (req, res) => {
 });
 
 // Undo the last AI generation (restore settings.sitePrev).
-app.post("/api/dashboard/site-revert", authMiddleware, async (req, res) => {
+app.post("/api/dashboard/site-revert", ownerAuth, async (req, res) => {
   const tenant = getTenant((req as any).tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
   const s = tenant.settings || {};
@@ -1904,6 +1907,40 @@ function validateRecordToken(rt: string): string | null {
     if (!tenantId || !Number.isFinite(exp) || exp < Date.now()) return null;
     return tenantId;
   } catch { return null; }
+}
+
+// Passwordless owner edit — a signed magic-link token. Interview-onboarded owners
+// never set a dashboard password, so a signed link is their way in. Same HMAC
+// scheme as record tokens, longer TTL, distinct "edit:" prefix so the two kinds
+// are not interchangeable.
+function mintEditToken(tenantId: string): string {
+  const payload = `edit:${tenantId}.${Date.now() + 30 * 24 * 60 * 60 * 1000}`;
+  const sig = createHmac("sha256", ADMIN_SECRET).update(payload).digest("hex").slice(0, 32);
+  return Buffer.from(payload).toString("base64url") + "." + sig;
+}
+function validateEditToken(token: string): string | null {
+  try {
+    const dot = token.lastIndexOf(".");
+    if (dot <= 0) return null;
+    const b64 = token.slice(0, dot), sig = token.slice(dot + 1);
+    const payload = Buffer.from(b64, "base64url").toString();
+    const expect = createHmac("sha256", ADMIN_SECRET).update(payload).digest("hex").slice(0, 32);
+    if (!safeStrEq(sig, expect)) return null;
+    if (!payload.startsWith("edit:")) return null;
+    const rest = payload.slice(5);
+    const i = rest.lastIndexOf(".");
+    const tenantId = rest.slice(0, i);
+    const exp = Number(rest.slice(i + 1));
+    if (!tenantId || !Number.isFinite(exp) || exp < Date.now()) return null;
+    return tenantId;
+  } catch { return null; }
+}
+// Editor auth: a valid dashboard session OR a valid edit token (header/query).
+async function ownerAuth(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
+  const et = String(req.headers["x-edit-token"] || req.query.edit || "");
+  const t = et ? validateEditToken(et) : null;
+  if (t) { (req as any).tenantId = t; next(); return; }
+  await authMiddleware(req, res, next);
 }
 
 app.get("/api/dashboard/record-token", authMiddleware, (req, res) => {
