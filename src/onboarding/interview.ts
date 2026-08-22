@@ -79,6 +79,8 @@ export async function nextInterviewQuestion(
 export interface SynthesisResult {
   chunks: KBChunk[];        // KB fact blocks (embedded + stored)
   tagline: string;          // short line for the micro-site
+  eyebrow: string;          // "City · Category" label above the name
+  phone: string;            // business phone for the "call" CTA (or "")
   suggestions: string[];    // example customer questions for the micro-site
 }
 
@@ -91,10 +93,12 @@ export async function synthesizeKB(businessName: string, transcript: InterviewTu
   const provider = new OpenRouterProvider();
   const system =
     "You convert an onboarding interview into an AI assistant's knowledge base AND a short website card. " +
-    "Output STRICT JSON only: {\"tagline\":\"...\",\"suggestions\":[\"...\"],\"chunks\":[{\"title\":\"...\",\"content\":\"...\"}]}. " +
+    "Output STRICT JSON only: {\"tagline\":\"...\",\"eyebrow\":\"...\",\"phone\":\"...\",\"suggestions\":[\"...\"],\"chunks\":[{\"title\":\"...\",\"content\":\"...\"}]}. " +
     "chunks: self-contained fact blocks the assistant retrieves to answer customers, in the business's OWN voice (we/our/us), same language as the interview (default Polish), covering what they offer, hours, location/area, contact & booking, pricing, and common Q&A. 4-10 chunks, 1-4 sentences each, short titles. Do NOT invent facts the owner did not give. " +
     "This business has NO separate website — NEVER write 'check our website', 'see our page', 'na naszej stronie', 'sprawdź na stronie' or any reference to a website / online page / link; state each fact directly or point to the phone number. For anything that changes daily (e.g. a daily special), say to call. " +
     "tagline: one short catchy line (max 8 words) in the business's language. " +
+    "eyebrow: a very short 'City · Category' label (e.g. 'Wrocław · Kuchnia włoska'), in the business's language; empty string if unknown. " +
+    "phone: the business phone number exactly as the owner gave it (digits and spaces), or empty string if none was mentioned. " +
     "suggestions: 3-4 short example questions a customer might ask, in the business's language.";
   const prompt =
     `Business name: ${businessName}\n\nInterview:\n${transcriptText(transcript)}\n\nReturn the JSON now.`;
@@ -106,7 +110,7 @@ export async function synthesizeKB(businessName: string, transcript: InterviewTu
       { maxTokens: 1800, temperature: 0.3 }
     );
     content = r.content || "";
-  } catch { return { chunks: [], tagline: "", suggestions: [] }; }
+  } catch { return { chunks: [], tagline: "", eyebrow: "", phone: "", suggestions: [] }; }
 
   const parsed = extractJson(content);
   const chunks = (Array.isArray(parsed?.chunks) ? parsed.chunks : [])
@@ -114,9 +118,11 @@ export async function synthesizeKB(businessName: string, transcript: InterviewTu
     .filter((c: KBChunk) => c.content.length > 10)
     .slice(0, 12);
   const tagline = String(parsed?.tagline || "").trim().slice(0, 80);
+  const eyebrow = String(parsed?.eyebrow || "").trim().slice(0, 60);
+  const phone = String(parsed?.phone || "").trim().slice(0, 40);
   const suggestions = (Array.isArray(parsed?.suggestions) ? parsed.suggestions : [])
     .map((s: any) => String(s).trim()).filter(Boolean).slice(0, 4);
-  return { chunks, tagline, suggestions };
+  return { chunks, tagline, eyebrow, phone, suggestions };
 }
 
 function extractJson(text: string): any {
