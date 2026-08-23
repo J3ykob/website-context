@@ -887,6 +887,8 @@ app.get("/site/:tenantId", (req, res) => {
   const baseUrl = process.env.BASE_URL || "https://" + host;
   const editParam = String(req.query.edit || "");
   const editToken = editParam && validateEditToken(editParam) === tenant.id ? editParam : "";
+  // Owner-editable page: never let a browser/edge serve a stale copy after an edit.
+  res.set("Cache-Control", "no-store, must-revalidate");
   res.send(renderSitePage(tenant as any, baseUrl, editToken));
 });
 
@@ -1765,6 +1767,13 @@ app.post("/api/dashboard/site-generate", ownerAuth, async (req, res) => {
     const currentHtml = typeof s.siteHtml === "string" ? s.siteHtml : "";
     const { html, changeSummary } = await generateSiteHtml(tenant.brandName || tenant.domain, s.siteCard || {}, currentHtml, prompt);
     if (!html || html.trim().length < 20) { res.status(502).json({ error: "Nie udało się wygenerować. Spróbuj inaczej." }); return; }
+    // The model sometimes returns an unchanged page yet reports success — don't
+    // save, and tell the owner honestly instead of a false "done".
+    const norm = (h: string) => String(h).replace(/\s+/g, " ").trim();
+    if (currentHtml && norm(html) === norm(currentHtml)) {
+      res.json({ ok: true, unchanged: true, changeSummary: "Nie wykryłem zmiany - opisz dokładniej, co mam zmienić." });
+      return;
+    }
     const settings = { ...s };
     settings.sitePrev = { siteHtml: s.siteHtml || null, siteCard: s.siteCard || null, accentColor: s.accentColor || null, siteTheme: s.siteTheme || null };
     settings.siteHtml = html;

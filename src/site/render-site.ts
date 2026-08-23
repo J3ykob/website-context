@@ -136,8 +136,9 @@ ${body}
   function gen(){var p=(input.value||"").trim();if(!p)return;go.disabled=true;st.textContent="Przeprojektowuję Twoją stronę…";
     req("/api/dashboard/site-generate",{prompt:p}).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});}).then(function(res){
       if(!res.ok){go.disabled=false;st.textContent=(res.d&&res.d.error)||"Nie udało się. Spróbuj ponownie.";return;}
+      if(res.d&&res.d.unchanged){go.disabled=false;st.textContent=res.d.changeSummary||"Brak zmian.";return;}
       try{sessionStorage.setItem("wctx-ai-summary",res.d.changeSummary||"Zaktualizowano stronę.");}catch(e){}
-      location.reload();
+      location.replace(location.pathname+(EDIT_TOKEN?("?edit="+encodeURIComponent(EDIT_TOKEN)+"&"):"?")+"_r="+Date.now());
     }).catch(function(){go.disabled=false;st.textContent="Błąd połączenia.";});}
   go.addEventListener("click",gen); input.addEventListener("keydown",function(e){if(e.key==="Enter")gen();});
   undo.addEventListener("click",function(){undo.disabled=true;st.textContent="Cofam…";
@@ -748,8 +749,9 @@ export function renderSitePage(tenant: SiteTenant, baseUrl: string, editToken: s
   function generate(){var p=(input.value||"").trim();if(!p){input.focus();return;}go.disabled=true;status.textContent="Projektuj\\u0119 Twoj\\u0105 stron\\u0119\\u2026";
     req("/api/dashboard/site-generate",{prompt:p}).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});}).then(function(res){
       if(!res.ok){go.disabled=false;status.textContent=(res.d&&res.d.error)||"Nie uda\\u0142o si\\u0119. Spr\\u00f3buj ponownie.";return;}
+      if(res.d&&res.d.unchanged){go.disabled=false;status.textContent=res.d.changeSummary||"Brak zmian.";return;}
       try{sessionStorage.setItem("wctx-ai-summary",res.d.changeSummary||"Zaktualizowano stron\\u0119.");}catch(e){}
-      location.reload();
+      location.replace(location.pathname+(EDIT_TOKEN?("?edit="+encodeURIComponent(EDIT_TOKEN)+"&"):"?")+"_r="+Date.now());
     }).catch(function(){go.disabled=false;status.textContent="B\\u0142\\u0105d po\\u0142\\u0105czenia.";});}
   go.addEventListener("click",generate);
   input.addEventListener("keydown",function(e){if(e.key==="Enter")generate();});
