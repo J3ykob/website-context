@@ -54,11 +54,17 @@ export async function fetchPdfAsPage(
     const fileName = decodeURIComponent(new URL(url).pathname.split("/").pop() || "").replace(/\.pdf$/i, "");
     const title = fileName.replace(/[_-]+/g, " ").trim() || "PDF document";
 
+    const blocks = splitBlocks(clean);
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // The extracted text as HTML, so buildContext never re-fetches the PDF through
+    // the HTML fetcher (that chunked raw PDF bytes as text: binary garbage chunks).
+    const html = `<html><head><title>${esc(title)}</title></head><body><main><h1>${esc(title)}</h1>${blocks.map((b) => `<p>${esc(b)}</p>`).join("")}</main></body></html>`;
     return {
       url,
       title,
       description: `PDF document (${totalPages} ${totalPages === 1 ? "page" : "pages"})`,
-      content: splitBlocks(clean).map((t) => ({ type: "paragraph" as const, content: t })),
+      content: blocks.map((t) => ({ type: "paragraph" as const, content: t })),
+      fetch: { html, finalUrl: url, statusCode: 200, renderMethod: "static", headers: { "content-type": "text/html; charset=utf-8" } },
       metadata: {},
       links: [],
       forms: [],

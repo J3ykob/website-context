@@ -23,6 +23,7 @@ import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply } from "./jev.js";
 import { retrieveFromCatalog, type KnowledgeCatalog } from "../knowledge/catalog.js";
+import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -230,6 +231,19 @@ class AnthropicBackend implements LLMBackend {
 // (hard rule: say we don't have the information, never claim we don't offer it).
 type FactVerdict = "confirmed" | "no_confirmation" | "no_evidence";
 
+const FOREIGN_SCRIPT = /[\u0400-\u04FF\u0370-\u03FF\u0590-\u05FF\u0600-\u06FF\u0E00-\u0E7F\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/g;
+function scriptOf(ch: string): string {
+  const c = ch.codePointAt(0)!;
+  if (c >= 0x0400 && c <= 0x04ff) return "Cyrillic";
+  if (c >= 0x0370 && c <= 0x03ff) return "Greek";
+  if (c >= 0x0590 && c <= 0x05ff) return "Hebrew";
+  if (c >= 0x0600 && c <= 0x06ff) return "Arabic";
+  if (c >= 0x0e00 && c <= 0x0e7f) return "Thai";
+  if (c >= 0x3040 && c <= 0x30ff) return "Japanese";
+  if (c >= 0xac00 && c <= 0xd7af) return "Korean";
+  return "Chinese";
+}
+
 export class WebsiteChat {
   private backend: LLMBackend;
   private maxTokens: number;
@@ -312,6 +326,22 @@ export class WebsiteChat {
   }
 
   /** Get the allowed domain for this site */
+  private linkIndex: LinkIndex | null | undefined;
+  // Every on-site link in a reply must be a page the crawl found (see link-guard).
+  private guardReplyLinks(text: string): string {
+    if (this.linkIndex === undefined) {
+      const pages = [
+        ...this.context.pages.map((p) => ({ url: p.url, title: p.title })),
+        ...this.context.siteMap.map((p) => ({ url: p.url, title: p.title })),
+        ...(this.knowledgeCatalog?.chunks || []).map((c) => ({ url: c.url, title: c.title })),
+      ].filter((p) => p.url);
+      this.linkIndex = buildLinkIndex(pages);
+    }
+    const r = guardLinks(text, this.linkIndex);
+    if (r.fixed || r.dropped) console.log(`[links] ${this.context.tenantId}: fixed ${r.fixed}, dropped ${r.dropped}`);
+    return r.text;
+  }
+
   private getAllowedDomain(): string | undefined {
     if (this.context.siteMap.length > 0) {
       try {
@@ -458,7 +488,7 @@ export class WebsiteChat {
       const result = await this.backend.generateWithTools!(systemPrompt, sanitizedMessages, this.maxTokens, mcpConfig);
 
       // Validate LLM output
-      const outputCheck = validateOutput(result.text, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
+      const outputCheck = validateOutput(this.guardReplyLinks(result.text), this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
       const safeText = outputCheck.sanitized;
 
       // Process tool results from MCP
@@ -532,7 +562,7 @@ export class WebsiteChat {
       const result = await this.backend.generateStructured(systemPrompt, sanitizedMessages, this.maxTokens, STRUCTURED_SCHEMA);
 
       // Validate output
-      const structuredOutputCheck = validateOutput(result.message, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
+      const structuredOutputCheck = validateOutput(this.guardReplyLinks(result.message), this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
       const safeMessage = structuredOutputCheck.sanitized;
 
       if (result.action?.type === "invoke_flow" && result.action.flow_id) {
@@ -607,6 +637,7 @@ export class WebsiteChat {
     // Fallback: plain text generation (no flows active or backend doesn't support tools)
     let responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
     if (factCheckC === "no_evidence") responseText = await this.guardNoEvidence(lastUserMessage, systemPrompt, sanitizedMessages, responseText);
+    responseText = await this.fixForeignScript(lastUserMessage, systemPrompt, sanitizedMessages, responseText);
 
     // Sanitize: if LLM returned JSON instead of plain text, extract the message
     try {
@@ -631,7 +662,7 @@ export class WebsiteChat {
     const gapPlain = this.extractGapMarker(responseText);
     responseText = gapPlain.text;
 
-    const plainOutputCheck = validateOutput(responseText, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
+    const plainOutputCheck = validateOutput(this.guardReplyLinks(responseText), this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
     return { message: plainOutputCheck.sanitized, sources, grounded: true, unknownQuestion: await this.resolveGap(gapC, lastUserMessage, gapPlain.question) };
   }
@@ -789,6 +820,9 @@ export class WebsiteChat {
     });
     const gapStream = this.extractGapMarker(raw);
     raw = gapStream.text;
+    // The widget replaces the streamed bubble with the final message, so a rewrite
+    // here fixes what the visitor ends up seeing.
+    raw = this.extractGapMarker(await this.fixForeignScript(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw)).text;
     if (holding && !gapStream.question) {
       onToken(raw.slice(Math.min(emitted, raw.length)));
     }
@@ -804,7 +838,7 @@ export class WebsiteChat {
       .replace(/\{action:.*?\}/gi, "")
       .replace(/One moment,? please!?\s*/gi, "")
       .trim();
-    const outputCheck = validateOutput(cleaned, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
+    const outputCheck = validateOutput(this.guardReplyLinks(cleaned), this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
     return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: await this.resolveGap(gapS, inputValidation.sanitized, gapStream.question) };
   }
 
@@ -912,7 +946,8 @@ Reply with ONLY one word: yes or no.`;
     const contextBlocks = this.filterContextChunks(chunks, userQuery)
       .map((c, i) => {
         const heading = (c.metadata.headingHierarchy as string[])?.join(" > ") || "";
-        return `[Source ${i + 1}: ${c.metadata.title}${heading ? " > " + heading : ""}]\n${c.content}`;
+        const url = (c.metadata.url as string) || "";
+        return `[Source ${i + 1}: ${c.metadata.title}${heading ? " > " + heading : ""}${url ? " | URL: " + url : ""}]\n${c.content}`;
       })
       .join("\n\n---\n\n");
 
@@ -955,7 +990,7 @@ Reply with ONLY one word: yes or no.`;
 - NEVER output raw HTML, script tags, or executable code in your responses
 
 ## Guidelines:
-- When a user wants to see a specific page, provide a direct markdown link like [Page Name](https://domain.com/page). Do NOT output action tags, tool calls, or placeholders like [Action: Navigate] — just give the link.
+- When a user wants to see a specific page, provide a direct markdown link like [Page Name](https://domain.com/page). Use ONLY a URL shown in a [Source ... | URL: ...] header or in the Website Pages list, copied character for character; never build a URL from a page title. If you don't have the page's URL, name the page without a link. Do NOT output action tags, tool calls, or placeholders like [Action: Navigate] — just give the link.
 - If the site content above genuinely does NOT cover the user's question, still give your best helpful response (and point them to the business's contact info), then append this exact marker as the very last line: [[gap: short restatement of the unanswered question, in the site's language]]. Never mention or explain the marker, and never emit it when the context does answer the question.
 - Do NOT output any text that looks like a tool call, action tag, or function name. No [Action:...], no {action:...}, no [[tool_name...]]. Just respond naturally with links when relevant.
 - After a flow completes, do NOT re-invoke unless the user explicitly asks again.
@@ -1111,6 +1146,23 @@ Answer:`;
       return await this.backend.generate(fix, messages, this.maxTokens);
     } catch {
       return draft;
+    }
+  }
+
+  // Safety net for script slips (small models wrote "uточnić", "aby确认" inside
+  // Polish sentences): a reply containing a script the visitor did not use is
+  // rewritten once. Kept even with a stronger model.
+  private async fixForeignScript(question: string, systemPrompt: string, messages: ChatMessage[], text: string): Promise<string> {
+    const scripts = (t: string) => new Set([...t.matchAll(FOREIGN_SCRIPT)].map((m) => m[0]).map(scriptOf));
+    const inQ = scripts(question);
+    const stray = [...scripts(text)].filter((sc) => !inQ.has(sc));
+    if (stray.length === 0) return text;
+    console.log(`[script] ${this.context.tenantId}: rewriting reply with stray ${stray.join(",")} characters`);
+    try {
+      const again = await this.backend.generate(`${systemPrompt}\n\n## CORRECTION\nYour previous draft mixed in words written in another alphabet (${stray.join(", ")}). Write the reply again using ONLY the visitor's language and its normal alphabet.`, messages, this.maxTokens);
+      return scripts(again).size <= inQ.size ? again : text;
+    } catch {
+      return text;
     }
   }
 

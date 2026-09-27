@@ -72,6 +72,12 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
     // Reuse the crawl's HTML; only pages without it (e.g. PDFs) are fetched again.
     const fetchResult = scrapedPage.fetch || await fetchPage(scrapedPage.url, { timeout: 10000 });
     scrapedPage.fetch = undefined; // free the HTML as soon as it is converted
+    // Never chunk a non-text document (PDF, image, archive): its bytes decode to garbage.
+    const ctype = (fetchResult.headers["content-type"] || "").toLowerCase();
+    if ((ctype && !/text\/html|application\/xhtml|text\/plain/.test(ctype)) || /[\u0000-\u0008\u000e-\u001f]/.test(fetchResult.html.slice(0, 4000))) {
+      console.warn(`[buildContext] skipped non-text document: ${scrapedPage.url} (${ctype || "binary"})`);
+      continue;
+    }
     const markdown = htmlToMarkdown(fetchResult);
     profilePages.push({ url: scrapedPage.url, html: fetchResult.html });
 
