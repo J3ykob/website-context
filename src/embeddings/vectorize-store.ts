@@ -86,7 +86,10 @@ export class CloudflareVectorizeStore implements VectorStore {
         }),
       })).join("\n");
 
-      const resp = await fetch(`${BASE}/insert`, {
+      // /upsert, not /insert: Vectorize keeps the FIRST vector for an existing id on
+      // insert, so re-scrapes (deterministic ids) and in-place KB edits silently kept
+      // stale content, labels and embeddings.
+      const resp = await fetch(`${BASE}/upsert`, {
         method: "POST",
         headers: { ...headers(), "Content-Type": "application/x-ndjson" },
         body: ndjson,
@@ -98,7 +101,7 @@ export class CloudflareVectorizeStore implements VectorStore {
         // Vectorize -> demo marked active + emailed but chat ungrounded. Throwing
         // lets embedChunks count this as a failure so the scrape gate catches it.
         const err = await resp.text();
-        throw new Error(`Vectorize insert failed (HTTP ${resp.status}): ${err.slice(0, 200)}`);
+        throw new Error(`Vectorize upsert failed (HTTP ${resp.status}): ${err.slice(0, 200)}`);
       }
     }
   }
