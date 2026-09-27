@@ -68,14 +68,23 @@ async function discoverIds(oldStore: CloudflareVectorizeStore, tenantId: string)
   for (let probe = 0; probe < 60 && quiet < 3; probe++) {
     const found = await oldStore.searchIds(randomUnit(), 100);
     const before = ids.size;
-    for (const id of found) ids.add(id);
+    // Probe ids come back with the tenant prefix ("<tenant>__<id>" or "t<md5>__<id>");
+    // the R2 list holds bare ids. Normalise so each vector is counted and moved once.
+    for (const id of found) ids.add(id.replace(/^.*?__/, ""));
     quiet = ids.size === before ? quiet + 1 : 0;
     if (found.length === 0) break;
   }
   return [...ids];
 }
 
+// --skip-anchors: vectors only (run BEFORE switching the server to bge-m3).
+// --anchors-only: intent anchors only (run AFTER the switch, so the live intent
+// engine never compares vectors from two embedding spaces).
+const SKIP_ANCHORS = process.argv.includes("--skip-anchors");
+const ANCHORS_ONLY = process.argv.includes("--anchors-only");
+
 async function migrateTenant(tenantId: string): Promise<{ vectors: number; anchors: number }> {
+  if (ANCHORS_ONLY) return { vectors: 0, anchors: await migrateAnchors(tenantId) };
   const oldStore = new CloudflareVectorizeStore({ tenantId, indexName: OLD_INDEX });
   const newStore = new CloudflareVectorizeStore({ tenantId, indexName: NEW_INDEX });
   const ids = await discoverIds(oldStore, tenantId);
@@ -87,7 +96,11 @@ async function migrateTenant(tenantId: string): Promise<{ vectors: number; ancho
     await newStore.upsert(items.map((x, k) => ({ id: x.id, vector: embs[k], content: x.content, metadata: x.metadata })));
     vectors += items.length;
   }
-  // Intent anchors live in D1 with their embedding: re-embed from the stored text.
+  return { vectors, anchors: SKIP_ANCHORS ? 0 : await migrateAnchors(tenantId) };
+}
+
+// Intent anchors live in D1 with their embedding: re-embed from the stored text.
+async function migrateAnchors(tenantId: string): Promise<number> {
   let anchors = 0;
   const rows = await d1("SELECT id, canonical FROM question_intents WHERE tenant_id = ?", [tenantId]).catch(() => []);
   for (let i = 0; i < rows.length; i += 50) {
@@ -98,7 +111,7 @@ async function migrateTenant(tenantId: string): Promise<{ vectors: number; ancho
       anchors++;
     }
   }
-  return { vectors, anchors };
+  return anchors;
 }
 
 async function main() {
