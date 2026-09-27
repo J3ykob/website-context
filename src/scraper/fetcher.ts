@@ -99,14 +99,46 @@ export async function connectScrapeBrowser(): Promise<Browser> {
   });
 }
 
+let browserLaunch: Promise<Browser> | null = null;
 async function getBrowser(): Promise<Browser> {
-  if (!browserInstance || !browserInstance.isConnected()) {
-    browserInstance = await connectScrapeBrowser();
+  if (browserInstance && browserInstance.isConnected()) return browserInstance;
+  // One launch shared by concurrent callers (the crawler fetches in parallel).
+  if (!browserLaunch) {
+    browserLaunch = connectScrapeBrowser()
+      .then((b) => { browserInstance = b; return b; })
+      .finally(() => { browserLaunch = null; });
   }
-  return browserInstance;
+  return browserLaunch;
+}
+
+// Rendered pages are memory-heavy: at most 2 open at once, whatever the crawl concurrency.
+const MAX_DYNAMIC = 2;
+let dynamicActive = 0;
+const dynamicWaiters: (() => void)[] = [];
+async function acquireDynamic(): Promise<void> {
+  if (dynamicActive < MAX_DYNAMIC) { dynamicActive++; return; }
+  await new Promise<void>((r) => dynamicWaiters.push(r));
+  dynamicActive++;
+}
+function releaseDynamic(): void {
+  dynamicActive--;
+  const next = dynamicWaiters.shift();
+  if (next) next();
 }
 
 async function fetchDynamic(
+  url: string,
+  options: { timeout: number; userAgent: string }
+): Promise<Omit<FetchResult, "renderMethod">> {
+  await acquireDynamic();
+  try {
+    return await fetchDynamicInner(url, options);
+  } finally {
+    releaseDynamic();
+  }
+}
+
+async function fetchDynamicInner(
   url: string,
   options: { timeout: number; userAgent: string }
 ): Promise<Omit<FetchResult, "renderMethod">> {
@@ -139,7 +171,10 @@ async function fetchDynamic(
       headers,
     };
   } finally {
-    await page.close();
+    await page.close().catch(() => {});
+    // Local Chromium gets a fresh context per page; close it or every rendered
+    // page stays in memory until the browser closes (browserless shares one).
+    if (!BROWSERLESS_TOKEN) await context.close().catch(() => {});
   }
 }
 

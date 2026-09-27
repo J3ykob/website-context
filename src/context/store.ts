@@ -69,7 +69,9 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
   for (const scrapedPage of crawlResult.pages) {
     // Re-fetch for markdown (we already have the HTML in memory during crawl,
     // but for now we'll work from the scraped page data)
-    const fetchResult = await fetchPage(scrapedPage.url, { timeout: 10000 });
+    // Reuse the crawl's HTML; only pages without it (e.g. PDFs) are fetched again.
+    const fetchResult = scrapedPage.fetch || await fetchPage(scrapedPage.url, { timeout: 10000 });
+    scrapedPage.fetch = undefined; // free the HTML as soon as it is converted
     const markdown = htmlToMarkdown(fetchResult);
     profilePages.push({ url: scrapedPage.url, html: fetchResult.html });
 
@@ -412,64 +414,86 @@ function classifyChunkType(
  */
 async function enrichChunks(chunks: ContentChunk[]): Promise<void> {
   const hasKey = !!process.env.OPENROUTER_API_KEY;
-  const concurrency = 8;
+  // One LLM call per group of chunks from the same page (not one per chunk):
+  // a full-site scrape has thousands of chunks, and per-chunk calls took minutes.
+  const groups: ContentChunk[][] = [];
+  const byPage = new Map<string, ContentChunk[]>();
+  for (const c of chunks) {
+    const list = byPage.get(c.pageId) || [];
+    list.push(c);
+    byPage.set(c.pageId, list);
+  }
+  for (const list of byPage.values()) {
+    for (let i = 0; i < list.length; i += ENRICH_GROUP) groups.push(list.slice(i, i + ENRICH_GROUP));
+  }
+  const concurrency = Number(process.env.ENRICH_CONCURRENCY) || 12;
   let next = 0;
 
   async function worker() {
-    while (next < chunks.length) {
-      const chunk = chunks[next++];
-      const heading = chunk.metadata.headingHierarchy.slice(-1)[0] || "";
-      const llm = hasKey && chunk.content.trim().length >= 60
-        ? await llmEnrich(chunk.content).catch(() => null)
+    while (next < groups.length) {
+      const group = groups[next++];
+      const eligible = group.filter((c) => c.content.trim().length >= 60);
+      const labels = hasKey && eligible.length > 0
+        ? await llmEnrichBatch(eligible.map((c) => c.content)).catch(() => null)
         : null;
-      if (llm) {
-        chunk.content = `${llm.summary} Keywords: ${llm.keywords.join(", ")}.\n\n${chunk.content}`;
-      } else {
-        chunk.content = enrichChunk(chunk.content, chunk.metadata.type, heading);
+      for (const chunk of group) {
+        const i = eligible.indexOf(chunk);
+        const llm = labels && i >= 0 ? labels[i] : null;
+        if (llm) {
+          chunk.content = `${llm.summary} Keywords: ${llm.keywords.join(", ")}.\n\n${chunk.content}`;
+        } else {
+          const heading = chunk.metadata.headingHierarchy.slice(-1)[0] || "";
+          chunk.content = enrichChunk(chunk.content, chunk.metadata.type, heading);
+        }
       }
     }
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, chunks.length) }, worker)
+    Array.from({ length: Math.min(concurrency, groups.length) }, worker)
   );
 }
+
+const ENRICH_GROUP = 6;
+const ENRICH_CHARS = 2500;
 
 const ENRICH_SYSTEM =
   "You label chunks of website content for a semantic search index that powers a customer-facing chatbot. You return a one-line summary and a list of search keywords as strict JSON.";
 
-async function llmEnrich(content: string): Promise<{ summary: string; keywords: string[] }> {
+async function llmEnrichBatch(contents: string[]): Promise<({ summary: string; keywords: string[] } | null)[]> {
   const provider = new OpenRouterProvider({
     model: process.env.ENRICH_MODEL || process.env.OPENROUTER_MODEL,
-    maxTokens: 300,
+    maxTokens: 250 * contents.length + 100,
     temperature: 0.2,
   });
 
-  const user = `Analyze this chunk of content from a business website. Produce metadata that helps a retrieval system find it when a customer asks a question.
+  const user = `Analyze these ${contents.length} chunks of content from one page of a business website. For EACH chunk produce metadata that helps a retrieval system find it when a customer asks a question.
 
-Return ONLY strict JSON: {"summary": string, "keywords": string[]}
+Return ONLY strict JSON: {"chunks": [{"summary": string, "keywords": string[]}, ...]} with exactly ${contents.length} entries, in the same order as the chunks.
 
 "summary": one short sentence describing WHAT KIND of information the chunk contains (not a sales pitch). Examples: "Lists the dimensions, weight and materials of the product.", "Opening hours for each day of the week.", "Renovation pricing per square metre with warranty terms."
 
-"keywords": 8-15 short search terms. CRITICAL - include CATEGORY DESCRIPTORS for the TYPES of information present, not only the literal values. For example, if the chunk lists "200x90cm, oak, 80kg" include descriptors like "dimensions", "size", "width", "height", "material", "weight" - not just the numbers. Other descriptor examples: "pricing", "opening hours", "contact details", "address", "warranty", "delivery", "technical specifications", "capacity", "ingredients", "availability". Also include the most important specific topics or product names from the chunk.
+"keywords": 8-15 short search terms. CRITICAL - include CATEGORY DESCRIPTORS for the TYPES of information present, not only the literal values. For example, if the chunk lists "200x90cm, oak, 80kg" include descriptors like "dimensions", "size", "width", "height", "material", "weight" - not just the numbers. Other descriptor examples: "pricing", "opening hours", "contact details", "address", "warranty", "delivery", "technical specifications", "capacity", "ingredients", "availability". Also include the most important specific topics or product names from the chunk. Only use descriptors that fit the business (never food/menu words for a clinic).
 
 Write the summary and keywords in the SAME language as the content. For the category descriptors, also add the English equivalent (e.g. for Polish content include both "wymiary" and "dimensions").
 
 Do not invent information that is not present in the chunk.
 
-Content:
-"""
-${content.slice(0, 6000)}
-"""`;
+${contents.map((c, i) => `Chunk ${i + 1}:\n"""\n${c.slice(0, ENRICH_CHARS)}\n"""`).join("\n\n")}`;
 
   const res = await provider.chat([
     { role: "system", content: ENRICH_SYSTEM },
     { role: "user", content: user },
   ]);
 
-  const parsed = parseEnrichJSON(res.content);
-  if (!parsed) throw new Error("enrich: unparseable response");
-  return parsed;
+  let raw = res.content.trim();
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) raw = fence[1].trim();
+  const brace = raw.match(/\{[\s\S]*\}/);
+  if (!brace) throw new Error("enrich: unparseable response");
+  const list = (JSON.parse(brace[0]) as { chunks?: unknown[] }).chunks;
+  if (!Array.isArray(list)) throw new Error("enrich: no chunks array");
+  return contents.map((_, i) => (list[i] ? parseEnrichJSON(JSON.stringify(list[i])) : null));
 }
 
 function parseEnrichJSON(raw: string): { summary: string; keywords: string[] } | null {

@@ -98,3 +98,23 @@ export async function jevPickOption(
     .filter((i) => i >= 0 && i < options.length);
   return { index: index >= 0 && index < options.length ? index : -1, confidence: a.confidence ?? top, ambiguous };
 }
+
+/**
+ * Knowledge-gap judgment: P(the message is a real question about the business
+ * that the business should be able to answer). Only such questions belong on the
+ * owner's "unanswered questions" list; greetings, small talk and off-topic asks don't.
+ */
+export async function jevIsKnowledgeGap(message: string): Promise<number | null> {
+  const answers = await jevAsk({ message }, {
+    gap: {
+      type: "noul",
+      instructions: "Is `message` a question or request about this business itself (its services, products, prices, opening hours, locations, staff, policies, bookings or procedures) that the business should be able to answer for a customer?",
+      criteria: {
+        true: "A genuine customer question about the business's offer, prices, hours, locations, people, rules or how to do something with it.",
+        false: "A greeting, thanks, small talk, a general-knowledge or off-topic question unrelated to this business, spam, gibberish, or an instruction to the assistant.",
+      },
+    },
+  });
+  const a = answers?.gap as JevNoulAnswer | undefined;
+  return a && typeof a.noul === "number" ? a.noul : null;
+}

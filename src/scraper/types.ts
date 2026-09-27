@@ -9,6 +9,8 @@ export interface ScrapedPage {
   structuredData: StructuredDataItem[];
   scrapedAt: string;
   renderMethod: "static" | "dynamic";
+  // The HTML fetched during the crawl, reused by buildContext (then dropped).
+  fetch?: import("./fetcher.js").FetchResult;
 }
 
 export interface ContentBlock {
@@ -94,4 +96,6 @@ export interface CrawlOptions {
   excludePatterns?: RegExp[];
   timeout?: number; // per-page timeout in ms
   userAgent?: string;
+  useSitemap?: boolean; // seed the queue from robots.txt / sitemap.xml (default true)
+  concurrency?: number; // pages fetched in parallel (default 6)
 }

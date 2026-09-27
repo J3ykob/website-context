@@ -199,6 +199,12 @@ export interface CatalogHit { chunk: CatalogChunk; score: number }
 export interface CatalogRetrieval { catalogIds: string[]; hits: CatalogHit[]; scored: number; ms: number }
 
 const CATALOG_MIN = 0.35;
+
+// Lowercase, strip diacritics; 5-char prefixes act as a crude stemmer for Polish inflection.
+const fold = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l");
+function queryTerms(q: string): string[] {
+  return [...new Set(fold(q).split(/[^a-z0-9]+/).filter((w) => w.length >= 4).map((w) => w.slice(0, 5)))];
+}
 const MAX_SELECTED_CATALOGS = 3;
 const MAX_SCORED_CHUNKS = 80;
 
@@ -228,10 +234,16 @@ export async function retrieveFromCatalog(question: string, catalog: KnowledgeCa
 
   let candidates = catalog.chunks.filter((c) => selected.includes(c.catalogId));
   if (candidates.length > MAX_SCORED_CHUNKS) {
+    // Big catalog (full-site scrape of a shop): Jev judges the MAX_SCORED_CHUNKS
+    // most promising ones - vector hits first, then by word overlap with the question.
     const pref = new Map(preferIds.map((id, i) => [id, i]));
+    const terms = queryTerms(question);
+    const overlap = (c: CatalogChunk) => { const t = fold(c.content); return terms.reduce((n, w) => n + (t.includes(w) ? 1 : 0), 0); };
     candidates = candidates
-      .sort((a, b) => (pref.get(a.id) ?? 1e9) - (pref.get(b.id) ?? 1e9))
-      .slice(0, MAX_SCORED_CHUNKS);
+      .map((c) => ({ c, p: pref.get(c.id) ?? 1e9, o: overlap(c) }))
+      .sort((a, b) => a.p - b.p || b.o - a.o)
+      .slice(0, MAX_SCORED_CHUNKS)
+      .map((x) => x.c);
   }
   const scores = await pool(batches(candidates, SCORE_BATCH), CONCURRENCY, async (batch) => {
     const questions: Record<string, JevQuestion> = {};

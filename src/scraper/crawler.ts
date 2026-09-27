@@ -2,12 +2,15 @@ import { fetchPage, closeBrowser } from "./fetcher.js";
 import { extractPage } from "./extractor.js";
 import { fetchPdfAsPage } from "./pdf.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
+import { createHash } from "crypto";
 
 const DEFAULT_OPTIONS: Required<CrawlOptions> = {
-  maxPages: 100,
-  maxDepth: 5,
+  maxPages: 500,
+  maxDepth: 10,
   respectRobotsTxt: true,
-  rateLimit: 1000,
+  rateLimit: 100,
+  useSitemap: true,
+  concurrency: 6,
   includePatterns: [],
   excludePatterns: [
     // (\?|$) not $: binary links often carry cache-buster query strings
@@ -17,7 +20,9 @@ const DEFAULT_OPTIONS: Required<CrawlOptions> = {
     // often live in PDFs).
     /\.(zip|tar|gz|mp4|mp3|avi|mov|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2|ttf|eot|docx?|xlsx?|pptx?)(\?|$)/i,
     /\?(utm_|fbclid|gclid)/i,
-    /\/(wp-admin|wp-login|admin|login|logout|cart|checkout)\//i,
+    /\/(wp-admin|wp-login|admin|login|logout|cart|checkout|koszyk|zamowienie|my-account|moje-konto)\//i,
+    /[?&](replytocom|add-to-cart|orderby|sort|filter_[a-z_]+|s)=/i,
+    /\/(feed|wp-json|xmlrpc\.php)(\/|$)/i,
   ],
   timeout: 15000,
   userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -32,114 +37,140 @@ export async function crawlSite(
   options: CrawlOptions = {}
 ): Promise<CrawlResult> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
+  const concurrency = Math.max(1, options.concurrency ?? 6);
   const baseUrl = new URL(startUrl);
-  const allowedHosts = new Set([baseUrl.hostname]);
+  // Both apex and www variants: sitemaps often list the other one.
+  const bareHost = baseUrl.hostname.replace(/^www\./, "");
+  const allowedHosts = new Set([baseUrl.hostname, bareHost, `www.${bareHost}`]);
   const visited = new Set<string>();
+  const contentHashes = new Set<string>();
   const queue: { url: string; depth: number; parent?: string }[] = [{ url: startUrl, depth: 0 }];
   const pages: ScrapedPage[] = [];
   const failures: string[] = [];
   const startTime = Date.now();
   let staticCount = 0;
   let dynamicCount = 0;
+  let inFlight = 0;
 
-  // Fetch robots.txt if needed
+  // Key pages (contact, pricing, hours...) jump the queue so they are fetched early.
+  const enqueue = (next: { url: string; depth: number; parent?: string }) => {
+    const n = normalizeUrl(next.url);
+    if (visited.has(n)) return;
+    let path = "";
+    try { path = new URL(n).pathname; } catch { return; }
+    if (KEY_PAGE_PATTERN.test(path)) {
+      const firstNonKey = queue.findIndex((q) => { try { return !KEY_PAGE_PATTERN.test(new URL(q.url).pathname); } catch { return true; } });
+      queue.splice(firstNonKey < 0 ? queue.length : firstNonKey, 0, next);
+    } else queue.push(next);
+  };
+
   let disallowedPaths: string[] = [];
-  if (opts.respectRobotsTxt) {
-    disallowedPaths = await fetchRobotsTxt(baseUrl.origin, opts.userAgent);
-  }
+  const robots = await fetchRobotsTxt(baseUrl.origin, opts.userAgent);
+  if (opts.respectRobotsTxt) disallowedPaths = robots.disallowed;
 
-  while (queue.length > 0 && pages.length < opts.maxPages) {
-    const item = queue.shift()!;
-    const normalizedUrl = normalizeUrl(item.url);
-
-    if (visited.has(normalizedUrl)) continue;
-    if (item.depth > opts.maxDepth) continue;
-    if (!isAllowedUrl(normalizedUrl, allowedHosts, opts, disallowedPaths)) continue;
-
-    visited.add(normalizedUrl);
-
-    try {
-      // Rate limiting
-      if (pages.length > 0) {
-        await sleep(opts.rateLimit);
-      }
-
-      console.log(`  [${pages.length + 1}/${opts.maxPages}] Crawling: ${normalizedUrl} (depth: ${item.depth})`);
-
-      // PDFs take a dedicated extraction path (text via unpdf), never the HTML fetcher.
-      if (/\.pdf(\?|$)/i.test(normalizedUrl)) {
-        const pdfPage = await fetchPdfAsPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
-        if (pdfPage) {
-          pages.push(pdfPage);
-          staticCount++;
-          console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`);
-        } else {
-          console.log(`  [PDF] skipped (too large, scanned, or unreadable): ${normalizedUrl}`);
-        }
-        continue;
-      }
-
-      const fetchResult = await fetchPage(normalizedUrl, {
-        timeout: opts.timeout,
-        userAgent: opts.userAgent,
-      });
-
-      if (fetchResult.statusCode >= 400) {
-        failures.push(normalizedUrl);
-        continue;
-      }
-
-      // Content-type is the authority, extensions are just a fast pre-filter:
-      // PDFs served without a .pdf extension still get the extraction path,
-      // any other non-HTML document is skipped, never chunked.
-      const ctype = (fetchResult.headers["content-type"] || "").toLowerCase();
-      if (ctype.includes("application/pdf")) {
-        const pdfPage = await fetchPdfAsPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
-        if (pdfPage) { pages.push(pdfPage); staticCount++; console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`); }
-        continue;
-      }
-      if (ctype && !/text\/html|application\/xhtml|text\/plain/.test(ctype)) {
-        console.log(`  [SKIP] non-HTML content-type (${ctype.split(";")[0]}): ${normalizedUrl}`);
-        continue;
-      }
-
-      // Track effective hostname after redirects
-      const effectiveHost = new URL(fetchResult.finalUrl).hostname;
-      if (!allowedHosts.has(effectiveHost)) {
-        allowedHosts.add(effectiveHost);
-        // Fetch robots.txt for the new host too
-        if (opts.respectRobotsTxt) {
-          const newOrigin = new URL(fetchResult.finalUrl).origin;
-          const newDisallowed = await fetchRobotsTxt(newOrigin, opts.userAgent);
-          disallowedPaths.push(...newDisallowed);
-        }
-      }
-
-      const page = extractPage(fetchResult);
-      pages.push(page);
-
-      if (page.renderMethod === "static") staticCount++;
-      else dynamicCount++;
-
-      // Add links to queue (internal = same allowed hosts). Key pages (contact,
-      // about, pricing, services, hours) JUMP the queue so they're crawled even on
-      // large sites where they'd otherwise fall outside the page cap — this is how
-      // a contact page (with the phone) gets reliably captured.
-      for (const link of page.links) {
-        const linkHost = new URL(link.href).hostname;
-        const isInternal = allowedHosts.has(linkHost);
-        if (isInternal && !visited.has(normalizeUrl(link.href))) {
-          const next = { url: link.href, depth: item.depth + 1, parent: normalizedUrl };
-          if (KEY_PAGE_PATTERN.test(new URL(link.href).pathname)) queue.unshift(next);
-          else queue.push(next);
-        }
-      }
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`  [FAIL] ${normalizedUrl}: ${msg}`);
-      failures.push(normalizedUrl);
+  // Sitemap-first discovery: every URL the site declares, not only what is
+  // reachable within a few link hops from the homepage.
+  if (opts.useSitemap) {
+    const sitemapUrls = await fetchSitemapUrls(baseUrl.origin, robots.sitemaps, opts.userAgent);
+    let added = 0;
+    for (const u of sitemapUrls) {
+      try { if (!allowedHosts.has(new URL(u).hostname)) continue; } catch { continue; }
+      enqueue({ url: u, depth: 1, parent: startUrl });
+      added++;
     }
+    console.log(`  [sitemap] ${sitemapUrls.length} URL(s) declared, ${added} queued`);
   }
+
+  const handle = async (item: { url: string; depth: number; parent?: string }, normalizedUrl: string): Promise<void> => {
+    console.log(`  [${pages.length + 1}/${opts.maxPages}] Crawling: ${normalizedUrl} (depth: ${item.depth})`);
+
+    // PDFs take a dedicated extraction path (text via unpdf), never the HTML fetcher.
+    if (/\.pdf(\?|$)/i.test(normalizedUrl)) {
+      const pdfPage = await fetchPdfAsPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
+      if (pdfPage) {
+        pages.push(pdfPage);
+        staticCount++;
+        console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`);
+      } else {
+        console.log(`  [PDF] skipped (too large, scanned, or unreadable): ${normalizedUrl}`);
+      }
+      return;
+    }
+
+    const fetchResult = await fetchPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
+    if (fetchResult.statusCode >= 400) { failures.push(normalizedUrl); return; }
+
+    // Content-type is the authority, extensions are just a fast pre-filter.
+    const ctype = (fetchResult.headers["content-type"] || "").toLowerCase();
+    if (ctype.includes("application/pdf")) {
+      const pdfPage = await fetchPdfAsPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
+      if (pdfPage) { pages.push(pdfPage); staticCount++; console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`); }
+      return;
+    }
+    if (ctype && !/text\/html|application\/xhtml|text\/plain/.test(ctype)) {
+      console.log(`  [SKIP] non-HTML content-type (${ctype.split(";")[0]}): ${normalizedUrl}`);
+      return;
+    }
+
+    const finalNorm = normalizeUrl(fetchResult.finalUrl);
+    if (finalNorm !== normalizedUrl && pages.some((p) => normalizeUrl(p.url) === finalNorm)) return; // redirect to a page we already have
+    visited.add(finalNorm);
+
+    const effectiveHost = new URL(fetchResult.finalUrl).hostname;
+    if (!allowedHosts.has(effectiveHost)) {
+      allowedHosts.add(effectiveHost);
+      if (opts.respectRobotsTxt) {
+        const more = await fetchRobotsTxt(new URL(fetchResult.finalUrl).origin, opts.userAgent);
+        disallowedPaths.push(...more.disallowed);
+      }
+    }
+
+    const page = extractPage(fetchResult);
+    // Same text under a different URL (query variants, print views, aliases): skip.
+    const hash = contentHash(page);
+    if (hash && contentHashes.has(hash)) { console.log(`  [DUP] same content as an earlier page: ${normalizedUrl}`); return; }
+    if (hash) contentHashes.add(hash);
+    // Keep the fetched HTML so buildContext does not fetch every page again.
+    page.fetch = fetchResult;
+    pages.push(page);
+    if (page.renderMethod === "static") staticCount++;
+    else dynamicCount++;
+
+    for (const link of page.links) {
+      let linkHost = "";
+      try { linkHost = new URL(link.href).hostname; } catch { continue; }
+      if (allowedHosts.has(linkHost)) enqueue({ url: link.href, depth: item.depth + 1, parent: normalizedUrl });
+    }
+  };
+
+  const worker = async (): Promise<void> => {
+    while (true) {
+      if (pages.length + inFlight >= opts.maxPages) return;
+      const item = queue.shift();
+      if (!item) {
+        if (inFlight === 0) return;
+        await sleep(100); // another worker may still add links
+        continue;
+      }
+      const normalizedUrl = normalizeUrl(item.url);
+      if (visited.has(normalizedUrl)) continue;
+      if (item.depth > opts.maxDepth) continue;
+      if (!isAllowedUrl(normalizedUrl, allowedHosts, opts, disallowedPaths)) continue;
+      visited.add(normalizedUrl);
+      inFlight++;
+      try {
+        await handle(item, normalizedUrl);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn(`  [FAIL] ${normalizedUrl}: ${msg}`);
+        failures.push(normalizedUrl);
+      } finally {
+        inFlight--;
+      }
+      if (opts.rateLimit > 0) await sleep(opts.rateLimit);
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
 
   await closeBrowser();
 
@@ -163,21 +194,56 @@ export async function crawlSite(
   };
 }
 
-async function fetchRobotsTxt(origin: string, userAgent: string): Promise<string[]> {
+function contentHash(page: ScrapedPage): string {
+  const text = page.content.map((b) => b.content + (b.items || []).join(" ")).join("\n").replace(/\s+/g, " ").trim();
+  if (text.length < 200) return ""; // too thin to call two pages identical
+  return createHash("sha1").update(text).digest("hex");
+}
+
+const MAX_SITEMAPS = 25;
+const MAX_SITEMAP_URLS = 5000;
+
+/** URLs from robots.txt Sitemap: lines, /sitemap.xml and /sitemap_index.xml, following sitemap indexes. */
+export async function fetchSitemapUrls(origin: string, declared: string[], userAgent: string): Promise<string[]> {
+  const toVisit = [...new Set([...declared, `${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`, `${origin}/wp-sitemap.xml`])];
+  const seenMaps = new Set<string>();
+  const urls = new Set<string>();
+  while (toVisit.length > 0 && seenMaps.size < MAX_SITEMAPS && urls.size < MAX_SITEMAP_URLS) {
+    const sm = toVisit.shift()!;
+    if (seenMaps.has(sm) || /\.gz(\?|$)/i.test(sm)) continue;
+    seenMaps.add(sm);
+    try {
+      const r = await fetch(sm, { headers: { "User-Agent": userAgent }, signal: AbortSignal.timeout(10000), redirect: "follow" });
+      if (!r.ok) continue;
+      const xml = await r.text();
+      if (!/<(urlset|sitemapindex)\b/i.test(xml)) continue;
+      const locs = [...xml.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)\s*(?:\]\]>)?\s*<\/loc>/gi)].map((m) => m[1].replace(/&amp;/g, "&"));
+      if (/<sitemapindex\b/i.test(xml)) toVisit.push(...locs);
+      else for (const u of locs) { if (urls.size >= MAX_SITEMAP_URLS) break; urls.add(u); }
+    } catch {}
+  }
+  return [...urls];
+}
+
+async function fetchRobotsTxt(origin: string, userAgent: string): Promise<{ disallowed: string[]; sitemaps: string[] }> {
   try {
     const response = await fetch(`${origin}/robots.txt`, {
       headers: { "User-Agent": userAgent },
       signal: AbortSignal.timeout(5000),
     });
-    if (!response.ok) return [];
+    if (!response.ok) return { disallowed: [], sitemaps: [] };
 
     const text = await response.text();
     const disallowed: string[] = [];
+    const sitemaps: string[] = [];
     let relevantSection = false;
 
     for (const line of text.split("\n")) {
       const trimmed = line.trim().toLowerCase();
-      if (trimmed.startsWith("user-agent:")) {
+      if (trimmed.startsWith("sitemap:")) {
+        const u = line.trim().slice("sitemap:".length).trim();
+        if (/^https?:\/\//i.test(u)) sitemaps.push(u);
+      } else if (trimmed.startsWith("user-agent:")) {
         const agent = trimmed.slice("user-agent:".length).trim();
         relevantSection = agent === "*" || userAgent.toLowerCase().includes(agent);
       } else if (relevantSection && trimmed.startsWith("disallow:")) {
@@ -186,9 +252,9 @@ async function fetchRobotsTxt(origin: string, userAgent: string): Promise<string
       }
     }
 
-    return disallowed;
+    return { disallowed, sitemaps };
   } catch {
-    return [];
+    return { disallowed: [], sitemaps: [] };
   }
 }
 

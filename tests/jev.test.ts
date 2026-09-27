@@ -48,3 +48,21 @@ describe("jev fallbacks", () => {
     } finally { if (saved) process.env.JEV_API_KEY = saved; }
   });
 });
+
+live("jevIsKnowledgeGap", () => {
+  it("flags real questions about the business and ignores small talk and off-topic", async () => {
+    const { jevIsKnowledgeGap } = await import("../src/llm/jev.js");
+    const [mri, parking, hi, thanks, capital] = await Promise.all([
+      jevIsKnowledgeGap("Czy robicie rezonans magnetyczny głowy?"),
+      jevIsKnowledgeGap("Czy jest parking przy placówce na Ursynowie?"),
+      jevIsKnowledgeGap("Cześć!"),
+      jevIsKnowledgeGap("Dzięki, to wszystko"),
+      jevIsKnowledgeGap("Jaka jest stolica Francji?"),
+    ]);
+    expect(mri!).toBeGreaterThan(0.5);
+    expect(parking!).toBeGreaterThan(0.5);
+    expect(hi!).toBeLessThan(0.5);
+    expect(thanks!).toBeLessThan(0.5);
+    expect(capital!).toBeLessThan(0.5);
+  }, 20000);
+});

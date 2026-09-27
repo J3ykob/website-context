@@ -21,7 +21,7 @@ import {
 } from "../flows/conversation.js";
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
-import { jevPassageRelevance, jevPickOption } from "./jev.js";
+import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled } from "./jev.js";
 import { retrieveFromCatalog, type KnowledgeCatalog } from "../knowledge/catalog.js";
 
 export interface ChatMessage {
@@ -225,6 +225,11 @@ class AnthropicBackend implements LLMBackend {
   }
 }
 
+// confirmed: sources answer it. no_confirmation: the fallback small model doubts it
+// (advisory). no_evidence: Jev read every candidate passage and none answers it
+// (hard rule: say we don't have the information, never claim we don't offer it).
+type FactVerdict = "confirmed" | "no_confirmation" | "no_evidence";
+
 export class WebsiteChat {
   private backend: LLMBackend;
   private maxTokens: number;
@@ -425,9 +430,10 @@ export class WebsiteChat {
     // at all to reason over). Otherwise the small model's verdict becomes an
     // advisory the big model weighs (see buildSystemPrompt).
     if (usableChunksC.length === 0) {
-      return { message: this.refusal(lastUserMessage), sources: [], grounded: false, unknownQuestion: lastUserMessage.trim() || undefined };
+      return { message: this.refusal(lastUserMessage), sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
     }
     const factCheckC = await this.factCheck(lastUserMessage, usableChunksC);
+    const gapC = this.gapDecision(lastUserMessage, factCheckC); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
     const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage, factCheckC);
@@ -626,7 +632,7 @@ export class WebsiteChat {
 
     const plainOutputCheck = validateOutput(responseText, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
-    return { message: plainOutputCheck.sanitized, sources, grounded: true, unknownQuestion: gapPlain.question || undefined };
+    return { message: plainOutputCheck.sanitized, sources, grounded: true, unknownQuestion: await this.resolveGap(gapC, lastUserMessage, gapPlain.question) };
   }
 
   // Parallel retrieval shared by chat() and chatStream(). Each Vectorize query is ~2s,
@@ -744,9 +750,10 @@ export class WebsiteChat {
     if (usableStream.length === 0) {
       const msg = this.refusal(inputValidation.sanitized);
       onToken(msg);
-      return { message: msg, sources: [], grounded: false, unknownQuestion: inputValidation.sanitized.trim() || undefined };
+      return { message: msg, sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(inputValidation.sanitized, "no_evidence"), inputValidation.sanitized, inputValidation.sanitized.trim() || null) };
     }
     const factCheckS = await this.factCheck(inputValidation.sanitized, usableStream);
+    const gapS = this.gapDecision(inputValidation.sanitized, factCheckS); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
     const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, inputValidation.sanitized, factCheckS);
@@ -789,7 +796,7 @@ export class WebsiteChat {
       .replace(/One moment,? please!?\s*/gi, "")
       .trim();
     const outputCheck = validateOutput(cleaned, this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
-    return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: gapStream.question || undefined };
+    return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: await this.resolveGap(gapS, inputValidation.sanitized, gapStream.question) };
   }
 
   // Route tiny classification through the small fast model when available.
@@ -814,14 +821,15 @@ export class WebsiteChat {
   // this is a dedicated yes/no decision — if "no", the bot refuses and the
   // question is logged as a knowledge gap instead of a confabulated answer.
   // Fails OPEN (returns true) on error so a transient blip never over-refuses.
-  private async factCheck(question: string, chunks: { content: string; metadata: Record<string, unknown>; score?: number }[]): Promise<"confirmed" | "no_confirmation"> {
+  private async factCheck(question: string, chunks: { content: string; metadata: Record<string, unknown>; score?: number }[]): Promise<FactVerdict> {
     if (chunks.length === 0) return "no_confirmation";
     // Catalog retrieval already had Jev judge these chunks against this question.
     if (chunks.some((c) => typeof c.metadata.jevScore === "number" && (c.metadata.jevScore as number) >= (Number(process.env.JEV_GATE_MIN) || 0.5))) return "confirmed";
     // Fast path: strong direct retrieval (high cosine) is trusted — skip the
     // small model entirely and report the sources as relevant.
     const topScore = Math.max(...chunks.map((c) => (c as any).score || 0));
-    if (topScore >= 0.62) return "confirmed";
+    // Cosine shortcut only without Jev: with Jev every answer is judged (slower, surer).
+    if (topScore >= 0.62 && !jevEnabled()) return "confirmed";
     // Primary judge: TypeSafe Jev scores each passage (full text, not a 700-char
     // prefix that is mostly the LLM summary) for P(answers the question) in one
     // ~400ms call. Measured on amygdala.pl (PL, 13 questions): off-site questions
@@ -829,7 +837,7 @@ export class WebsiteChat {
     const relevance = await jevPassageRelevance(question, chunks.slice(0, 12).map((c) => (c.content || "").slice(0, 1500)));
     if (relevance) {
       const best = relevance.length ? Math.max(...relevance) : 0;
-      return best >= (Number(process.env.JEV_GATE_MIN) || 0.5) ? "confirmed" : "no_confirmation";
+      return best >= (Number(process.env.JEV_GATE_MIN) || 0.5) ? "confirmed" : "no_evidence";
     }
     // Fallback (no key / Jev down): the OpenRouter fast model.
     const context = chunks.slice(0, 6).map((c) => (c.content || "").slice(0, 700)).join("\n---\n");
@@ -885,7 +893,7 @@ Reply with ONLY one word: yes or no.`;
     userQuery?: string,
     // Advisory verdict from the small fact-check model — the big model is the
     // final judge and is told to interpret this hint in BOTH directions.
-    factCheck?: "confirmed" | "no_confirmation"
+    factCheck?: FactVerdict
   ): string {
     const siteInfo = this.context.siteMap
       .slice(0, 20)
@@ -948,7 +956,15 @@ Reply with ONLY one word: yes or no.`;
 ## Website Pages:
 ${siteInfo}
 ${skillsSection}${renderOfficialInfo(this.context.businessProfile)}
-${factCheck ? `
+${factCheck === "no_evidence" ? `
+## NO INFORMATION FOUND — HARD RULE for this reply:
+A checker read every relevant passage of our knowledge base for this exact question and NONE of them answers it. Therefore:
+- Say briefly, in the visitor's language, that you don't have this information here.
+- NEVER state or imply that we do NOT offer, do, have or sell it. Missing information is not a "no" — we may simply not have described it.
+- NEVER recommend other companies, hospitals, shops or places, and never answer from general knowledge.
+- Point the visitor to how they can get the answer from us (phone, booking or contact details from the Official Business Info or the context).
+- You MAY mention closely related things the context shows we DO offer, clearly as related, not as the answer.
+- If the message is only a greeting, thanks or small talk, just reply naturally.` : factCheck ? `
 ## Fact-check (advisory — YOU are the final judge):
 A fast, deliberately strict fact-checking model reviewed the sources above for this exact question and concluded: **the sources ${factCheck === "confirmed" ? "appear to contain relevant information for it" : "do NOT clearly contain a direct answer"}**.
 This checker is small and strict, so read its verdict with judgment, in both directions:
@@ -1063,6 +1079,21 @@ Answer:`;
       const n = parseInt((raw.match(/\d+/) || ["0"])[0], 10);
       return n >= 1 && n <= flows.length ? flows[n - 1] : null;
     } catch { return null; }
+  }
+
+  // Knowledge-gap decision by Jev: only when no evidence was found, and only for
+  // real questions about the business (not greetings / off-topic). Resolves to
+  // null when Jev is unavailable, so the caller falls back to the [[gap]] marker.
+  private gapDecision(question: string, verdict: FactVerdict): Promise<boolean | null> {
+    if (!jevEnabled()) return Promise.resolve(null);
+    if (verdict === "confirmed") return Promise.resolve(false);
+    return jevIsKnowledgeGap(question).then((p) => (p === null ? null : p >= 0.5)).catch(() => null);
+  }
+
+  private async resolveGap(decision: Promise<boolean | null>, question: string, marker: string | null): Promise<string | undefined> {
+    const d = await decision;
+    if (d === null) return marker || undefined;
+    return d ? question.trim().slice(0, 200) || undefined : undefined;
   }
 
   // [[gap: ...]] protocol — the plain-text paths have no tool channel, so the

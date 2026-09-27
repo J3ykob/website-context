@@ -47,9 +47,12 @@ export async function scrapeTenant(
   const store = new CloudflareVectorizeStore({ tenantId });
   console.log(`[scrape-pipeline] Using Cloudflare Vectorize for ${tenantId}`);
 
-  // Crawl site first (uses shared browser)
-  console.log(`[scrape-pipeline] Crawling ${siteUrl} (max ${maxPages} pages) for tenant ${tenantId}`);
-  const crawlResult = await crawlSite(siteUrl, { maxPages, maxDepth: 3, rateLimit: 800 });
+  // Crawl the WHOLE site: sitemap + links, 6 pages in parallel. Callers' small
+  // page caps (15/20, from when the crawl was sequential) no longer limit it;
+  // SCRAPE_MAX_PAGES is only a safety ceiling for huge sites.
+  const pageBudget = Math.max(maxPages, Number(process.env.SCRAPE_MAX_PAGES) || 500);
+  console.log(`[scrape-pipeline] Crawling ${siteUrl} (full site, ceiling ${pageBudget} pages) for tenant ${tenantId}`);
+  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6 });
   await closeBrowser();
 
   const pagesScraped = crawlResult.stats.successPages;
