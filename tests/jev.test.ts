@@ -81,3 +81,26 @@ live("jevCheckNoEvidenceReply", () => {
     expect(honest!.external).toBeLessThan(0.5);
   }, 20000);
 });
+
+describe("splitStatements", () => {
+  it("splits sentences and list items, drops link targets and short fragments", async () => {
+    const { splitStatements } = await import("../src/llm/jev.js");
+    const s = splitStatements("Tak, mamy placówkę w Legnicy. Adres: ul. Brzechwy 12f.\n- **Wrocław**: pon.-pt. 8:00-16:00\nZobacz [cennik](https://x.pl/cennik/). Ok.");
+    expect(s).toEqual(["Tak, mamy placówkę w Legnicy.", "Adres: ul. Brzechwy 12f.", "Wrocław: pon.-pt. 8:00-16:00", "Zobacz cennik."]);
+  });
+});
+
+live("jevUnsupportedStatements", () => {
+  it("flags the unsupported statement and passes supported ones", async () => {
+    const { jevUnsupportedStatements } = await import("../src/llm/jev.js");
+    const sources = ["Cennik. Badanie psychotechniczne 150 zł - kierowcy wszystkich kategorii. Badanie psychologiczne operatorów maszyn i do pracy na wysokości: 100 zł."];
+    const r = await jevUnsupportedStatements("Ile kosztuje psychotechnika?", [
+      "Badanie psychotechniczne dla kierowców i operatorów maszyn kosztuje 150 zł.",
+      "Dla operatorów maszyn badanie kosztuje 100 zł.",
+      "Zapraszamy do kontaktu!",
+    ], sources);
+    expect(r![0]).toBeGreaterThan(0.6);
+    expect(r![1]).toBeLessThan(0.6);
+    expect(r![2]).toBeLessThan(0.6);
+  }, 20000);
+});

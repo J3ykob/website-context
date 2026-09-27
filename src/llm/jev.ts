@@ -140,3 +140,38 @@ export async function jevCheckNoEvidenceReply(question: string, reply: string): 
   const e = answers?.external as JevNoulAnswer | undefined;
   return d && e && typeof d.noul === "number" && typeof e.noul === "number" ? { denies: d.noul, external: e.noul } : null;
 }
+
+/** Split a reply into checkable statements (sentences and list items). */
+export function splitStatements(reply: string): string[] {
+  return reply
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    // Sentence ends before a capital letter, but never after Polish abbreviations
+    // ("ul.", "pon.-pt.", "np.", "tel.") or inside times/prices.
+    .split(/\n+|(?<=(?<!(?:^|[\s(])(?:ul|al|pl|os|pon|pt|wt|śr|czw|sob|niedz|np|tj|tzw|nr|lok|tel|godz|in|dr|prof|mgr|ok|św|bud|ww|m|r|zł))[.!?])\s+(?=[A-ZĄĆĘŁŃÓŚŹŻ])/)
+    .map((s) => s.replace(/^[\s*#>-]+|\*\*/g, "").trim())
+    .filter((s) => s.length >= 12)
+    .slice(0, 24);
+}
+
+/**
+ * Answer verification: P(statement asserts a fact about the business that the
+ * sources do not support) for every statement of a reply, in one call.
+ */
+export async function jevUnsupportedStatements(question: string, statements: string[], sources: string[]): Promise<number[] | null> {
+  if (statements.length === 0) return [];
+  const questions: Record<string, JevQuestion> = {};
+  statements.forEach((_, i) => {
+    questions[`s${i}`] = {
+      type: "noul",
+      instructions: `Does \`statements[${i}]\` state a fact about the business that the \`sources\` do not support or that they contradict?`,
+      criteria: {
+        true: "It states a specific fact (what we do or offer, where it happens, who does it, a price, time, number, address or contact) that is missing from the sources or differs from them.",
+        false: "The sources support it (stated or directly implied), or it is only a greeting, an offer to help, or a general invitation to contact us.",
+      },
+    };
+  });
+  const answers = await jevAsk({ question, sources, statements }, questions, 4000);
+  if (!answers) return null;
+  const out = statements.map((_, i) => (answers[`s${i}`] as JevNoulAnswer | undefined)?.noul);
+  return out.every((v) => typeof v === "number") ? (out as number[]) : null;
+}

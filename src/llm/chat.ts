@@ -21,7 +21,7 @@ import {
 } from "../flows/conversation.js";
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
-import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply } from "./jev.js";
+import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements } from "./jev.js";
 import { retrieveFromCatalog, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 
@@ -638,6 +638,7 @@ export class WebsiteChat {
     let responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
     if (factCheckC === "no_evidence") responseText = await this.guardNoEvidence(lastUserMessage, systemPrompt, sanitizedMessages, responseText);
     responseText = await this.fixForeignScript(lastUserMessage, systemPrompt, sanitizedMessages, responseText);
+    if (factCheckC === "confirmed") responseText = await this.verifyAnswer(lastUserMessage, systemPrompt, sanitizedMessages, this.extractGapMarker(responseText).text, usableChunksC);
 
     // Sanitize: if LLM returned JSON instead of plain text, extract the message
     try {
@@ -830,6 +831,7 @@ export class WebsiteChat {
     // The widget replaces the streamed bubble with the final message, so a rewrite
     // here fixes what the visitor ends up seeing.
     raw = this.extractGapMarker(await this.fixForeignScript(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw)).text;
+    if (factCheckS === "confirmed") raw = this.extractGapMarker(await this.verifyAnswer(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw, usableStream)).text;
     if (holding && !gapStream.question) {
       onToken(raw.slice(Math.min(emitted, raw.length)));
     }
@@ -1004,6 +1006,8 @@ Reply with ONLY one word: yes or no.`;
 - Do NOT output any text that looks like a tool call, action tag, or function name. No [Action:...], no {action:...}, no [[tool_name...]]. Just respond naturally with links when relevant.
 - After a flow completes, do NOT re-invoke unless the user explicitly asks again.
 - PRECISION over guessing: never state a specific figure (team size, headcount, prices, quantities, dates) unless it is stated in the context as a general fact about the business. A number that appears inside a specific project, case study, or example describes ONLY that project — never generalize it into a company-wide fact (e.g. "2 people worked on project X" does NOT mean the team has 2 people). If you don't have the exact figure asked for, say so plainly, give the closest real information you do have, point to contact for the precise answer, and append the [[gap: ...]] marker.
+- CHECK THE QUESTION'S ASSUMPTIONS: a question may assume something (where, who, when, how much, whether we do it). Compare each assumption with the sources. If the sources say something different, say so plainly and give what the sources say instead of agreeing with the question. Keep apart what WE do and what a partner or another company does, and where each thing happens.
+- PRICES: copy the exact item name and price from the same line of a source; never apply one item's price to another item or group.
 - SYNTHESISE for descriptive questions: when asked what you do, what you offer, who you are, or for examples of your work, and the context contains projects or case studies, answer by describing them ("we build/deliver work such as ..."). Concrete examples ARE a valid answer to a general question — don't refuse just because there is no single summary sentence. This does NOT license inventing specific figures (see above).
 
 ## Website Pages:
@@ -1170,6 +1174,35 @@ Answer:`;
     try {
       const again = await this.backend.generate(`${systemPrompt}\n\n## CORRECTION\nYour previous draft mixed in words written in another alphabet (${stray.join(", ")}). Write the reply again using ONLY the visitor's language and its normal alphabet.`, messages, this.maxTokens);
       return scripts(again).size <= inQ.size ? again : text;
+    } catch {
+      return text;
+    }
+  }
+
+  // Answer verification (grounded replies): Jev checks every statement against the
+  // sources the model was given; statements asserting a fact the sources do not
+  // support ("we take blood on site", a price applied to the wrong group) trigger
+  // one rewrite that corrects exactly those. ~0.3-0.4s, after the stream, so the
+  // first token is not delayed; the widget swaps in the final message.
+  private async verifyAnswer(question: string, systemPrompt: string, messages: ChatMessage[], text: string, chunks: { content: string }[]): Promise<string> {
+    if (!jevEnabled()) return text;
+    const statements = splitStatements(text);
+    if (statements.length === 0) return text;
+    const sources = [
+      renderOfficialInfo(this.context.businessProfile),
+      ...this.contextNotes.map((n) => `Q: ${n.question}\nA: ${n.answer}`),
+      ...chunks.slice(0, 12).map((c) => c.content.slice(0, 2500)),
+    ].filter((x) => x && x.trim());
+    const t0 = Date.now();
+    const scores = await jevUnsupportedStatements(question, statements, sources);
+    if (!scores) return text;
+    const min = Number(process.env.JEV_VERIFY_MIN) || 0.6;
+    const bad = statements.filter((_, i) => scores[i] >= min);
+    if (bad.length === 0) return text;
+    console.log(`[verify] ${this.context.tenantId}: ${bad.length}/${statements.length} unsupported (${Date.now() - t0}ms) -> rewrite: ${bad.map((b) => b.slice(0, 80)).join(" | ")}`);
+    try {
+      const fix = `${systemPrompt}\n\n## CORRECTION\nYour previous draft was:\n"""\n${text.slice(0, 3000)}\n"""\nThese statements are NOT supported by the sources (missing or different there):\n${bad.map((b) => `- ${b}`).join("\n")}\nWrite the reply again. Correct or remove those statements using only what the sources say; if the sources say something different, say that. Keep everything else that was correct. Same language as the visitor.`;
+      return await this.backend.generate(fix, messages, this.maxTokens);
     } catch {
       return text;
     }

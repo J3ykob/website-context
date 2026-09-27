@@ -244,6 +244,42 @@ export function lexicalCandidates(question: string, catalog: KnowledgeCatalog, k
   return scored.sort((a, b) => b.s - a.s).slice(0, k).map((x) => catalog.chunks[x.i]);
 }
 
+// ── Title scan ─────────────────────────────────────────────────────────────
+// Jev judges the one-line LLM title of EVERY chunk (page title + summary), so the
+// pre-selection is per chunk instead of per catalog: a price list filed under
+// "Cennik" is still picked for "do you take blood samples?" when its title says
+// "laboratory tests by partner Synevo, blood draw fee".
+const TITLE_BATCH = 60;
+const TITLE_CONCURRENCY = 10;
+const TITLE_MIN = 0.3;
+const TITLE_TOP = 40;
+export const TITLE_SCAN_MAX = Number(process.env.TITLE_SCAN_MAX ?? 1500); // bigger KBs pre-select by catalog (latency)
+export function chunkTitle(c: CatalogChunk): string {
+  const firstLine = c.content.split("\n")[0] || "";
+  const summary = firstLine.includes("Keywords:") ? firstLine.split("Keywords:")[0].trim() : c.content.replace(/\s+/g, " ").slice(0, 160);
+  const page = (c.title || "").split(/\s+[|–—-]\s+/)[0];
+  return `${page}: ${summary}`.slice(0, 300);
+}
+export async function selectByTitles(question: string, catalog: KnowledgeCatalog): Promise<CatalogChunk[] | null> {
+  const chunks = catalog.chunks;
+  const results = await pool(batches(chunks, TITLE_BATCH), TITLE_CONCURRENCY, async (batch) => {
+    const questions: Record<string, JevQuestion> = {};
+    batch.forEach((_, j) => {
+      questions[`t${j}`] = { type: "noul", instructions: `Could the passage described by \`titles[${j}]\` contain information that answers \`question\`?` };
+    });
+    const answers = await jevAsk({ question, titles: batch.map(chunkTitle) }, questions);
+    return batch.map((_, j) => (answers?.[`t${j}`] as JevNoulAnswer | undefined)?.noul ?? -1);
+  });
+  const flat = results.flat();
+  if (flat.every((v) => v < 0)) return null;
+  return chunks
+    .map((c, i) => ({ c, p: flat[i] }))
+    .filter((x) => x.p >= TITLE_MIN)
+    .sort((a, b) => b.p - a.p)
+    .slice(0, TITLE_TOP)
+    .map((x) => x.c);
+}
+
 export interface CatalogHit { chunk: CatalogChunk; score: number }
 export interface CatalogRetrieval { catalogIds: string[]; hits: CatalogHit[]; scored: number; scores: Map<string, number>; ms: number }
 
@@ -270,7 +306,12 @@ export async function retrieveFromCatalog(question: string, catalog: KnowledgeCa
   const t0 = Date.now();
   const cats = catalog.catalogs;
   let selected: string[] = [];
-  if (cats.length > 0) {
+  let fromTitles: CatalogChunk[] | null = null;
+  if (catalog.chunks.length <= TITLE_SCAN_MAX) {
+    fromTitles = await selectByTitles(question, catalog);
+    if (!fromTitles) return null;
+    selected = ["titles"];
+  } else if (cats.length > 0) {
     const catQuestions: Record<string, JevQuestion> = {};
     cats.forEach((_, i) => {
       catQuestions[`k${i}`] = {
@@ -288,7 +329,7 @@ export async function retrieveFromCatalog(question: string, catalog: KnowledgeCa
       .map((r) => r.c.id);
   }
 
-  let fromCatalogs = catalog.chunks.filter((c) => selected.includes(c.catalogId));
+  let fromCatalogs = fromTitles ?? catalog.chunks.filter((c) => selected.includes(c.catalogId));
   if (fromCatalogs.length > MAX_SCORED_CHUNKS) {
     // Big catalog (full-site scrape of a shop): Jev judges the MAX_SCORED_CHUNKS
     // most promising ones - vector hits first, then by word overlap with the question.
