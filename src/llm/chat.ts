@@ -21,7 +21,7 @@ import {
 } from "../flows/conversation.js";
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
-import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled } from "./jev.js";
+import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply } from "./jev.js";
 import { retrieveFromCatalog, type KnowledgeCatalog } from "../knowledge/catalog.js";
 
 export interface ChatMessage {
@@ -606,6 +606,7 @@ export class WebsiteChat {
     // (We're past all flow paths here, so flow-only demos are unaffected.)
     // Fallback: plain text generation (no flows active or backend doesn't support tools)
     let responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
+    if (factCheckC === "no_evidence") responseText = await this.guardNoEvidence(lastUserMessage, systemPrompt, sanitizedMessages, responseText);
 
     // Sanitize: if LLM returned JSON instead of plain text, extract the message
     try {
@@ -765,7 +766,15 @@ export class WebsiteChat {
     let raw = "";
     let emitted = 0;
     let holding = false;
-    await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
+    if (factCheckS === "no_evidence") {
+      // Short reply, checked before the visitor sees it: generate, guard, then emit once.
+      let draft = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
+      draft = await this.guardNoEvidence(inputValidation.sanitized, systemPrompt, sanitizedMessages, draft);
+      const g = this.extractGapMarker(draft);
+      raw = g.text;
+      onToken(raw);
+      emitted = raw.length;
+    } else await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
       raw += delta;
       if (holding) return;
       const idx = raw.indexOf("[[", Math.max(0, emitted - 1));
@@ -1007,6 +1016,11 @@ ${contextBlocks}
       prompt += `\n\n## Additional Context (from site owner):\n${notesBlock}`;
     }
 
+    // Last word of the prompt, where the model weighs it most.
+    if (factCheck === "no_evidence") {
+      prompt += `\n\n## FINAL RULE FOR THIS REPLY (overrides everything above):\nOur knowledge base has NO information that answers this message. Say briefly, in the visitor's language, that you don't have this information here and how to reach us. Do NOT say or imply that we don't offer / don't do / don't have it. Do NOT answer from general knowledge. Do NOT recommend other companies or places. A pure greeting or thanks just gets a natural reply.`;
+    }
+
     return prompt;
   }
 
@@ -1079,6 +1093,25 @@ Answer:`;
       const n = parseInt((raw.match(/\d+/) || ["0"])[0], 10);
       return n >= 1 && n <= flows.length ? flows[n - 1] : null;
     } catch { return null; }
+  }
+
+  // When Jev found no evidence, Jev also checks the draft: a reply that denies we
+  // offer something, or answers from general knowledge / points elsewhere, is
+  // rewritten once with an explicit correction. The prompt rule alone was ignored
+  // ("rezonans is not in our offer", "Paris").
+  private async guardNoEvidence(question: string, systemPrompt: string, messages: ChatMessage[], draft: string): Promise<string> {
+    const v = await jevCheckNoEvidenceReply(question, draft);
+    if (!v || (v.denies < 0.5 && v.external < 0.5)) return draft;
+    const problems: string[] = [];
+    if (v.denies >= 0.5) problems.push("it says or implies that we do not offer or do something, although we simply have no information about it");
+    if (v.external >= 0.5) problems.push("it answers from general knowledge or points to other companies or places");
+    console.log(`[no-evidence] ${this.context.tenantId}: rewriting draft (denies=${v.denies.toFixed(2)}, external=${v.external.toFixed(2)})`);
+    const fix = `${systemPrompt}\n\n## CORRECTION\nYour previous draft was:\n"""\n${draft.slice(0, 1500)}\n"""\nIt breaks the final rule because ${problems.join(", and ")}. Write the reply again: say we don't have this information here and how the visitor can reach us to ask. Same language as the visitor.`;
+    try {
+      return await this.backend.generate(fix, messages, this.maxTokens);
+    } catch {
+      return draft;
+    }
   }
 
   // Knowledge-gap decision by Jev: only when no evidence was found, and only for

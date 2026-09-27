@@ -44,7 +44,11 @@ export async function crawlSite(
   const allowedHosts = new Set([baseUrl.hostname, bareHost, `www.${bareHost}`]);
   const visited = new Set<string>();
   const contentHashes = new Set<string>();
-  const queue: { url: string; depth: number; parent?: string }[] = [{ url: startUrl, depth: 0 }];
+  const queue: { url: string; depth: number; parent?: string; attempt?: number }[] = [{ url: startUrl, depth: 0 }];
+  // Politeness: a 429/503 pauses ALL workers (Retry-After or 5s x attempt), slows
+  // the crawl for the rest of the run, and re-queues the page (max 3 attempts).
+  let pausedUntil = 0;
+  let politeDelay = opts.rateLimit;
   const pages: ScrapedPage[] = [];
   const failures: string[] = [];
   const startTime = Date.now();
@@ -81,7 +85,7 @@ export async function crawlSite(
     console.log(`  [sitemap] ${sitemapUrls.length} URL(s) declared, ${added} queued`);
   }
 
-  const handle = async (item: { url: string; depth: number; parent?: string }, normalizedUrl: string): Promise<void> => {
+  const handle = async (item: { url: string; depth: number; parent?: string; attempt?: number }, normalizedUrl: string): Promise<void> => {
     console.log(`  [${pages.length + 1}/${opts.maxPages}] Crawling: ${normalizedUrl} (depth: ${item.depth})`);
 
     // PDFs take a dedicated extraction path (text via unpdf), never the HTML fetcher.
@@ -98,6 +102,19 @@ export async function crawlSite(
     }
 
     const fetchResult = await fetchPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
+    if (fetchResult.statusCode === 429 || fetchResult.statusCode === 503) {
+      const attempt = (item.attempt || 0) + 1;
+      const ra = Number(fetchResult.headers["retry-after"]);
+      const waitMs = Math.min(60000, Number.isFinite(ra) && ra > 0 ? ra * 1000 : 5000 * attempt);
+      pausedUntil = Math.max(pausedUntil, Date.now() + waitMs);
+      politeDelay = Math.max(politeDelay, 1000);
+      if (attempt <= 3) {
+        console.log(`  [${fetchResult.statusCode}] throttled on ${normalizedUrl}, pausing ${Math.round(waitMs / 1000)}s (attempt ${attempt}/3)`);
+        visited.delete(normalizedUrl);
+        queue.unshift({ ...item, attempt });
+      } else failures.push(normalizedUrl);
+      return;
+    }
     if (fetchResult.statusCode >= 400) { failures.push(normalizedUrl); return; }
 
     // Content-type is the authority, extensions are just a fast pre-filter.
@@ -158,6 +175,8 @@ export async function crawlSite(
       if (!isAllowedUrl(normalizedUrl, allowedHosts, opts, disallowedPaths)) continue;
       visited.add(normalizedUrl);
       inFlight++;
+      const pause = pausedUntil - Date.now();
+      if (pause > 0) await sleep(pause);
       try {
         await handle(item, normalizedUrl);
       } catch (error) {
@@ -167,7 +186,7 @@ export async function crawlSite(
       } finally {
         inFlight--;
       }
-      if (opts.rateLimit > 0) await sleep(opts.rateLimit);
+      if (politeDelay > 0) await sleep(politeDelay);
     }
   };
   await Promise.all(Array.from({ length: concurrency }, worker));

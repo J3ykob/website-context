@@ -118,3 +118,25 @@ export async function jevIsKnowledgeGap(message: string): Promise<number | null>
   const a = answers?.gap as JevNoulAnswer | undefined;
   return a && typeof a.noul === "number" ? a.noul : null;
 }
+
+/**
+ * Checks a draft reply written when the knowledge base had NO answer. Flags the
+ * two failure modes the prompt rule alone did not stop: claiming the business
+ * does not offer something (missing info is not a "no"), and answering from
+ * general knowledge / pointing to other providers.
+ */
+export async function jevCheckNoEvidenceReply(question: string, reply: string): Promise<{ denies: number; external: number } | null> {
+  const answers = await jevAsk({ question, reply }, {
+    denies: {
+      type: "noul",
+      instructions: "Does `reply` state or imply that the business does NOT offer, do, have, sell or provide something (for example \"we don't do X\", \"X is not in our offer\")?",
+    },
+    external: {
+      type: "noul",
+      instructions: "Does `reply` answer `question` with general-knowledge facts that are not about the business itself, or recommend another company, hospital, shop, website or place?",
+    },
+  });
+  const d = answers?.denies as JevNoulAnswer | undefined;
+  const e = answers?.external as JevNoulAnswer | undefined;
+  return d && e && typeof d.noul === "number" && typeof e.noul === "number" ? { denies: d.noul, external: e.noul } : null;
+}

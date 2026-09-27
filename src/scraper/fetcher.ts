@@ -20,6 +20,13 @@ export async function fetchPage(
   // Try static fetch first (fast path)
   const staticResult = await fetchStatic(url, { timeout, userAgent });
 
+  // Throttling and missing pages: report the status, never re-hit the site with a
+  // browser (its thin body would otherwise look like a JS shell). 403 still gets the
+  // browser, which sometimes passes bot protection.
+  if ([404, 410, 429, 503].includes(staticResult.statusCode)) {
+    return { ...staticResult, renderMethod: "static" };
+  }
+
   if (hasSubstantialContent(staticResult.html)) {
     return { ...staticResult, renderMethod: "static" };
   }
