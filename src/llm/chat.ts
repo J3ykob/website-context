@@ -21,6 +21,7 @@ import {
 } from "../flows/conversation.js";
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
+import { jevPassageRelevance, jevPickOption } from "./jev.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -777,6 +778,16 @@ export class WebsiteChat {
     // small model entirely and report the sources as relevant.
     const topScore = Math.max(...chunks.map((c) => (c as any).score || 0));
     if (topScore >= 0.62) return "confirmed";
+    // Primary judge: TypeSafe Jev scores each passage (full text, not a 700-char
+    // prefix that is mostly the LLM summary) for P(answers the question) in one
+    // ~400ms call. Measured on amygdala.pl (PL, 13 questions): off-site questions
+    // all <=0.06, answerable ones >=0.95 whenever retrieval surfaced the fact.
+    const relevance = await jevPassageRelevance(question, chunks.slice(0, 12).map((c) => (c.content || "").slice(0, 1500)));
+    if (relevance) {
+      const best = relevance.length ? Math.max(...relevance) : 0;
+      return best >= (Number(process.env.JEV_GATE_MIN) || 0.5) ? "confirmed" : "no_confirmation";
+    }
+    // Fallback (no key / Jev down): the OpenRouter fast model.
     const context = chunks.slice(0, 6).map((c) => (c.content || "").slice(0, 700)).join("\n---\n");
     const prompt = `A visitor asked: "${question}"
 
@@ -955,6 +966,17 @@ ${contextBlocks}
   // intent), or [flowA, flowB] (genuinely ambiguous -> caller disambiguates).
   private async classifyFlowIntent(message: string, flows: FlowDefinition[]): Promise<FlowDefinition[]> {
     if (flows.length === 0) return [];
+    const jev = await jevPickOption(
+      "Does the visitor's `message` ask to START one of these actions right now (e.g. book, order, sign up)? Choose none if they only ask a question, ask about price or info, greet, or chat.",
+      message,
+      flows.map((f) => `${f.name}: ${f.description || ""}`),
+      "Just asking a question, asking about price or information, greeting, chatting, or none of the actions apply.",
+    );
+    if (jev) {
+      if (jev.index < 0) return [];
+      const picks = jev.ambiguous.length > 1 ? jev.ambiguous.slice(0, 2) : [jev.index];
+      return picks.map((i) => flows[i]);
+    }
     const list = flows.map((f, i) => `${i + 1}. ${f.name} — ${f.description || ""}`).join("\n");
     const prompt = `This website can perform these actions for a visitor:
 ${list}
@@ -983,6 +1005,13 @@ Answer:`;
   private async pickFromCandidates(message: string, flows: FlowDefinition[]): Promise<FlowDefinition | null> {
     if (flows.length === 0) return null;
     if (flows.length === 1) return flows[0];
+    const jev = await jevPickOption(
+      "The visitor was asked which task they want. Which option does their `message` mean? Choose none if it is unclear or matches no option.",
+      message,
+      flows.map((f) => `${f.name}: ${f.description || ""}`),
+      "Unclear, or matches none of the options.",
+    );
+    if (jev) return jev.index >= 0 ? flows[jev.index] : null;
     const list = flows.map((f, i) => `${i + 1}. ${f.name} — ${f.description || ""}`).join("\n");
     const prompt = `The visitor was asked which task they want. Options:\n${list}\n\nTheir reply: "${message}"\n\nWhich option number do they mean? Reply with ONLY the number, or "0" if none/unclear.`;
     try {
