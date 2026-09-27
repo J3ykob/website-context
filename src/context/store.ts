@@ -514,28 +514,34 @@ ${chunk.content.slice(0, 6000)}
   return parsed;
 }
 
-function parseEnrichJSON(raw: string): { summary: string; keywords: string[] } | null {
+export function parseEnrichJSON(raw: string): { summary: string; keywords: string[] } | null {
   let s = raw.trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) s = fence[1].trim();
   const brace = s.match(/\{[\s\S]*\}/);
   if (brace) s = brace[0];
+  let summary = "";
+  let keywords: string[] = [];
   try {
     const obj = JSON.parse(s) as { summary?: unknown; keywords?: unknown };
-    const summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
-    const keywords = Array.isArray(obj.keywords)
-      ? (obj.keywords.filter((k) => typeof k === "string") as string[])
-          .map((k) => k.trim())
-          .filter(Boolean)
-          .slice(0, 15)
-      : [];
-    if (!summary && keywords.length === 0) return null;
-    let normSummary = summary || "Website content.";
-    if (!/[.!?]$/.test(normSummary)) normSummary += ".";
-    return { summary: normSummary, keywords };
+    summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
+    keywords = Array.isArray(obj.keywords) ? (obj.keywords.filter((k) => typeof k === "string") as string[]) : [];
   } catch {
-    return null;
+    // Truncated reply (the model sometimes loops on keywords until max_tokens):
+    // keep the LLM's complete summary and every keyword written before the cut.
+    const sm = s.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (!sm) return null;
+    try { summary = JSON.parse(`"${sm[1]}"`); } catch { summary = sm[1]; }
+    const kwPart = s.split(/"keywords"\s*:\s*\[/)[1] || "";
+    keywords = [...kwPart.matchAll(/"((?:[^"\\]|\\.){1,80})"/g)].map((m) => m[1]);
   }
+  // Dedupe case-insensitively (looping output repeats the same terms).
+  const seen = new Set<string>();
+  keywords = keywords.map((k) => k.trim()).filter((k) => k && !seen.has(k.toLowerCase()) && seen.add(k.toLowerCase())).slice(0, 15);
+  summary = summary.trim();
+  if (!summary || keywords.length < 3) return null; // no invented placeholder summary
+  if (!/[.!?]$/.test(summary)) summary += ".";
+  return { summary, keywords };
 }
 
 function generatePageId(url: string): string {
