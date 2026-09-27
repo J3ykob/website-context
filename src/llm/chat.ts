@@ -22,7 +22,7 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply } from "./jev.js";
-import { retrieveFromCatalog, type KnowledgeCatalog } from "../knowledge/catalog.js";
+import { retrieveFromCatalog, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 
 export interface ChatMessage {
@@ -706,36 +706,43 @@ export class WebsiteChat {
     return this.catalogRetrieve(lastUserMessage, retrievedChunks);
   }
 
-  // Catalog stage: Jev picks the relevant catalogs, then judges EVERY chunk in
-  // them, so aggregate questions ("hours of all branches") get all matching
-  // chunks instead of whatever the single vector query ranked into the top-k.
-  // Jev hits come first (score = Jev probability, marked jevScore); a few vector
-  // hits are kept after them as a safety net. No catalog / Jev down / no hits ->
-  // the vector result is returned unchanged and the normal gate judges it.
+  // Catalog stage: Jev picks the relevant catalogs and judges every chunk in them
+  // TOGETHER WITH the vector hits, so a chunk filed under another topic (a price
+  // list answering "do you take blood samples?") is still judged. Jev hits come
+  // first (score = Jev probability, marked jevScore). With no hit, the vector
+  // chunks are returned carrying their Jev scores, so the gate does not judge
+  // them a second time. No catalog / Jev down -> vector result unchanged.
   private async catalogRetrieve(
     question: string,
     vectorChunks: { content: string; metadata: Record<string, unknown>; score: number }[],
   ): Promise<{ content: string; metadata: Record<string, unknown>; score: number }[]> {
     if (!this.knowledgeCatalog) return vectorChunks;
     try {
-      const r = await retrieveFromCatalog(question, this.knowledgeCatalog, vectorChunks.map((c) => String(c.metadata.id || "")));
-      if (!r || r.hits.length === 0) {
-        if (r) console.log(`[catalog] ${this.context.tenantId}: 0 hits (cats=${r.catalogIds.join(",")}, scored=${r.scored}, ${r.ms}ms)`);
-        return vectorChunks;
+      const byId = new Map(this.knowledgeCatalog.chunks.map((c) => [c.id, c]));
+      const keyOf = (id: string, content: string) => id || content.slice(0, 200);
+      const vectorHits: CatalogChunk[] = vectorChunks.map((c) => {
+        const id = String(c.metadata.id || "");
+        return byId.get(id) || {
+          // Not in the catalog (e.g. knowledge added in the dashboard after the scrape).
+          id: keyOf(id, c.content), catalogId: "", content: c.content,
+          url: String(c.metadata.url || ""), title: String(c.metadata.title || ""), type: String(c.metadata.type || ""),
+        };
+      });
+      const r = await retrieveFromCatalog(question, this.knowledgeCatalog, vectorHits);
+      if (!r) return vectorChunks;
+      if (r.hits.length === 0) {
+        console.log(`[catalog] ${this.context.tenantId}: 0 hits (cats=${r.catalogIds.join(",")}, scored=${r.scored}, ${r.ms}ms)`);
+        return vectorChunks.map((c) => {
+          const sc = r.scores.get(keyOf(String(c.metadata.id || ""), c.content));
+          return sc === undefined ? c : { ...c, metadata: { ...c.metadata, jevScore: sc } };
+        });
       }
-      console.log(`[catalog] ${this.context.tenantId}: ${r.hits.length} hits from [${r.catalogIds.join(",")}] (scored=${r.scored}, ${r.ms}ms)`);
-      const out = r.hits.slice(0, 25).map((h) => ({
+      console.log(`[catalog] ${this.context.tenantId}: ${r.hits.length} hits from [${r.catalogIds.join(",")}] + vector (scored=${r.scored}, ${r.ms}ms)`);
+      return r.hits.slice(0, 25).map((h) => ({
         content: h.chunk.content,
         metadata: { id: h.chunk.id, url: h.chunk.url, title: h.chunk.title, type: h.chunk.type, catalog: h.chunk.catalogId, jevScore: h.score } as Record<string, unknown>,
         score: h.score,
       }));
-      const seen = new Set(out.map((c) => c.content.slice(0, 200)));
-      for (const c of vectorChunks) {
-        if (out.length >= 30) break;
-        const key = c.content.slice(0, 200);
-        if (!seen.has(key)) { seen.add(key); out.push(c); if (out.length - r.hits.length >= 5) break; }
-      }
-      return out;
     } catch (e: any) {
       console.warn(`[catalog] ${this.context.tenantId}: ${e?.message || e}`);
       return vectorChunks;
@@ -868,6 +875,8 @@ export class WebsiteChat {
     if (chunks.length === 0) return "no_confirmation";
     // Catalog retrieval already had Jev judge these chunks against this question.
     if (chunks.some((c) => typeof c.metadata.jevScore === "number" && (c.metadata.jevScore as number) >= (Number(process.env.JEV_GATE_MIN) || 0.5))) return "confirmed";
+    // Every candidate was already judged by Jev in the catalog stage and none answers.
+    if (chunks.every((c) => typeof c.metadata.jevScore === "number")) return "no_evidence";
     // Fast path: strong direct retrieval (high cosine) is trusted — skip the
     // small model entirely and report the sources as relevant.
     const topScore = Math.max(...chunks.map((c) => (c as any).score || 0));

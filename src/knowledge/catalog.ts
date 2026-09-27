@@ -195,8 +195,57 @@ export function parseNamerReply(raw: string): CatalogDef[] {
   } catch { return []; }
 }
 
+// ── Lexical candidates (BM25 over the catalog) ─────────────────────────────
+// The vector model is English-only, so on Polish text it ranks generic chunks
+// almost flat (0.58-0.62) and misses specific ones: "badania krwi" never
+// surfaced the Synevo blood-draw price list. Rare words ("krwi") find it at once.
+// 5-char prefixes act as a crude stemmer for Polish inflection.
+const STOP = new Set(["czy", "jak", "jaki", "jaka", "jest", "sie", "nie", "dla", "oraz", "albo", "czyli", "przy", "tego", "tym", "the", "and", "for", "you", "your", "are", "with", "what", "does", "macie", "robic", "robia", "moze", "mozna"]);
+function lexTokens(t: string): string[] {
+  return fold(t).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w)).map((w) => w.slice(0, 5));
+}
+interface Bm25Index { docs: Map<string, number>[]; lens: number[]; avg: number; df: Map<string, number> }
+const bm25Cache = new WeakMap<KnowledgeCatalog, Bm25Index>();
+function bm25Index(catalog: KnowledgeCatalog): Bm25Index {
+  let idx = bm25Cache.get(catalog);
+  if (idx) return idx;
+  const docs: Map<string, number>[] = [];
+  const lens: number[] = [];
+  const df = new Map<string, number>();
+  for (const c of catalog.chunks) {
+    const tf = new Map<string, number>();
+    const toks = lexTokens(`${c.title} ${c.content}`);
+    for (const w of toks) tf.set(w, (tf.get(w) || 0) + 1);
+    for (const w of tf.keys()) df.set(w, (df.get(w) || 0) + 1);
+    docs.push(tf);
+    lens.push(toks.length);
+  }
+  idx = { docs, lens, avg: lens.reduce((a, b) => a + b, 0) / Math.max(1, lens.length), df };
+  bm25Cache.set(catalog, idx);
+  return idx;
+}
+export function lexicalCandidates(question: string, catalog: KnowledgeCatalog, k = 15): CatalogChunk[] {
+  const idx = bm25Index(catalog);
+  const n = catalog.chunks.length;
+  const terms = [...new Set(lexTokens(question))];
+  if (terms.length === 0) return [];
+  const scored: { i: number; s: number }[] = [];
+  idx.docs.forEach((tf, i) => {
+    let s = 0;
+    for (const w of terms) {
+      const f = tf.get(w);
+      if (!f) continue;
+      const d = idx.df.get(w) || 0;
+      const idf = Math.log(1 + (n - d + 0.5) / (d + 0.5));
+      s += idf * (f * 2.2) / (f + 1.2 * (0.25 + 0.75 * idx.lens[i] / idx.avg));
+    }
+    if (s > 0) scored.push({ i, s });
+  });
+  return scored.sort((a, b) => b.s - a.s).slice(0, k).map((x) => catalog.chunks[x.i]);
+}
+
 export interface CatalogHit { chunk: CatalogChunk; score: number }
-export interface CatalogRetrieval { catalogIds: string[]; hits: CatalogHit[]; scored: number; ms: number }
+export interface CatalogRetrieval { catalogIds: string[]; hits: CatalogHit[]; scored: number; scores: Map<string, number>; ms: number }
 
 const CATALOG_MIN = 0.35;
 
@@ -209,42 +258,61 @@ const MAX_SELECTED_CATALOGS = 3;
 const MAX_SCORED_CHUNKS = 80;
 
 /**
- * Two-stage retrieval: Jev picks catalogs, then scores every chunk inside them.
- * `preferIds` (e.g. vector hits) decide which chunks to keep when a selected
- * catalog is larger than MAX_SCORED_CHUNKS. Returns null when Jev is unavailable.
+ * Two-stage retrieval: Jev picks catalogs, then scores every chunk inside them
+ * TOGETHER WITH the vector-search hits (`vectorHits`) and the best lexical
+ * (BM25) matches. Catalogs only ADD
+ * candidates, they never shut others out: a chunk filed under one topic can
+ * answer a question about another (the Synevo lab price list sits in "Cennik"
+ * but answers "do you take blood samples?"), and the catalog pick used to drop
+ * it before Jev ever saw it. Returns null when Jev is unavailable.
  */
-export async function retrieveFromCatalog(question: string, catalog: KnowledgeCatalog, preferIds: string[] = [], minScore = 0.5): Promise<CatalogRetrieval | null> {
+export async function retrieveFromCatalog(question: string, catalog: KnowledgeCatalog, vectorHits: CatalogChunk[] = [], minScore = 0.5): Promise<CatalogRetrieval | null> {
   const t0 = Date.now();
   const cats = catalog.catalogs;
-  if (cats.length === 0) return null;
-  const catQuestions: Record<string, JevQuestion> = {};
-  cats.forEach((_, i) => {
-    catQuestions[`k${i}`] = {
-      type: "noul",
-      instructions: `Could the catalog \`catalogs[${i}]\` of this business's knowledge base contain information that answers \`question\`?`,
-    };
-  });
-  const catAnswers = await jevAsk({ question, catalogs: cats.map(describe) }, catQuestions);
-  if (!catAnswers) return null;
-  const ranked = cats
-    .map((c, i) => ({ c, p: (catAnswers[`k${i}`] as JevNoulAnswer | undefined)?.noul ?? 0 }))
-    .sort((a, b) => b.p - a.p);
-  const selected = ranked.filter((r) => r.p >= CATALOG_MIN).slice(0, MAX_SELECTED_CATALOGS).map((r) => r.c.id);
-  if (selected.length === 0) return { catalogIds: [], hits: [], scored: 0, ms: Date.now() - t0 };
+  let selected: string[] = [];
+  if (cats.length > 0) {
+    const catQuestions: Record<string, JevQuestion> = {};
+    cats.forEach((_, i) => {
+      catQuestions[`k${i}`] = {
+        type: "noul",
+        instructions: `Could the catalog \`catalogs[${i}]\` of this business's knowledge base contain information that answers \`question\`?`,
+      };
+    });
+    const catAnswers = await jevAsk({ question, catalogs: cats.map(describe) }, catQuestions);
+    if (!catAnswers) return null;
+    selected = cats
+      .map((c, i) => ({ c, p: (catAnswers[`k${i}`] as JevNoulAnswer | undefined)?.noul ?? 0 }))
+      .sort((a, b) => b.p - a.p)
+      .filter((r) => r.p >= CATALOG_MIN)
+      .slice(0, MAX_SELECTED_CATALOGS)
+      .map((r) => r.c.id);
+  }
 
-  let candidates = catalog.chunks.filter((c) => selected.includes(c.catalogId));
-  if (candidates.length > MAX_SCORED_CHUNKS) {
+  let fromCatalogs = catalog.chunks.filter((c) => selected.includes(c.catalogId));
+  if (fromCatalogs.length > MAX_SCORED_CHUNKS) {
     // Big catalog (full-site scrape of a shop): Jev judges the MAX_SCORED_CHUNKS
     // most promising ones - vector hits first, then by word overlap with the question.
-    const pref = new Map(preferIds.map((id, i) => [id, i]));
+    const pref = new Map(vectorHits.map((c, i) => [c.id, i]));
     const terms = queryTerms(question);
     const overlap = (c: CatalogChunk) => { const t = fold(c.content); return terms.reduce((n, w) => n + (t.includes(w) ? 1 : 0), 0); };
-    candidates = candidates
+    fromCatalogs = fromCatalogs
       .map((c) => ({ c, p: pref.get(c.id) ?? 1e9, o: overlap(c) }))
       .sort((a, b) => a.p - b.p || b.o - a.o)
       .slice(0, MAX_SCORED_CHUNKS)
       .map((x) => x.c);
   }
+  // Union: catalog candidates + every vector hit + the best lexical (BM25) hits,
+  // each scored once.
+  const seen = new Set<string>();
+  const candidates: CatalogChunk[] = [];
+  for (const c of [...fromCatalogs, ...vectorHits, ...lexicalCandidates(question, catalog)]) {
+    const key = c.id || c.content.slice(0, 200);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push(c);
+  }
+  if (candidates.length === 0) return { catalogIds: selected, hits: [], scored: 0, scores: new Map(), ms: Date.now() - t0 };
+
   const scores = await pool(batches(candidates, SCORE_BATCH), CONCURRENCY, async (batch) => {
     const questions: Record<string, JevQuestion> = {};
     batch.forEach((_, j) => {
@@ -262,9 +330,11 @@ export async function retrieveFromCatalog(question: string, catalog: KnowledgeCa
   });
   const flat = scores.flat();
   if (flat.every((s) => s < 0)) return null;
+  const all = new Map<string, number>();
+  candidates.forEach((c, i) => { if (flat[i] >= 0) all.set(c.id || c.content.slice(0, 200), flat[i]); });
   const hits = candidates
     .map((chunk, i) => ({ chunk, score: flat[i] }))
     .filter((h) => h.score >= minScore)
     .sort((a, b) => b.score - a.score);
-  return { catalogIds: selected, hits, scored: candidates.length, ms: Date.now() - t0 };
+  return { catalogIds: selected, hits, scored: candidates.length, scores: all, ms: Date.now() - t0 };
 }

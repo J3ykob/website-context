@@ -45,3 +45,18 @@ describe("parseNamerReply", () => {
     expect(parseNamerReply("no json here")).toEqual([]);
   });
 });
+
+describe("lexicalCandidates (BM25 over the catalog)", () => {
+  it("finds the chunk holding a rare query word even when its catalog is not about the question", async () => {
+    const { lexicalCandidates } = await import("../src/knowledge/catalog.js");
+    const mk = (id: string, catalogId: string, content: string) => ({ id, catalogId, content, url: "https://x.pl/" + id, title: id, type: "" });
+    const cat = { version: 1 as const, builtAt: "", catalogs: [], chunks: [
+      mk("uslugi", "services", "Badania medycyny pracy: badania wstępne, okresowe i kontrolne dla pracowników."),
+      mk("kierowcy", "services", "Badania lekarskie kierowców, badania psychotechniczne, orzeczenie."),
+      mk("synevo", "pricing", "Badania dodatkowe. Badania laboratoryjne zapewnia partner Synevo. Pobranie krwi 10 zł. ALT 46 zł."),
+      mk("godziny", "locations", "Ursynów pon.-pt. 8:00-17:00."),
+    ] };
+    expect(lexicalCandidates("Czy robicie badania krwi na miejscu?", cat, 2)[0].id).toBe("synevo");
+    expect(lexicalCandidates("Czy robicie?", cat)).toEqual([]);
+  });
+});
