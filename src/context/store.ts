@@ -406,94 +406,112 @@ function classifyChunkType(
 }
 
 /**
- * Enrich every chunk with an LLM-generated summary + descriptor keywords.
- * Keywords are CATEGORY descriptors ("dimensions", "opening hours", "warranty"),
- * not just literal values, so "what are the dimensions?" retrieves a chunk that
- * only lists raw measurements. Falls back to regex enrichment when no API key is
- * set or the call fails, so a scrape never silently loses all enrichment.
+ * LLM label for every chunk: a one-line summary + category keywords, prepended to
+ * the chunk so embeddings, BM25-style overlap and Jev all see WHAT KIND of
+ * information it holds. One call per chunk (per-chunk labels retrieve best), and
+ * each call gets the page's title, URL and heading outline so a bare fragment
+ * like "pon.-pt. 8:00-17:00" is labelled with the branch it belongs to
+ * (contextual retrieval). Failed calls are retried; a chunk whose calls all fail
+ * stays unlabelled and is logged - there is deliberately NO regex fallback (it
+ * produced wrong labels such as "menu, food" on a clinic).
  */
-async function enrichChunks(chunks: ContentChunk[]): Promise<void> {
-  const hasKey = !!process.env.OPENROUTER_API_KEY;
-  // One LLM call per group of chunks from the same page (not one per chunk):
-  // a full-site scrape has thousands of chunks, and per-chunk calls took minutes.
-  const groups: ContentChunk[][] = [];
-  const byPage = new Map<string, ContentChunk[]>();
+export async function enrichChunks(chunks: ContentChunk[]): Promise<{ enriched: number; failed: number; skipped: number }> {
+  const result = { enriched: 0, failed: 0, skipped: 0 };
+  if (!process.env.OPENROUTER_API_KEY) {
+    console.warn("[enrich] OPENROUTER_API_KEY missing - chunks left unlabelled");
+    result.skipped = chunks.length;
+    return result;
+  }
+  const pages = new Map<string, { title: string; url: string; outline: string[] }>();
   for (const c of chunks) {
-    const list = byPage.get(c.pageId) || [];
-    list.push(c);
-    byPage.set(c.pageId, list);
+    const p = pages.get(c.pageId) || { title: c.metadata.title || "", url: c.metadata.url || "", outline: [] };
+    const h = c.metadata.headingHierarchy.join(" > ");
+    if (h && !p.outline.includes(h) && p.outline.length < 40) p.outline.push(h);
+    pages.set(c.pageId, p);
   }
-  for (const list of byPage.values()) {
-    for (let i = 0; i < list.length; i += ENRICH_GROUP) groups.push(list.slice(i, i + ENRICH_GROUP));
-  }
-  const concurrency = Number(process.env.ENRICH_CONCURRENCY) || 12;
+  const provider = new OpenRouterProvider({
+    model: process.env.ENRICH_MODEL || process.env.OPENROUTER_MODEL,
+    maxTokens: 800, // 400 truncated long summaries mid-JSON on dense pages
+    temperature: 0.2,
+  });
+  const concurrency = Number(process.env.ENRICH_CONCURRENCY) || 48;
+  const errors: string[] = [];
   let next = 0;
 
   async function worker() {
-    while (next < groups.length) {
-      const group = groups[next++];
-      const eligible = group.filter((c) => c.content.trim().length >= 60);
-      const labels = hasKey && eligible.length > 0
-        ? await llmEnrichBatch(eligible.map((c) => c.content)).catch(() => null)
-        : null;
-      for (const chunk of group) {
-        const i = eligible.indexOf(chunk);
-        const llm = labels && i >= 0 ? labels[i] : null;
-        if (llm) {
-          chunk.content = `${llm.summary} Keywords: ${llm.keywords.join(", ")}.\n\n${chunk.content}`;
-        } else {
-          const heading = chunk.metadata.headingHierarchy.slice(-1)[0] || "";
-          chunk.content = enrichChunk(chunk.content, chunk.metadata.type, heading);
+    while (next < chunks.length) {
+      const chunk = chunks[next++];
+      if (chunk.content.trim().length < 60) { result.skipped++; continue; }
+      const page = pages.get(chunk.pageId)!;
+      let label: { summary: string; keywords: string[] } | null = null;
+      for (let attempt = 1; attempt <= ENRICH_ATTEMPTS && !label; attempt++) {
+        try {
+          label = await llmEnrich(provider, chunk, page);
+        } catch (e: any) {
+          if (attempt === ENRICH_ATTEMPTS) { if (errors.length < 5) errors.push(String(e?.message || e).slice(0, 200)); break; }
+          await sleep(1000 * 2 ** attempt + Math.random() * 500);
         }
       }
+      if (label) {
+        chunk.content = `${label.summary} Keywords: ${label.keywords.join(", ")}.\n\n${chunk.content}`;
+        result.enriched++;
+      } else result.failed++;
     }
   }
 
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, groups.length) }, worker)
-  );
+  await Promise.all(Array.from({ length: Math.min(concurrency, chunks.length) }, worker));
+  console.log(`[enrich] ${result.enriched} labelled, ${result.failed} failed, ${result.skipped} too short`);
+  if (errors.length) console.warn(`[enrich] failures, e.g.: ${errors.join(" | ")}`);
+  return result;
 }
 
-const ENRICH_GROUP = 6;
-const ENRICH_CHARS = 2500;
+const ENRICH_ATTEMPTS = 4;
+const ENRICH_TIMEOUT_MS = 45000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const ENRICH_SYSTEM =
   "You label chunks of website content for a semantic search index that powers a customer-facing chatbot. You return a one-line summary and a list of search keywords as strict JSON.";
 
-async function llmEnrichBatch(contents: string[]): Promise<({ summary: string; keywords: string[] } | null)[]> {
-  const provider = new OpenRouterProvider({
-    model: process.env.ENRICH_MODEL || process.env.OPENROUTER_MODEL,
-    maxTokens: 250 * contents.length + 100,
-    temperature: 0.2,
-  });
+async function llmEnrich(
+  provider: OpenRouterProvider,
+  chunk: ContentChunk,
+  page: { title: string; url: string; outline: string[] },
+): Promise<{ summary: string; keywords: string[] }> {
+  const user = `Analyze this chunk of content from a business website. Produce metadata that helps a retrieval system find it when a customer asks a question.
 
-  const user = `Analyze these ${contents.length} chunks of content from one page of a business website. For EACH chunk produce metadata that helps a retrieval system find it when a customer asks a question.
+The chunk comes from this page (context only - describe the CHUNK, but use the page to understand what it refers to, e.g. which branch, product or service):
+Page title: ${page.title}
+Page URL: ${page.url}
+Page outline:
+${page.outline.map((h) => `- ${h}`).join("\n") || "- (none)"}
+This chunk's section: ${chunk.metadata.headingHierarchy.join(" > ") || "(none)"}
 
-Return ONLY strict JSON: {"chunks": [{"summary": string, "keywords": string[]}, ...]} with exactly ${contents.length} entries, in the same order as the chunks.
+Return ONLY strict JSON: {"summary": string, "keywords": string[]}
 
-"summary": one short sentence describing WHAT KIND of information the chunk contains (not a sales pitch). Examples: "Lists the dimensions, weight and materials of the product.", "Opening hours for each day of the week.", "Renovation pricing per square metre with warranty terms."
+"summary": ONE short sentence (max 25 words) describing WHAT KIND of information the chunk contains and what it refers to (not a sales pitch). Examples: "Opening hours and address of the Targówek branch in Warsaw.", "Lists the dimensions, weight and materials of the product.", "Renovation pricing per square metre with warranty terms."
 
-"keywords": 8-15 short search terms. CRITICAL - include CATEGORY DESCRIPTORS for the TYPES of information present, not only the literal values. For example, if the chunk lists "200x90cm, oak, 80kg" include descriptors like "dimensions", "size", "width", "height", "material", "weight" - not just the numbers. Other descriptor examples: "pricing", "opening hours", "contact details", "address", "warranty", "delivery", "technical specifications", "capacity", "ingredients", "availability". Also include the most important specific topics or product names from the chunk. Only use descriptors that fit the business (never food/menu words for a clinic).
+"keywords": 8-15 short search terms. CRITICAL - include CATEGORY DESCRIPTORS for the TYPES of information present, not only the literal values. For example, if the chunk lists "200x90cm, oak, 80kg" include descriptors like "dimensions", "size", "width", "height", "material", "weight" - not just the numbers. Other descriptor examples: "pricing", "opening hours", "contact details", "address", "warranty", "delivery", "technical specifications", "capacity", "ingredients", "availability". Also include the most important specific topics, place names or product names. Only use descriptors that fit this business.
 
 Write the summary and keywords in the SAME language as the content. For the category descriptors, also add the English equivalent (e.g. for Polish content include both "wymiary" and "dimensions").
 
-Do not invent information that is not present in the chunk.
+Do not invent information that is not present in the chunk or the page context.
 
-${contents.map((c, i) => `Chunk ${i + 1}:\n"""\n${c.slice(0, ENRICH_CHARS)}\n"""`).join("\n\n")}`;
+Chunk:
+"""
+${chunk.content.slice(0, 6000)}
+"""`;
 
-  const res = await provider.chat([
-    { role: "system", content: ENRICH_SYSTEM },
-    { role: "user", content: user },
+  const res = await Promise.race([
+    provider.chat([
+      { role: "system", content: ENRICH_SYSTEM },
+      { role: "user", content: user },
+    ]),
+    new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`enrich: timeout after ${ENRICH_TIMEOUT_MS}ms`)), ENRICH_TIMEOUT_MS)),
   ]);
 
-  let raw = res.content.trim();
-  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) raw = fence[1].trim();
-  const brace = raw.match(/\{[\s\S]*\}/);
-  if (!brace) throw new Error("enrich: unparseable response");
-  const list = (JSON.parse(brace[0]) as { chunks?: unknown[] }).chunks;
-  if (!Array.isArray(list)) throw new Error("enrich: no chunks array");
-  return contents.map((_, i) => (list[i] ? parseEnrichJSON(JSON.stringify(list[i])) : null));
+  const parsed = parseEnrichJSON(res.content);
+  if (!parsed) throw new Error(`enrich: unparseable response: ${res.content.slice(0, 120)}`);
+  return parsed;
 }
 
 function parseEnrichJSON(raw: string): { summary: string; keywords: string[] } | null {
@@ -518,83 +536,6 @@ function parseEnrichJSON(raw: string): { summary: string; keywords: string[] } |
   } catch {
     return null;
   }
-}
-
-/**
- * Regex enrichment - fallback used when the LLM call is unavailable.
- * "1,850 zł/m2" in a table becomes findable by "how much does renovation cost?"
- */
-function enrichChunk(content: string, type: string, heading: string): string {
-  const keywords = extractKeywords(content, heading);
-  const summary = generateSummary(content, type, heading);
-
-  if (summary || keywords.length > 0) {
-    const parts: string[] = [];
-    if (summary) parts.push(summary);
-    if (keywords.length > 0) parts.push(`Keywords: ${keywords.join(", ")}`);
-    return `${parts.join(". ")}.\n\n${content}`;
-  }
-
-  return content;
-}
-
-function extractKeywords(content: string, heading: string): string[] {
-  const kw: Set<string> = new Set();
-
-  // Add heading as keyword
-  if (heading) kw.add(heading.toLowerCase().trim());
-
-  // Extract prices
-  const prices = content.match(/\d[\d\s,.]*\s*(zł|PLN|€|EUR|\$|USD|£|GBP|kr|SEK|NOK|DKK)(\/m[²2])?/gi) || [];
-  if (prices.length > 0) { kw.add("pricing"); kw.add("price"); kw.add("cost"); kw.add("cennik"); kw.add("cena"); }
-
-  // Extract times/hours
-  if (/\d{1,2}[:.]\d{2}\s*[-–]\s*\d{1,2}[:.]\d{2}/.test(content)) { kw.add("hours"); kw.add("opening hours"); kw.add("godziny otwarcia"); kw.add("schedule"); }
-
-  // Extract phone numbers
-  if (/(?:\+?\d[\d\s()-]{7,})/.test(content)) { kw.add("phone"); kw.add("contact"); kw.add("telefon"); kw.add("call"); }
-
-  // Extract emails
-  if (/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(content)) { kw.add("email"); kw.add("contact"); kw.add("kontakt"); }
-
-  // Extract addresses
-  if (/(?:ul\.|ulica|street|str\.|aleja|al\.|road|avenue)\s/i.test(content)) { kw.add("address"); kw.add("location"); kw.add("adres"); kw.add("directions"); }
-
-  // Detect tables
-  if (content.includes("|") && content.includes("---")) { kw.add("table"); kw.add("comparison"); kw.add("details"); }
-
-  // Detect FAQ patterns
-  if (/\?[\s\n]/.test(content)) { kw.add("faq"); kw.add("questions"); kw.add("answers"); }
-
-  // Detect booking/reservation
-  if (/book|reserv|rezerwac|termin|appointment|umów/i.test(content)) { kw.add("booking"); kw.add("reservation"); kw.add("rezerwacja"); }
-
-  // Detect menu/food
-  if (/menu|dish|course|danie|zupa|deser|starter|main/i.test(content)) { kw.add("menu"); kw.add("food"); kw.add("dishes"); }
-
-  return [...kw].slice(0, 10);
-}
-
-function generateSummary(content: string, type: string, heading: string): string {
-  if (type === "pricing") {
-    const prices = content.match(/\d[\d\s,.]*\s*(zł|PLN|€|EUR|\$|USD|£|GBP|kr|SEK|NOK|DKK)(\/m[²2])?/gi) || [];
-    return prices.length > 0
-      ? `This section contains pricing: ${prices.slice(0, 5).join(", ")}`
-      : "This section contains pricing and cost information";
-  }
-
-  // Auto-generate summary from heading + detected content types
-  const detections: string[] = [];
-  if (/\d{1,2}[:.]\d{2}/.test(content)) detections.push("schedules/hours");
-  if (/(?:\+?\d[\d\s()-]{7,})/.test(content)) detections.push("phone numbers");
-  if (/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(content)) detections.push("email addresses");
-  if (content.includes("|") && content.includes("---")) detections.push("tabular data");
-
-  if (detections.length > 0) {
-    return `${heading ? heading + ": " : ""}contains ${detections.join(", ")}`;
-  }
-
-  return "";
 }
 
 function generatePageId(url: string): string {
