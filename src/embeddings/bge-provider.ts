@@ -30,7 +30,9 @@ export class BGEEmbeddingProvider implements EmbeddingProvider {
     this.baseUrl = bgeBaseUrl(config);
     this.batchSize = config.batchSize || 256;
     this.apiKey = config.apiKey || process.env.BGE_API_KEY || "";
-    this.modelName = config.model || "bge-large-en-v1.5";
+    // EMBED_MODEL picks the embedding space; it must match VECTORIZE_INDEX
+    // (bge-large-en-v1.5 -> whisp-vectors, bge-m3 -> whisp-vectors-m3).
+    this.modelName = config.model || (process.env.EMBED_MODEL as BGEProviderConfig["model"]) || "bge-large-en-v1.5";
     this.dimensions = this.modelName === "bge-m3" ? 1024 : 1024;
   }
 
@@ -46,7 +48,7 @@ export class BGEEmbeddingProvider implements EmbeddingProvider {
       const response = await fetch(`${this.baseUrl}/embed`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ texts: batch }),
+        body: JSON.stringify({ texts: batch, model: this.modelName }),
         signal: AbortSignal.timeout(30000),
       });
 
@@ -54,7 +56,12 @@ export class BGEEmbeddingProvider implements EmbeddingProvider {
         throw new Error(`BGE embedding failed: ${response.status} ${await response.text()}`);
       }
 
-      const data = await response.json() as { embeddings: number[][] };
+      const data = await response.json() as { embeddings: number[][]; model?: string };
+      // An old worker ignores "model" and always answers with bge-large-en: never
+      // mix embedding spaces silently.
+      if (this.modelName !== "bge-large-en-v1.5" && data.model !== this.modelName) {
+        throw new Error(`BGE embedding: asked for ${this.modelName}, worker returned ${data.model || "bge-large-en-v1.5"}`);
+      }
       allEmbeddings.push(...data.embeddings);
     }
 

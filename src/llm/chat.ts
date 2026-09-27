@@ -1191,7 +1191,9 @@ Answer:`;
     const sources = [
       renderOfficialInfo(this.context.businessProfile),
       ...this.contextNotes.map((n) => `Q: ${n.question}\nA: ${n.answer}`),
-      ...chunks.slice(0, 12).map((c) => c.content.slice(0, 2500)),
+      // The same passages the model saw (up to 25): checking against fewer made
+      // correct lines of long lists look unsupported.
+      ...chunks.slice(0, 25).map((c) => c.content.slice(0, 2500)),
     ].filter((x) => x && x.trim());
     const t0 = Date.now();
     const scores = await jevUnsupportedStatements(question, statements, sources);

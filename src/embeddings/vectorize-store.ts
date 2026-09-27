@@ -9,7 +9,8 @@ import { createHash } from "crypto";
 import { getCfToken, refreshCfToken } from "../storage/cf-auth.js";
 
 const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
-const INDEX_NAME = process.env.VECTORIZE_INDEX || "whisp-vectors";
+// Must match EMBED_MODEL (bge-large-en-v1.5 -> whisp-vectors, bge-m3 -> whisp-vectors-m3).
+const INDEX_NAME = process.env.VECTORIZE_INDEX || (process.env.EMBED_MODEL === "bge-m3" ? "whisp-vectors-m3" : "whisp-vectors");
 const BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/vectorize/v2/indexes/${INDEX_NAME}`;
 
 const headers = () => ({
@@ -34,7 +35,12 @@ function fitMetadata(meta: Record<string, string>): Record<string, string> {
 export class CloudflareVectorizeStore implements VectorStore {
   private tenantId: string;
 
-  constructor(config: { tenantId: string }) {
+  private base: string;
+
+  // indexName overrides the env-selected index (used by the embedding migration,
+  // which reads the old index and writes the new one in one process).
+  constructor(config: { tenantId: string; indexName?: string }) {
+    this.base = config.indexName ? `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/vectorize/v2/indexes/${config.indexName}` : BASE;
     this.tenantId = config.tenantId;
   }
 
@@ -89,7 +95,7 @@ export class CloudflareVectorizeStore implements VectorStore {
       // /upsert, not /insert: Vectorize keeps the FIRST vector for an existing id on
       // insert, so re-scrapes (deterministic ids) and in-place KB edits silently kept
       // stale content, labels and embeddings.
-      const resp = await fetch(`${BASE}/upsert`, {
+      const resp = await fetch(`${this.base}/upsert`, {
         method: "POST",
         headers: { ...headers(), "Content-Type": "application/x-ndjson" },
         body: ndjson,
@@ -122,13 +128,13 @@ export class CloudflareVectorizeStore implements VectorStore {
       returnMetadata: "all",
       filter: { tenant: this.tenantId, ...filter },
     });
-    let resp = await fetch(`${BASE}/query`, { method: "POST", headers: headers(), body });
+    let resp = await fetch(`${this.base}/query`, { method: "POST", headers: headers(), body });
 
     // Token may have rotated/expired — reload it from R2 once (debounced) and retry
     // before failing, so serving auto-recovers without a Render restart.
     if (resp.status === 401 || resp.status === 403) {
       await refreshCfToken();
-      resp = await fetch(`${BASE}/query`, { method: "POST", headers: headers(), body });
+      resp = await fetch(`${this.base}/query`, { method: "POST", headers: headers(), body });
     }
 
     if (!resp.ok) {
@@ -165,10 +171,10 @@ export class CloudflareVectorizeStore implements VectorStore {
       returnMetadata: "none",
       filter: { tenant: this.tenantId },
     });
-    let resp = await fetch(`${BASE}/query`, { method: "POST", headers: headers(), body });
+    let resp = await fetch(`${this.base}/query`, { method: "POST", headers: headers(), body });
     if (resp.status === 401 || resp.status === 403) {
       await refreshCfToken();
-      resp = await fetch(`${BASE}/query`, { method: "POST", headers: headers(), body });
+      resp = await fetch(`${this.base}/query`, { method: "POST", headers: headers(), body });
     }
     if (!resp.ok) {
       const err = await resp.text();
@@ -190,10 +196,10 @@ export class CloudflareVectorizeStore implements VectorStore {
     for (let i = 0; i < prefixed.length; i += 20) batches.push(prefixed.slice(i, i + 20));
     const perBatch = await Promise.all(batches.map(async (batch) => {
       const body = JSON.stringify({ ids: batch });
-      let resp = await fetch(`${BASE}/get_by_ids`, { method: "POST", headers: headers(), body });
+      let resp = await fetch(`${this.base}/get_by_ids`, { method: "POST", headers: headers(), body });
       if (resp.status === 401 || resp.status === 403) {
         await refreshCfToken();
-        resp = await fetch(`${BASE}/get_by_ids`, { method: "POST", headers: headers(), body });
+        resp = await fetch(`${this.base}/get_by_ids`, { method: "POST", headers: headers(), body });
       }
       if (!resp.ok) {
         const err = await resp.text();
@@ -219,7 +225,7 @@ export class CloudflareVectorizeStore implements VectorStore {
   async delete(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     const prefixed = ids.map((id) => this.vecId(id));
-    const resp = await fetch(`${BASE}/delete_by_ids`, {
+    const resp = await fetch(`${this.base}/delete_by_ids`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ ids: prefixed }),
@@ -257,7 +263,7 @@ export class CloudflareVectorizeStore implements VectorStore {
       return v.map((x) => x / n);
     };
     const queryIds = async (vec: number[]): Promise<string[] | null> => {
-      const resp = await fetch(`${BASE}/query`, {
+      const resp = await fetch(`${this.base}/query`, {
         method: "POST",
         headers: headers(),
         body: JSON.stringify({ vector: vec, topK: 100, returnValues: false, returnMetadata: "none", filter: { tenant: this.tenantId } }),
@@ -284,7 +290,7 @@ export class CloudflareVectorizeStore implements VectorStore {
         if (keepIds.size) ids = ids.filter((id) => !keepIds.has(bare(id)));
         if (ids.length === 0) { lowStreak += 2; if (lowStreak >= 10) break; await sleep(1500); continue; }
         const fresh = ids.filter((id) => !seen.has(id)).length;
-        await fetch(`${BASE}/delete_by_ids`, { method: "POST", headers: headers(), body: JSON.stringify({ ids }) });
+        await fetch(`${this.base}/delete_by_ids`, { method: "POST", headers: headers(), body: JSON.stringify({ ids }) });
         ids.forEach((id) => seen.add(id));
         if (fresh <= 2) lowStreak++; else lowStreak = 0;
         if (lowStreak >= 10) break;
