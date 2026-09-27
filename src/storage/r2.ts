@@ -68,7 +68,7 @@ export interface TenantUploadResult {
 export async function uploadTenantFiles(tenantId: string, dataDir: string, required: string[] = []): Promise<TenantUploadResult> {
   const { readFileSync, existsSync } = await import("fs");
   const { resolve } = await import("path");
-  const files = ["context-meta.json", "business-info.json", "auto-context-notes.json", "screenshot.png"];
+  const files = ["context-meta.json", "business-info.json", "auto-context-notes.json", "knowledge-catalog.json", "screenshot.png"];
   const uploaded: string[] = [];
   const missing: string[] = [];
   const failed: string[] = [];

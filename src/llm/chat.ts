@@ -22,6 +22,7 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import { jevPassageRelevance, jevPickOption } from "./jev.js";
+import { retrieveFromCatalog, type KnowledgeCatalog } from "../knowledge/catalog.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -38,6 +39,9 @@ export interface ChatConfig {
   maxTokens?: number;
   topK?: number;
   systemPromptExtra?: string;
+  // Jev-classified catalog of every chunk (knowledge-catalog.json). When present
+  // and Jev is reachable, retrieval judges all chunks of the relevant catalogs.
+  knowledgeCatalog?: KnowledgeCatalog | null;
 }
 
 export interface ChatResponse {
@@ -229,6 +233,7 @@ export class WebsiteChat {
   private store: VectorStore;
   private context: WebsiteContext;
   private systemPromptExtra: string;
+  private knowledgeCatalog: KnowledgeCatalog | null;
   private contextNotes: { question: string; answer: string; addedAt: string }[] = [];
   private flowSessions: Map<string, FlowSession> = new Map();
   // When a message plausibly matches 2+ flows, we ask which one and remember
@@ -248,6 +253,7 @@ export class WebsiteChat {
     this.store = store;
     this.context = context;
     this.systemPromptExtra = config.systemPromptExtra || "";
+    this.knowledgeCatalog = config.knowledgeCatalog || null;
 
     if (config.llmProvider === "claude-cli") {
       this.backend = new ClaudeCLIBackend(config.claudeCli);
@@ -659,7 +665,43 @@ export class WebsiteChat {
         if (!seen.has(key)) { seen.add(key); retrievedChunks.push(chunk); }
       }
     }
-    return retrievedChunks;
+    return this.catalogRetrieve(lastUserMessage, retrievedChunks);
+  }
+
+  // Catalog stage: Jev picks the relevant catalogs, then judges EVERY chunk in
+  // them, so aggregate questions ("hours of all branches") get all matching
+  // chunks instead of whatever the single vector query ranked into the top-k.
+  // Jev hits come first (score = Jev probability, marked jevScore); a few vector
+  // hits are kept after them as a safety net. No catalog / Jev down / no hits ->
+  // the vector result is returned unchanged and the normal gate judges it.
+  private async catalogRetrieve(
+    question: string,
+    vectorChunks: { content: string; metadata: Record<string, unknown>; score: number }[],
+  ): Promise<{ content: string; metadata: Record<string, unknown>; score: number }[]> {
+    if (!this.knowledgeCatalog) return vectorChunks;
+    try {
+      const r = await retrieveFromCatalog(question, this.knowledgeCatalog, vectorChunks.map((c) => String(c.metadata.id || "")));
+      if (!r || r.hits.length === 0) {
+        if (r) console.log(`[catalog] ${this.context.tenantId}: 0 hits (cats=${r.catalogIds.join(",")}, scored=${r.scored}, ${r.ms}ms)`);
+        return vectorChunks;
+      }
+      console.log(`[catalog] ${this.context.tenantId}: ${r.hits.length} hits from [${r.catalogIds.join(",")}] (scored=${r.scored}, ${r.ms}ms)`);
+      const out = r.hits.slice(0, 25).map((h) => ({
+        content: h.chunk.content,
+        metadata: { id: h.chunk.id, url: h.chunk.url, title: h.chunk.title, type: h.chunk.type, catalog: h.chunk.catalogId, jevScore: h.score } as Record<string, unknown>,
+        score: h.score,
+      }));
+      const seen = new Set(out.map((c) => c.content.slice(0, 200)));
+      for (const c of vectorChunks) {
+        if (out.length >= 30) break;
+        const key = c.content.slice(0, 200);
+        if (!seen.has(key)) { seen.add(key); out.push(c); if (out.length - r.hits.length >= 5) break; }
+      }
+      return out;
+    } catch (e: any) {
+      console.warn(`[catalog] ${this.context.tenantId}: ${e?.message || e}`);
+      return vectorChunks;
+    }
   }
 
   // Streaming variant of chat(): for the common plain-text path it surfaces the answer
@@ -774,6 +816,8 @@ export class WebsiteChat {
   // Fails OPEN (returns true) on error so a transient blip never over-refuses.
   private async factCheck(question: string, chunks: { content: string; metadata: Record<string, unknown>; score?: number }[]): Promise<"confirmed" | "no_confirmation"> {
     if (chunks.length === 0) return "no_confirmation";
+    // Catalog retrieval already had Jev judge these chunks against this question.
+    if (chunks.some((c) => typeof c.metadata.jevScore === "number" && (c.metadata.jevScore as number) >= (Number(process.env.JEV_GATE_MIN) || 0.5))) return "confirmed";
     // Fast path: strong direct retrieval (high cosine) is trusted — skip the
     // small model entirely and report the sources as relevant.
     const topScore = Math.max(...chunks.map((c) => (c as any).score || 0));
@@ -923,7 +967,7 @@ ${contextBlocks}
 - When linking to pages, use proper markdown: [Page Name](https://url). NEVER use arrow symbols like "Page Name →" without a URL. If you don't have the URL, just mention the page name without a link.
 - NEVER say "check each hotel's policy" or "contact them directly" - if you know details, share them. If you don't, say "I don't have those details right now, but I can help with something else."
 - Do NOT use emojis. No 🔍🌟🏢🤝📈🚀💡🏡💰📞📝. Just plain text.
-- Keep answers SHORT. 2-4 sentences for simple questions. Only use bullet points or headers when listing 4+ items. Don't write essays.
+- Keep answers SHORT. 2-4 sentences for simple questions. Only use bullet points or headers when listing 4+ items. Don't write essays. Exception: when the visitor asks about ALL locations, branches, products or options (e.g. "where are you and when are you open"), list every one found in the sources compactly, one line each.
 
 ## Rules:
 - Only use information from the context above

@@ -114,7 +114,7 @@ export async function searchContext(
 
   return results.map((r) => ({
     content: r.content,
-    metadata: r.metadata,
+    metadata: { ...r.metadata, id: r.id },
     score: r.score,
   }));
 }

@@ -14,6 +14,7 @@ import { WebsiteChat } from "../llm/chat.js";
 import { getFlows } from "../flows/flow-store.js";
 import { getTenant } from "./tenant-registry.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
+import { CATALOG_FILE, type KnowledgeCatalog } from "../knowledge/catalog.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -143,8 +144,31 @@ export class TenantManager {
         `Answer with the facts directly, or give the phone number. For anything that changes day to day (e.g. a daily special), say it's best to call. Only discuss this business.`
       : `This assistant is deployed on ${new URL(meta.siteUrl).hostname}. Never reference or provide information about any other website or domain.`;
 
+    // Knowledge catalog (Jev-classified chunks, built at scrape time): disk first,
+    // then R2. Optional — tenants scraped before catalogs existed keep the vector path.
+    let knowledgeCatalog: KnowledgeCatalog | null = null;
+    try {
+      const catPath = resolve(DATA_ROOT, tenantId, CATALOG_FILE);
+      let catRaw: string | null = existsSync(catPath) ? await readFile(catPath, "utf-8") : null;
+      if (!catRaw) {
+        const { downloadTenantFile } = await import("../storage/r2.js");
+        const buf = await downloadTenantFile(tenantId, CATALOG_FILE);
+        if (buf) {
+          catRaw = buf.toString("utf-8");
+          const { mkdirSync } = await import("fs");
+          const dir = resolve(DATA_ROOT, tenantId);
+          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+          await writeFile(catPath, catRaw);
+        }
+      }
+      if (catRaw) knowledgeCatalog = JSON.parse(catRaw) as KnowledgeCatalog;
+    } catch (e: any) {
+      console.warn(`[tenant-manager] knowledge catalog load failed for ${tenantId}: ${e?.message || e}`);
+    }
+
     // Create WebsiteChat with OpenRouter
     const chat = new WebsiteChat(this.bgeProvider, store, context, {
+      knowledgeCatalog,
       llmProvider: "openrouter",
       openRouter: {
         apiKey: process.env.OPENROUTER_API_KEY!,

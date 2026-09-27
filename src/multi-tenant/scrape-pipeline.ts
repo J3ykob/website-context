@@ -4,7 +4,7 @@
  */
 
 import { existsSync, mkdirSync } from "fs";
-import { writeFile, readFile } from "fs/promises";
+import { writeFile, readFile, rm } from "fs/promises";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { crawlSite, closeBrowser } from "../scraper/index.js";
@@ -15,6 +15,9 @@ import { embedChunks } from "../embeddings/pipeline.js";
 import { scrapeGooglePlaces, placesToChunks } from "../scraper/google-places.js";
 import { auditBusinessInfo, businessInfoToNotes } from "./business-audit.js";
 import { uploadToR2, downloadFromR2 } from "../storage/r2.js";
+import { buildCatalog, namerPrompt, parseNamerReply, CATALOG_FILE } from "../knowledge/catalog.js";
+import { jevEnabled } from "../llm/jev.js";
+import { OpenRouterProvider } from "../llm/openrouter-provider.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -238,6 +241,28 @@ export async function scrapeTenant(
     JSON.stringify(contextMeta, null, 2)
   );
 
+  // Knowledge catalog: Jev sorts every chunk into topical catalogs (self-growing:
+  // an LLM names new catalogs for chunks that fit none). Non-fatal — without it
+  // chat falls back to plain vector retrieval.
+  if (jevEnabled() && context.chunks.length > 0) {
+    try {
+      const t0 = Date.now();
+      const llm = new OpenRouterProvider({ maxTokens: 600 });
+      const namer = async (texts: string[], existing: any[]) =>
+        parseNamerReply((await llm.chat([{ role: "user", content: namerPrompt(texts, existing) }], { model: process.env.ENRICH_MODEL || undefined, temperature: 0 })).content);
+      const catalog = await buildCatalog(context.chunks, namer);
+      if (catalog) {
+        await writeFile(resolve(tenantDir, CATALOG_FILE), JSON.stringify(catalog));
+        console.log(`[scrape-pipeline] Knowledge catalog: ${catalog.catalogs.length} catalogs, ${catalog.chunks.length} chunks (${Date.now() - t0}ms)`);
+      } else {
+        await rm(resolve(tenantDir, CATALOG_FILE), { force: true }); // never serve a previous scrape's catalog
+      }
+    } catch (err) {
+      await rm(resolve(tenantDir, CATALOG_FILE), { force: true }).catch(() => {});
+      console.warn(`[scrape-pipeline] Knowledge catalog skipped: ${(err as Error).message}`);
+    }
+  }
+
   // Auto-extract business info and save as context notes + gap report
   try {
     const bizInfo = auditBusinessInfo(context.chunks);
@@ -295,6 +320,7 @@ export async function scrapeTenant(
       ["context-meta.json", "application/json"],
       ["business-info.json", "application/json"],
       ["auto-context-notes.json", "application/json"],
+      [CATALOG_FILE, "application/json"],
       ["screenshot.png", "image/png"],
     ];
     for (const [file, ct] of artifacts) {
