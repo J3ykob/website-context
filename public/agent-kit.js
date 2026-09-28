@@ -110,8 +110,8 @@
     try {
       if (!hl) {
         hl = document.createElement("div");
-        hl.id = "wctx-agent-hl";
-        hl.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;border:3px solid #3b82f6;border-radius:8px;box-shadow:0 0 0 4px rgba(59,130,246,.25);transition:all .18s ease";
+        hl.id = "wctx-agent-hl"; // z-index below the chat widget (~1e6): it must never cover the chat
+        hl.style.cssText = "position:fixed;pointer-events:none;z-index:999990;border:3px solid #3b82f6;border-radius:8px;box-shadow:0 0 0 4px rgba(59,130,246,.25);transition:all .18s ease";
         document.body.appendChild(hl);
       }
       var r = el.getBoundingClientRect();
@@ -194,5 +194,25 @@
   // Point at an element without acting (final submit and consents are left to the visitor).
   function point(i) { var el = nodes.get(i); if (el) { makeRoom(el); setTimeout(function () { highlight(el); }, 450); } }
 
-  window.__whispAgentKit = { snapshot: snapshot, act: act, point: point, clear: clearHighlight };
+  // Cheap page-state fingerprint (does not touch the index map): lets the widget
+  // notice that the visitor acted on the page themselves while the agent waited.
+  function signature() {
+    var parts = [location.href];
+    var list = document.querySelectorAll(SELECTOR);
+    for (var k = 0; k < list.length && k < 300; k++) {
+      var e = list[k];
+      if (!safe(e) || ownUi(e) || !visible(e)) continue;
+      parts.push((e.tagName || "") + "|" + (e.innerText || e.value || "").slice(0, 40) + "|" + (e.checked ? 1 : 0) + "|" + (e.getAttribute("aria-pressed") || e.getAttribute("aria-checked") || e.getAttribute("data-state") || ""));
+    }
+    return parts.join("\n");
+  }
+  // Current state of an element from the last snapshot (value typed / box ticked).
+  function stateOf(i) {
+    var e = nodes.get(i);
+    if (!e || !e.isConnected) return null;
+    var ticked = e.checked === true || e.getAttribute("aria-checked") === "true" || e.getAttribute("aria-pressed") === "true" || e.getAttribute("data-state") === "checked";
+    return { value: e.value !== undefined ? String(e.value) : "", ticked: ticked };
+  }
+
+  window.__whispAgentKit = { snapshot: snapshot, act: act, point: point, clear: clearHighlight, signature: signature, stateOf: stateOf };
 })();

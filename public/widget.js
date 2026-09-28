@@ -1162,8 +1162,10 @@
   // ─── Goal-driven flows ("agent") ──────────────────────────────────────
   // Thin client: snapshot the page (agent-kit.js), ask the server for ONE step
   // (/api/agent/step, where Jev decides), execute it, repeat. No model, key or
-  // decision logic here. Personal data, choices and consents come from the
-  // visitor through the chat; the final submit is always left to the visitor.
+  // decision logic here. While a process runs, EVERY visitor message goes to the
+  // agent (an answer, a preference or a correction - the server decides which),
+  // and while it waits the widget watches the page so the visitor can also just
+  // tick the consent / type the field / click "Next" themselves.
   var agent = null;
   function agentSay(text) {
     messages.push({ role: "assistant", content: text }); persistMessages();
@@ -1181,8 +1183,8 @@
         el.id = pair[0];
         el.className = pair[0] === "wctx-agent-status" ? "wctx-msg wctx-msg-assistant" : "wctx-bar-bubble assistant";
         el.style.opacity = "0.8"; el.style.fontStyle = "italic";
-        pair[1].appendChild(el);
       }
+      pair[1].appendChild(el); // keep it last
       el.textContent = "⚙ " + text;
       pair[1].scrollTop = pair[1].scrollHeight;
     });
@@ -1206,45 +1208,91 @@
         }
       } catch (e) {}
     }
-    agent = { flowId: a.flowId, request: a.request || "", lang: a.lang || "pl", inputs: {}, history: [], waiting: null, steps: 0, running: false };
+    if (agent) { stopWatch(); } // a new request replaces a running process, never runs beside it
+    agent = { flowId: a.flowId, request: a.request || "", lang: a.lang || "pl", inputs: {}, history: [], waiting: false, waitField: null, waitI: 0, pendingReply: null, steps: 0, running: false, watch: null };
     loadAgentKit(agentLoop);
+  }
+  function applyNote(n) {
+    if (!n || !agent) return;
+    if (n.kind === "input") { agent.inputs[n.field] = n.value; agent.history.push({ op: "VISITOR_GAVE", label: n.field }); }
+    else if (n.kind === "pref") { agent.request += "\nVisitor's preference: " + n.text; agent.history.push({ op: n.op, label: n.text.slice(0, 100) }); }
+    else if (n.kind === "correction") { agent.request += "\nVisitor's correction (latest, overrides earlier choices): " + n.text; agent.history.push({ op: "VISITOR_CORRECTION", label: n.text.slice(0, 100) }); if (n.say) agentSay(n.say); }
+    else if (n.kind === "consent") { agent.history.push({ op: "VISITOR_HANDLED_CONSENT" }); }
+    else if (n.kind === "acted") { agent.history.push({ op: "VISITOR_ACTED_ON_PAGE" }); }
+  }
+  function stopWatch() { if (agent && agent.watch) { clearInterval(agent.watch); agent.watch = null; } }
+  // While waiting, notice the visitor acting on the page themselves.
+  function startWatch() {
+    stopWatch();
+    var kit = window.__whispAgentKit;
+    var sig0 = kit.signature(), lastVal = null, stable = 0, changed = 0;
+    var kind = agent.waitField === "consent" ? "consent" : (agent.waitField && agent.waitField.indexOf("choice") === 0) ? "choice" : "data";
+    agent.watch = setInterval(function () {
+      if (!agent || !agent.waiting) { stopWatch(); return; }
+      var st = agent.waitI ? kit.stateOf(agent.waitI) : null;
+      if (kind === "consent") {
+        if (st && st.ticked) { resume({ field: "consent", text: "(ticked on the page)" }); return; }
+        if (agent.waitI && !st) { resume({ field: "page", text: "(page changed)" }); }
+        return;
+      }
+      if (kind === "data") {
+        if (agent.waitI && !st) { resume({ field: "page", text: "(page changed)" }); return; }
+        if (st && st.value) {
+          // Typed into the asked field: wait until it stops changing (~2.4 s).
+          if (st.value === lastVal) stable++; else { stable = 0; lastVal = st.value; }
+          if (stable >= 3) resume({ field: agent.waitField, text: st.value, auto: true });
+        }
+        return;
+      }
+      // choice: the visitor picked an option or moved on by themselves.
+      if (kit.signature() !== sig0) { if (++changed >= 2) resume({ field: "page", text: "(acted on the page)" }); }
+      else changed = 0;
+    }, 800);
+  }
+  function resume(reply) {
+    if (!agent) return;
+    stopWatch();
+    agent.waiting = false;
+    agent.pendingReply = reply;
+    agentLoop();
   }
   async function agentLoop() {
     if (!agent || agent.running) return;
     agent.running = true;
     var pl = agent.lang === "pl";
     try {
-      while (agent && !agent.waiting && agent.steps < 45) {
+      while (agent && !agent.waiting && agent.steps < 60) {
         agent.steps++;
         var snap = window.__whispAgentKit.snapshot();
+        var reply = agent.pendingReply; agent.pendingReply = null;
         var r;
         try {
           r = await fetch(API_HOST + "/api/agent/step", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tenantId: TENANT_ID, flowId: agent.flowId, request: agent.request, inputs: agent.inputs, snapshot: snap, history: agent.history, lang: agent.lang })
+            body: JSON.stringify({ tenantId: TENANT_ID, flowId: agent.flowId, request: agent.request, inputs: agent.inputs, snapshot: snap, history: agent.history.slice(-30), lang: agent.lang, reply: reply })
           });
         } catch (e) { r = null; }
+        if (!agent) break; // stopped by the visitor meanwhile
         if (!r || !r.ok) { agentStatus(""); agentSay(pl ? "Nie mogę teraz kontynuować. Dokończ proszę ręcznie albo zadzwoń do nas." : "I can't continue right now. Please finish manually or call us."); agent = null; break; }
         var cmd = await r.json();
+        applyNote(cmd.note);
         var el = null;
         for (var k = 0; k < snap.elements.length; k++) if (snap.elements[k].i === cmd.i) { el = snap.elements[k]; break; }
         var label = el ? el.label : "";
         if (["CLICK", "TYPE", "SELECT", "SCROLL_DOWN", "WAIT"].indexOf(cmd.op) >= 0) {
           agentStatus(cmd.say);
           var res = await window.__whispAgentKit.act(cmd);
-          agent.history.push({ op: cmd.op, i: cmd.i, label: label, ok: res.ok });
+          if (agent) agent.history.push({ op: cmd.op, i: cmd.i, label: label, ok: res.ok });
           continue;
         }
         agentStatus("");
-        if (cmd.op === "ASK") {
-          agent.waiting = cmd.field === "choice" ? "choice" : "data";
-          agent.field = cmd.field;
+        if (cmd.op === "ASK" || cmd.op === "CONSENT") {
+          agent.waiting = true;
+          agent.waitField = cmd.op === "CONSENT" ? "consent" : cmd.field;
+          agent.waitI = cmd.i || 0;
           if (cmd.i) window.__whispAgentKit.point(cmd.i);
           agentSay(cmd.say);
-        } else if (cmd.op === "CONSENT") {
-          agent.waiting = "consent"; agent.consentI = cmd.i; agent.consentLabel = label;
-          window.__whispAgentKit.point(cmd.i);
-          agentSay(cmd.say);
+          startWatch();
         } else if (cmd.op === "CONFIRM") {
           window.__whispAgentKit.point(cmd.i);
           agentSay(cmd.say);
@@ -1255,27 +1303,30 @@
           agent = null;
         }
       }
-      if (agent && agent.steps >= 45) { agentStatus(""); agentSay(pl ? "To trwa za długo, zatrzymuję się. Dokończ proszę ręcznie." : "This is taking too long, stopping here."); agent = null; }
+      if (agent && agent.steps >= 60) { agentStatus(""); agentSay(pl ? "To trwa za długo, zatrzymuję się. Dokończ proszę ręcznie." : "This is taking too long, stopping here."); agent = null; }
     } finally {
       if (agent) agent.running = false;
+      // A message that arrived while the last step was executing is not lost.
+      if (agent && !agent.waiting && agent.pendingReply) agentLoop();
     }
   }
-  // Returns true when the visitor's message was an answer for the agent.
+  // While a process runs, every visitor message belongs to it. Returns true when consumed.
   function agentHandleReply(text) {
-    if (!agent || !agent.waiting) return false;
+    if (!agent) return false;
     messages.push({ role: "user", content: text }); persistMessages();
     appendMsg("user", text);
     try { syncBarMessages(); } catch (e) {}
-    if (/^(stop|anuluj|przerwij|koniec|cancel)\b/i.test(text.trim())) {
+    if (/^\s*(stop|anuluj|przerwij|koniec|cancel)\b/i.test(text)) {
+      stopWatch();
       window.__whispAgentKit && window.__whispAgentKit.clear();
+      agentStatus("");
       agentSay(agent.lang === "pl" ? "Dobrze, przerywam." : "OK, stopping.");
       agent = null; return true;
     }
-    if (agent.waiting === "data") { agent.inputs[agent.field] = text.trim(); agent.history.push({ op: "VISITOR_GAVE", label: agent.field }); }
-    else if (agent.waiting === "choice") { agent.request += "\nVisitor's preference: " + text.trim(); agent.history.push({ op: "VISITOR_CHOSE", label: text.trim().slice(0, 100) }); }
-    else if (agent.waiting === "consent") { agent.history.push({ op: "VISITOR_HANDLED_CONSENT", i: agent.consentI, label: agent.consentLabel || "" }); }
-    agent.waiting = null;
-    agentLoop();
+    if (agent.waiting) { resume({ field: agent.waitField, text: text }); return true; }
+    // Mid-run: a correction or a new instruction; picked up by the next step.
+    agent.pendingReply = { field: null, text: text };
+    if (!agent.running) agentLoop();
     return true;
   }
   // Central flow-session handler: apply any on-page form actions, keep chat active.

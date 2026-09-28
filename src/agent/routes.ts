@@ -47,11 +47,14 @@ export function registerAgentRoutes(app: Express): void {
     const snapshot: AgentSnapshot = { url: str(s.url, 500), title: str(s.title, 200), text: str(s.text, 6000), elements, errors: (Array.isArray(s.errors) ? s.errors : []).slice(0, 8).map((x: unknown) => str(x, 200)) };
     const inputs: Record<string, string> = {};
     for (const [k, v] of Object.entries(b.inputs || {}).slice(0, 20)) if (typeof v === "string") inputs[str(k, 80)] = v.slice(0, 200);
-    const history: AgentHistoryItem[] = (Array.isArray(b.history) ? b.history : []).slice(-20).map((h: any) => ({ op: str(h.op, 30), i: Number.isFinite(Number(h.i)) ? Number(h.i) : undefined, label: str(h.label, 120), ok: h.ok === false ? false : undefined }));
+    const history: AgentHistoryItem[] = (Array.isArray(b.history) ? b.history : []).slice(-30).map((h: any) => ({ op: str(h.op, 30), i: Number.isFinite(Number(h.i)) ? Number(h.i) : undefined, label: str(h.label, 120), ok: h.ok === false ? false : undefined }));
 
     try {
       const t0 = Date.now();
-      const cmd = await decideStep({ goal: flow.description, request: str(b.request, 600), inputs, snapshot, history, lang: b.lang === "en" ? "en" : "pl" });
+      const rp = b.reply && typeof b.reply === "object" && typeof b.reply.text === "string"
+        ? { field: b.reply.field === null ? null : str(b.reply.field, 120), text: str(b.reply.text, 300), auto: b.reply.auto === true }
+        : undefined;
+      const cmd = await decideStep({ goal: flow.description, request: str(b.request, 2000), inputs, snapshot, history, lang: b.lang === "en" ? "en" : "pl", reply: rp });
       console.log(`[agent] ${tenantId}/${flowId}: ${cmd.op}${"i" in cmd && cmd.i ? ` [${cmd.i}]` : ""} (${Date.now() - t0}ms)`);
       res.json(cmd);
     } catch (e: any) {
