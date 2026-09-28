@@ -90,6 +90,17 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
   const BACK = /^(wstecz|cofnij|powrót|powrot|back|previous|poprzedni)$/i;
   const lastFailed = history.length > 0 && history[history.length - 1].ok === false;
   const clickable = els.filter((e) => e.ops.includes("CLICK") && (lastFailed || !BACK.test((e.label || "").trim())));
+
+  // Deterministic hand-off: a value the visitor gave for a named field (the key
+  // is that field's label, set when we asked) is typed into it before anything
+  // else. Letting the model pick the next field skipped answered ones.
+  for (const e of els) {
+    if (!e.ops.includes("TYPE")) continue;
+    const v = input.inputs[e.label];
+    if (v !== undefined && (e.value || "") !== v) {
+      return { op: "TYPE", i: e.i, text: v, say: say(lang, `Wpisuję: ${short(e.label, 40)}`, `Filling in: ${short(e.label, 40)}`) };
+    }
+  }
   const typable = els.filter((e) => e.ops.includes("TYPE"));
   const selects = els.filter((e) => e.ops.includes("SELECT") && e.options?.length);
 
