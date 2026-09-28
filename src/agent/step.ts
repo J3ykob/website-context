@@ -356,7 +356,13 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       const sinceCorr = history.slice(lastCorr + 1);
       const dateChosen = sinceCorr.some((h) => h.op === "VISITOR_CHOSE_DATE" || h.op === "VISITOR_CHOSE_TIME");
       const timeAsked = sinceCorr.some((h) => h.op === "VISITOR_CHOSE_TIME");
-      const hasPref = dateChosen || (noul(a, "date_pref") ?? 0) >= 0.5;
+      let hasPref = dateChosen || (noul(a, "date_pref") ?? 0) >= 0.5;
+      // The main call carries the whole page; its date_pref occasionally misses a
+      // plain "na środę". Before asking the visitor, re-check it on its own.
+      if (!hasPref && latestPrefs.trim()) {
+        const d = await jevAsk({ latest_preferences: latestPrefs }, { date_pref: questions.date_pref }, 4000);
+        hasPref = (noul(d, "date_pref") ?? 0) >= 0.5;
+      }
       // A fresh answer to our date / hour question is applied even when an older
       // pick is still marked selected (after going back to change the date).
       const answeredSlot = !!lastStep && (lastStep.op === "VISITOR_CHOSE_DATE" || lastStep.op === "VISITOR_CHOSE_TIME");
