@@ -360,25 +360,30 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
           const c = await gatedClick([slots[0]]);
           return c.op === "CLICK" ? { ...c, say: say(lang, `Wybieram najbliższy termin: „${short(slots[0].label)}”`, `Choosing the earliest slot: "${short(slots[0].label)}"`) } : c;
         }
-        // A stated preference ("Wednesday", "after 3 pm"): which slots fit it is a
-        // Jev question per slot. One fit -> take it. Several (a day without an
-        // hour) -> ask which one, unless they asked for the earliest within it.
-        // None -> say so and show the nearest ones.
+        // A stated preference ("Wednesday", "after 3 pm", "12:00"): which slots fit it
+        // is a Jev question per slot. Strict: a named clock time is matched exactly,
+        // never silently swapped for a nearby one. One fit -> take it. Several (a day
+        // without an hour) -> ask which, unless they asked for the earliest within it.
+        // None -> tell the visitor and offer the closest ones (same day first).
         const cands = slots.slice(0, 40);
         const f = await jevAsk({ latest_preferences: latestPrefs, slots: cands.map((e) => e.label) }, {
-          ...Object.fromEntries(cands.map((_, k) => [`f${k}`, { type: "noul", instructions: `Does \`slots[${k}]\` fit what the visitor asked for in \`latest_preferences\` (the day, date, time or period they named)?` } as JevQuestion])),
+          ...Object.fromEntries(cands.map((_, k) => [`f${k}`, { type: "noul", instructions: `Does \`slots[${k}]\` satisfy what the visitor asked for in \`latest_preferences\` (the day, date, time or period they named)? If they named a specific clock time, only a slot at exactly that time satisfies it; a nearby time does not.` } as JevQuestion])),
+          ...Object.fromEntries(cands.map((_, k) => [`n${k}`, { type: "noul", instructions: `Is \`slots[${k}]\` close to what the visitor asked for in \`latest_preferences\`: on the day they named, or near the time they named?` } as JevQuestion])),
           earliest_within: { type: "noul", instructions: "Does `latest_preferences` ask for the earliest possible time within the day or period it names (for example as early as possible on Wednesday)?" },
         }, 6000);
         if (!f) return retry("slot fit call failed");
         const fits = cands.filter((_, k) => (noul(f, `f${k}`) ?? 0) >= 0.6);
-        // Ask about the hour at most once: after the visitor answered, several
-        // fits (e.g. "12:00" on two different Wednesdays) -> the nearest one.
         // The hour is asked at most once: after the visitor answered it, several
-        // fits (e.g. "12:00" on two Wednesdays) -> the nearest one.
+        // exact fits (e.g. "12:00" on two Wednesdays) -> the nearest one.
         if (fits.length === 1 || (fits.length > 1 && (timeAsked || (noul(f, "earliest_within") ?? 0) >= 0.5))) return gatedClick([fits[0]]);
         if (fits.length > 1) {
           const list = fits.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
           return { op: "ASK", i: 0, field: "choice:time", say: say(lang, `Pasujące wolne terminy:\n${list}\nKtóra godzina Ci odpowiada?`, `Matching free slots:\n${list}\nWhich time suits you?`) };
+        }
+        const near = cands.filter((_, k) => (noul(f, `n${k}`) ?? 0) >= 0.5).slice(0, 8);
+        if (near.length) {
+          const list = near.map((e) => `• ${short(e.label, 60)}`).join("\n");
+          return { op: "ASK", i: 0, field: "choice:time", say: say(lang, `Ten termin nie jest wolny. Najbliższe możliwe:\n${list}\nKtóry z nich Ci pasuje?`, `That time isn't available. The closest free ones:\n${list}\nWhich one suits you?`) };
         }
         const list = slots.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
         return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Nie widzę wolnego terminu pasującego do tego, co napisałeś. Najbliższe wolne:\n${list}\nKtóry wybierasz?`, `I can't see a free slot matching that. The nearest free ones:\n${list}\nWhich one do you choose?`) };

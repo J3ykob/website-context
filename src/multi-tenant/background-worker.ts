@@ -78,6 +78,13 @@ export class ScrapeWorker {
     ensureMigrated();
     const db = getDb();
 
+    // An explicit (admin) re-scrape starts with a clean interruption count.
+    const t = getTenant(tenantId);
+    if (t?.settings?.scrapeInterrupts) {
+      const { scrapeInterrupts: _reset, ...settings } = t.settings;
+      updateTenant(tenantId, { settings });
+    }
+
     const alreadyQueued = this.queue.some((j) => j.tenantId === tenantId) ||
       this.retryQueue.some((j) => j.tenantId === tenantId);
     if (alreadyQueued) {
