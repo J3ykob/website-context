@@ -189,21 +189,23 @@ async function applyReply(input: AgentStepInput): Promise<{ input: AgentStepInpu
   return { input: out, note: { kind: "acted" } };
 }
 
-// Which option the visitor's own words point to, judged with the site's
-// knowledge about each option. Returns one option only when it clearly fits
-// (>= 0.7) and no other plausibly does (< 0.4); otherwise the visitor is asked.
-async function matchByKnowledge(options: AgentElement[], request: string, knowledge?: (q: string) => string[]): Promise<AgentElement | null> {
+// How well each option fits the visitor's own words, judged with the site's
+// knowledge about each option, plus whether they said anything about this
+// choice at all. Null when Jev is unavailable.
+async function matchByKnowledge(options: AgentElement[], request: string, knowledge?: (q: string) => string[]): Promise<{ scores: number[]; relevant: number } | null> {
   const rows = options.map((e) => ({ option: short(e.label, 120), site_knowledge: knowledge ? knowledge(e.label).map((p) => short(p, 350)) : [] }));
-  const a = await jevAsk({ visitor_request: request.slice(-1200), options: rows }, Object.fromEntries(rows.map((_, k) => [`m${k}`, {
-    type: "noul",
-    instructions: `Does a wish stated in \`visitor_request\` (a place, area, person, type or other preference) clearly point to \`options[${k}]\`, judging by the option and its \`site_knowledge\` (facts from this business's own website)? Answer no when the visitor states nothing relevant to this choice.`,
-  } as JevQuestion])), 5000);
+  const a = await jevAsk({ visitor_request: request.slice(-1200), options: rows }, {
+    ...Object.fromEntries(rows.map((_, k) => [`m${k}`, {
+      type: "noul",
+      instructions: `Does a wish stated in \`visitor_request\` (a place, area, person, type or other preference) clearly point to \`options[${k}]\`, judging by the option and its \`site_knowledge\` (facts from this business's own website)? Answer no when the visitor states nothing relevant to this choice.`,
+    } as JevQuestion])),
+    relevant: { type: "noul", instructions: "Does `visitor_request` state any wish that bears on this particular choice among `options` (for example a place, area, person, type or product), even if no option matches it?" },
+  }, 5000);
   if (!a) return null;
-  const p = rows.map((_, k) => noul(a, `m${k}`) ?? 0);
-  if (process.env.AGENT_DEBUG) console.log("   [match]", rows.map((r, k) => `${short(r.option, 30)}=${p[k].toFixed(2)}`).join(" | "));
-  const strong = p.filter((x) => x >= 0.7).length, weak = p.filter((x) => x >= 0.4).length;
-  if (strong !== 1 || weak !== 1) return null;
-  return options[p.findIndex((x) => x >= 0.7)];
+  const scores = rows.map((_, k) => noul(a, `m${k}`) ?? 0);
+  const relevant = noul(a, "relevant") ?? 0;
+  if (process.env.AGENT_DEBUG) console.log("   [match]", `relevant=${relevant.toFixed(2)}`, rows.map((r, k) => `${short(r.option, 30)}=${scores[k].toFixed(2)}`).join(" | "));
+  return { scores, relevant };
 }
 
 // ── One decision ────────────────────────────────────────────────────────────
@@ -346,7 +348,11 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
     if (s) {
       const allSlots = cand.filter((_, k) => (noul(s, `s${k}`) ?? 0) >= 0.5);
       const slots = allSlots.filter((e) => !e.selected);
-      const alreadyPicked = allSlots.some((e) => e.selected);
+      // Picked already: marked selected, or clicked in the previous step (some
+      // pages don't mark the chosen slot, and "earliest" would then take the next).
+      const lastStep = history[history.length - 1];
+      const alreadyPicked = allSlots.some((e) => e.selected)
+        || (!!lastStep && lastStep.op === "CLICK" && lastStep.ok !== false && allSlots.some((e) => e.label.slice(0, 120) === lastStep.label));
       const sinceCorr = history.slice(lastCorr + 1);
       const dateChosen = sinceCorr.some((h) => h.op === "VISITOR_CHOSE_DATE" || h.op === "VISITOR_CHOSE_TIME");
       const timeAsked = sinceCorr.some((h) => h.op === "VISITOR_CHOSE_TIME");
@@ -404,34 +410,66 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const alreadyChosen = (e: AgentElement) => !!e.selected || history.slice(-4).some((h) => h.op === "CLICK" && h.ok !== false && h.label === e.label.slice(0, 120));
   const moveOn = (options: AgentElement[]) => { const nav = rankedClicks().filter((e) => !options.includes(e)); return nav.length ? gatedClick(nav) : null; };
 
+  // The visitor just answered a question (or that answer was applied by one click
+  // on a still-showing page): match against that answer, not the whole request.
+  const CHOSE = ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CHOSE_TIME", "VISITOR_CORRECTION"];
+  const lastH = history[history.length - 1];
+  const prevH = history[history.length - 2];
+  const answer = lastH && CHOSE.includes(lastH.op) ? lastH
+    : prevH && CHOSE.includes(prevH.op) && lastH?.op === "CLICK" && lastH.ok !== false && !!lastH.label && clickable.some((e) => e.label.slice(0, 120) === lastH.label) ? prevH : null;
+  const justChose = !!answer;
+
+  // ── The rule for every choice (branch, service, package...; slots above follow
+  // it too): one clear match -> take it; the visitor's wish fits several options
+  // or none -> say so and offer suggestions, never pick silently; nothing said
+  // about this choice -> null (the caller's default).
+  const resolveChoice = async (options: AgentElement[]): Promise<AgentCommand | null> => {
+    const m = await matchByKnowledge(options, answer?.label || reqText, input.knowledge);
+    if (!m) return null;
+    const byScore = options.map((e, k) => ({ e, s: m.scores[k] })).sort((x, y) => y.s - x.s);
+    const good = byScore.filter((r) => r.s >= 0.6), plausible = byScore.filter((r) => r.s >= 0.2);
+    // From the request: take an option only when nothing else is plausible. From
+    // the visitor's answer to our own question: a clear lead decides (their words
+    // name one option; similar ones score lower but not zero).
+    const second = byScore[1]?.s ?? 0;
+    const clear = answer ? byScore[0].s >= 0.6 && byScore[0].s - second >= 0.2 : good.length === 1 && plausible.length === 1;
+    if (clear) {
+      const pick = byScore[0].e;
+      return alreadyChosen(pick) ? moveOn(options) : gatedClick([pick]);
+    }
+    if (plausible.length === 0 && m.relevant < 0.5) return null;
+    const bullets = (rs: { e: AgentElement }[]) => rs.map((r) => `• ${short(r.e.label, 70)}`).join("\n");
+    if (plausible.length >= 2) {
+      const list = bullets(plausible.slice(0, 6));
+      return { op: "ASK", i: 0, field: "choice", say: say(lang, `Pasuje kilka opcji:\n${list}\nKtórą wybierasz?`, `Several options fit:\n${list}\nWhich one do you choose?`) };
+    }
+    if (plausible.length === 1) {
+      const others = bullets(byScore.slice(1, 5));
+      return { op: "ASK", i: 0, field: "choice", say: say(lang, `Najbardziej pasuje:\n${bullets(plausible)}\nInne dostępne:\n${others}\nKtórą wybierasz?`, `The closest match:\n${bullets(plausible)}\nOther options:\n${others}\nWhich one do you choose?`) };
+    }
+    const sugg = byScore.filter((r) => r.s >= 0.15).slice(0, 5);
+    const list = bullets(sugg.length >= 2 ? sugg : byScore.slice(0, 5));
+    return { op: "ASK", i: 0, field: "choice", say: say(lang, `Nie widzę opcji, która pasuje do tego, o co prosisz. Dostępne są na przykład:\n${list}\nKtórą wybierasz?`, `I can't see an option matching what you asked for. Available are, for example:\n${list}\nWhich one do you choose?`) };
+  };
+
   if (op === "CLICK") {
-    // A click on a choice page is checked against the visitor's words: a single
-    // clear match elsewhere overrides Jev's pick; otherwise Jev's pick stands.
+    // A click on one of several options is checked against the visitor's words.
     if ((noul(a, "choice_page") ?? 0) >= 0.5 && reqText.trim()) {
       const t = rankedClicks()[0];
       const { options } = await optionSet();
       if (t && options.length >= 2 && options.includes(t)) {
-        const m = await matchByKnowledge(options, reqText, input.knowledge);
-        if (m && alreadyChosen(m)) { const c = await moveOn(options); if (c) return c; }
-        else if (m && m !== t) return gatedClick([m]);
+        const c = await resolveChoice(options);
+        if (c) return c;
       }
     }
     return gatedClick(rankedClicks());
   }
 
   if (op === "NEED_CHOICE" && clickable.length) {
-    const CHOSE = ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CHOSE_TIME", "VISITOR_CORRECTION"];
-    const last = history[history.length - 1];
-    const prev = history[history.length - 2];
-    // Also "just chose" when that choice was applied by one click and the same
-    // page is still showing (the clicked option is still there): move on, don't re-ask.
-    const justChose = !!last && (CHOSE.includes(last.op)
-      || (!!prev && CHOSE.includes(prev.op) && last.op === "CLICK" && last.ok !== false && !!last.label && clickable.some((e) => e.label.slice(0, 120) === last.label)));
     const { top, options } = await optionSet();
     if (options.length >= 2 && reqText.trim()) {
-      const m = await matchByKnowledge(options, reqText, input.knowledge);
-      if (m && alreadyChosen(m)) { const c = await moveOn(options); if (c) return c; }
-      else if (m) return gatedClick([m]);
+      const c = await resolveChoice(options);
+      if (c) return c;
     }
     if (justChose) return gatedClick(rankedClicks());
     if (options.length <= 1) return gatedClick(options.length ? options : top);
