@@ -110,7 +110,18 @@ async function applyReply(input: AgentStepInput): Promise<{ input: AgentStepInpu
   };
   if (r.field === null) return correction();
   if (r.field === "page") { out.history.push({ op: "VISITOR_ACTED_ON_PAGE" }); return { input: out, note: { kind: "acted" } }; }
-  if (r.field === "consent") { out.history.push({ op: "VISITOR_HANDLED_CONSENT" }); return { input: out, note: { kind: "consent" } }; }
+  if (r.field === "consent") {
+    // "dalej" / "ok" / "gotowe" confirm the consent step; anything else written
+    // there ("this date doesn't suit me after all") is a correction.
+    if (!r.auto) {
+      const c = await jevAsk({ reply: text }, {
+        instruction: { type: "noul", instructions: "Does `reply` ask to change something or give a new instruction (for example change the date, the location or the service, go back, stop), rather than simply saying to continue, ok, done or yes?" },
+      }, 4000);
+      if (((c?.instruction as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.5) return correction();
+    }
+    out.history.push({ op: "VISITOR_HANDLED_CONSENT" });
+    return { input: out, note: { kind: "consent" } };
+  }
   if (r.field.startsWith("choice")) {
     const op = r.field === "choice:date" ? "VISITOR_CHOSE_DATE" : "VISITOR_CHOSE";
     out.request = `${out.request || ""}\nVisitor's preference: ${text}`;

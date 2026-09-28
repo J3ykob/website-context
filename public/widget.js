@@ -1231,7 +1231,7 @@
       if (!agent || !agent.waiting) { stopWatch(); return; }
       var st = agent.waitI ? kit.stateOf(agent.waitI) : null;
       if (kind === "consent") {
-        if (st && st.ticked) { resume({ field: "consent", text: "(ticked on the page)" }); return; }
+        if (st && st.ticked) { resume({ field: "consent", text: "(ticked on the page)", auto: true }); return; }
         if (agent.waitI && !st) { resume({ field: "page", text: "(page changed)" }); }
         return;
       }
