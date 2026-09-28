@@ -56,31 +56,37 @@ function extractHeaderFooterText(html: string): string[] {
   }
 }
 
-export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteContext> {
+/**
+ * Incremental context builder: each crawled page is converted to sections and
+ * chunks as soon as it arrives (addPage), and its HTML is dropped right away.
+ * Only a slim digest per page (JSON-LD, footer, tel:/mailto: links, plain text)
+ * is kept for the Official Business Info extractor. Holding every page's full
+ * HTML until the end of a 500-page crawl OOM-killed the server (2026-09-28).
+ */
+export function createContextBuilder() {
   const pages: PageContext[] = [];
   const chunks: ContentChunk[] = [];
   const siteMap: SiteMapEntry[] = [];
   const contactPhones = new Set<string>();
   const contactEmails = new Set<string>();
   const headerFooterBlocks = new Set<string>();
-  // Raw HTML per page, fed to the canonical Official Business Info extractor below.
+  // Slim per-page digest fed to the canonical Official Business Info extractor.
   const profilePages: { url: string; html: string }[] = [];
+  let firstUrl = "";
 
-  for (const scrapedPage of crawlResult.pages) {
-    // Re-fetch for markdown (we already have the HTML in memory during crawl,
-    // but for now we'll work from the scraped page data)
-    // Reuse the crawl's HTML; only pages without it (e.g. PDFs) are fetched again.
+  async function addPage(scrapedPage: ScrapedPage): Promise<void> {
+    // Reuse the crawl's HTML; only pages without it are fetched again.
     const fetchResult = scrapedPage.fetch || await fetchPage(scrapedPage.url, { timeout: 10000 });
     scrapedPage.fetch = undefined; // free the HTML as soon as it is converted
     // Never chunk a non-text document (PDF, image, archive): its bytes decode to garbage.
     const ctype = (fetchResult.headers["content-type"] || "").toLowerCase();
     if ((ctype && !/text\/html|application\/xhtml|text\/plain/.test(ctype)) || /[\u0000-\u0008\u000e-\u001f]/.test(fetchResult.html.slice(0, 4000))) {
       console.warn(`[buildContext] skipped non-text document: ${scrapedPage.url} (${ctype || "binary"})`);
-      continue;
+      return;
     }
+    if (!firstUrl) firstUrl = scrapedPage.url;
     const markdown = htmlToMarkdown(fetchResult);
-    profilePages.push({ url: scrapedPage.url, html: fetchResult.html });
-
+    profilePages.push({ url: scrapedPage.url, html: slimForProfile(fetchResult.html) });
     // Harvest canonical contact data from this page's tel:/mailto: links.
     const ci = extractTelMailto(fetchResult.html);
     ci.phones.forEach((p) => contactPhones.add(p));
@@ -133,57 +139,87 @@ export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteCon
     });
   }
 
-  // Add ONE reliable contact chunk from the collected tel:/mailto: links, so the bot
-  // can give the real phone/email even when the header/footer didn't survive markdown
-  // extraction and the dedicated contact page wasn't crawled.
-  if ((contactPhones.size || contactEmails.size) && crawlResult.pages.length > 0) {
-    const lines: string[] = [];
-    if (contactPhones.size) lines.push(`Telefon / phone: ${[...contactPhones].join(", ")}`);
-    if (contactEmails.size) lines.push(`Email: ${[...contactEmails].join(", ")}`);
-    const body = `## Kontakt / Contact\n\n${lines.join("\n")}`;
-    const url = crawlResult.pages[0].url;
-    const pageId = generatePageId(url);
-    chunks.push({
-      id: chunkId(pageId, ["Kontakt"], 0, body),
-      pageId,
-      content: body,
-      contextPrefix: `Official contact details (phone / email) for this business, taken from the site's tel: and mailto: links.`,
-      metadata: { url, title: "Kontakt / Contact", headingHierarchy: ["Kontakt", "Contact"], type: "form-description" },
-    });
+  async function finish(homeUrl?: string): Promise<WebsiteContext> {
+    // Add ONE reliable contact chunk from the collected tel:/mailto: links, so the bot
+    // can give the real phone/email even when the header/footer didn't survive markdown
+    // extraction and the dedicated contact page wasn't crawled.
+    if ((contactPhones.size || contactEmails.size) && firstUrl !== "") {
+      const lines: string[] = [];
+      if (contactPhones.size) lines.push(`Telefon / phone: ${[...contactPhones].join(", ")}`);
+      if (contactEmails.size) lines.push(`Email: ${[...contactEmails].join(", ")}`);
+      const body = `## Kontakt / Contact\n\n${lines.join("\n")}`;
+      const url = homeUrl || firstUrl;
+      const pageId = generatePageId(url);
+      chunks.push({
+        id: chunkId(pageId, ["Kontakt"], 0, body),
+        pageId,
+        content: body,
+        contextPrefix: `Official contact details (phone / email) for this business, taken from the site's tel: and mailto: links.`,
+        metadata: { url, title: "Kontakt / Contact", headingHierarchy: ["Kontakt", "Contact"], type: "form-description" },
+      });
+    }
+
+    // Header/footer content (address, hours, company info), captured once + deduped.
+    if (headerFooterBlocks.size > 0 && firstUrl !== "") {
+      const ordered = [...headerFooterBlocks].sort((a, b) => b.length - a.length).slice(0, 3);
+      const body = `## Informacje ze stopki / Site info\n\n${ordered.join("\n\n")}`.slice(0, 2500);
+      const url = homeUrl || firstUrl;
+      const pageId = generatePageId(url);
+      chunks.push({
+        id: chunkId(pageId, ["SiteInfo"], 0, body),
+        pageId,
+        content: body,
+        contextPrefix: `Header/footer information (often address, opening hours, company details) shown site-wide on this business's pages.`,
+        metadata: { url, title: "Site info", headingHierarchy: ["Site info"], type: "content" },
+      });
+    }
+
+    await enrichChunks(chunks);
+
+    // Canonical Official Business Info — built from authoritative typed sources (JSON-LD,
+    // tel:/mailto:) so the chat can answer "what's your main phone/email/address?" from one
+    // always-injected block instead of losing to testimonial/listing chunks in retrieval.
+    const businessProfile = extractOfficialInfo(profilePages, homeUrl || firstUrl);
+
+    return {
+      tenantId: "", // set by caller
+      version: 1,
+      lastUpdated: new Date().toISOString(),
+      siteMap,
+      pages,
+      flows: [],
+      chunks,
+      businessProfile,
+    };
   }
 
-  // Header/footer content (address, hours, company info), captured once + deduped.
-  if (headerFooterBlocks.size > 0 && crawlResult.pages.length > 0) {
-    const ordered = [...headerFooterBlocks].sort((a, b) => b.length - a.length).slice(0, 3);
-    const body = `## Informacje ze stopki / Site info\n\n${ordered.join("\n\n")}`.slice(0, 2500);
-    const url = crawlResult.pages[0].url;
-    const pageId = generatePageId(url);
-    chunks.push({
-      id: chunkId(pageId, ["SiteInfo"], 0, body),
-      pageId,
-      content: body,
-      contextPrefix: `Header/footer information (often address, opening hours, company details) shown site-wide on this business's pages.`,
-      metadata: { url, title: "Site info", headingHierarchy: ["Site info"], type: "content" },
-    });
+  return { addPage, finish, get pageCount() { return pages.length; } };
+}
+
+export async function buildContext(crawlResult: CrawlResult): Promise<WebsiteContext> {
+  const builder = createContextBuilder();
+  for (const page of crawlResult.pages) await builder.addPage(page);
+  return builder.finish(crawlResult.pages[0]?.url);
+}
+
+// What extractOfficialInfo reads from a page, without the rest of the HTML:
+// JSON-LD blocks, footer markup (tel: links there mark the main line), tel:/mailto:
+// links elsewhere (each occurrence once, for frequency), and the visible text.
+function slimForProfile(html: string): string {
+  try {
+    const $ = cheerio.load(html);
+    const FOOTER = "footer, [role='contentinfo']";
+    const ld = $('script[type="application/ld+json"]').map((_: any, e: any) => $.html(e)).get().join("");
+    const footers = $(FOOTER).map((_: any, e: any) => $.html(e)).get().join("");
+    const links = $('[href^="tel:"], [href^="mailto:"]')
+      .filter((_: any, e: any) => $(e).closest(FOOTER).length === 0)
+      .map((_: any, e: any) => `<a href="${String($(e).attr("href") || "").replace(/"/g, "&quot;")}"></a>`).get().join("");
+    $("script,style,noscript").remove();
+    const text = $("body").text().replace(/\s+/g, " ").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    return `<html><head>${ld}</head><body><p>${text}</p>${links}${footers}</body></html>`;
+  } catch {
+    return html.slice(0, 200000);
   }
-
-  await enrichChunks(chunks);
-
-  // Canonical Official Business Info — built from authoritative typed sources (JSON-LD,
-  // tel:/mailto:) so the chat can answer "what's your main phone/email/address?" from one
-  // always-injected block instead of losing to testimonial/listing chunks in retrieval.
-  const businessProfile = extractOfficialInfo(profilePages, crawlResult.pages[0]?.url);
-
-  return {
-    tenantId: "", // set by caller
-    version: 1,
-    lastUpdated: new Date().toISOString(),
-    siteMap,
-    pages,
-    flows: [],
-    chunks,
-    businessProfile,
-  };
 }
 
 function buildSections(sections: MarkdownSection[], pageId: string): SectionContext[] {

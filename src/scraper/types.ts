@@ -98,4 +98,8 @@ export interface CrawlOptions {
   userAgent?: string;
   useSitemap?: boolean; // seed the queue from robots.txt / sitemap.xml (default true)
   concurrency?: number; // pages fetched in parallel (default 6)
+  // Called with each page as soon as it is extracted (with its HTML in page.fetch).
+  // A consumer that processes pages here keeps memory flat: the crawl no longer
+  // holds every page's HTML until the end.
+  onPage?: (page: ScrapedPage) => Promise<void> | void;
 }

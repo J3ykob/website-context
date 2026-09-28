@@ -8,7 +8,7 @@ import { writeFile, readFile, rm } from "fs/promises";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { crawlSite, closeBrowser } from "../scraper/index.js";
-import { buildContext } from "../context/index.js";
+import { createContextBuilder } from "../context/store.js";
 import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { embedChunks } from "../embeddings/pipeline.js";
@@ -55,14 +55,17 @@ export async function scrapeTenant(
   // SCRAPE_MAX_PAGES is only a safety ceiling for huge sites.
   const pageBudget = Math.max(maxPages, Number(process.env.SCRAPE_MAX_PAGES) || 500);
   console.log(`[scrape-pipeline] Crawling ${siteUrl} (full site, ceiling ${pageBudget} pages) for tenant ${tenantId}`);
-  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6 });
+  // Pages are converted to chunks as they arrive (their HTML dropped at once),
+  // so memory stays flat however large the site is.
+  const builder = createContextBuilder();
+  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, onPage: builder.addPage });
   await closeBrowser();
 
   const pagesScraped = crawlResult.stats.successPages;
   console.log(`[scrape-pipeline] ${pagesScraped} pages scraped`);
 
   // Build context
-  const context = await buildContext(crawlResult);
+  const context = await builder.finish(crawlResult.pages[0]?.url);
   await closeBrowser();
   console.log(`[scrape-pipeline] ${context.chunks.length} chunks built`);
 

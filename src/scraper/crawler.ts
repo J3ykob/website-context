@@ -4,7 +4,7 @@ import { fetchPdfAsPage } from "./pdf.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
 import { createHash } from "crypto";
 
-const DEFAULT_OPTIONS: Required<CrawlOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage">> = {
   maxPages: 500,
   maxDepth: 10,
   respectRobotsTxt: true,
@@ -85,6 +85,15 @@ export async function crawlSite(
     console.log(`  [sitemap] ${sitemapUrls.length} URL(s) declared, ${added} queued`);
   }
 
+  // Hand each page to the consumer right away (it converts the page and drops
+  // the HTML); without a consumer the HTML stays on the page for buildContext.
+  const deliver = async (page: ScrapedPage) => {
+    if (!options.onPage) return;
+    try { await options.onPage(page); }
+    catch (e) { console.warn(`  [onPage] ${page.url}: ${(e as Error).message}`); }
+    finally { page.fetch = undefined; }
+  };
+
   const handle = async (item: { url: string; depth: number; parent?: string; attempt?: number }, normalizedUrl: string): Promise<void> => {
     console.log(`  [${pages.length + 1}/${opts.maxPages}] Crawling: ${normalizedUrl} (depth: ${item.depth})`);
 
@@ -93,6 +102,7 @@ export async function crawlSite(
       const pdfPage = await fetchPdfAsPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
       if (pdfPage) {
         pages.push(pdfPage);
+        await deliver(pdfPage);
         staticCount++;
         console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`);
       } else {
@@ -121,7 +131,7 @@ export async function crawlSite(
     const ctype = (fetchResult.headers["content-type"] || "").toLowerCase();
     if (ctype.includes("application/pdf")) {
       const pdfPage = await fetchPdfAsPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
-      if (pdfPage) { pages.push(pdfPage); staticCount++; console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`); }
+      if (pdfPage) { pages.push(pdfPage); await deliver(pdfPage); staticCount++; console.log(`  [PDF] extracted ${pdfPage.content.length} block(s): ${pdfPage.title}`); }
       return;
     }
     if (ctype && !/text\/html|application\/xhtml|text\/plain/.test(ctype)) {
@@ -150,6 +160,7 @@ export async function crawlSite(
     // Keep the fetched HTML so buildContext does not fetch every page again.
     page.fetch = fetchResult;
     pages.push(page);
+    await deliver(page);
     if (page.renderMethod === "static") staticCount++;
     else dynamicCount++;
 
@@ -158,6 +169,8 @@ export async function crawlSite(
       try { linkHost = new URL(link.href).hostname; } catch { continue; }
       if (allowedHosts.has(linkHost)) enqueue({ url: link.href, depth: item.depth + 1, parent: normalizedUrl });
     }
+    // A consumer already processed the page: keep only what the site map needs.
+    if (options.onPage) { page.content = []; page.links = []; page.forms = []; page.structuredData = []; }
   };
 
   const worker = async (): Promise<void> => {
@@ -280,7 +293,7 @@ async function fetchRobotsTxt(origin: string, userAgent: string): Promise<{ disa
 function isAllowedUrl(
   url: string,
   allowedHosts: Set<string>,
-  opts: Required<CrawlOptions>,
+  opts: Required<Omit<CrawlOptions, "onPage">>,
   disallowedPaths: string[]
 ): boolean {
   try {
