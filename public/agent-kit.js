@@ -12,6 +12,7 @@
   if (window.__whispAgentKit) return;
 
   var nodes = new Map(); // index -> element (last snapshot only)
+  var seenAs = new Map(); // index -> role|label at snapshot time (freshness guard)
 
   var ROLES = ["button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "menuitemradio", "option", "gridcell", "combobox", "textbox", "searchbox", "spinbutton"];
   var SELECTOR = "a[href],button,input,textarea,select,summary,[contenteditable='true']," + ROLES.map(function (r) { return "[role='" + r + "']"; }).join(",");
@@ -60,6 +61,7 @@
   // (flagged offscreen) so a long list (28 exam packages) is choosable at once.
   function snapshot() {
     nodes = new Map();
+    seenAs = new Map();
     var elements = [];
     var list = document.querySelectorAll(SELECTOR);
     for (var k = 0; k < list.length && elements.length < 150; k++) {
@@ -78,6 +80,7 @@
       if (r === "combobox" && e.tagName !== "SELECT") ops.push("CLICK");
       var idx = elements.length + 1;
       nodes.set(idx, e);
+      seenAs.set(idx, r + "|" + name(e));
       var item = { i: idx, role: r, label: name(e), ops: ops };
       // Where it sits: header/nav/footer links restart or leave a multi-step process.
       var area = e.closest("header,[role='banner']") ? "header" : e.closest("nav,[role='navigation']") ? "nav" : e.closest("footer,[role='contentinfo']") ? "footer" : "";
@@ -146,10 +149,16 @@
     if (cmd.op === "WAIT") { await settle(2500); return { ok: true }; }
     var el = nodes.get(cmd.i);
     if (!el || !el.isConnected) return { ok: false, error: "element " + cmd.i + " is gone" };
+    // Freshness guard: single-page apps reuse DOM nodes (the wizard's "DALEJ"
+    // button becomes "ZAKOŃCZ" on the summary). If the visitor moved the page on
+    // since the snapshot, the decided action must not hit whatever the node is now.
+    var fresh = function () { return el.isConnected && seenAs.get(cmd.i) === role(el) + "|" + name(el); };
+    if (!fresh()) return { ok: false, stale: true, error: "page changed since the snapshot" };
     el.scrollIntoView({ block: "center", behavior: "smooth" });
     await new Promise(function (r) { setTimeout(r, 250); });
     highlight(el);
     await new Promise(function (r) { setTimeout(r, 350); });
+    if (!fresh()) return { ok: false, stale: true, error: "page changed since the snapshot" }; // re-check right before acting
     try {
       if (cmd.op === "CLICK") {
         el.click();

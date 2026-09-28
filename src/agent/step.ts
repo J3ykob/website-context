@@ -108,7 +108,16 @@ async function applyReply(input: AgentStepInput): Promise<{ input: AgentStepInpu
     out.history.push({ op: "VISITOR_CORRECTION", label: text });
     return { input: out, note: { kind: "correction", text, say: say(lang, "Dobrze, uwzględniam to.", "OK, taking that into account.") } };
   };
-  if (r.field === null) return correction();
+  if (r.field === null) {
+    // Written while the agent was working: only a real change / instruction
+    // counts; "dalej", "ok" etc. are just acknowledgements.
+    const c = await jevAsk({ reply: text }, {
+      instruction: { type: "noul", instructions: "Does `reply` ask to change something or give a new instruction (for example change the date, the location or the service, go back, stop), rather than simply saying to continue, ok, done or yes?" },
+    }, 4000);
+    if (((c?.instruction as JevNoulAnswer | undefined)?.noul ?? 1) >= 0.5) return correction();
+    out.history.push({ op: "VISITOR_ACKNOWLEDGED" });
+    return { input: out, note: { kind: "acted" } };
+  }
   if (r.field === "page") { out.history.push({ op: "VISITOR_ACTED_ON_PAGE" }); return { input: out, note: { kind: "acted" } }; }
   if (r.field === "consent") {
     // "dalej" / "ok" / "gotowe" confirm the consent step; anything else written
