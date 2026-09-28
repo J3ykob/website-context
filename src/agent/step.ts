@@ -177,7 +177,7 @@ async function applyReply(input: AgentStepInput): Promise<{ input: AgentStepInpu
     return { input: out, note: { kind: "input", field: r.field as string, value: text } };
   }
   if (kind === "choice") {
-    const op = r.field === "choice:date" ? "VISITOR_CHOSE_DATE" : "VISITOR_CHOSE";
+    const op = r.field === "choice:time" ? "VISITOR_CHOSE_TIME" : r.field === "choice:date" ? "VISITOR_CHOSE_DATE" : "VISITOR_CHOSE";
     out.request = `${out.request || ""}\nVisitor's preference: ${text}`;
     out.history.push({ op, label: text });
     return { input: out, note: { kind: "pref", text, op } };
@@ -210,7 +210,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const lastFailed = history.length > 0 && history[history.length - 1].ok === false;
   const ops = history.map((h) => h.op);
   const lastCorr = ops.lastIndexOf("VISITOR_CORRECTION");
-  const correctionPending = lastCorr >= 0 && !history.slice(lastCorr + 1).some((h) => h.op === "VISITOR_CHOSE_DATE" || h.op === "VISITOR_CHOSE");
+  const correctionPending = lastCorr >= 0 && !history.slice(lastCorr + 1).some((h) => h.op === "VISITOR_CHOSE_DATE" || h.op === "VISITOR_CHOSE_TIME" || h.op === "VISITOR_CHOSE");
   const allowBack = lastFailed || (lastCorr >= 0 && lastCorr >= history.length - 6);
   const started = history.length > 0;
 
@@ -318,7 +318,9 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       const allSlots = cand.filter((_, k) => (noul(s, `s${k}`) ?? 0) >= 0.5);
       const slots = allSlots.filter((e) => !e.selected);
       const alreadyPicked = allSlots.some((e) => e.selected);
-      const dateChosen = history.slice(lastCorr + 1).some((h) => h.op === "VISITOR_CHOSE_DATE");
+      const sinceCorr = history.slice(lastCorr + 1);
+      const dateChosen = sinceCorr.some((h) => h.op === "VISITOR_CHOSE_DATE" || h.op === "VISITOR_CHOSE_TIME");
+      const timeAsked = sinceCorr.some((h) => h.op === "VISITOR_CHOSE_TIME");
       const hasPref = dateChosen || (noul(a, "date_pref") ?? 0) >= 0.5;
       if (slots.length >= 3 && (!alreadyPicked || correctionPending)) {
         if (!hasPref) {
@@ -342,10 +344,12 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
         const fits = cands.filter((_, k) => (noul(f, `f${k}`) ?? 0) >= 0.6);
         // Ask about the hour at most once: after the visitor answered, several
         // fits (e.g. "12:00" on two different Wednesdays) -> the nearest one.
-        if (fits.length === 1 || (fits.length > 1 && (dateChosen || (noul(f, "earliest_within") ?? 0) >= 0.5))) return gatedClick([fits[0]]);
+        // The hour is asked at most once: after the visitor answered it, several
+        // fits (e.g. "12:00" on two Wednesdays) -> the nearest one.
+        if (fits.length === 1 || (fits.length > 1 && (timeAsked || (noul(f, "earliest_within") ?? 0) >= 0.5))) return gatedClick([fits[0]]);
         if (fits.length > 1) {
           const list = fits.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
-          return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Pasujące wolne terminy:\n${list}\nKtóra godzina Ci odpowiada?`, `Matching free slots:\n${list}\nWhich time suits you?`) };
+          return { op: "ASK", i: 0, field: "choice:time", say: say(lang, `Pasujące wolne terminy:\n${list}\nKtóra godzina Ci odpowiada?`, `Matching free slots:\n${list}\nWhich time suits you?`) };
         }
         const list = slots.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
         return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Nie widzę wolnego terminu pasującego do tego, co napisałeś. Najbliższe wolne:\n${list}\nKtóry wybierasz?`, `I can't see a free slot matching that. The nearest free ones:\n${list}\nWhich one do you choose?`) };
@@ -357,7 +361,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   if (op === "CLICK") return gatedClick(rankedClicks());
 
   if (op === "NEED_CHOICE" && clickable.length) {
-    const justChose = history.length > 0 && ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CORRECTION"].includes(history[history.length - 1].op);
+    const justChose = history.length > 0 && ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CHOSE_TIME", "VISITOR_CORRECTION"].includes(history[history.length - 1].op);
     if (justChose) return gatedClick(rankedClicks());
     // Offer the likely options (not the navigation buttons) instead of choosing.
     const top = ranked("click_target").filter((e) => clickable.includes(e)).slice(0, 12);

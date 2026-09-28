@@ -25,23 +25,50 @@ export function jevEnabled(): boolean {
   return !!process.env.JEV_API_KEY;
 }
 
+// TypeSafe latency is bimodal under load (~0.4 s or 13-20 s for the same tiny
+// request, measured 2026-09-28). For calls with room (timeout >= 2 s) a second,
+// identical request is fired if the first has not answered after JEV_HEDGE_MS
+// (default 1200); the first answer wins and the other is aborted. Short-budget
+// callers (the voice bot, 450 ms) are never hedged.
 export async function jevAsk(state: unknown, questions: Record<string, JevQuestion>, timeoutMs?: number): Promise<Record<string, JevAnswer> | null> {
   const key = process.env.JEV_API_KEY;
   if (!key) return null;
   const t0 = Date.now();
-  try {
-    const r = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: process.env.JEV_MODEL || "jev-latest", state, questions }),
-      signal: AbortSignal.timeout(timeoutMs ?? (Number(process.env.JEV_TIMEOUT_MS) || 2500)),
-    });
-    if (!r.ok) { console.warn(`[jev] HTTP ${r.status} after ${Date.now() - t0}ms`); return null; }
+  const budget = timeoutMs ?? (Number(process.env.JEV_TIMEOUT_MS) || 2500);
+  const hedgeAfter = Number(process.env.JEV_HEDGE_MS) || 1200;
+  const body = JSON.stringify({ model: process.env.JEV_MODEL || "jev-latest", state, questions });
+  const controllers: AbortController[] = [];
+  const attempt = async (): Promise<Record<string, JevAnswer>> => {
+    const c = new AbortController();
+    controllers.push(c);
+    const r = await fetch(ENDPOINT, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body, signal: c.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const answers = ((await r.json()) as any)?.answers;
-    return answers && typeof answers === "object" ? answers : null;
+    if (!answers || typeof answers !== "object") throw new Error("no answers");
+    return answers;
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let hedge: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const racers: Promise<Record<string, JevAnswer>>[] = [attempt()];
+    const second = budget >= 2000
+      ? new Promise<Record<string, JevAnswer>>((resolve, reject) => { hedge = setTimeout(() => attempt().then(resolve, reject), hedgeAfter); })
+      : null;
+    if (second) racers.push(second);
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), budget); });
+    // First success wins; a failed attempt only loses if every attempt fails.
+    const firstOk = new Promise<Record<string, JevAnswer>>((resolve, reject) => {
+      let failed = 0;
+      for (const p of racers) p.then(resolve, (e) => { if (++failed === racers.length) reject(e); });
+    });
+    return await Promise.race([firstOk, timeout]);
   } catch (e: any) {
-    console.warn(`[jev] ${e?.name === "TimeoutError" ? "timeout" : e?.message || e} after ${Date.now() - t0}ms`);
+    console.warn(`[jev] ${e?.message || e} after ${Date.now() - t0}ms`);
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (hedge) clearTimeout(hedge);
+    for (const c of controllers) c.abort();
   }
 }
 
