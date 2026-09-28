@@ -244,6 +244,26 @@ export function lexicalCandidates(question: string, catalog: KnowledgeCatalog, k
   return scored.sort((a, b) => b.s - a.s).slice(0, k).map((x) => catalog.chunks[x.i]);
 }
 
+/**
+ * Short passages about `query` from the site's own knowledge: the best BM25
+ * chunks, each cut to the window of words that shares most terms with the query
+ * (a homepage chunk listing 12 branches becomes the line about the one asked for).
+ */
+export function lexicalSnippets(query: string, catalog: KnowledgeCatalog, k = 3, windowWords = 45): string[] {
+  const terms = new Set(lexTokens(query));
+  if (terms.size === 0) return [];
+  return lexicalCandidates(query, catalog, k).map((c) => {
+    const words = c.content.split(/\s+/).filter(Boolean);
+    const hit = words.map((w) => lexTokens(w).some((t) => terms.has(t)) ? 1 : 0);
+    let best = 0, bestAt = 0, cur = 0;
+    for (let i = 0; i < words.length; i++) {
+      cur += hit[i] - (i >= windowWords ? hit[i - windowWords] : 0);
+      if (cur > best) { best = cur; bestAt = Math.max(0, i - windowWords + 1); }
+    }
+    return words.slice(bestAt, bestAt + windowWords).join(" ");
+  });
+}
+
 // ── Title scan ─────────────────────────────────────────────────────────────
 // Jev judges the one-line LLM title of EVERY chunk (page title + summary), so the
 // pre-selection is per chunk instead of per catalog: a price list filed under

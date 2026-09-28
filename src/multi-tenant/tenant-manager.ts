@@ -146,25 +146,7 @@ export class TenantManager {
 
     // Knowledge catalog (Jev-classified chunks, built at scrape time): disk first,
     // then R2. Optional — tenants scraped before catalogs existed keep the vector path.
-    let knowledgeCatalog: KnowledgeCatalog | null = null;
-    try {
-      const catPath = resolve(DATA_ROOT, tenantId, CATALOG_FILE);
-      let catRaw: string | null = existsSync(catPath) ? await readFile(catPath, "utf-8") : null;
-      if (!catRaw) {
-        const { downloadTenantFile } = await import("../storage/r2.js");
-        const buf = await downloadTenantFile(tenantId, CATALOG_FILE);
-        if (buf) {
-          catRaw = buf.toString("utf-8");
-          const { mkdirSync } = await import("fs");
-          const dir = resolve(DATA_ROOT, tenantId);
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-          await writeFile(catPath, catRaw);
-        }
-      }
-      if (catRaw) knowledgeCatalog = JSON.parse(catRaw) as KnowledgeCatalog;
-    } catch (e: any) {
-      console.warn(`[tenant-manager] knowledge catalog load failed for ${tenantId}: ${e?.message || e}`);
-    }
+    const knowledgeCatalog = await loadKnowledgeCatalog(tenantId);
 
     // Create WebsiteChat with OpenRouter
     const chat = new WebsiteChat(this.bgeProvider, store, context, {
@@ -233,5 +215,28 @@ export class TenantManager {
    */
   destroy(): void {
     clearInterval(this.evictionInterval);
+  }
+}
+
+/** A tenant's knowledge catalog (disk first, then R2), or null when it has none. */
+export async function loadKnowledgeCatalog(tenantId: string): Promise<KnowledgeCatalog | null> {
+  try {
+    const catPath = resolve(DATA_ROOT, tenantId, CATALOG_FILE);
+    let catRaw: string | null = existsSync(catPath) ? await readFile(catPath, "utf-8") : null;
+    if (!catRaw) {
+      const { downloadTenantFile } = await import("../storage/r2.js");
+      const buf = await downloadTenantFile(tenantId, CATALOG_FILE);
+      if (buf) {
+        catRaw = buf.toString("utf-8");
+        const { mkdirSync } = await import("fs");
+        const dir = resolve(DATA_ROOT, tenantId);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        await writeFile(catPath, catRaw);
+      }
+    }
+    return catRaw ? (JSON.parse(catRaw) as KnowledgeCatalog) : null;
+  } catch (e: any) {
+    console.warn(`[tenant-manager] knowledge catalog load failed for ${tenantId}: ${e?.message || e}`);
+    return null;
   }
 }

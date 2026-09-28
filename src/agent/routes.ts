@@ -7,6 +7,8 @@
 import type { Express, Request } from "express";
 import { getFlow } from "../flows/flow-store.js";
 import { jevAsk, jevEnabled } from "../llm/jev.js";
+import { lexicalSnippets, type KnowledgeCatalog } from "../knowledge/catalog.js";
+import { loadKnowledgeCatalog } from "../multi-tenant/tenant-manager.js";
 import { decideStep, type AgentSnapshot, type AgentHistoryItem } from "./step.js";
 
 const hits = new Map<string, { n: number; t: number }>();
@@ -21,6 +23,17 @@ function rateOk(req: Request): boolean {
 setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now - v.t > 120000) hits.delete(k); }, 300000).unref?.();
 
 const str = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : "");
+
+// Tenant knowledge for matching the visitor's words to page options (10 min cache).
+const catalogs = new Map<string, { cat: KnowledgeCatalog | null; at: number }>();
+async function catalogFor(tenantId: string): Promise<KnowledgeCatalog | null> {
+  const hit = catalogs.get(tenantId);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.cat;
+  const cat = await loadKnowledgeCatalog(tenantId);
+  if (catalogs.size >= 50) catalogs.delete(catalogs.keys().next().value as string);
+  catalogs.set(tenantId, { cat, at: Date.now() });
+  return cat;
+}
 
 export function registerAgentRoutes(app: Express): void {
   // Admin: Jev latency as seen from this server (raw fetch, no hedging).
@@ -77,7 +90,9 @@ export function registerAgentRoutes(app: Express): void {
       const rp = b.reply && typeof b.reply === "object" && typeof b.reply.text === "string"
         ? { field: b.reply.field === null ? null : str(b.reply.field, 120), text: str(b.reply.text, 300), auto: b.reply.auto === true }
         : undefined;
-      const cmd = await decideStep({ goal: flow.description, request: str(b.request, 2000), inputs, snapshot, history, lang: b.lang === "en" || b.lang === "other" ? b.lang : "pl", reply: rp });
+      const cat = await catalogFor(tenantId);
+      const knowledge = cat ? (q: string) => lexicalSnippets(q, cat, 3) : undefined;
+      const cmd = await decideStep({ knowledge, goal: flow.description, request: str(b.request, 2000), inputs, snapshot, history, lang: b.lang === "en" || b.lang === "other" ? b.lang : "pl", reply: rp });
       console.log(`[agent] ${tenantId}/${flowId}: ${cmd.op}${"i" in cmd && cmd.i ? ` [${cmd.i}]` : ""} (${Date.now() - t0}ms)`);
       res.json(cmd);
     } catch (e: any) {

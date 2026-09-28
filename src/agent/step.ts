@@ -55,6 +55,8 @@ export interface AgentStepInput {
   // a field label), "page" when they acted on the page themselves, null when they
   // wrote while the agent was running.
   reply?: { field: string | null; text: string; auto?: boolean };
+  // Passages from the tenant's own knowledge base about a phrase (server-side).
+  knowledge?: (query: string) => string[];
 }
 export type AgentCommand =
   | { op: "CLICK"; i: number; say: string }
@@ -187,6 +189,23 @@ async function applyReply(input: AgentStepInput): Promise<{ input: AgentStepInpu
   return { input: out, note: { kind: "acted" } };
 }
 
+// Which option the visitor's own words point to, judged with the site's
+// knowledge about each option. Returns one option only when it clearly fits
+// (>= 0.7) and no other plausibly does (< 0.4); otherwise the visitor is asked.
+async function matchByKnowledge(options: AgentElement[], request: string, knowledge?: (q: string) => string[]): Promise<AgentElement | null> {
+  const rows = options.map((e) => ({ option: short(e.label, 120), site_knowledge: knowledge ? knowledge(e.label).map((p) => short(p, 350)) : [] }));
+  const a = await jevAsk({ visitor_request: request.slice(-1200), options: rows }, Object.fromEntries(rows.map((_, k) => [`m${k}`, {
+    type: "noul",
+    instructions: `Does a wish stated in \`visitor_request\` (a place, area, person, type or other preference) clearly point to \`options[${k}]\`, judging by the option and its \`site_knowledge\` (facts from this business's own website)? Answer no when the visitor states nothing relevant to this choice.`,
+  } as JevQuestion])), 5000);
+  if (!a) return null;
+  const p = rows.map((_, k) => noul(a, `m${k}`) ?? 0);
+  if (process.env.AGENT_DEBUG) console.log("   [match]", rows.map((r, k) => `${short(r.option, 30)}=${p[k].toFixed(2)}`).join(" | "));
+  const strong = p.filter((x) => x >= 0.7).length, weak = p.filter((x) => x >= 0.4).length;
+  if (strong !== 1 || weak !== 1) return null;
+  return options[p.findIndex((x) => x >= 0.7)];
+}
+
 // ── One decision ────────────────────────────────────────────────────────────
 async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const lang = input.lang || "pl";
@@ -249,6 +268,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
     operation: { type: "choice", instructions: common, criteria: operations },
     // Speculative date questions ride along in the same call (no extra latency).
     slot_step: { type: "noul", instructions: "Does the current page ask the visitor to pick a date or a time slot (an appointment time)?" },
+    choice_page: { type: "noul", instructions: "Does the current page ask the visitor to pick one of several options (for example a location, a service, a person or a package)?" },
     date_pref: { type: "noul", instructions: "Does `latest_preferences` state any wish about the date or time (a day, a date, a time of day, a period such as next week, or as soon as possible)?" },
     // Strict wording: "na jutro" is a specific day, not "the earliest" (0.73 -> 0.14 on tests).
     soonest: { type: "noul", instructions: "Does `latest_preferences` ask for the earliest / soonest available slot in general (for example as soon as possible, the nearest date, the first free slot), WITHOUT naming a particular day, date or time?" },
@@ -367,7 +387,32 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   }
 
   const rankedClicks = () => { const r = ranked("click_target"); return [...r, ...clickable.filter((e) => !r.includes(e))]; };
-  if (op === "CLICK") return gatedClick(rankedClicks());
+  // ── Choosing among options: the likely options (not navigation buttons), and
+  // which one the visitor's own words point to, judged with what the site's
+  // knowledge says about each ("Praga" -> the branch at ul. Konopacka).
+  const optionSet = async (): Promise<{ top: AgentElement[]; options: AgentElement[] }> => {
+    const top = ranked("click_target").filter((e) => clickable.includes(e)).slice(0, 12);
+    const o = await jevAsk({ elements: top.map((e) => `${e.role}: ${short(e.label, 90)}`) }, Object.fromEntries(top.map((_, k) => [`o${k}`, { type: "noul", instructions: `Is \`elements[${k}]\` one of the options to choose from, rather than a navigation or submit button (next, back, finish, cancel)?` } as JevQuestion])), 4000);
+    return { top, options: o ? top.filter((_, k) => (noul(o, `o${k}`) ?? 0) >= 0.5).slice(0, 10) : [] };
+  };
+  // Already chosen: selected on the page, or clicked in the last few steps.
+  const alreadyChosen = (e: AgentElement) => !!e.selected || history.slice(-4).some((h) => h.op === "CLICK" && h.ok !== false && h.label === e.label.slice(0, 120));
+  const moveOn = (options: AgentElement[]) => { const nav = rankedClicks().filter((e) => !options.includes(e)); return nav.length ? gatedClick(nav) : null; };
+
+  if (op === "CLICK") {
+    // A click on a choice page is checked against the visitor's words: a single
+    // clear match elsewhere overrides Jev's pick; otherwise Jev's pick stands.
+    if ((noul(a, "choice_page") ?? 0) >= 0.5 && reqText.trim()) {
+      const t = rankedClicks()[0];
+      const { options } = await optionSet();
+      if (t && options.length >= 2 && options.includes(t)) {
+        const m = await matchByKnowledge(options, reqText, input.knowledge);
+        if (m && alreadyChosen(m)) { const c = await moveOn(options); if (c) return c; }
+        else if (m && m !== t) return gatedClick([m]);
+      }
+    }
+    return gatedClick(rankedClicks());
+  }
 
   if (op === "NEED_CHOICE" && clickable.length) {
     const CHOSE = ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CHOSE_TIME", "VISITOR_CORRECTION"];
@@ -377,11 +422,13 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
     // page is still showing (the clicked option is still there): move on, don't re-ask.
     const justChose = !!last && (CHOSE.includes(last.op)
       || (!!prev && CHOSE.includes(prev.op) && last.op === "CLICK" && last.ok !== false && !!last.label && clickable.some((e) => e.label.slice(0, 120) === last.label)));
+    const { top, options } = await optionSet();
+    if (options.length >= 2 && reqText.trim()) {
+      const m = await matchByKnowledge(options, reqText, input.knowledge);
+      if (m && alreadyChosen(m)) { const c = await moveOn(options); if (c) return c; }
+      else if (m) return gatedClick([m]);
+    }
     if (justChose) return gatedClick(rankedClicks());
-    // Offer the likely options (not the navigation buttons) instead of choosing.
-    const top = ranked("click_target").filter((e) => clickable.includes(e)).slice(0, 12);
-    const o = await jevAsk({ elements: top.map((e) => `${e.role}: ${short(e.label, 90)}`) }, Object.fromEntries(top.map((_, k) => [`o${k}`, { type: "noul", instructions: `Is \`elements[${k}]\` one of the options to choose from, rather than a navigation or submit button (next, back, finish, cancel)?` } as JevQuestion])), 4000);
-    const options = o ? top.filter((_, k) => (noul(o, `o${k}`) ?? 0) >= 0.5).slice(0, 10) : [];
     if (options.length <= 1) return gatedClick(options.length ? options : top);
     const list = options.map((e) => `• ${short(e.label, 70)}`).join("\n");
     return { op: "ASK", i: 0, field: "choice", say: say(lang, `Którą opcję wybierasz?\n${list}\nNapisz, co Ci pasuje.`, `Which option do you prefer?\n${list}\nTell me what suits you.`) };
