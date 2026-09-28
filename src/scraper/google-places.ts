@@ -5,6 +5,7 @@
 
 import { chromium, type Browser } from "playwright";
 import type { ContentChunk } from "../context/types.js";
+import { BROWSERLESS_HOST } from "./fetcher.js";
 import { randomUUID } from "crypto";
 
 export interface PlacesData {
@@ -27,11 +28,23 @@ export async function scrapeGooglePlaces(businessName: string, location: string,
   let browser: Browser | undefined;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    });
+    // Remote browser only when one is configured: Google Maps in a local Chromium
+    // does not fit next to the server in 512 MB (OOM crash loop, 2026-09-28).
+    // Maps data is a supplement, so if the remote browser is unreachable we skip it.
+    if (process.env.BROWSERLESS_TOKEN) {
+      try {
+        browser = await chromium.connectOverCDP(`wss://${BROWSERLESS_HOST}?token=${process.env.BROWSERLESS_TOKEN}`, { timeout: 20000 });
+      } catch (err) {
+        console.warn(`[google-places] remote browser unavailable (${(err as Error).message}), skipping Maps`);
+        return null;
+      }
+    } else {
+      browser = await chromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+      });
+    }
     // Self-bound: force-close the browser if the scrape runs long, so it can never be
     // orphaned (the caller no longer races + abandons us). In-flight page ops then
     // error and we return null via the catch below.
