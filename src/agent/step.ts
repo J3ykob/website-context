@@ -235,9 +235,6 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   // shortcuts alike): a shortcut once bypassed it and fired a real booking.
   const FINAL_WORDS = /\b(zako[ńn]cz\w*|wy[śs]lij|wysy[łl]am|potwierd[źz]\w*|zamawiam|zamów|zam[óo]w\s+i\s+zap[łl]a[ćc]|zap[łl]a[ćc]\w*|kupuj\w*|kup\s+teraz|zarezerwuj\w*|rezerwuj\w*|finaliz\w*|submit|confirm\w*|book\s+now|place\s+order|pay\s+now|checkout|finish)\b/i;
   const clickCommand = async (t: AgentElement): Promise<AgentCommand> => {
-    if (FINAL_WORDS.test(t.label || "")) {
-      return { op: "CONFIRM", i: t.i, say: say(lang, `Wszystko gotowe. Sprawdź dane i kliknij „${short(t.label, 40)}”, żeby wysłać.`, `All set. Check the details and click "${short(t.label, 40)}" to send.`) };
-    }
     // Code-level guard: never press the final submit/confirm for the visitor.
     // Consent is the visitor's legal act: ticking terms / data-processing consent
     // is never done on their behalf, whatever the model chose.
@@ -251,11 +248,17 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
         instructions: "Is `element` a checkbox or button by which the person gives consent, accepts terms, rules or a privacy / data-processing policy, or makes a legal declaration?",
       },
     }, 4000);
-    if (((g?.final as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.6) {
-      return { op: "CONFIRM", i: t.i, say: say(lang, `Wszystko gotowe. Sprawdź dane i kliknij „${short(t.label, 40)}”, żeby wysłać.`, `All set. Check the details and click "${short(t.label, 40)}" to send.`) };
-    }
-    if (((g?.consent as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.6 && !t.checked && !t.selected) {
+    // Consent first: a consent text ("Potwierdzam, że rozumiem i akceptuję…") can
+    // contain final-submit words. Toggles (checkbox/radio/switch) never submit;
+    // the word belt applies to buttons and links only, as a backstop to Jev.
+    const consentP = (g?.consent as JevNoulAnswer | undefined)?.noul ?? 0;
+    const finalP = (g?.final as JevNoulAnswer | undefined)?.noul ?? 0;
+    const isToggle = ["checkbox", "radio", "switch"].includes(t.role);
+    if (consentP >= 0.6 && !t.checked && !t.selected) {
       return { op: "CONSENT", i: t.i, say: say(lang, `To zgoda, którą musisz wyrazić sam(a): „${short(t.label, 90)}”. Zaznacz ją, jeśli się zgadzasz, i napisz „dalej”.`, `This is a consent only you can give: "${short(t.label, 90)}". Tick it if you agree, then type "continue".`) };
+    }
+    if (!isToggle && (finalP >= 0.6 || (consentP < 0.6 && FINAL_WORDS.test(t.label || "")))) {
+      return { op: "CONFIRM", i: t.i, say: say(lang, `Wszystko gotowe. Sprawdź dane i kliknij „${short(t.label, 40)}”, żeby wysłać.`, `All set. Check the details and click "${short(t.label, 40)}" to send.`) };
     }
     return { op: "CLICK", i: t.i, say: say(lang, `Klikam: „${short(t.label)}”`, `Clicking "${short(t.label)}"`) };
   };
