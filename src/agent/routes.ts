@@ -54,7 +54,7 @@ export function registerAgentRoutes(app: Express): void {
       const rp = b.reply && typeof b.reply === "object" && typeof b.reply.text === "string"
         ? { field: b.reply.field === null ? null : str(b.reply.field, 120), text: str(b.reply.text, 300), auto: b.reply.auto === true }
         : undefined;
-      const cmd = await decideStep({ goal: flow.description, request: str(b.request, 2000), inputs, snapshot, history, lang: b.lang === "en" ? "en" : "pl", reply: rp });
+      const cmd = await decideStep({ goal: flow.description, request: str(b.request, 2000), inputs, snapshot, history, lang: b.lang === "en" || b.lang === "other" ? b.lang : "pl", reply: rp });
       console.log(`[agent] ${tenantId}/${flowId}: ${cmd.op}${"i" in cmd && cmd.i ? ` [${cmd.i}]` : ""} (${Date.now() - t0}ms)`);
       res.json(cmd);
     } catch (e: any) {

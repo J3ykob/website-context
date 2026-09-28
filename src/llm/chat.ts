@@ -21,7 +21,7 @@ import {
 } from "../flows/conversation.js";
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
-import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements } from "./jev.js";
+import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 
@@ -68,7 +68,7 @@ export interface ChatResponse {
     guidedInputs?: Record<string, string>;
     formActions?: any[];
     // Goal-driven flow: the widget runs the Jev step loop (/api/agent/step).
-    agent?: { flowId: string; startUrl?: string; request: string; lang: "pl" | "en" };
+    agent?: { flowId: string; startUrl?: string; request: string; lang: "pl" | "en" | "other" };
   };
 }
 
@@ -870,14 +870,18 @@ export class WebsiteChat {
 
   // Start a goal-driven ("agent") flow: no input collection here; the widget
   // drives the page with /api/agent/step and asks the visitor for data as needed.
-  private startAgentFlow(flow: FlowDefinition, message: string): ChatResponse {
-    const q = message.toLowerCase();
-    const pl = /[ąćęłńóśźż]/.test(q) || /\b(czy|jak|chcę|chce|zapisz|umów|umow|mnie|proszę|prosze|się|sie)\b/.test(q);
-    const lang: "pl" | "en" = pl ? "pl" : "en";
+  private async startAgentFlow(flow: FlowDefinition, message: string): Promise<ChatResponse> {
+    // Language by Jev, not keyword lists: works for any language the visitor uses.
+    const l = await jevAsk({ message }, { lang: { type: "choice", instructions: "In which language is `message` written?", criteria: { pl: "Polish", en: "English", other: "Any other language" } } }, 3000);
+    const lang = ((l?.lang as { choice?: string } | undefined)?.choice || "en") as "pl" | "en" | "other";
+    let text = lang === "pl"
+      ? `Jasne, przeprowadzę Cię przez to krok po kroku („${flow.name}”). Będę pokazywać, co klikam. O dane osobowe i zgody zapytam Ciebie.`
+      : `Sure, I'll take you through it step by step ("${flow.name}"). I'll show what I click and ask you for personal details and consents.`;
+    if (lang === "other") {
+      try { text = (await this.backend.generate(`Rewrite this assistant message in the same language as the visitor's message, keeping the meaning and the quoted name. Visitor's message: ${message.slice(0, 300)}. Reply with the rewritten message only.`, [{ role: "user", content: text }], 200)).trim() || text; } catch {}
+    }
     return {
-      message: pl
-        ? `Jasne, przeprowadzę Cię przez to krok po kroku („${flow.name}”). Będę pokazywać, co klikam. O dane osobowe i zgody zapytam Ciebie.`
-        : `Sure, I'll take you through it step by step ("${flow.name}"). I'll show what I click and ask you for personal details and consents.`,
+      message: text,
       sources: [],
       flowSession: { active: true, status: "executing" as FlowSession["status"], flowId: flow.id, complete: false, agent: { flowId: flow.id, startUrl: flow.startUrl, request: message.slice(0, 600), lang } },
     };

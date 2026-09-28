@@ -1226,7 +1226,7 @@
     stopWatch();
     var kit = window.__whispAgentKit;
     var sig0 = kit.signature(), lastVal = null, stable = 0, changed = 0;
-    var kind = agent.waitField === "consent" ? "consent" : (agent.waitField && agent.waitField.indexOf("choice") === 0) ? "choice" : "data";
+    var kind = agent.waitField === "consent" ? "consent" : (agent.waitField === "manual" || (agent.waitField && agent.waitField.indexOf("choice") === 0)) ? "choice" : "data";
     agent.watch = setInterval(function () {
       if (!agent || !agent.waiting) { stopWatch(); return; }
       var st = agent.waitI ? kit.stateOf(agent.waitI) : null;
@@ -1293,6 +1293,10 @@
           if (cmd.i) window.__whispAgentKit.point(cmd.i);
           agentSay(cmd.say);
           startWatch();
+        } else if (cmd.op === "STOPPED") {
+          window.__whispAgentKit.clear();
+          agentSay(cmd.say);
+          agent = null;
         } else if (cmd.op === "CONFIRM") {
           window.__whispAgentKit.point(cmd.i);
           agentSay(cmd.say);
@@ -1316,13 +1320,7 @@
     messages.push({ role: "user", content: text }); persistMessages();
     appendMsg("user", text);
     try { syncBarMessages(); } catch (e) {}
-    if (/^\s*(stop|anuluj|przerwij|koniec|cancel)\b/i.test(text)) {
-      stopWatch();
-      window.__whispAgentKit && window.__whispAgentKit.clear();
-      agentStatus("");
-      agentSay(agent.lang === "pl" ? "Dobrze, przerywam." : "OK, stopping.");
-      agent = null; return true;
-    }
+    // Stop / change / answer: decided by the server (Jev), in any language.
     if (agent.waiting) { resume({ field: agent.waitField, text: text }); return true; }
     // Mid-run: a correction or a new instruction; picked up by the next step.
     agent.pendingReply = { field: null, text: text };
