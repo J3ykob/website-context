@@ -195,6 +195,15 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const byIndex = new Map(els.map((e) => [e.i, e]));
   const manual = (why = ""): AgentCommand => { console.log(`[agent] manual fallback: ${why}`); return { op: "ASK", i: 0, field: "manual", say: say(lang, "Nie jestem pewien tego kroku. Wykonaj go proszę ręcznie na stronie, a ja przejmę od następnego.", "I'm not sure about this step. Please do it by hand on the page and I'll take over from the next one.") }; };
 
+  // Jev unavailable (timeout / outage) is transient: wait and retry the step a
+  // few times before handing it to the visitor.
+  let trailingWaits = 0;
+  for (let k = history.length - 1; k >= 0 && history[k].op === "WAIT"; k--) trailingWaits++;
+  const retry = (why: string): AgentCommand => {
+    if (trailingWaits < 3) { console.log(`[agent] retrying step: ${why}`); return { op: "WAIT", say: say(lang, "Chwila…", "One moment…") }; }
+    return manual(why);
+  };
+
   // Loop guard: the same action on the same element three times in a row.
   const last3 = history.slice(-3);
   if (last3.length === 3 && last3.every((h) => h.op === last3[0].op && h.i === last3[0].i && h.i !== undefined)) return manual("loop guard");
@@ -261,7 +270,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const a = await jevAsk(state, questions, 8000);
   const op = choice(a, "operation")?.choice;
   if (process.env.AGENT_DEBUG) console.log("   [ops]", JSON.stringify(choice(a, "operation")?.probabilities));
-  if (!op) return manual("no operation from Jev");
+  if (!op) return retry("no operation from Jev");
 
   const ranked = (key: string): AgentElement[] => {
     const probs = choice(a, key)?.probabilities || {};
@@ -276,7 +285,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       consent: { type: "noul", instructions: "Is `element` a checkbox or button by which the person gives consent, accepts terms, rules or a privacy / data-processing policy, or makes a legal declaration?" },
       back: { type: "noul", instructions: "Does clicking `element` go back to a previous step, cancel, or leave the current process?" },
     }, 4000);
-    if (!g) return manual("gate call failed"); // cannot verify the click -> the visitor does it
+    if (!g) return retry("gate call failed"); // cannot verify the click -> the visitor does it
     const isToggle = t.role === "checkbox" || t.role === "radio" || t.role === "switch";
     if ((noul(g, "consent") ?? 0) >= 0.6 && !t.checked && !t.selected) {
       return { op: "CONSENT", i: t.i, say: say(lang, `To zgoda, którą musisz wyrazić sam(a): „${short(t.label, 90)}”. Zaznacz ją, jeśli się zgadzasz.`, `This is a consent only you can give: "${short(t.label, 90)}". Tick it if you agree.`) };
@@ -340,7 +349,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
           ...Object.fromEntries(cands.map((_, k) => [`f${k}`, { type: "noul", instructions: `Does \`slots[${k}]\` fit what the visitor asked for in \`latest_preferences\` (the day, date, time or period they named)?` } as JevQuestion])),
           earliest_within: { type: "noul", instructions: "Does `latest_preferences` ask for the earliest possible time within the day or period it names (for example as early as possible on Wednesday)?" },
         }, 6000);
-        if (!f) return manual("slot fit call failed");
+        if (!f) return retry("slot fit call failed");
         const fits = cands.filter((_, k) => (noul(f, `f${k}`) ?? 0) >= 0.6);
         // Ask about the hour at most once: after the visitor answered, several
         // fits (e.g. "12:00" on two different Wednesdays) -> the nearest one.
