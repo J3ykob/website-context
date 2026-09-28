@@ -121,6 +121,10 @@
     } catch (e) {}
   }
   function clearHighlight() { if (hl) hl.style.display = "none"; }
+  var lastHl = null;
+  var _hl = highlight;
+  highlight = function (el) { lastHl = el; _hl(el); };
+  window.addEventListener("scroll", function () { if (lastHl && hl && hl.style.display !== "none") _hl(lastHl); }, true);
 
   function settle(maxMs) {
     return new Promise(function (resolve) {
@@ -168,8 +172,27 @@
     return { ok: true };
   }
 
-  // Point at an element without acting (final submit is left to the visitor).
-  function point(i) { var el = nodes.get(i); if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); setTimeout(function () { highlight(el); }, 300); } }
+  // The chat widget covers the bottom of the screen: give the page (or its inner
+  // scroll container) room below, and bring the element into the upper part of
+  // the viewport so the visitor can actually see and click it.
+  function scrollParent(el) {
+    for (var x = el.parentElement; x && x !== document.body; x = x.parentElement) {
+      var st = getComputedStyle(x);
+      if (/(auto|scroll)/.test(st.overflowY) && x.scrollHeight > x.clientHeight + 4) return x;
+    }
+    return null;
+  }
+  function makeRoom(el) {
+    var sp = scrollParent(el) || document.body;
+    if (!sp.dataset.wctxPad) {
+      sp.dataset.wctxPad = "1";
+      sp.style.paddingBottom = ((parseFloat(getComputedStyle(sp).paddingBottom) || 0) + Math.round(innerHeight * 0.5)) + "px";
+    }
+    el.style.scrollMarginTop = Math.round(innerHeight * 0.2) + "px";
+    el.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+  // Point at an element without acting (final submit and consents are left to the visitor).
+  function point(i) { var el = nodes.get(i); if (el) { makeRoom(el); setTimeout(function () { highlight(el); }, 450); } }
 
   window.__whispAgentKit = { snapshot: snapshot, act: act, point: point, clear: clearHighlight };
 })();
