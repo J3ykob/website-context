@@ -339,8 +339,10 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
           earliest_within: { type: "noul", instructions: "Does `latest_preferences` ask for the earliest possible time within the day or period it names (for example as early as possible on Wednesday)?" },
         }, 6000);
         if (!f) return manual("slot fit call failed");
-        const fits = cands.filter((_, k) => (noul(f, `f${k}`) ?? 0) >= 0.5);
-        if (fits.length === 1 || (fits.length > 1 && (noul(f, "earliest_within") ?? 0) >= 0.5)) return gatedClick([fits[0]]);
+        const fits = cands.filter((_, k) => (noul(f, `f${k}`) ?? 0) >= 0.6);
+        // Ask about the hour at most once: after the visitor answered, several
+        // fits (e.g. "12:00" on two different Wednesdays) -> the nearest one.
+        if (fits.length === 1 || (fits.length > 1 && (dateChosen || (noul(f, "earliest_within") ?? 0) >= 0.5))) return gatedClick([fits[0]]);
         if (fits.length > 1) {
           const list = fits.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
           return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Pasujące wolne terminy:\n${list}\nKtóra godzina Ci odpowiada?`, `Matching free slots:\n${list}\nWhich time suits you?`) };
