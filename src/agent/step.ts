@@ -370,7 +370,13 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   if (op === "CLICK") return gatedClick(rankedClicks());
 
   if (op === "NEED_CHOICE" && clickable.length) {
-    const justChose = history.length > 0 && ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CHOSE_TIME", "VISITOR_CORRECTION"].includes(history[history.length - 1].op);
+    const CHOSE = ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CHOSE_TIME", "VISITOR_CORRECTION"];
+    const last = history[history.length - 1];
+    const prev = history[history.length - 2];
+    // Also "just chose" when that choice was applied by one click and the same
+    // page is still showing (the clicked option is still there): move on, don't re-ask.
+    const justChose = !!last && (CHOSE.includes(last.op)
+      || (!!prev && CHOSE.includes(prev.op) && last.op === "CLICK" && last.ok !== false && !!last.label && clickable.some((e) => e.label.slice(0, 120) === last.label)));
     if (justChose) return gatedClick(rankedClicks());
     // Offer the likely options (not the navigation buttons) instead of choosing.
     const top = ranked("click_target").filter((e) => clickable.includes(e)).slice(0, 12);
@@ -393,7 +399,9 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       const k = choice(m, "key")?.choice;
       if (k && k !== "none" && input.inputs[k] !== undefined) return { op: "TYPE", i: t.i, text: input.inputs[k], say: say(lang, `Wpisuję: ${short(t.label, 40)}`, `Filling in: ${short(t.label, 40)}`) };
     }
-    return { op: "ASK", i: t.i, field: t.label, say: say(lang, `Potrzebuję jeszcze jednej informacji: ${short(t.label, 60)}. Podaj ją proszę tutaj w czacie.`, `I need one more detail: ${short(t.label, 60)}. Please type it here in the chat.`) };
+    let name = short(t.label, 60);
+    while (name && ".:?!".includes(name[name.length - 1])) name = name.slice(0, -1);
+    return { op: "ASK", i: t.i, field: t.label, say: say(lang, `Potrzebuję jeszcze jednej informacji: ${name}. Podaj ją proszę tutaj w czacie.`, `I need one more detail: ${name}. Please type it here in the chat.`) };
   }
 
   if (op === "SELECT") {
