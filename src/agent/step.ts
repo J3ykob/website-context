@@ -231,29 +231,13 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
     return c ? byIndex.get(Number(c.split(":")[0])) : undefined;
   };
 
-  // Dates / time slots are the visitor's choice and date arithmetic stays in code
-  // (Jev compares dates poorly). The preference comes from the LATEST correction
-  // when there is one, else from the whole request.
-  const reqText = input.request || "";
-  const cIdx = reqText.lastIndexOf("Visitor's correction");
-  const prefText = cIdx >= 0 ? reqText.slice(cIdx) : reqText; // text from the latest correction on (incl. later preferences)
-  const wantsSoonest = /najbli[żz]sz|najszybciej|jak najwcze[śs]niej|pierwszy wolny|earliest|soonest|asap|first available/i.test(prefText);
-  const DATE_WORDS = /\b(poniedzia[łl]\w*|wtor\w*|[śs]rod\w*|czwart\w*|pi[ąa]t\w*|sobot\w*|niedziel\w*|jutr\w*|pojutrze|dzi[śs]|rano|po po[łl]udniu|wieczor\w*|przed po[łl]udniem|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|morning|afternoon|evening)\b|\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s+(wrze|pa[źz]dz|listop|grud|stycz|lut|mar|kwie|maj|czerw|lip|sierp)/i;
-  const dateChosenSinceCorr = history.slice(lastCorr + 1).some((h) => h.op === "VISITOR_CHOSE_DATE");
-  const hasDatePref = wantsSoonest || DATE_WORDS.test(prefText) || dateChosenSinceCorr;
-  const DATEISH = /\b(poniedzia[łl]ek|wtorek|[śs]roda|czwartek|pi[ąa]tek|sobota|niedziela|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}[./-]\d{1,2}([./-]\d{2,4})?\b/i;
-  const allSlots = els.filter((e) => e.ops.includes("CLICK") && !e.area && DATEISH.test(e.label || ""));
-  const slots = allSlots.filter((e) => !e.selected);
-  const alreadyPicked = allSlots.some((e) => e.selected);
-  if (slots.length >= 2 && (!alreadyPicked || correctionPending)) {
-    if (!hasDatePref) {
-      const list = slots.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
-      return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Który termin Ci pasuje? Najbliższe wolne:\n${list}\nNapisz dzień i godzinę albo „najbliższy”.`, `Which slot suits you? The nearest free ones:\n${list}\nTell me a day and time, or "earliest".`) };
-    }
-    if (wantsSoonest && !correctionPending) return { op: "CLICK", i: slots[0].i, say: say(lang, `Wybieram najbliższy termin: „${short(slots[0].label)}”`, `Choosing the earliest slot: "${short(slots[0].label)}"`) };
-  }
-
+  // EVERY click the agent makes goes through this gate (Jev decisions and code
+  // shortcuts alike): a shortcut once bypassed it and fired a real booking.
+  const FINAL_WORDS = /\b(zako[ńn]cz\w*|wy[śs]lij|wysy[łl]am|potwierd[źz]\w*|zamawiam|zamów|zam[óo]w\s+i\s+zap[łl]a[ćc]|zap[łl]a[ćc]\w*|kupuj\w*|kup\s+teraz|zarezerwuj\w*|rezerwuj\w*|finaliz\w*|submit|confirm\w*|book\s+now|place\s+order|pay\s+now|checkout|finish)\b/i;
   const clickCommand = async (t: AgentElement): Promise<AgentCommand> => {
+    if (FINAL_WORDS.test(t.label || "")) {
+      return { op: "CONFIRM", i: t.i, say: say(lang, `Wszystko gotowe. Sprawdź dane i kliknij „${short(t.label, 40)}”, żeby wysłać.`, `All set. Check the details and click "${short(t.label, 40)}" to send.`) };
+    }
     // Code-level guard: never press the final submit/confirm for the visitor.
     // Consent is the visitor's legal act: ticking terms / data-processing consent
     // is never done on their behalf, whatever the model chose.
@@ -275,6 +259,31 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
     }
     return { op: "CLICK", i: t.i, say: say(lang, `Klikam: „${short(t.label)}”`, `Clicking "${short(t.label)}"`) };
   };
+  // Dates / time slots are the visitor's choice and date arithmetic stays in code
+  // (Jev compares dates poorly). The preference comes from the LATEST correction
+  // when there is one, else from the whole request.
+  const reqText = input.request || "";
+  const cIdx = reqText.lastIndexOf("Visitor's correction");
+  const prefText = cIdx >= 0 ? reqText.slice(cIdx) : reqText; // text from the latest correction on (incl. later preferences)
+  const wantsSoonest = /najbli[żz]sz|najszybciej|jak najwcze[śs]niej|pierwszy wolny|earliest|soonest|asap|first available/i.test(prefText);
+  const DATE_WORDS = /\b(poniedzia[łl]\w*|wtor\w*|[śs]rod\w*|czwart\w*|pi[ąa]t\w*|sobot\w*|niedziel\w*|jutr\w*|pojutrze|dzi[śs]|rano|po po[łl]udniu|wieczor\w*|przed po[łl]udniem|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|morning|afternoon|evening)\b|\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s+(wrze|pa[źz]dz|listop|grud|stycz|lut|mar|kwie|maj|czerw|lip|sierp)/i;
+  const dateChosenSinceCorr = history.slice(lastCorr + 1).some((h) => h.op === "VISITOR_CHOSE_DATE");
+  const hasDatePref = wantsSoonest || DATE_WORDS.test(prefText) || dateChosenSinceCorr;
+  const DATEISH = /\b(poniedzia[łl]ek|wtorek|[śs]roda|czwartek|pi[ąa]tek|sobota|niedziela|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}[./-]\d{1,2}([./-]\d{2,4})?\b/i;
+  const allSlots = els.filter((e) => e.ops.includes("CLICK") && !e.area && DATEISH.test(e.label || ""));
+  const slots = allSlots.filter((e) => !e.selected);
+  const alreadyPicked = allSlots.some((e) => e.selected);
+  if (slots.length >= 3 && (!alreadyPicked || correctionPending)) { // a real slot list, not a date shown on a summary
+    if (!hasDatePref) {
+      const list = slots.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
+      return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Który termin Ci pasuje? Najbliższe wolne:\n${list}\nNapisz dzień i godzinę albo „najbliższy”.`, `Which slot suits you? The nearest free ones:\n${list}\nTell me a day and time, or "earliest".`) };
+    }
+    if (wantsSoonest && !correctionPending) {
+      const c = await clickCommand(slots[0]);
+      return c.op === "CLICK" ? { ...c, say: say(lang, `Wybieram najbliższy termin: „${short(slots[0].label)}”`, `Choosing the earliest slot: "${short(slots[0].label)}"`) } : c;
+    }
+  }
+
   if (op === "CLICK") {
     const t = pick("click_target");
     if (!t || !clickable.includes(t)) return { op: "WAIT", say: say(lang, "Chwila…", "One moment…") };
