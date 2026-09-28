@@ -52,7 +52,10 @@ export async function scrapeGooglePlaces(businessName: string, location: string,
 
     const page = await browser.newPage();
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
+    // Not "networkidle": Maps keeps streaming tiles and never goes idle (every
+    // scrape timed out at 20 s). Wait for the page, then for a result to render.
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.locator('h1, [role="feed"], form[action*="consent"], button:has-text("Accept all"), button:has-text("Zaakceptuj wszystko")').first().waitFor({ timeout: 10000 }).catch(() => {});
 
     // Accept cookies if prompted
     try {
@@ -65,10 +68,12 @@ export async function scrapeGooglePlaces(businessName: string, location: string,
 
     // Click on first result if we're on search results page
     try {
-      const firstResult = page.locator('[role="feed"] > div').first();
+      // A result list: open the first place (its link, not the list's header row).
+      const firstResult = page.locator('[role="feed"] a[href*="/maps/place"]').first();
       if (await firstResult.isVisible({ timeout: 3000 })) {
         await firstResult.click();
-        await page.waitForTimeout(2000);
+        await page.waitForURL(/\/maps\/place\//, { timeout: 10000 }).catch(() => {});
+        await page.waitForTimeout(1500);
       }
     } catch {}
 
@@ -89,103 +94,62 @@ export async function scrapeGooglePlaces(businessName: string, location: string,
       description: null,
     };
 
-    // Name
+    // Extract from stable, language-independent markers (data-item-id, roles);
+    // Google's CSS class names change often and broke the old selectors.
+    // Headless/remote sessions get Maps' "limited view": no reviews tab, so
+    // reviews are best-effort (usually none).
     try {
-      data.name = await page.locator('h1').first().textContent() || "";
+      // Expand the weekly opening hours when collapsed.
+      const hoursToggle = page.locator('[aria-expanded="false"][jsaction*="openhours"]').first();
+      if (await hoursToggle.isVisible({ timeout: 1500 })) { await hoursToggle.click(); await page.waitForTimeout(1500); }
     } catch {}
-
-    // Rating
     try {
-      const ratingText = await page.locator('[role="img"][aria-label*="star"], span:has-text(".")').first().textContent();
-      if (ratingText) {
-        const match = ratingText.match(/([\d.]+)/);
-        if (match) data.rating = parseFloat(match[1]);
-      }
-    } catch {}
-
-    // Review count
-    try {
-      const reviewText = await page.locator('button:has-text("review"), button:has-text("opini")').first().textContent();
-      if (reviewText) {
-        const match = reviewText.match(/([\d,. ]+)/);
-        if (match) data.reviewCount = parseInt(match[1].replace(/[,. ]/g, ""));
-      }
-    } catch {}
-
-    // Address
-    try {
-      const addressBtn = page.locator('[data-item-id="address"] .fontBodyMedium, button[aria-label*="Address"], button[aria-label*="Adres"]');
-      if (await addressBtn.isVisible({ timeout: 2000 })) {
-        data.address = await addressBtn.textContent() || null;
-      }
-    } catch {}
-
-    // Phone
-    try {
-      const phoneBtn = page.locator('[data-item-id*="phone"] .fontBodyMedium, button[aria-label*="Phone"], button[aria-label*="Telefon"]');
-      if (await phoneBtn.isVisible({ timeout: 2000 })) {
-        data.phone = await phoneBtn.textContent() || null;
-      }
-    } catch {}
-
-    // Categories
-    try {
-      const catButtons = page.locator('button[jsaction*="category"]');
-      const count = await catButtons.count();
-      for (let i = 0; i < Math.min(count, 5); i++) {
-        const text = await catButtons.nth(i).textContent();
-        if (text) data.categories.push(text.trim());
-      }
-    } catch {}
-
-    // Hours
-    try {
-      const hoursTable = page.locator('[aria-label*="hour"], [aria-label*="godzin"]');
-      if (await hoursTable.isVisible({ timeout: 2000 })) {
-        await hoursTable.click();
-        await page.waitForTimeout(1000);
-        const hourRows = page.locator('table[role="presentation"] tr');
-        const rowCount = await hourRows.count();
-        for (let i = 0; i < rowCount; i++) {
-          const text = await hourRows.nth(i).textContent();
-          if (text) data.hours.push(text.trim());
-        }
-      }
-    } catch {}
-
-    // Reviews — scroll the reviews panel
-    try {
-      const reviewsBtn = page.locator('button:has-text("review"), button:has-text("opini")').first();
-      if (await reviewsBtn.isVisible({ timeout: 2000 })) {
-        await reviewsBtn.click();
-        await page.waitForTimeout(2000);
-
-        // Scroll to load more reviews
-        const scrollable = page.locator('[role="feed"], .m6QErb.DxyBCb');
-        for (let i = 0; i < 3; i++) {
-          await scrollable.evaluate((el) => el.scrollBy(0, 1000));
-          await page.waitForTimeout(800);
-        }
-
-        // Extract reviews
-        const reviewEls = page.locator('[data-review-id], .jftiEf');
-        const reviewCount = Math.min(await reviewEls.count(), 15);
-
-        for (let i = 0; i < reviewCount; i++) {
-          try {
-            const el = reviewEls.nth(i);
-            const author = await el.locator('.d4r55, [class*="author"]').first().textContent() || "Anonymous";
-            const ratingEl = await el.locator('[role="img"]').first().getAttribute("aria-label") || "";
-            const ratingMatch = ratingEl.match(/([\d])/);
-            const rating = ratingMatch ? parseInt(ratingMatch[1]) : 0;
-            const text = await el.locator('.wiI7pd, [class*="review-text"], .MyEned').first().textContent() || "";
-            const time = await el.locator('.rsqaWe, [class*="publish"]').first().textContent() || "";
-
-            if (text.length > 10) {
-              data.reviews.push({ author: author.trim(), rating, text: text.trim(), time: time.trim() });
-            }
-          } catch {}
-        }
+      // Passed as a string: tsx/esbuild wraps named helpers in __name(), which
+      // does not exist inside the page and made every extraction throw.
+      const x: {
+        name: string; rating: string; reviewCount: string; address: string; phone: string; website: string;
+        categories: string[]; hours: string[]; reviews: { author: string; stars: string; text: string }[];
+      } = await page.evaluate(`(() => {
+        var text = function (e) { return ((e && e.textContent) || "").replace(/\\s+/g, " ").trim(); };
+        var leaf = function (sel, re) {
+          var els = Array.prototype.slice.call(document.querySelectorAll(sel));
+          for (var i = 0; i < els.length; i++) { var t = els[i].children.length === 0 ? text(els[i]) : ""; if (re.test(t)) return t; }
+          return "";
+        };
+        var all = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
+        var phoneEl = document.querySelector('[data-item-id^="phone:tel:"]');
+        var site = document.querySelector('a[data-item-id="authority"]');
+        return {
+          name: text(document.querySelector("h1")),
+          rating: leaf("span, div", /^[1-5][.,]\\d$/),
+          reviewCount: leaf("span, button", /^\\([\\d\\s.,\\u00a0]+\\)$/),
+          address: text(document.querySelector('[data-item-id="address"]')),
+          phone: phoneEl ? (phoneEl.getAttribute("data-item-id") || "").slice(10) : "",
+          website: site ? site.href : text(document.querySelector('[data-item-id="authority"]')),
+          categories: all('button[jsaction*="category"]').map(text).filter(Boolean).slice(0, 5),
+          hours: all("table tr").map(text).filter(function (t) { return t.length > 3 && t.length < 80; }).slice(0, 7),
+          reviews: all("[data-review-id]").slice(0, 15).map(function (r) {
+            var img = r.querySelector('[role="img"][aria-label]');
+            return { author: r.getAttribute("aria-label") || "Anonymous", stars: img ? img.getAttribute("aria-label") : "", text: text(r.querySelector("[lang], .wiI7pd")) };
+          }),
+        };
+      })()`);
+      data.name = x.name;
+      data.rating = x.rating ? parseFloat(x.rating.replace(",", ".")) : null;
+      data.reviewCount = x.reviewCount ? parseInt(x.reviewCount.replace(/\D/g, ""), 10) || null : null;
+      data.address = x.address || null;
+      data.phone = x.phone || null;
+      data.website = x.website || null;
+      data.categories = x.categories;
+      // The limited view often lists only today; partial hours ("Monday 8-17")
+      // would read as "open only on Monday", so keep them only for a full week.
+      data.hours = x.hours.length >= 7 ? x.hours : [];
+      const seen = new Set<string>();
+      for (const r of x.reviews) {
+        if (r.text.length <= 10 || seen.has(r.text)) continue;
+        seen.add(r.text);
+        const m = r.stars.match(/([1-5])/);
+        data.reviews.push({ author: r.author.trim(), rating: m ? parseInt(m[1], 10) : 0, text: r.text, time: "" });
       }
     } catch {}
 
