@@ -83,6 +83,7 @@ import {
 } from "../src/channels/index.js";
 import type { MetaChannelConfig } from "../src/channels/index.js";
 import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
+import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-llm.js";
 import { registerAgentRoutes } from "../src/agent/routes.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -2908,17 +2909,57 @@ app.all("/api/voice/relay-twiml", (req, res) => {
   if (!validateTwilio(req)) { res.status(403).send("Forbidden"); return; }
   const wsUrl = `wss://${req.get("host")}/api/voice/relay`;
   const tenantId = (((req.query.tenantId as string) || process.env.VOICE_BOT_TENANT || "")).replace(/[^a-zA-Z0-9_-]/g, "");
-  const ttsProvider = (((req.query.tts as string) || process.env.VOICE_TTS_PROVIDER || "Google")).replace(/[^a-zA-Z]/g, "");
-  const voice = (((req.query.voice as string) || process.env.VOICE_TTS_VOICE || "")).replace(/[^a-zA-Z0-9._-]/g, "");
-  const greeting = process.env.VOICE_GREETING || "Dzień dobry, z tej strony asystent Whisp. W czym mogę pomóc?";
+  // ElevenLabs by default (Twilio bills it inside ConversationRelay - no separate account).
+  // Male voice (ElevenLabs premade "Adam") on turbo_v2_5, which speaks Polish; Twilio lists only
+  // one (female) pl-PL voice, W0sqKm1Sfw1EzlCH14FQ. Format: <voiceId>-<model>-<speed>_<stability>_<similarity>;
+  // speed 1.05 (1.0 dragged, 1.08+ too fast on calls), stability 0.3 for livelier intonation.
+  const ttsProvider = (((req.query.tts as string) || process.env.VOICE_TTS_PROVIDER || "ElevenLabs")).replace(/[^a-zA-Z]/g, "");
+  const defaultVoice = ttsProvider.toLowerCase() === "elevenlabs" ? "pNInz6obpgDQGcFmaJgB-turbo_v2_5-1.05_0.3_0.8" : "";
+  const voice = (((req.query.voice as string) || process.env.VOICE_TTS_VOICE || defaultVoice)).replace(/[^a-zA-Z0-9._-]/g, "");
+  // Contact-database context for the callee: name + short description. With it the bot skips
+  // "czym się zajmujesz?" and role-plays their own reception straight away.
+  const clip = (v: unknown, n: number) => String(v ?? "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, n);
+  const company = clip(req.query.company || (tenantId ? getTenant(tenantId)?.brandName : ""), 80);
+  const business = clip(req.query.business, 300);
+  // We place the call, so "W czym mogę pomóc?" was backwards - state why we call and ask for a minute.
+  const greeting = process.env.VOICE_GREETING || (company
+    ? `Dzień dobry! Tu asystent AI firmy Whisp. Dzwonię dosłownie na minutkę w sprawie czatu na stronę ${company}. Czy to dobry moment?`
+    : "Dzień dobry! Tu asystent AI firmy Whisp. Dzwonię dosłownie na minutkę w sprawie czatu na Waszą stronę internetową. Czy to dobry moment?");
   const voiceAttr = voice ? ` voice="${xmlEscape(voice)}"` : "";
+  // Turn-taking knobs, query-overridable so a live call can A/B them without a redeploy.
+  // ignoreBackchannel + interruptSensitivity are NOT Flux-only (the TwiML reference and the
+  // background-noise guide both confirm they run on nova-3) — which matters because Flux's
+  // 10 languages exclude Polish, so pl-PL is stuck on nova-3 endpointing.
+  const pick = (raw: unknown, allowed: string[], fallback: string): string => {
+    const v = String(raw ?? "").trim().toLowerCase();
+    return allowed.includes(v) ? v : fallback;
+  };
+  const sensitivity = pick(req.query.sens || process.env.VOICE_INTERRUPT_SENSITIVITY, ["high", "medium", "low"], "low");
+  const backchannel = pick(req.query.backchannel || process.env.VOICE_IGNORE_BACKCHANNEL, ["true", "false"], "true");
+  const reportInput = pick(req.query.reportInput || process.env.VOICE_REPORT_INPUT, ["none", "dtmf", "speech", "any"], "speech");
+  // "auto" (adaptive) or 600-5000ms. The old fixed 800 was a silence-based workaround for
+  // dropped "tak"/"nie"; with backchannels filtered that gap should shrink — A/B ?eot=auto.
+  const rawEot = String(req.query.eot || process.env.VOICE_SPEECH_TIMEOUT || "600").trim().toLowerCase();
+  const speechTimeout = rawEot === "auto" ? "auto" : String(Math.min(5000, Math.max(600, parseInt(rawEot, 10) || 600)));
   const prospect = String(req.body?.To || req.body?.Called || "").replace(/[^0-9+]/g, ""); // the number we dialed → SMS target
   res.setHeader("Content-Type", "text/xml");
-  // STT tuning: speechTimeout=800 (fixed short end-of-speech gap so a lone "tak"/"nie"
-  // finalizes instead of being swallowed by adaptive endpointing — the #1 dropped-word fix);
-  // reportInputDuringAgentSpeech=speech (deliver a reply spoken over the greeting);
-  // nova-3 + hints bias the short answer words; dtmfDetection adds a 1/2 fallback.
-  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" language="pl-PL" transcriptionProvider="Deepgram" speechModel="nova-3-general" speechTimeout="800" reportInputDuringAgentSpeech="speech" interruptible="any" interruptSensitivity="medium" dtmfDetection="true" hints="Whisp,Wisp,tak,nie,ok,zgoda,potwierdzam,anuluj,jeden,dwa" ttsProvider="${xmlEscape(ttsProvider)}"${voiceAttr} elevenlabsTextNormalization="on">\n      <Parameter name="tenantId" value="${xmlEscape(tenantId)}"/>\n      <Parameter name="prospect" value="${xmlEscape(prospect)}"/>\n    </ConversationRelay>\n  </Connect>\n</Response>`);
+  // STT/turn-taking tuning: ignoreBackchannel drops "mhm"/"aha"/"no dobra" so affirmations
+  // stop cutting the agent off mid-sentence (the main "turn-taking feels bad" cause);
+  // interruptSensitivity=low stops room noise registering as barge-in; speechTimeout is the
+  // end-of-speech gap (down from a fixed 800); reportInputDuringAgentSpeech=speech is KEPT
+  // so a reply spoken over the greeting still lands; events=speaker-events gives us
+  // agentSpeaking/clientSpeaking transitions to actually measure turn latency.
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" language="pl-PL" transcriptionProvider="Deepgram" speechModel="nova-3-general" speechTimeout="${speechTimeout}" reportInputDuringAgentSpeech="${reportInput}" interruptible="any" interruptSensitivity="${sensitivity}" ignoreBackchannel="${backchannel}" events="speaker-events" dtmfDetection="true" hints="Whisp,Wisp,tak,nie,ok,zgoda,potwierdzam,anuluj,przyszły tydzień,jutro,pojutrze,poniedziałek,wtorek,środa,czwartek,piątek,sobota,po południu,rano,szesnasta,termin" ttsProvider="${xmlEscape(ttsProvider)}"${voiceAttr} elevenlabsTextNormalization="on">\n      <Parameter name="tenantId" value="${xmlEscape(tenantId)}"/>\n      <Parameter name="prospect" value="${xmlEscape(prospect)}"/>\n      <Parameter name="greeting" value="${xmlEscape(greeting)}"/>\n      <Parameter name="company" value="${xmlEscape(company)}"/>\n      <Parameter name="business" value="${xmlEscape(business)}"/>\n    </ConversationRelay>\n  </Connect>\n</Response>`);
+});
+
+// ElevenLabs Agents path (experimental, alongside ConversationRelay): ElevenLabs does STT,
+// turn-taking and TTS; our custom-LLM endpoint is the brain (src/voice/eleven-llm.ts).
+// Custom LLM server URL to configure in the agent: https://<host>/api/voice/eleven/v1
+// All three spellings: the docs do not say whether the configured URL gets "/chat/completions" appended.
+app.post(["/api/voice/eleven/v1/chat/completions", "/api/voice/eleven/chat/completions", "/api/voice/eleven/v1"], elevenChatCompletions);
+app.all("/api/voice/eleven-twiml", (req, res) => {
+  if (!validateTwilio(req)) { res.status(403).send("Forbidden"); return; }
+  elevenRegisterTwiml(req, res);
 });
 
 // Call status callbacks (StatusCallbackEvent=completed). Logged to the admin log

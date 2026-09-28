@@ -13,6 +13,10 @@ services:
     envVars:
       - key: OPENROUTER_API_KEY
         sync: false
+      # TypeSafe Jev: per-turn reply-type + filler classification for the voice bot.
+      # Unset -> the bot falls back to a neutral rotating filler (no failure).
+      - key: JEV_API_KEY
+        sync: false
       - key: OPENROUTER_MODEL
         value: deepseek/deepseek-chat-v3
       # BGE embeddings via Workers AI shim (workers/bge-embed) — the old GPU box
