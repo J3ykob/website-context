@@ -89,7 +89,10 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
   // the model bounce DALEJ -> WSTECZ -> DALEJ on every page transition.
   const BACK = /^(wstecz|cofnij|powrót|powrot|back|previous|poprzedni)$/i;
   const lastFailed = history.length > 0 && history[history.length - 1].ok === false;
-  const clickable = els.filter((e) => e.ops.includes("CLICK") && (lastFailed || !BACK.test((e.label || "").trim())));
+  // Header / nav / footer controls restart or leave a running process (the
+  // model clicked the header "REJESTRACJA" despite the rule): excluded in code
+  // once the process has started.
+  const clickable = els.filter((e) => e.ops.includes("CLICK") && (lastFailed || !BACK.test((e.label || "").trim())) && !(e.area && history.length > 0));
 
   // Deterministic hand-off: a value the visitor gave for a named field (the key
   // is that field's label, set when we asked) is typed into it before anything
@@ -160,9 +163,7 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
     if (!alreadyPicked) return { op: "CLICK", i: slots[0].i, say: say(lang, `Wybieram najbliższy termin: „${short(slots[0].label)}”`, `Choosing the earliest slot: "${short(slots[0].label)}"`) };
   }
 
-  if (op === "CLICK") {
-    const t = pick("click_target");
-    if (!t) return { op: "WAIT", say: say(lang, "Chwila…", "One moment…") };
+  const clickCommand = async (t: AgentElement): Promise<AgentCommand> => {
     // Code-level guard: never press the final submit/confirm for the visitor.
     // Consent is the visitor's legal act: ticking terms / data-processing consent
     // is never done on their behalf, whatever the model chose.
@@ -183,6 +184,11 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
       return { op: "CONSENT", i: t.i, say: say(lang, `To zgoda, którą musisz wyrazić sam(a): „${short(t.label, 90)}”. Zaznacz ją, jeśli się zgadzasz, i napisz „dalej”.`, `This is a consent only you can give: "${short(t.label, 90)}". Tick it if you agree, then type "continue".`) };
     }
     return { op: "CLICK", i: t.i, say: say(lang, `Klikam: „${short(t.label)}”`, `Clicking "${short(t.label)}"`) };
+  };
+  if (op === "CLICK") {
+    const t = pick("click_target");
+    if (!t || !clickable.includes(t)) return { op: "WAIT", say: say(lang, "Chwila…", "One moment…") };
+    return clickCommand(t);
   }
 
   // The visitor already answered this choice: do not ask again (their words may
@@ -191,7 +197,7 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
   const justChose = history.length > 0 && history[history.length - 1].op === "VISITOR_CHOSE";
   if (op === "NEED_CHOICE" && justChose && clickable.length) {
     const t = pick("click_target");
-    if (t) return { op: "CLICK", i: t.i, say: say(lang, `Wybieram: „${short(t.label)}”`, `Choosing "${short(t.label)}"`) };
+    if (t && clickable.includes(t)) return clickCommand(t);
   }
 
   if (op === "NEED_CHOICE" && clickable.length) {
@@ -204,6 +210,12 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
       .sort((x, y) => y.p - x.p)
       .slice(0, 10)
       .map((x) => short(x.e!.label, 70));
+    // A "choice" with one real option is not a choice: act on it (the final
+    // submit guard still applies).
+    if (top.length <= 1) {
+      const t = pick("click_target");
+      if (t && clickable.includes(t)) return clickCommand(t);
+    }
     const list = top.length ? top.map((t) => `• ${t}`).join("\n") : "";
     return {
       op: "ASK", i: 0, field: "choice",
