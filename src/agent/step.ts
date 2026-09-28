@@ -357,7 +357,10 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       const dateChosen = sinceCorr.some((h) => h.op === "VISITOR_CHOSE_DATE" || h.op === "VISITOR_CHOSE_TIME");
       const timeAsked = sinceCorr.some((h) => h.op === "VISITOR_CHOSE_TIME");
       const hasPref = dateChosen || (noul(a, "date_pref") ?? 0) >= 0.5;
-      if (slots.length >= 3 && (!alreadyPicked || correctionPending)) {
+      // A fresh answer to our date / hour question is applied even when an older
+      // pick is still marked selected (after going back to change the date).
+      const answeredSlot = !!lastStep && (lastStep.op === "VISITOR_CHOSE_DATE" || lastStep.op === "VISITOR_CHOSE_TIME");
+      if (slots.length >= 3 && (!alreadyPicked || correctionPending || answeredSlot)) {
         if (!hasPref) {
           const list = slots.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
           return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Który termin Ci pasuje? Najbliższe wolne:\n${list}\nNapisz, który wybierasz albo „najbliższy”.`, `Which slot suits you? The nearest free ones:\n${list}\nTell me which one, or "earliest".`) };
@@ -437,7 +440,9 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       const pick = byScore[0].e;
       return alreadyChosen(pick) ? moveOn(options) : gatedClick([pick]);
     }
-    if (plausible.length === 0 && m.relevant < 0.5) return null;
+    // Nothing said about this choice -> caller's default. But a reply to our own
+    // question that fits nothing is never turned into a silent pick: ask again.
+    if (!answer && plausible.length === 0 && m.relevant < 0.5) return null;
     const bullets = (rs: { e: AgentElement }[]) => rs.map((r) => `• ${short(r.e.label, 70)}`).join("\n");
     if (plausible.length >= 2) {
       const list = bullets(plausible.slice(0, 6));
@@ -454,7 +459,8 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
 
   if (op === "CLICK") {
     // A click on one of several options is checked against the visitor's words.
-    if ((noul(a, "choice_page") ?? 0) >= 0.5 && reqText.trim()) {
+    // (Date / time slots are the slot logic's; this is for all other choices.)
+    if ((noul(a, "choice_page") ?? 0) >= 0.5 && (noul(a, "slot_step") ?? 0) < 0.5 && reqText.trim()) {
       const t = rankedClicks()[0];
       const { options } = await optionSet();
       if (t && options.length >= 2 && options.includes(t)) {
@@ -467,7 +473,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
 
   if (op === "NEED_CHOICE" && clickable.length) {
     const { top, options } = await optionSet();
-    if (options.length >= 2 && reqText.trim()) {
+    if (options.length >= 2 && reqText.trim() && (noul(a, "slot_step") ?? 0) < 0.5) {
       const c = await resolveChoice(options);
       if (c) return c;
     }
