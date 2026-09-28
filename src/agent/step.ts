@@ -193,7 +193,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const els = input.snapshot.elements || [];
   const history = input.history.slice(-12);
   const byIndex = new Map(els.map((e) => [e.i, e]));
-  const manual = (why = ""): AgentCommand => { if (process.env.AGENT_DEBUG) console.log("   [manual]", why); return { op: "ASK", i: 0, field: "manual", say: say(lang, "Nie jestem pewien tego kroku. Wykonaj go proszę ręcznie na stronie, a ja przejmę od następnego.", "I'm not sure about this step. Please do it by hand on the page and I'll take over from the next one.") }; };
+  const manual = (why = ""): AgentCommand => { console.log(`[agent] manual fallback: ${why}`); return { op: "ASK", i: 0, field: "manual", say: say(lang, "Nie jestem pewien tego kroku. Wykonaj go proszę ręcznie na stronie, a ja przejmę od następnego.", "I'm not sure about this step. Please do it by hand on the page and I'll take over from the next one.") }; };
 
   // Loop guard: the same action on the same element three times in a row.
   const last3 = history.slice(-3);
