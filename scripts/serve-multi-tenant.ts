@@ -83,6 +83,7 @@ import {
 } from "../src/channels/index.js";
 import type { MetaChannelConfig } from "../src/channels/index.js";
 import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
+import { registerAgentRoutes } from "../src/agent/routes.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "3211");
@@ -1151,6 +1152,9 @@ app.get("/api/tenants/:id/status", (req, res) => {
 // Most recent chat backend failure (BGE/Vectorize/LLM). Surfaced by /api/health-deep
 // so an outage is detectable from monitoring instead of via a customer email.
 let lastChatError: { tenantId: string; cause: string; msg: string; at: string } | null = null;
+
+// Goal-driven ("agent") flows: one Jev-decided step per call (src/agent/routes.ts).
+registerAgentRoutes(app);
 
 app.post("/api/chat", async (req, res) => {
   try {

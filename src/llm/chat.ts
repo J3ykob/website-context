@@ -67,6 +67,8 @@ export interface ChatResponse {
     guidedSteps?: any[];
     guidedInputs?: Record<string, string>;
     formActions?: any[];
+    // Goal-driven flow: the widget runs the Jev step loop (/api/agent/step).
+    agent?: { flowId: string; startUrl?: string; request: string; lang: "pl" | "en" };
   };
 }
 
@@ -425,6 +427,7 @@ export class WebsiteChat {
     if (pending && Date.now() - pending.at < 5 * 60 * 1000) {
       const picked = await this.pickFromCandidates(inputValidation.sanitized, pending.flows);
       this.pendingDisambig.delete(effectiveSessionKey);
+      if (picked && picked.executionMode === "agent") return this.startAgentFlow(picked, inputValidation.sanitized);
       if (picked) {
         const started = this.beginFlowSession(effectiveSessionKey, picked);
         return { message: started.message, sources: [], flowSession: { active: true, status: "choosing", flowId: picked.id, complete: false } };
@@ -438,6 +441,7 @@ export class WebsiteChat {
     const activeFlows = this.context.flows.filter((f) => f.status === "active");
     if (activeFlows.length > 0) {
       const picked = await this.classifyFlowIntent(inputValidation.sanitized, activeFlows);
+      if (picked.length === 1 && picked[0].executionMode === "agent") return this.startAgentFlow(picked[0], inputValidation.sanitized);
       if (picked.length === 1) {
         const started = this.beginFlowSession(effectiveSessionKey, picked[0]);
         return {
@@ -774,7 +778,14 @@ export class WebsiteChat {
       : messages;
 
     // Flows / tool-calls don't stream cleanly — defer to the full path, emit whole.
-    if (this.hasActiveFlowSession(effectiveSessionKey) || this.context.flows.some((f) => f.status === "active")) {
+    // Only when a flow is actually in play: a tenant merely HAVING flows used to
+    // lose streaming for every ordinary question.
+    const activeFlowsS = this.context.flows.filter((f) => f.status === "active");
+    const pendingS = this.pendingDisambig.get(effectiveSessionKey);
+    const flowInPlay = this.hasActiveFlowSession(effectiveSessionKey)
+      || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000)
+      || (activeFlowsS.length > 0 && (await this.classifyFlowIntent(inputValidation.sanitized, activeFlowsS)).length > 0);
+    if (flowInPlay) {
       const r = await this.chat(messages, sessionKey, formState);
       onToken(r.message);
       return r;
@@ -855,6 +866,21 @@ export class WebsiteChat {
   private async fastClassify(system: string, prompt: string): Promise<string> {
     if (this.backend.classify) return this.backend.classify(system, prompt);
     return this.backend.generate(system, [{ role: "user", content: prompt }], 8);
+  }
+
+  // Start a goal-driven ("agent") flow: no input collection here; the widget
+  // drives the page with /api/agent/step and asks the visitor for data as needed.
+  private startAgentFlow(flow: FlowDefinition, message: string): ChatResponse {
+    const q = message.toLowerCase();
+    const pl = /[ąćęłńóśźż]/.test(q) || /\b(czy|jak|chcę|chce|zapisz|umów|umow|mnie|proszę|prosze|się|sie)\b/.test(q);
+    const lang: "pl" | "en" = pl ? "pl" : "en";
+    return {
+      message: pl
+        ? `Jasne, przeprowadzę Cię przez to krok po kroku („${flow.name}”). Będę pokazywać, co klikam. O dane osobowe i zgody zapytam Ciebie.`
+        : `Sure, I'll take you through it step by step ("${flow.name}"). I'll show what I click and ask you for personal details and consents.`,
+      sources: [],
+      flowSession: { active: true, status: "executing" as FlowSession["status"], flowId: flow.id, complete: false, agent: { flowId: flow.id, startUrl: flow.startUrl, request: message.slice(0, 600), lang } },
+    };
   }
 
   // Refusal in the visitor's language — an English refusal on a Polish site

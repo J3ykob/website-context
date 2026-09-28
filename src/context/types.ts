@@ -145,7 +145,10 @@ export interface FlowDefinition {
   updatedAt: string;
   lastTestedAt?: string;
   status: "draft" | "active" | "disabled";
-  executionMode?: "background" | "guided" | "auto" | "highlight";
+  executionMode?: "background" | "guided" | "auto" | "highlight" | "agent";
+  // "agent" flows: the description is the goal; Jev drives the page step by step
+  // from the widget (no recorded steps). startUrl = where the process begins.
+  startUrl?: string;
 }
 
 export interface FlowStep {
