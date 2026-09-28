@@ -6,7 +6,7 @@
  */
 import type { Express, Request } from "express";
 import { getFlow } from "../flows/flow-store.js";
-import { jevEnabled } from "../llm/jev.js";
+import { jevAsk, jevEnabled } from "../llm/jev.js";
 import { decideStep, type AgentSnapshot, type AgentHistoryItem } from "./step.js";
 
 const hits = new Map<string, { n: number; t: number }>();
@@ -28,6 +28,11 @@ export function registerAgentRoutes(app: Express): void {
     const secret = process.env.ADMIN_SECRET;
     if (!secret || req.query.secret !== secret) { res.status(403).json({ error: "Forbidden" }); return; }
     const n = Math.min(Number(req.query.n) || 10, 30);
+    if (req.query.via === "jevAsk") {
+      const ms: number[] = [];
+      for (let k = 0; k < n; k++) { const t = Date.now(); const a = await jevAsk({ page: "Wybierz placówkę i termin badania. ".repeat(110) }, { a: { type: "noul", instructions: "Is this a date page?" } }, 8000); ms.push(a ? Date.now() - t : -(Date.now() - t)); }
+      res.json({ via: "jevAsk", ms }); return;
+    }
     const body = JSON.stringify({ model: process.env.JEV_MODEL || "jev-latest", state: { page: "Wybierz placówkę i termin badania. ".repeat(110) }, questions: { a: { type: "noul", instructions: "Is this a date page?" } } });
     const out: (number | string)[] = [];
     for (let k = 0; k < n; k++) {

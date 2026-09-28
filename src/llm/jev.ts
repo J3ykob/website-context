@@ -25,17 +25,18 @@ export function jevEnabled(): boolean {
   return !!process.env.JEV_API_KEY;
 }
 
-// TypeSafe latency is bimodal under load (~0.4 s or 13-20 s for the same tiny
-// request, measured 2026-09-28). For calls with room (timeout >= 2 s) a second,
-// identical request is fired if the first has not answered after JEV_HEDGE_MS
-// (default 1200); the first answer wins and the other is aborted. Short-budget
-// callers (the voice bot, 450 ms) are never hedged.
+// TypeSafe latency is bimodal (from Render: ~80 ms, or 2-3.5 s in bursts for
+// ~40% of calls, measured 2026-09-28). For calls with room (timeout >= 2 s),
+// identical backup requests fire on a staggered schedule (JEV_HEDGE_SCHEDULE ms,
+// default 300,800,1600,3000) while none has answered; the first answer wins and
+// the rest are aborted. Requests are cheap, stalls are not. Short-budget callers
+// (the voice bot, 450 ms) are never hedged.
 export async function jevAsk(state: unknown, questions: Record<string, JevQuestion>, timeoutMs?: number): Promise<Record<string, JevAnswer> | null> {
   const key = process.env.JEV_API_KEY;
   if (!key) return null;
   const t0 = Date.now();
   const budget = timeoutMs ?? (Number(process.env.JEV_TIMEOUT_MS) || 2500);
-  const hedgeAfter = Number(process.env.JEV_HEDGE_MS) || 1200;
+  const schedule = (process.env.JEV_HEDGE_SCHEDULE || "300,800,1600,3000").split(",").map(Number).filter((n) => n > 0 && n < budget);
   const body = JSON.stringify({ model: process.env.JEV_MODEL || "jev-latest", state, questions });
   const controllers: AbortController[] = [];
   const attempt = async (): Promise<Record<string, JevAnswer>> => {
@@ -48,18 +49,17 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     return answers;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let hedge: ReturnType<typeof setTimeout> | undefined;
+  const hedges: ReturnType<typeof setTimeout>[] = [];
   try {
-    const racers: Promise<Record<string, JevAnswer>>[] = [attempt()];
-    const second = budget >= 2000
-      ? new Promise<Record<string, JevAnswer>>((resolve, reject) => { hedge = setTimeout(() => attempt().then(resolve, reject), hedgeAfter); })
-      : null;
-    if (second) racers.push(second);
     const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), budget); });
-    // First success wins; a failed attempt only loses if every attempt fails.
+    // First success wins; a failed attempt only loses once every attempt
+    // (including the ones still scheduled) has failed.
+    const total = budget >= 2000 ? 1 + schedule.length : 1;
     const firstOk = new Promise<Record<string, JevAnswer>>((resolve, reject) => {
       let failed = 0;
-      for (const p of racers) p.then(resolve, (e) => { if (++failed === racers.length) reject(e); });
+      const run = () => attempt().then(resolve, (e) => { if (++failed === total) reject(e); });
+      run();
+      if (total > 1) for (const ms of schedule) hedges.push(setTimeout(run, ms));
     });
     return await Promise.race([firstOk, timeout]);
   } catch (e: any) {
@@ -67,7 +67,7 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     return null;
   } finally {
     if (timer) clearTimeout(timer);
-    if (hedge) clearTimeout(hedge);
+    for (const h of hedges) clearTimeout(h);
     for (const c of controllers) c.abort();
   }
 }
