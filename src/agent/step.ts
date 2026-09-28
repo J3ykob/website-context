@@ -85,7 +85,11 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
     return { op: "BLOCKED", say: say(lang, "Utknąłem na tym kroku. Dokończ proszę ręcznie albo zadzwoń do nas.", "I'm stuck on this step. Please finish it manually or call us.") };
   }
 
-  const clickable = els.filter((e) => e.ops.includes("CLICK"));
+  // Back buttons only to recover from a failed step: offering them always made
+  // the model bounce DALEJ -> WSTECZ -> DALEJ on every page transition.
+  const BACK = /^(wstecz|cofnij|powrót|powrot|back|previous|poprzedni)$/i;
+  const lastFailed = history.length > 0 && history[history.length - 1].ok === false;
+  const clickable = els.filter((e) => e.ops.includes("CLICK") && (lastFailed || !BACK.test((e.label || "").trim())));
   const typable = els.filter((e) => e.ops.includes("TYPE"));
   const selects = els.filter((e) => e.ops.includes("SELECT") && e.options?.length);
 
@@ -135,6 +139,16 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
     return c ? byIndex.get(Number(c.split(":")[0])) : undefined;
   };
 
+  // "Soonest" is date arithmetic, which stays in code (Jev compares dates poorly):
+  // booking wizards list slots chronologically, so take the first slot shown.
+  const wantsSoonest = /najbli[żz]sz|najszybciej|jak najwcze[śs]niej|pierwszy wolny|earliest|soonest|asap|first available/i.test(input.request || "");
+  const DATEISH = /\b(poniedzia[łl]ek|wtorek|[śs]roda|czwartek|pi[ąa]tek|sobota|niedziela|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}[./-]\d{1,2}([./-]\d{2,4})?\b/i;
+  const slots = clickable.filter((e) => !e.area && DATEISH.test(e.label || "") && !e.selected);
+  if (wantsSoonest && slots.length >= 2 && (op === "CLICK" || op === "NEED_CHOICE")) {
+    const alreadyPicked = els.some((e) => DATEISH.test(e.label || "") && e.selected);
+    if (!alreadyPicked) return { op: "CLICK", i: slots[0].i, say: say(lang, `Wybieram najbliższy termin: „${short(slots[0].label)}”`, `Choosing the earliest slot: "${short(slots[0].label)}"`) };
+  }
+
   if (op === "CLICK") {
     const t = pick("click_target");
     if (!t) return { op: "WAIT", say: say(lang, "Chwila…", "One moment…") };
@@ -160,6 +174,15 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
     return { op: "CLICK", i: t.i, say: say(lang, `Klikam: „${short(t.label)}”`, `Clicking "${short(t.label)}"`) };
   }
 
+  // The visitor already answered this choice: do not ask again (their words may
+  // not match the option labels literally, e.g. "Praga" vs "ul. Konopacka");
+  // take the best option given their preference.
+  const justChose = history.length > 0 && history[history.length - 1].op === "VISITOR_CHOSE";
+  if (op === "NEED_CHOICE" && justChose && clickable.length) {
+    const t = pick("click_target");
+    if (t) return { op: "CLICK", i: t.i, say: say(lang, `Wybieram: „${short(t.label)}”`, `Choosing "${short(t.label)}"`) };
+  }
+
   if (op === "NEED_CHOICE" && clickable.length) {
     // Offer the visitor the most likely options instead of choosing for them.
     const probs = (a?.click_target as JevChoiceAnswer | undefined)?.probabilities || {};
@@ -168,7 +191,7 @@ export async function decideStep(input: AgentStepInput): Promise<AgentCommand> {
       .map(([k, p]) => ({ e: byIndex.get(Number(k)), p }))
       .filter((x) => x.e && !nav.test((x.e.label || "").trim()))
       .sort((x, y) => y.p - x.p)
-      .slice(0, 5)
+      .slice(0, 10)
       .map((x) => short(x.e!.label, 70));
     const list = top.length ? top.map((t) => `• ${t}`).join("\n") : "";
     return {
