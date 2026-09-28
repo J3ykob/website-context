@@ -1741,6 +1741,7 @@ app.put("/api/dashboard/site-card", ownerAuth, async (req, res) => {
     : [];
   const siteCard: any = {
     tagline: str(b.tagline, 120) || undefined,
+    brand: str(b.brand, 120) || tenant.settings?.siteCard?.brand || undefined,
     eyebrow: str(b.eyebrow, 80) || undefined,
     phone: str(b.phone, 40) || undefined,
     suggestions,
@@ -1769,7 +1770,7 @@ app.post("/api/dashboard/site-generate", ownerAuth, async (req, res) => {
     // arbitrary edits ("remove this section", "two columns") work. Output is
     // sanitized inside generateSiteHtml; facts come from siteCard, not the model.
     const currentHtml = typeof s.siteHtml === "string" ? s.siteHtml : "";
-    const { html, changeSummary } = await generateSiteHtml(tenant.brandName || tenant.domain, s.siteCard || {}, currentHtml, prompt);
+    const { html, changeSummary } = await generateSiteHtml(s.siteCard?.brand || tenant.brandName || tenant.domain, s.siteCard || {}, currentHtml, prompt);
     if (!html || html.trim().length < 20) { res.status(502).json({ error: "Nie udało się wygenerować. Spróbuj inaczej." }); return; }
     // The model sometimes returns an unchanged page yet reports success — don't
     // save, and tell the owner honestly instead of a false "done".

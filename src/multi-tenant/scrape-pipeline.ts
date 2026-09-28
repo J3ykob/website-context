@@ -18,6 +18,7 @@ import { uploadToR2, downloadFromR2 } from "../storage/r2.js";
 import { buildCatalog, namerPrompt, parseNamerReply, CATALOG_FILE } from "../knowledge/catalog.js";
 import { jevEnabled } from "../llm/jev.js";
 import { OpenRouterProvider } from "../llm/openrouter-provider.js";
+import { synthesizeSiteCardFromScrape, type ScrapedSiteCard } from "../site/site-from-scrape.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -25,6 +26,8 @@ const DATA_ROOT = resolve(__dirname, "../../data");
 export interface ScrapePipelineResult {
   pages: number;
   chunks: number;
+  // Micro-site card (/site/:id) built from the scraped pages; null when it could not be built.
+  siteCard?: ScrapedSiteCard | null;
 }
 
 /**
@@ -285,6 +288,15 @@ export async function scrapeTenant(
     console.log(`[scrape-pipeline] Business audit skipped: ${(err as Error).message}`);
   }
 
+  // Micro-site card for /site/:id (the "new website" offer). Non-fatal.
+  let siteCard: ScrapedSiteCard | null = null;
+  try {
+    siteCard = await synthesizeSiteCardFromScrape(new URL(siteUrl).hostname.replace(/^www\./, ""), context.chunks, context.businessProfile);
+    console.log(`[scrape-pipeline] Site card: ${siteCard ? siteCard.sections.length + " sections" : "skipped"}`);
+  } catch (err) {
+    console.log(`[scrape-pipeline] Site card skipped: ${(err as Error).message}`);
+  }
+
   // Take screenshot only if one doesn't already exist (saves memory on re-scrapes)
   const screenshotPath = resolve(DATA_ROOT, tenantId, "screenshot.png");
   if (!existsSync(screenshotPath)) {
@@ -341,5 +353,6 @@ export async function scrapeTenant(
   return {
     pages: pagesScraped,
     chunks: embedResult.embeddedChunks,
+    siteCard,
   };
 }

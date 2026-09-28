@@ -115,13 +115,25 @@ export class ScrapeWorker {
     ensureMigrated();
     const allTenants = listTenants();
 
-    // Reset any stuck "scraping" to pending
+    // Reset any stuck "scraping" to pending. A tenant still "scraping" at boot was
+    // interrupted: by a deploy, or by the scrape itself crashing the server (OOM).
+    // The in-memory attempt counter restarts with the process, so interruptions
+    // are counted in the tenant record (D1); a scrape that keeps taking the
+    // server down is given up instead of crash-looping production (2026-09-28).
+    const MAX_INTERRUPTS = 3;
     const stuck = allTenants.filter((t) => t.status === "scraping");
     for (const tenant of stuck) {
-      updateTenant(tenant.id, { status: "pending" });
+      const interrupts = (Number(tenant.settings?.scrapeInterrupts) || 0) + 1;
+      const settings = { ...(tenant.settings || {}), scrapeInterrupts: interrupts };
+      if (interrupts >= MAX_INTERRUPTS) {
+        updateTenant(tenant.id, { status: "error", settings });
+        console.error(`[worker] Giving up on ${tenant.id}: scrape interrupted ${interrupts} times (server restarts mid-scrape)`);
+      } else {
+        updateTenant(tenant.id, { status: "pending", settings });
+      }
     }
     if (stuck.length > 0) {
-      console.log(`[worker] Reset ${stuck.length} stuck tenant(s) to pending`);
+      console.log(`[worker] Reset ${stuck.length} stuck tenant(s) (interrupted scrape)`);
     }
 
     // Render owns scraping now (the VPS pipeline is gone) — re-enqueue pending
@@ -220,12 +232,25 @@ export class ScrapeWorker {
         throw new Error(`Scraped ${result.pages} pages but 0 chunks embedded — embedding likely failed`);
       }
 
+      const done = getTenant(job.tenantId);
+      const { scrapeInterrupts: _cleared, ...settingsAfter } = done?.settings || {};
       updateTenant(job.tenantId, {
         status: "active",
         lastScrapedAt: new Date().toISOString(),
         pagesCount: result.pages,
         chunksCount: result.chunks,
+        ...(done?.settings?.scrapeInterrupts ? { settings: settingsAfter } : {}),
       });
+
+      // Scraped micro-site card: fill it in, or refresh a previous scraped one, but
+      // never overwrite a card the owner edited or built by interview.
+      if (result.siteCard) {
+        const t = getTenant(job.tenantId);
+        const prev = t?.settings?.siteCard;
+        if (t && (!prev || prev.source === "scrape")) {
+          updateTenant(job.tenantId, { settings: { ...(t.settings || {}), siteCard: result.siteCard } });
+        }
+      }
 
       db.prepare(`
         UPDATE scrape_jobs

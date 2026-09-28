@@ -56,7 +56,7 @@ function normHex(raw: string): string {
 // Free-form HTML mode: the page body is LLM-generated (already sanitized on save).
 // We inject the real Whisp chat where {{WHISP_CHAT}} sits, plus the owner AI bar.
 function renderCustomHtml(tenant: SiteTenant, baseUrl: string, editToken: string, siteHtml: string): string {
-  const brand = tenant.brandName || tenant.domain || "Nasza firma";
+  const brand = tenant.settings?.siteCard?.brand || tenant.brandName || tenant.domain || "Nasza firma";
   const settings = tenant.settings || {};
   const accent = /^#[0-9a-fA-F]{6}$/.test(settings.accentColor || "") ? settings.accentColor : "#bb5a30";
   const dark = settings.siteTheme === "dark";
@@ -154,7 +154,7 @@ export function renderSitePage(tenant: SiteTenant, baseUrl: string, editToken: s
   if (typeof _s.siteHtml === "string" && _s.siteHtml.trim().length > 0) {
     return renderCustomHtml(tenant, baseUrl, editToken, _s.siteHtml);
   }
-  const brand = tenant.brandName || tenant.domain || "Nasza firma";
+  const brand = tenant.settings?.siteCard?.brand || tenant.brandName || tenant.domain || "Nasza firma";
   const settings = tenant.settings || {};
   const card = settings.siteCard || {};
 
