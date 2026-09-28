@@ -193,11 +193,11 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const els = input.snapshot.elements || [];
   const history = input.history.slice(-12);
   const byIndex = new Map(els.map((e) => [e.i, e]));
-  const manual = (): AgentCommand => ({ op: "ASK", i: 0, field: "manual", say: say(lang, "Nie jestem pewien tego kroku. Wykonaj go proszę ręcznie na stronie, a ja przejmę od następnego.", "I'm not sure about this step. Please do it by hand on the page and I'll take over from the next one.") });
+  const manual = (why = ""): AgentCommand => { if (process.env.AGENT_DEBUG) console.log("   [manual]", why); return { op: "ASK", i: 0, field: "manual", say: say(lang, "Nie jestem pewien tego kroku. Wykonaj go proszę ręcznie na stronie, a ja przejmę od następnego.", "I'm not sure about this step. Please do it by hand on the page and I'll take over from the next one.") }; };
 
   // Loop guard: the same action on the same element three times in a row.
   const last3 = history.slice(-3);
-  if (last3.length === 3 && last3.every((h) => h.op === last3[0].op && h.i === last3[0].i && h.i !== undefined)) return manual();
+  if (last3.length === 3 && last3.every((h) => h.op === last3[0].op && h.i === last3[0].i && h.i !== undefined)) return manual("loop guard");
 
   // Deterministic hand-off: a value the visitor gave for a named field is typed
   // into that field first (the key is the field's label, set when we asked).
@@ -261,7 +261,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const a = await jevAsk(state, questions, 8000);
   const op = choice(a, "operation")?.choice;
   if (process.env.AGENT_DEBUG) console.log("   [ops]", JSON.stringify(choice(a, "operation")?.probabilities));
-  if (!op) return manual();
+  if (!op) return manual("no operation from Jev");
 
   const ranked = (key: string): AgentElement[] => {
     const probs = choice(a, key)?.probabilities || {};
@@ -276,7 +276,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       consent: { type: "noul", instructions: "Is `element` a checkbox or button by which the person gives consent, accepts terms, rules or a privacy / data-processing policy, or makes a legal declaration?" },
       back: { type: "noul", instructions: "Does clicking `element` go back to a previous step, cancel, or leave the current process?" },
     }, 4000);
-    if (!g) return manual(); // cannot verify the click -> the visitor does it
+    if (!g) return manual("gate call failed"); // cannot verify the click -> the visitor does it
     const isToggle = t.role === "checkbox" || t.role === "radio" || t.role === "switch";
     if ((noul(g, "consent") ?? 0) >= 0.6 && !t.checked && !t.selected) {
       return { op: "CONSENT", i: t.i, say: say(lang, `To zgoda, którą musisz wyrazić sam(a): „${short(t.label, 90)}”. Zaznacz ją, jeśli się zgadzasz.`, `This is a consent only you can give: "${short(t.label, 90)}". Tick it if you agree.`) };
@@ -287,13 +287,27 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
     if (!allowBack && (noul(g, "back") ?? 0) >= 0.6) return "back";
     return { op: "CLICK", i: t.i, say: say(lang, `Klikam: „${short(t.label)}”`, `Clicking "${short(t.label)}"`) };
   };
-  // Best allowed candidate: skips "back" controls (unless allowed) in rank order.
+  // Best allowed candidate. A control the gate marks as "back" (not allowed
+  // now) is excluded and Jev re-chooses among the rest (up to twice), so a
+  // page-transition moment that makes "Back" look best never stalls the agent.
   const gatedClick = async (candidates: AgentElement[]): Promise<AgentCommand> => {
-    for (const t of candidates.filter((e) => clickable.includes(e)).slice(0, 3)) {
+    const excluded = new Set<number>();
+    let pool = candidates.filter((e) => clickable.includes(e));
+    for (let round = 0; round < 3 && pool.length; round++) {
+      const t = pool[0];
       const c = await gate(t);
       if (c !== "back") return c;
+      excluded.add(t.i);
+      const rest = clickable.filter((e) => !excluded.has(e.i) && candidates.includes(e));
+      if (!rest.length) break;
+      const again = await jevAsk(state, { click_target: { type: "choice", instructions: { ...common, operation: "CLICK", target_rules: TARGET + " Going back is not wanted now." }, criteria: Object.fromEntries(rest.map((e) => [String(e.i), elementRow(e)])) } }, 6000);
+      const probs = choice(again, "click_target")?.probabilities || {};
+      pool = Object.entries(probs).sort((x, y) => y[1] - x[1]).map(([k]) => byIndex.get(Number(k))).filter((e): e is AgentElement => !!e && rest.includes(e));
     }
-    return manual();
+    // Usually a page still loading (only "Back" rendered yet): wait before asking the visitor.
+    const waited = history.slice(-2).filter((h) => h.op === "WAIT").length;
+    if (waited < 2) return { op: "WAIT", say: say(lang, "Chwila…", "One moment…") };
+    return manual(`no allowed click (excluded ${excluded.size} back control(s))`);
   };
 
   // ── Date / time slots: the visitor's choice; "earliest" is page order, in code.
@@ -315,18 +329,34 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
           const c = await gatedClick([slots[0]]);
           return c.op === "CLICK" ? { ...c, say: say(lang, `Wybieram najbliższy termin: „${short(slots[0].label)}”`, `Choosing the earliest slot: "${short(slots[0].label)}"`) } : c;
         }
-        // A stated preference ("Thursday", "after 3 pm"): Jev picks among the slots.
-        const pickFromSlots = ranked("click_target").filter((e) => slots.includes(e));
-        if (pickFromSlots.length) return gatedClick(pickFromSlots);
+        // A stated preference ("Wednesday", "after 3 pm"): which slots fit it is a
+        // Jev question per slot. One fit -> take it. Several (a day without an
+        // hour) -> ask which one, unless they asked for the earliest within it.
+        // None -> say so and show the nearest ones.
+        const cands = slots.slice(0, 40);
+        const f = await jevAsk({ latest_preferences: latestPrefs, slots: cands.map((e) => e.label) }, {
+          ...Object.fromEntries(cands.map((_, k) => [`f${k}`, { type: "noul", instructions: `Does \`slots[${k}]\` fit what the visitor asked for in \`latest_preferences\` (the day, date, time or period they named)?` } as JevQuestion])),
+          earliest_within: { type: "noul", instructions: "Does `latest_preferences` ask for the earliest possible time within the day or period it names (for example as early as possible on Wednesday)?" },
+        }, 6000);
+        if (!f) return manual("slot fit call failed");
+        const fits = cands.filter((_, k) => (noul(f, `f${k}`) ?? 0) >= 0.5);
+        if (fits.length === 1 || (fits.length > 1 && (noul(f, "earliest_within") ?? 0) >= 0.5)) return gatedClick([fits[0]]);
+        if (fits.length > 1) {
+          const list = fits.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
+          return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Pasujące wolne terminy:\n${list}\nKtóra godzina Ci odpowiada?`, `Matching free slots:\n${list}\nWhich time suits you?`) };
+        }
+        const list = slots.slice(0, 8).map((e) => `• ${short(e.label, 60)}`).join("\n");
+        return { op: "ASK", i: 0, field: "choice:date", say: say(lang, `Nie widzę wolnego terminu pasującego do tego, co napisałeś. Najbliższe wolne:\n${list}\nKtóry wybierasz?`, `I can't see a free slot matching that. The nearest free ones:\n${list}\nWhich one do you choose?`) };
       }
     }
   }
 
-  if (op === "CLICK") return gatedClick(ranked("click_target"));
+  const rankedClicks = () => { const r = ranked("click_target"); return [...r, ...clickable.filter((e) => !r.includes(e))]; };
+  if (op === "CLICK") return gatedClick(rankedClicks());
 
   if (op === "NEED_CHOICE" && clickable.length) {
     const justChose = history.length > 0 && ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CORRECTION"].includes(history[history.length - 1].op);
-    if (justChose) return gatedClick(ranked("click_target"));
+    if (justChose) return gatedClick(rankedClicks());
     // Offer the likely options (not the navigation buttons) instead of choosing.
     const top = ranked("click_target").filter((e) => clickable.includes(e)).slice(0, 12);
     const o = await jevAsk({ elements: top.map((e) => `${e.role}: ${short(e.label, 90)}`) }, Object.fromEntries(top.map((_, k) => [`o${k}`, { type: "noul", instructions: `Is \`elements[${k}]\` one of the options to choose from, rather than a navigation or submit button (next, back, finish, cancel)?` } as JevQuestion])), 4000);
@@ -338,7 +368,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
 
   if (op === "TYPE_TEXT" || op === "NEED_DATA") {
     const t = ranked("field_target")[0];
-    if (!t) return manual();
+    if (!t) return manual("no field target");
     const keys = Object.keys(input.inputs);
     if (keys.length) {
       // Which of the visitor's data belongs in this field (never generated text).
@@ -358,11 +388,11 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       const o = byIndex.get(i)?.options?.find((x) => x.j === j);
       if (o) return { op: "SELECT", i, option: j, say: say(lang, `Wybieram: ${short(o.label)}`, `Selecting: ${short(o.label)}`) };
     }
-    return manual();
+    return manual("select failed");
   }
 
   if (op === "SCROLL_DOWN") return { op: "SCROLL_DOWN", say: say(lang, "Przewijam…", "Scrolling…") };
   if (op === "WAIT") return { op: "WAIT", say: say(lang, "Chwila…", "One moment…") };
   if (op === "DONE") return { op: "DONE", say: say(lang, "Gotowe.", "Done.") };
-  return manual();
+  return manual(`op ${op}`);
 }
