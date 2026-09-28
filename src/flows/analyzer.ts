@@ -31,6 +31,7 @@ Analyze the recording and return a JSON object with these fields:
 {
   "name": "Short skill name (e.g., 'Submit Application', 'Contact Form', 'Place Order')",
   "description": "One paragraph describing what this flow does, written for an end user",
+  "goal": "Instructions for an assistant that will operate this page itself for a visitor: the end result to reach, which choices depend on the visitor's wishes (e.g. location, service, date), which details come from the visitor, and anything the recording shows must be chosen a certain way. Never mention CSS selectors or the values the owner typed while recording.",
   "triggerPhrases": ["8-12 natural phrases a user might say to trigger this flow - IMPORTANT: include phrases BOTH in the website's own language AND in English, e.g. for a Polish site: 'chcę zarezerwować stolik', 'rezerwacja stolika', 'I want to book a table'"],
   "requiredInputs": [
     {
@@ -129,6 +130,14 @@ ${JSON.stringify(rawFlow.steps, null, 2)}`;
     updatedAt: new Date().toISOString(),
     status: "active",
   };
+  // Recordings run as goal-driven agent flows: Jev follows the goal on the live
+  // page (surviving site changes); the recorded steps stay only as hints.
+  const startUrl = rawFlow.steps.find((st) => st.url)?.url || rawFlow.startUrl || "";
+  if (typeof analysis.goal === "string" && analysis.goal.trim().length >= 20 && /^https?:\/\//i.test(startUrl)) {
+    flow.description = analysis.goal.trim().slice(0, 2000);
+    flow.executionMode = "agent";
+    flow.startUrl = startUrl;
+  }
 
   return {
     flow,

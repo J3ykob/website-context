@@ -111,7 +111,14 @@ export async function updateFlow(
   const flows = await getFlows(tenantId, { fresh: true });
   const i = flows.findIndex((f) => f.id === flowId);
   if (i < 0) return null;
-  flows[i] = { ...flows[i], ...updates, updatedAt: new Date().toISOString() };
+  // Only these fields: the dashboard PUT passes the request body straight in,
+  // and e.g. startUrl / executionMode must go through validated routes.
+  const allowed: Partial<FlowDefinition> = {};
+  if (typeof updates.name === "string") allowed.name = updates.name.slice(0, 120);
+  if (typeof updates.description === "string") allowed.description = updates.description.slice(0, 2000);
+  if (Array.isArray(updates.triggerPhrases)) allowed.triggerPhrases = updates.triggerPhrases.filter((t) => typeof t === "string").slice(0, 30);
+  if (updates.status === "active" || updates.status === "disabled" || updates.status === "draft") allowed.status = updates.status;
+  flows[i] = { ...flows[i], ...allowed, updatedAt: new Date().toISOString() };
   await writeR2(tenantId, flows);
   return flows[i];
 }

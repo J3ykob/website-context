@@ -4,8 +4,10 @@
  * tenant's stored flow definition, so this endpoint cannot be used as a
  * general-purpose browsing agent. Rate-limited per IP.
  */
-import type { Express, Request } from "express";
-import { getFlow } from "../flows/flow-store.js";
+import type { Express, Request, RequestHandler } from "express";
+import { getFlow, getFlows, saveFlow } from "../flows/flow-store.js";
+import { getTenant } from "../multi-tenant/tenant-registry.js";
+import type { FlowDefinition } from "../context/types.js";
 import { jevAsk, jevEnabled } from "../llm/jev.js";
 import { lexicalSnippets, type KnowledgeCatalog } from "../knowledge/catalog.js";
 import { loadKnowledgeCatalog } from "../multi-tenant/tenant-manager.js";
@@ -35,7 +37,69 @@ async function catalogFor(tenantId: string): Promise<KnowledgeCatalog | null> {
   return cat;
 }
 
-export function registerAgentRoutes(app: Express): void {
+/** The goal Jev works from. A recorded flow's steps ride along as a hint only. */
+export function agentGoal(flow: FlowDefinition): string {
+  const hints = (flow.steps || []).map((s) => s.description).filter(Boolean).slice(0, 25);
+  if (!hints.length) return flow.description;
+  const path = hints.map((h, i) => `${i + 1}. ${h}`).join("\n").slice(0, 1200);
+  return `${flow.description}\n\nHow the owner did it when recording (a hint only; the page may have changed, follow what the page shows):\n${path}`;
+}
+
+/** The start page must be on the tenant's own site: the widget runs the flow there. */
+export function onTenantSite(url: string, siteUrl: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    const site = new URL(/^https?:\/\//i.test(siteUrl) ? siteUrl : `https://${siteUrl}`).hostname.replace(/^www\./, "");
+    const host = u.hostname.replace(/^www\./, "");
+    return host === site || host.endsWith(`.${site}`);
+  } catch { return false; }
+}
+
+// Validates an owner-written agent flow; returns the error message or the clean fields.
+function agentFields(b: any, siteUrl: string): { error: string } | { name: string; goal: string; startUrl: string } {
+  const name = str(b?.name, 120).trim(), goal = str(b?.goal, 2000).trim();
+  let startUrl = str(b?.startUrl, 500).trim();
+  if (startUrl && !/^https?:\/\//i.test(startUrl)) startUrl = `https://${startUrl}`;
+  if (name.length < 3) return { error: "Give the flow a short name (e.g. \"Book an appointment\")." };
+  if (goal.length < 20) return { error: "Describe what the assistant should do in a sentence or two." };
+  if (!onTenantSite(startUrl, siteUrl)) return { error: `The start page must be on your site (${siteUrl}) - the assistant runs the flow there.` };
+  return { name, goal, startUrl };
+}
+
+export interface AgentRouteDeps { auth: RequestHandler; onFlowsChanged: (tenantId: string) => void }
+
+export function registerAgentRoutes(app: Express, deps?: AgentRouteDeps): void {
+  if (deps) {
+    // Owner creates a goal-driven flow by describing it (no recording needed).
+    app.post("/api/dashboard/flows/agent", deps.auth, async (req, res) => {
+      const tenantId = (req as any).tenantId as string;
+      const f = agentFields(req.body, getTenant(tenantId)?.siteUrl || "");
+      if ("error" in f) { res.status(400).json({ error: f.error }); return; }
+      if ((await getFlows(tenantId)).length >= 50) { res.status(400).json({ error: "Flow limit reached (50)." }); return; }
+      const now = new Date().toISOString();
+      const flow: FlowDefinition = {
+        id: `agent_${Date.now().toString(36)}`, name: f.name, description: f.goal, triggerPhrases: [], steps: [], requiredInputs: [],
+        createdAt: now, updatedAt: now, status: "active", executionMode: "agent", startUrl: f.startUrl,
+      };
+      await saveFlow(tenantId, flow);
+      deps.onFlowsChanged(tenantId);
+      console.log(`[flows] ${tenantId}: agent flow "${flow.name}" created (${flow.startUrl})`);
+      res.json(flow);
+    });
+    // Edit an agent flow's name / goal / start page.
+    app.put("/api/dashboard/flows/:id/agent", deps.auth, async (req, res) => {
+      const tenantId = (req as any).tenantId as string;
+      const existing = await getFlow(tenantId, String(req.params.id));
+      if (!existing || existing.executionMode !== "agent") { res.status(404).json({ error: "Not found" }); return; }
+      const f = agentFields(req.body, getTenant(tenantId)?.siteUrl || "");
+      if ("error" in f) { res.status(400).json({ error: f.error }); return; }
+      const flow = await saveFlow(tenantId, { ...existing, name: f.name, description: f.goal, startUrl: f.startUrl, updatedAt: new Date().toISOString() });
+      deps.onFlowsChanged(tenantId);
+      res.json(flow);
+    });
+  }
+
   // Admin: Jev latency as seen from this server (raw fetch, no hedging).
   app.get("/api/admin/jev-probe", async (req, res) => {
     const secret = process.env.ADMIN_SECRET;
@@ -92,7 +156,7 @@ export function registerAgentRoutes(app: Express): void {
         : undefined;
       const cat = await catalogFor(tenantId);
       const knowledge = cat ? (q: string) => lexicalSnippets(q, cat, 3) : undefined;
-      const cmd = await decideStep({ knowledge, goal: flow.description, request: str(b.request, 2000), inputs, snapshot, history, lang: b.lang === "en" || b.lang === "other" ? b.lang : "pl", reply: rp });
+      const cmd = await decideStep({ knowledge, goal: agentGoal(flow), request: str(b.request, 2000), inputs, snapshot, history, lang: b.lang === "en" || b.lang === "other" ? b.lang : "pl", reply: rp });
       console.log(`[agent] ${tenantId}/${flowId}: ${cmd.op}${"i" in cmd && cmd.i ? ` [${cmd.i}]` : ""} (${Date.now() - t0}ms)`);
       res.json(cmd);
     } catch (e: any) {

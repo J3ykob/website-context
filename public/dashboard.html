@@ -390,6 +390,18 @@
       transition: border-color 0.2s, box-shadow 0.2s;
     }
     .skill-edit-form input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.5); }
+    .skill-edit-form textarea {
+      font-family: var(--font); font-size: 13px; padding: 10px 14px; min-height: 90px; resize: vertical;
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; background: rgba(255,255,255,0.05);
+      outline: none; color: var(--text);
+    }
+    .skill-edit-form textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,0.5); }
+    .skill-tag {
+      font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; flex-shrink: 0;
+      padding: 2px 7px; border-radius: 999px; color: var(--blue); background: rgba(59,130,246,0.12);
+    }
+    .form-hint { font-size: 12px; color: var(--text-3); margin: -4px 0 10px; }
+    .form-error { font-size: 12px; color: #f87171; min-height: 16px; }
 
     /* ─── Knowledge Base ─── */
     .kb-head {
@@ -673,6 +685,7 @@
       </div>
       <div class="topbar-right">
         <a class="btn btn-outline" id="open-site-btn" href="#" target="_blank">Open site</a>
+        <button class="btn btn-outline" onclick="openAgentFlowModal()">Describe flow</button>
         <button class="btn btn-dark" onclick="startRecording()">Record flow</button>
         <button class="btn btn-outline" onclick="logout()">Logout</button>
       </div>
@@ -762,6 +775,22 @@
       </div>
     </div>
 
+    <div class="modal-overlay" id="agent-flow-modal">
+      <div class="modal">
+        <div class="section-title">Describe a flow</div>
+        <div class="form-hint">The assistant does this on your site for visitors, step by step, asking them for their choices and details. Consents, payment and the final submit always stay with the visitor.</div>
+        <input type="text" id="agent-flow-name" placeholder="Name, e.g. Book an appointment" maxlength="120" />
+        <textarea id="agent-flow-goal" rows="5" maxlength="2000" placeholder="What should the assistant do? e.g. Book the visitor for an exam: pick the exam package that fits their job, the location and a date they want, then fill in their details."></textarea>
+        <input type="text" id="agent-flow-url" placeholder="Start page, e.g. https://booking.yoursite.com" maxlength="500" />
+        <div class="form-hint">The page where the process begins. It must be on your site, with the Whisp widget installed.</div>
+        <div class="form-error" id="agent-flow-error"></div>
+        <div class="modal-actions">
+          <button class="btn btn-sm btn-outline" onclick="closeAgentFlowModal()">Cancel</button>
+          <button class="btn btn-sm btn-dark" id="agent-flow-save" onclick="saveAgentFlow()">Create</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -835,6 +864,7 @@
         // Prefer the tenant's real site (siteUrl/domain) - data.apiUrl is the
         // Whisp serving host, NOT the customer's site, so never use it here.
         var siteHref = data.siteUrl || (data.domain ? "https://" + data.domain : "");
+        SITE_HREF = siteHref;
         var siteHost = "";
         if (siteHref) {
           try { siteHost = new URL(siteHref).hostname.replace(/^www\./, ""); } catch (e2) { siteHost = siteHref; }
@@ -1034,12 +1064,13 @@
       var panel = document.getElementById("skills-panel");
       if (!flows.length) {
         panel.innerHTML = emptyState('zap', '',
-          'No skills yet - record a flow on your site and the assistant learns to walk visitors through it.',
-          'Record your first flow', "startRecording()", true);
+          'No skills yet - describe what the assistant should do on your site, or record it once by doing it yourself.',
+          'Describe your first flow', "openAgentFlowModal()", true);
         return;
       }
 
       panel.innerHTML = flows.map(function(f) {
+        if (f.executionMode === "agent") return agentSkillRow(f);
         var triggers = (f.triggerPhrases || []).slice(0,3).join(", ");
         return '<div><div class="skill-item">' +
           '<div class="skill-info"><span class="skill-name" onclick="toggleSkillEdit(\'' + f.id + '\')">' + esc(f.name) + '</span>' +
@@ -1048,6 +1079,60 @@
           '<div class="skill-edit-form" id="skill-edit-' + f.id + '"><input type="text" value="' + escAttr((f.triggerPhrases||[]).join(", ")) + '" placeholder="Triggers (comma-separated)" id="skill-triggers-' + f.id + '" />' +
           '<div style="display:flex;gap:6px"><button class="btn btn-sm btn-dark" onclick="saveSkillTriggers(\'' + f.id + '\')">Save</button><button class="btn btn-sm btn-ghost" onclick="toggleSkillEdit(\'' + f.id + '\')">Cancel</button></div></div></div>';
       }).join("");
+    }
+
+    // ─── Agent flows (goal-driven: described, or recorded once) ────
+    var SITE_HREF = "";
+    function agentSkillRow(f) {
+      return '<div><div class="skill-item">' +
+        '<div class="skill-info"><span class="skill-tag">Agent</span><span class="skill-name" onclick="toggleSkillEdit(\'' + f.id + '\')">' + esc(f.name) + '</span>' +
+        '<span class="skill-triggers">' + esc(f.description || "") + '</span></div>' +
+        '<label class="toggle"><input type="checkbox" ' + (f.status === "active" ? "checked" : "") + ' onchange="toggleFlowStatus(\'' + f.id + '\',this.checked)"><span class="toggle-slider"></span></label></div>' +
+        '<div class="skill-edit-form" id="skill-edit-' + f.id + '">' +
+        '<input type="text" id="agent-edit-name-' + f.id + '" value="' + escAttr(f.name) + '" placeholder="Name" maxlength="120" />' +
+        '<textarea id="agent-edit-goal-' + f.id + '" maxlength="2000" placeholder="What should the assistant do?">' + esc(f.description || "") + '</textarea>' +
+        '<input type="text" id="agent-edit-url-' + f.id + '" value="' + escAttr(f.startUrl || "") + '" placeholder="Start page" maxlength="500" />' +
+        '<div class="form-error" id="agent-edit-error-' + f.id + '"></div>' +
+        '<div style="display:flex;gap:6px"><button class="btn btn-sm btn-dark" onclick="saveAgentEdit(\'' + f.id + '\')">Save</button><button class="btn btn-sm btn-ghost" onclick="toggleSkillEdit(\'' + f.id + '\')">Cancel</button></div></div></div>';
+    }
+    function openAgentFlowModal() {
+      var u = document.getElementById("agent-flow-url");
+      if (!u.value && SITE_HREF) u.value = SITE_HREF;
+      document.getElementById("agent-flow-error").textContent = "";
+      document.getElementById("agent-flow-modal").classList.add("open");
+      document.getElementById("agent-flow-name").focus();
+    }
+    function closeAgentFlowModal() {
+      document.getElementById("agent-flow-modal").classList.remove("open");
+      ["agent-flow-name", "agent-flow-goal", "agent-flow-url"].forEach(function(id) { document.getElementById(id).value = ""; });
+    }
+    async function postAgentFlow(url, method, body, errEl) {
+      errEl.textContent = "";
+      try {
+        var r = await authFetch(url, { method: method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        var d = await r.json().catch(function() { return {}; });
+        if (!r.ok) { errEl.textContent = d.error || "Could not save the flow."; return false; }
+        return true;
+      } catch (e) { errEl.textContent = "Could not save the flow."; return false; }
+    }
+    async function saveAgentFlow() {
+      var btn = document.getElementById("agent-flow-save");
+      btn.disabled = true;
+      var ok = await postAgentFlow(API + "/api/dashboard/flows/agent", "POST", {
+        name: document.getElementById("agent-flow-name").value,
+        goal: document.getElementById("agent-flow-goal").value,
+        startUrl: document.getElementById("agent-flow-url").value,
+      }, document.getElementById("agent-flow-error"));
+      btn.disabled = false;
+      if (ok) { closeAgentFlowModal(); loadSkills(); }
+    }
+    async function saveAgentEdit(id) {
+      var ok = await postAgentFlow(API + "/api/dashboard/flows/" + id + "/agent", "PUT", {
+        name: document.getElementById("agent-edit-name-" + id).value,
+        goal: document.getElementById("agent-edit-goal-" + id).value,
+        startUrl: document.getElementById("agent-edit-url-" + id).value,
+      }, document.getElementById("agent-edit-error-" + id));
+      if (ok) loadSkills();
     }
 
     // ─── Actions ────

@@ -1154,7 +1154,7 @@ app.get("/api/tenants/:id/status", (req, res) => {
 let lastChatError: { tenantId: string; cause: string; msg: string; at: string } | null = null;
 
 // Goal-driven ("agent") flows: one Jev-decided step per call (src/agent/routes.ts).
-registerAgentRoutes(app);
+registerAgentRoutes(app, { auth: authMiddleware, onFlowsChanged: (id) => tenantManager.evictTenant(id) });
 
 app.post("/api/chat", async (req, res) => {
   try {
