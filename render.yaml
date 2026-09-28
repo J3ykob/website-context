@@ -3,7 +3,7 @@ services:
   - type: web
     name: website-context
     runtime: docker
-    plan: starter
+    plan: standard
     region: oregon
     healthCheckPath: /api/health
     disk:
