@@ -234,7 +234,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   if (selects.length) operations.SELECT = "Choose a value in a dropdown.";
   operations.SCROLL_DOWN = "Scroll down to reveal more of the page.";
   operations.WAIT = "Wait for the page to finish loading.";
-  operations.NEED_DATA = "A field that must be filled needs information the visitor has not provided yet.";
+  if (typable.length) operations.NEED_DATA = "A field that must be filled needs information the visitor has not provided yet.";
   operations.NEED_CHOICE = "The page asks to choose something that depends on the visitor's preference (for example a location, a date or a time slot) and neither visitor_request nor visitor_data states that preference.";
   operations.DONE = "The page visibly shows that the goal is completed.";
   operations.BLOCKED = "No available operation can make progress.";

@@ -23,6 +23,24 @@ setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now -
 const str = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : "");
 
 export function registerAgentRoutes(app: Express): void {
+  // Admin: Jev latency as seen from this server (raw fetch, no hedging).
+  app.get("/api/admin/jev-probe", async (req, res) => {
+    const secret = process.env.ADMIN_SECRET;
+    if (!secret || req.query.secret !== secret) { res.status(403).json({ error: "Forbidden" }); return; }
+    const n = Math.min(Number(req.query.n) || 10, 30);
+    const body = JSON.stringify({ model: process.env.JEV_MODEL || "jev-latest", state: { page: "Wybierz placówkę i termin badania. ".repeat(110) }, questions: { a: { type: "noul", instructions: "Is this a date page?" } } });
+    const out: (number | string)[] = [];
+    for (let k = 0; k < n; k++) {
+      const t = Date.now();
+      try {
+        const r = await fetch("https://api.typesafe.ai/v1/systemone", { method: "POST", headers: { Authorization: `Bearer ${process.env.JEV_API_KEY}`, "Content-Type": "application/json" }, body, signal: AbortSignal.timeout(15000) });
+        await r.text();
+        out.push(r.ok ? Date.now() - t : `HTTP ${r.status} ${Date.now() - t}`);
+      } catch (e: any) { out.push(`${e?.name || "error"} ${Date.now() - t}`); }
+    }
+    res.json({ ms: out });
+  });
+
   app.post("/api/agent/step", async (req, res) => {
     if (!rateOk(req)) { res.status(429).json({ error: "Too many requests" }); return; }
     if (!jevEnabled()) { res.status(503).json({ error: "Agent unavailable" }); return; }
