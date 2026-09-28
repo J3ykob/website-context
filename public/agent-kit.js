@@ -44,7 +44,9 @@
     seen.add(e);
     var ref = squash(e.getAttribute("aria-labelledby") || "").split(" ").filter(Boolean).map(function (id) { return name(document.getElementById(id), seen); }).filter(Boolean).join(" ");
     var labels = e.labels ? Array.prototype.map.call(e.labels, function (l) { return name(l, seen); }).filter(Boolean).join(" ") : "";
-    var text = e.tagName === "INPUT" ? "" : (e.innerText || e.textContent || "");
+    // A text field's own content is its value, never its name (a typed textarea
+    // was renamed to what was typed, so the agent kept re-typing it).
+    var text = e.tagName === "INPUT" || e.tagName === "TEXTAREA" ? "" : (e.innerText || e.textContent || "");
     var n = (ref || e.getAttribute("aria-label") || labels ||
       (["button", "submit", "reset"].indexOf(e.type) >= 0 ? e.value : "") || e.getAttribute("alt") ||
       text || e.getAttribute("title") || e.getAttribute("placeholder") || e.getAttribute("name") || "").slice(0, 2000);

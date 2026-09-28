@@ -392,7 +392,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   // knowledge says about each ("Praga" -> the branch at ul. Konopacka).
   const optionSet = async (): Promise<{ top: AgentElement[]; options: AgentElement[] }> => {
     const top = ranked("click_target").filter((e) => clickable.includes(e)).slice(0, 12);
-    const o = await jevAsk({ elements: top.map((e) => `${e.role}: ${short(e.label, 90)}`) }, Object.fromEntries(top.map((_, k) => [`o${k}`, { type: "noul", instructions: `Is \`elements[${k}]\` one of the options to choose from, rather than a navigation or submit button (next, back, finish, cancel)?` } as JevQuestion])), 4000);
+    const o = await jevAsk({ elements: top.map((e) => `${e.role}: ${short(e.label, 90)}`) }, Object.fromEntries(top.map((_, k) => [`o${k}`, { type: "noul", instructions: `Is \`elements[${k}]\` one of the options to choose from, rather than a navigation or submit button (next, back, finish, cancel) or a consent / terms-acceptance checkbox?` } as JevQuestion])), 4000);
     return { top, options: o ? top.filter((_, k) => (noul(o, `o${k}`) ?? 0) >= 0.5).slice(0, 10) : [] };
   };
   // Already chosen: selected on the page, or clicked in the last few steps.
