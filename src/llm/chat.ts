@@ -972,6 +972,15 @@ export class WebsiteChat {
 
   // Refusal in the visitor's language — an English refusal on a Polish site
   // breaks the "we speak as you" voice, and the gate now fires more often.
+  // Ecosystem: another business asks whether WE can answer its visitor's question.
+  // Same path our own bot takes on our site - retrieval (incl. the Jev catalog
+  // stage) and the Jev answerability gate; only "confirmed" counts.
+  async canAnswer(question: string): Promise<boolean> {
+    const chunks = this.filterContextChunks(await this.retrieveContext(question), question);
+    if (chunks.length === 0) return false;
+    return (await this.factCheck(question, chunks)) === "confirmed";
+  }
+
   // Ecosystem: our own content has nothing on the question -> the other businesses
   // of our ecosystem decide whether they can answer (src/ecosystem/ask.ts), and we
   // relay what they said, attributed. Only their grounded answers are relayed; the
