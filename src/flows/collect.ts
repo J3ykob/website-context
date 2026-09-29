@@ -108,7 +108,7 @@ function scriptsIn(text: string): Set<string> {
   return found;
 }
 /** Scripts in the reply that the customer's own message does not use. */
-function strayScripts(customer: string, reply: string): string[] {
+export function strayScripts(customer: string, reply: string): string[] {
   const own = scriptsIn(customer);
   return [...scriptsIn(reply)].filter((x) => !own.has(x));
 }
@@ -194,15 +194,19 @@ ${prior || "(none)"}
 
 The customer's new message: """${message.slice(0, 1000)}"""
 
-Output {"language": "...", "intent": "...", "values": {...}}:
-- "language": the language the new message is written in, in English (e.g. "Polish", "English", "Ukrainian").
+Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
+- "language": the language the customer writes their sentences in, named in English (e.g. "Polish", "English", "Ukrainian"). Ignore names of places, streets, people and products (a Polish street name in an English sentence is still English).${s.language ? `
+- "switched": true only if in this message the customer clearly writes whole sentences in a language other than ${s.language}, the language of the conversation so far; otherwise false.` : ""}
 - "intent": "confirm" (they confirm the summary / say it is correct), "cancel" (they want to stop the whole order or inquiry), "change" (they correct something already given), or "answer" (anything else: giving details, asking something).
 - "values": ONLY the fields this new message gives or corrects, as {key: value}. Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their base form (e.g. "do Ząbek" -> "Ząbki") and keep street and number. A question the customer asks (price, availability...) goes into "notes". Empty object if the message gives no values.`,
     500,
   ));
   if (!read) throw new Error("collect: unparseable model reply");
   const intent = ["confirm", "cancel", "change", "answer"].includes(read.intent) ? read.intent : "answer";
-  if (typeof read.language === "string" && read.language.trim()) s.language = read.language.trim().slice(0, 30);
+  // The conversation's language is set by the first message and changes only
+  // when the customer clearly switches (a Polish address in an English message
+  // is not a switch).
+  if (typeof read.language === "string" && read.language.trim() && (!s.language || read.switched === true)) s.language = read.language.trim().slice(0, 30);
   const language = s.language || "the same language as the customer's latest message";
   if (intent !== "confirm" && intent !== "cancel" && read.values && typeof read.values === "object") {
     for (const f of fields) {
@@ -229,10 +233,12 @@ Output {"language": "...", "intent": "...", "values": {...}}:
         offerNote = `Say briefly that you can't see ${verdict.missing.length ? verdict.missing.join(", ") : v} in the offer, so the team will confirm whether they can provide it.`;
         continue;
       }
-      delete s.values[f.name];
+      // Their words stay recorded: we ask once, and if they go on without
+      // choosing, the order goes out with what they wrote (they confirm it in
+      // the summary) instead of asking the same question again and again.
       s.offerChecked[`${f.name}:suggested`] = "1";
       offerAsk = verdict.status === "several"
-        ? `What they asked for (${v}) could be several different offers: ${verdict.options.join("; ")}. Ask which one they mean.`
+        ? `What they asked for (${v}) could be several different offers: ${verdict.options.join("; ")}. Ask which one they mean (they may also leave it to the team).`
         : `Say that you can't see ${verdict.missing.length ? verdict.missing.join(", ") : v} in the offer, and suggest what is available, e.g.: ${verdict.options.join("; ")}. Ask whether one of these suits them, or what else they need.`;
       break;
     }
@@ -243,7 +249,7 @@ Output {"language": "...", "intent": "...", "values": {...}}:
   let task: string;
   let outcome: "cancel" | "send" | "summary" | "ask";
   if (intent === "cancel") { outcome = "cancel"; task = "Acknowledge in one short sentence that the order / inquiry is cancelled."; }
-  else if (intent === "confirm" && s.stage === "confirming" && !missing.length) { outcome = "send"; task = `Thank them in one short sentence and say their ${flow.name ? `"${flow.name}" (say this name in ${language})` : "request"} is being passed to the team, who will get back to them.`; }
+  else if (intent === "confirm" && s.stage === "confirming" && !missing.length) { outcome = "send"; task = `Thank them in one short sentence and say their order / request is being passed to the team, who will get back to them.`; }
   else if (offerAsk) { outcome = "ask"; task = offerAsk; }
   else if (!missing.length) { outcome = "summary"; task = "In ONE sentence, ask them to check the summary and confirm it or correct anything. Do not list the details yourself."; }
   else { outcome = "ask"; task = `Ask, briefly, for exactly these details and nothing else: ${missing.slice(0, 2).map((f) => `${f.label}${f.description ? ` (${f.description})` : ""}`).join("; ")}.`; }
@@ -254,7 +260,7 @@ Output {"language": "...", "intent": "...", "values": {...}}:
   // The reply as JSON: the message text, and (for the summary) the field names
   // translated into the customer's language.
   const shown = fields.filter((f) => (s.values[f.name] || "").trim());
-  const replySystem = `You are the chat assistant of ${brand || "this business"}. Write the assistant's next chat message: short, friendly, no lists. Write it in ${language}. Output only JSON.`;
+  const replySystem = `You are the chat assistant of ${brand || "this business"}. Write the assistant's next chat message: short, friendly, no lists. Write it in ${language}; the field names in the task may be in another language - translate them into ${language}. Output only JSON.`;
   const replyUser = `Customer's latest message: """${message.slice(0, 600)}"""
 
 Your task: ${task}
@@ -265,6 +271,16 @@ Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${s
   if (stray.length) {
     const again = parseJsonObject(await llm(`${replySystem} Use only the normal alphabet of ${language}; never mix in ${stray.join(" or ")} letters.`, replyUser, 300));
     if (again?.message && strayScripts(message, String(again.message)).length === 0) out = again;
+  }
+  // The model sometimes slips into the language of the field names or of a place
+  // name in the message. Jev checks the reply is in the customer's language.
+  if (s.language && out?.message) {
+    const inLang = async (t: string) => (await jevAsk({ text: t }, { ok: { type: "noul", instructions: `Is \`text\` written in ${s.language}?` } }, 3000))?.ok as { noul?: number } | undefined;
+    const v = await inLang(String(out.message));
+    if (v && (v.noul ?? 1) < 0.5) {
+      const again = parseJsonObject(await llm(`${replySystem} Your previous draft was not in ${s.language}. Write the message ONLY in ${s.language}.`, replyUser, 300));
+      if (again?.message) out = again;
+    }
   }
   let reply = String(out?.message || "").trim().slice(0, 600);
   if (!reply) throw new Error("collect: empty reply");
