@@ -52,7 +52,9 @@ export interface ChatConfig {
   // Ecosystem broadcast (src/ecosystem/ask.ts): when our own content has nothing
   // on the question, the other businesses of our ecosystem each decide from their
   // own knowledge whether they can answer; their answers come back here.
-  askEcosystem?: (messages: ChatMessage[]) => Promise<{ tenantId: string; label: string; answer: ChatResponse }[]>;
+  // onStart fires only when there are other businesses to ask (the widget shows
+  // "checking with businesses we work with" while they decide).
+  askEcosystem?: (messages: ChatMessage[], onStart?: () => void) => Promise<{ tenantId: string; label: string; answer: ChatResponse }[]>;
 }
 
 export interface ChatResponse {
@@ -797,7 +799,9 @@ export class WebsiteChat {
   // token-by-token via onToken(delta) (first token ~1s vs ~3.5s for the full answer).
   // Flow/tool/structured cases and backends without streaming defer to chat() and are
   // emitted whole. Returns the canonical (cleaned + validated) full response.
-  async chatStream(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void, formState?: Record<string, string>): Promise<ChatResponse> {
+  // onStatus: interim progress for the widget while no tokens flow yet (e.g. the
+  // ecosystem broadcast), in the visitor's language.
+  async chatStream(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void, formState?: Record<string, string>, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse> {
     if (!this.backend.generateStream) {
       const r = await this.chat(messages, sessionKey);
       onToken(r.message);
@@ -838,7 +842,7 @@ export class WebsiteChat {
     // directly answer the question → honest refusal + logged gap, no generation.
     const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
     if (usableStream.length === 0) {
-      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages);
+      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages, false, onStatus);
       if (viaPartner) { onToken(viaPartner.message); return viaPartner; }
       const msg = this.refusal(inputValidation.sanitized);
       onToken(msg);
@@ -846,7 +850,7 @@ export class WebsiteChat {
     }
     const factCheckS = await this.factCheck(inputValidation.sanitized, usableStream);
     if (factCheckS === "no_evidence") {
-      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages);
+      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages, false, onStatus);
       if (viaPartner) { onToken(viaPartner.message); return viaPartner; }
     }
     const gapS = this.gapDecision(inputValidation.sanitized, factCheckS); // runs alongside generation
@@ -985,11 +989,14 @@ export class WebsiteChat {
   // of our ecosystem decide whether they can answer (src/ecosystem/ask.ts), and we
   // relay what they said, attributed. Only their grounded answers are relayed; the
   // reply may restate them but never add to them. null = nobody could answer.
-  private async answerViaPartner(question: string, messages: ChatMessage[], noPartners?: boolean): Promise<ChatResponse | null> {
+  private async answerViaPartner(question: string, messages: ChatMessage[], noPartners?: boolean, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
     if (noPartners || !this.askEcosystem) return null;
     let found: { tenantId: string; label: string; answer: ChatResponse }[] = [];
     try {
-      found = await this.askEcosystem(messages);
+      found = await this.askEcosystem(messages, () => onStatus?.({
+        kind: "ecosystem",
+        text: this.isPolish(question) ? "Sprawdzam u firm, z którymi współpracujemy…" : "Checking with businesses we work with…",
+      }));
     } catch (e) {
       console.warn(`[ecosystem] ${this.context.tenantId}: broadcast failed: ${(e as Error).message}`);
       return null;
@@ -1014,10 +1021,13 @@ export class WebsiteChat {
     };
   }
 
-  private refusal(question: string): string {
+  private isPolish(question: string): boolean {
     const q = question.toLowerCase();
-    const isPolish = /[ąćęłńóśźż]/.test(q) || /\b(czy|jak|ile|gdzie|jaki|jaka|macie|kiedy|dlaczego|kto|co)\b/.test(q);
-    return isPolish
+    return /[ąćęłńóśźż]/.test(q) || /\b(czy|jak|ile|gdzie|jaki|jaka|macie|kiedy|dlaczego|kto|co)\b/.test(q);
+  }
+
+  private refusal(question: string): string {
+    return this.isPolish(question)
       ? "Nie mam tej informacji w tym, co wiem o nas, więc nie chcę zgadywać. Najlepiej skontaktuj się z nami bezpośrednio - chętnie pomożemy."
       : "I don't have that information in what I can see about us, so I don't want to guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.";
   }

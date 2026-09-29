@@ -164,7 +164,7 @@ export class TenantManager {
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
       // Every other business of this tenant's ecosystem decides whether it can answer what its own site can't.
       askEcosystem: ecosystemOf(getTenant(tenantId))
-        ? (messages) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, (id) => this.getChatForTenant(id))
+        ? (messages, onStart) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, (id) => this.getChatForTenant(id), onStart)
         : undefined,
     });
 

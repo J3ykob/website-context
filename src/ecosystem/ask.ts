@@ -45,11 +45,13 @@ export async function askEcosystem(
   ecosystem: string,
   messages: ChatMessage[],
   chatFor: (tenantId: string) => Promise<WebsiteChat>,
+  onStart?: () => void,
 ): Promise<EcosystemAnswer[]> {
   const question = messages.findLast((m) => m.role === "user")?.content?.trim() || "";
   if (!ecosystem || question.length < 3) return [];
   const members = listTenants().filter((t) => t.id !== fromTenantId && t.status === "active" && ecosystemOf(t) === ecosystem);
   if (members.length === 0) return [];
+  onStart?.();
   const t0 = Date.now();
 
   // Every member judges the question against its own knowledge, then the ones

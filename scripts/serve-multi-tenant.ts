@@ -1260,7 +1260,9 @@ app.post("/api/chat", async (req, res) => {
       try {
         const full = await chat.chatStream(messages, sessionKey, (delta) => {
           res.write(`data: ${JSON.stringify({ delta })}\n\n`);
-        }, formState && typeof formState === "object" ? formState : undefined);
+        }, formState && typeof formState === "object" ? formState : undefined, (status) => {
+          res.write(`data: ${JSON.stringify({ status })}\n\n`);
+        });
         res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null })}\n\n`);
         res.end();
         logResponse(full);

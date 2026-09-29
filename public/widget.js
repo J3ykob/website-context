@@ -601,6 +601,7 @@
 
     var raw = "";
     streamChat({
+      onStatus: function(status) { streamDiv.innerHTML = statusHtml(status); barMsgs.scrollTop = barMsgs.scrollHeight; },
       onFirst: function() { raw = ""; streamDiv.innerHTML = ""; },
       onDelta: function(delta) {
         raw += delta;
@@ -1040,7 +1041,9 @@
 
   // Stream a chat response over SSE. Calls cbs.onFirst() just before the first token
   // (clear the typing indicator), cbs.onDelta(text) per token, cbs.onDone(data) with the
-  // canonical {message, sources, navigateTo, flowSession}, cbs.onError(msg) on failure.
+  // canonical {message, sources, navigateTo, flowSession}, cbs.onError(msg) on failure,
+  // cbs.onStatus({kind, text}) for interim progress before the answer (e.g. the bot is
+  // asking the other businesses of its ecosystem).
   // Falls back to plain JSON if the server/proxy didn't actually stream.
   function streamChat(cbs) {
     var started = false;
@@ -1069,6 +1072,7 @@
         try { data = JSON.parse(payload); } catch (e) { return; }
         if (data.error) { finished = true; if (cbs.onError) cbs.onError(data.message); return; }
         if (data.done) { finished = true; if (cbs.onDone) cbs.onDone(data); return; }
+        if (data.status && !started) { if (cbs.onStatus) cbs.onStatus(data.status); return; }
         if (typeof data.delta === "string") {
           if (!started) { started = true; if (cbs.onFirst) cbs.onFirst(); }
           if (cbs.onDelta) cbs.onDelta(data.delta);
@@ -1115,6 +1119,7 @@
 
     var bubble = null, raw = "";
     streamChat({
+      onStatus: function(status) { showStatus(status); },
       onFirst: function() {
         setLoading(false); // swap the typing dots for the live answer bubble
         bubble = document.createElement("div");
@@ -1363,6 +1368,20 @@
         break;
     }
   });
+
+  // Interim progress in place of the typing dots: a small "network" (a centre with
+  // businesses orbiting it) and a shimmering line of text.
+  function statusHtml(status) {
+    var text = String((status && status.text) || "").replace(/[&<>]/g, function(c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; });
+    return '<span class="wctx-eco" aria-hidden="true"><i></i><i></i><i></i></span><span class="wctx-status-text">' + text + '</span>';
+  }
+  function showStatus(status) {
+    if (!typingEl) return;
+    typingEl.className = "wctx-typing wctx-status";
+    typingEl.setAttribute("role", "status");
+    typingEl.innerHTML = statusHtml(status);
+    els.msgs.scrollTop = els.msgs.scrollHeight;
+  }
 
   var typingEl = null;
   function setLoading(on) {
@@ -1891,6 +1910,19 @@
 .wctx-typing-dot:nth-child(2) { animation-delay:0.2s; }\
 .wctx-typing-dot:nth-child(3) { animation-delay:0.4s; }\
 @keyframes wctx-dot-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }\
+.wctx-typing.wctx-status { max-width:none; gap:10px; animation:wctx-status-in .25s ease-out; }\
+.wctx-eco { position:relative; display:inline-block; width:20px; height:20px; flex:none; vertical-align:middle; }\
+.wctx-eco::before { content:""; position:absolute; left:7px; top:7px; width:6px; height:6px; border-radius:50%; background:#3b82f6; box-shadow:0 0 0 0 rgba(59,130,246,0.45); animation:wctx-eco-pulse 1.6s ease-out infinite; }\
+.wctx-eco i { position:absolute; left:8px; top:8px; width:4px; height:4px; border-radius:50%; background:#3b82f6; opacity:.75; animation:wctx-eco-orbit 1.8s linear infinite; }\
+.wctx-eco i:nth-child(2) { animation-delay:-0.6s; opacity:.55; }\
+.wctx-eco i:nth-child(3) { animation-delay:-1.2s; opacity:.35; }\
+.wctx-status-text { font-size:13px; line-height:1.4; background:linear-gradient(90deg,#64748b 0%,#64748b 35%,#3b82f6 50%,#64748b 65%,#64748b 100%); background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:wctx-shimmer 2.2s linear infinite; }\
+@keyframes wctx-eco-orbit { from { transform:rotate(0deg) translateX(9px); } to { transform:rotate(360deg) translateX(9px); } }\
+@keyframes wctx-eco-pulse { 0% { box-shadow:0 0 0 0 rgba(59,130,246,0.45); } 70%,100% { box-shadow:0 0 0 7px rgba(59,130,246,0); } }\
+@keyframes wctx-shimmer { from { background-position:100% 0; } to { background-position:-150% 0; } }\
+@keyframes wctx-status-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }\
+.wctx-bar-bubble .wctx-eco { margin-right:8px; }\
+@media (prefers-reduced-motion: reduce) { .wctx-eco::before, .wctx-eco i, .wctx-status-text, .wctx-typing.wctx-status { animation:none; } .wctx-status-text { color:#64748b; background:none; } }\
 \
 @media(max-width:768px){\
   .wctx-shell{inset:0;border-radius:0}\
