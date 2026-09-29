@@ -32,11 +32,23 @@
   }
   function safe(e) { return ["password", "file", "hidden"].indexOf(e.type) < 0; }
   function ownUi(e) { return !!e.closest("#wctx-root,[id^='wctx-'],[class*='wctx-']"); }
-  function visible(e) {
-    if (e.closest("[aria-hidden='true'],[inert]")) return false;
+  function shown(e) {
     if (e.checkVisibility) return e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
     var s = getComputedStyle(e);
     return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+  }
+  function visible(e) {
+    if (e.closest("[aria-hidden='true'],[inert]")) return false;
+    if (shown(e)) return true;
+    // Custom-styled checkbox / radio: the real input is transparent and a styled
+    // label is drawn instead (common on consent boxes). It counts when its label
+    // or its container is visible.
+    if (e.tagName === "INPUT" && (e.type === "checkbox" || e.type === "radio")) {
+      var ls = e.labels ? Array.prototype.slice.call(e.labels) : [];
+      if (ls.some(shown)) return true;
+      return !!e.parentElement && shown(e.parentElement) && !!(e.parentElement.innerText || "").trim();
+    }
+    return false;
   }
   function name(e, seen) {
     seen = seen || new Set();

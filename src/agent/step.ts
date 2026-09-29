@@ -313,6 +313,15 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       return { op: "CONSENT", i: t.i, say: say(lang, `To zgoda, którą musisz wyrazić sam(a): „${short(t.label, 90)}”. Zaznacz ją, jeśli się zgadzasz.`, `This is a consent only you can give: "${short(t.label, 90)}". Tick it if you agree.`) };
     }
     if (!isToggle && (noul(g, "final") ?? 1) >= 0.5) {
+      // Before the final send: an unticked consent on the page (privacy policy,
+      // terms) is the visitor's to tick - ask for it now rather than letting the
+      // form fail (or go out without it) when they click send.
+      const boxes = els.filter((e) => e.role === "checkbox" && !e.checked && !e.area).slice(0, 6);
+      if (boxes.length) {
+        const c = await jevAsk({ checkboxes: boxes.map((e) => short(e.label, 160)) }, Object.fromEntries(boxes.map((_, k) => [`c${k}`, { type: "noul", instructions: `Is \`checkboxes[${k}]\` a consent: accepting terms, rules or a privacy / data-processing policy, or a legal declaration?` } as JevQuestion])), 4000);
+        const k = boxes.findIndex((_, j) => (noul(c, `c${j}`) ?? 0) >= 0.6);
+        if (k >= 0) return { op: "CONSENT", i: boxes[k].i, say: say(lang, `Przed wysłaniem: to zgoda, którą musisz wyrazić sam(a): „${short(boxes[k].label, 90)}”. Zaznacz ją, jeśli się zgadzasz.`, `Before sending: this is a consent only you can give: "${short(boxes[k].label, 90)}". Tick it if you agree.`) };
+      }
       return { op: "CONFIRM", i: t.i, say: say(lang, `Wszystko gotowe. Sprawdź dane i kliknij „${short(t.label, 40)}”, żeby wysłać.`, `All set. Check the details and click "${short(t.label, 40)}" to send.`) };
     }
     if (!allowBack && (noul(g, "back") ?? 0) >= 0.6) return "back";
