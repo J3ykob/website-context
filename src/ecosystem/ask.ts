@@ -4,9 +4,11 @@
  * gets the question, and each one decides for itself - with the same retrieval
  * and Jev answerability gate its own bot uses on its own site
  * (WebsiteChat.canAnswer) - whether it can answer. The ones that confirm answer
- * through their own bot (grounded in their own site, never asking further).
+ * through their own bot (grounded in their own site, never asking further), and
+ * only replies that actually give the visitor what they asked for are relayed.
  */
 import { listTenants } from "../multi-tenant/tenant-registry.js";
+import { jevReplyFulfils } from "../llm/jev.js";
 import type { ChatMessage, ChatResponse, WebsiteChat } from "../llm/chat.js";
 
 export interface EcosystemAnswer { tenantId: string; label: string; answer: ChatResponse }
@@ -58,8 +60,13 @@ export async function askEcosystem(
       const can = await withTimeout(chat.canAnswer(question), MEMBER_TIMEOUT_MS);
       if (!can) return { id: m.id, can: can === null ? "timeout" : "no", answer: null };
       const answer = await withTimeout(chat.chat(messages.slice(-4), `ecosystem:${fromTenantId}:${Date.now()}`, undefined, { noPartners: true }), MEMBER_TIMEOUT_MS);
-      const ok = !!answer && answer.grounded !== false && !answer.unknownQuestion && !!answer.message.trim();
-      return { id: m.id, can: "yes", answer: ok ? { tenantId: m.id, label: labelOf(m), answer: answer! } : null };
+      if (!answer || answer.grounded === false || answer.unknownQuestion || !answer.message.trim()) return { id: m.id, can: "yes", answer: null };
+      // Relevant knowledge is not the same as a yes: relay only a reply that gives
+      // the visitor what they asked for (not "we don't do that" / "no information").
+      // Without Jev nothing is relayed - the visitor gets our own honest reply.
+      const fulfils = await jevReplyFulfils(question, answer.message);
+      if (fulfils === null || fulfils < (Number(process.env.JEV_GATE_MIN) || 0.5)) return { id: m.id, can: `declined:${fulfils?.toFixed(2) ?? "?"}`, answer: null };
+      return { id: m.id, can: "yes", answer: { tenantId: m.id, label: labelOf(m), answer } };
     } catch (e) {
       console.warn(`[ecosystem] ${fromTenantId} -> ${m.id} failed: ${(e as Error).message}`);
       return { id: m.id, can: "error", answer: null };
@@ -67,7 +74,7 @@ export async function askEcosystem(
   });
   const answers = results.map((r) => r.answer).filter((a): a is EcosystemAnswer => a !== null);
   const yes = results.filter((r) => r.can === "yes").map((r) => r.id);
-  const other = results.filter((r) => r.can === "timeout" || r.can === "error").map((r) => `${r.id}:${r.can}`);
+  const other = results.filter((r) => r.can !== "yes" && r.can !== "no").map((r) => `${r.id}:${r.can}`);
   console.log(`[ecosystem] ${fromTenantId}: asked ${members.length}, can answer: ${yes.join(", ") || "none"}${other.length ? `, ${other.join(" ")}` : ""} -> relaying ${Math.min(answers.length, MAX_RELAYED)} (${Date.now() - t0}ms)`);
   return answers.slice(0, MAX_RELAYED);
 }

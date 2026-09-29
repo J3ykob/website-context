@@ -168,6 +168,22 @@ export async function jevCheckNoEvidenceReply(question: string, reply: string): 
   return d && e && typeof d.noul === "number" && typeof e.noul === "number" ? { denies: d.noul, external: e.noul } : null;
 }
 
+/**
+ * Ecosystem relay check: P(a member business's `reply` gives the visitor what
+ * `question` asked for). A reply saying it does not offer it, has no information,
+ * or only points to contact scores low. null when Jev is unavailable.
+ */
+export async function jevReplyFulfils(question: string, reply: string): Promise<number | null> {
+  const answers = await jevAsk({ question, reply }, {
+    fulfils: {
+      type: "noul",
+      instructions: "Does `reply` give a positive, useful answer to `question`: the business says it offers, has, sells or can do what was asked, or states the specific fact that was asked? Answer no if it says it does not offer or do it, says it has no information about it, or only tells the visitor to get in touch.",
+    },
+  });
+  const f = answers?.fulfils as JevNoulAnswer | undefined;
+  return f && typeof f.noul === "number" ? f.noul : null;
+}
+
 /** Split a reply into checkable statements (sentences and list items). */
 export function splitStatements(reply: string): string[] {
   return reply
