@@ -22,7 +22,7 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
-import { retrieveFromCatalog, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
+import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { collectTurn, startSession, type CollectSession, type Inquiry } from "../flows/collect.js";
 
@@ -925,7 +925,9 @@ export class WebsiteChat {
   private async runCollect(flow: FlowDefinition, s: CollectSession, sessionKey: string, message: string): Promise<ChatResponse> {
     const llm = (system: string, user: string, maxTokens = 700) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
     try {
-      const r = await collectTurn(flow, s, message, this.brandName, llm);
+      const cat = this.knowledgeCatalog;
+      const knowledge = cat ? (q: string) => lexicalSnippets(q, cat, 5) : undefined;
+      const r = await collectTurn(flow, s, message, this.brandName, llm, knowledge);
       if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [] }; }
       if ("inquiry" in r) {
         this.collectSessions.delete(sessionKey);
