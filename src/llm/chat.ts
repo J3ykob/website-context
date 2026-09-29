@@ -24,6 +24,7 @@ import { validateOutput } from "../security/output-guard.js";
 import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
+import { collectTurn, startSession, type CollectSession, type Inquiry } from "../flows/collect.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -43,6 +44,11 @@ export interface ChatConfig {
   // Jev-classified catalog of every chunk (knowledge-catalog.json). When present
   // and Jev is reachable, retrieval judges all chunks of the relevant catalogs.
   knowledgeCatalog?: KnowledgeCatalog | null;
+  // "In chat" flows: who the assistant speaks for, and where a confirmed
+  // inquiry goes (stored + emailed to the owner). Resolves false when it could
+  // not be recorded, so the customer is never told it was sent when it wasn't.
+  brandName?: string;
+  onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
 }
 
 export interface ChatResponse {
@@ -264,6 +270,9 @@ export class WebsiteChat {
   // the candidates until the visitor picks (multi-flow disambiguation).
   private pendingDisambig: Map<string, { flows: FlowDefinition[]; at: number }> = new Map();
   private recentlyCompletedFlows: Map<string, string> = new Map(); // sessionKey → flowId
+  private collectSessions: Map<string, CollectSession> = new Map();
+  private brandName = "";
+  private onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
 
   constructor(
     embeddingProvider: EmbeddingProvider,
@@ -278,6 +287,8 @@ export class WebsiteChat {
     this.context = context;
     this.systemPromptExtra = config.systemPromptExtra || "";
     this.knowledgeCatalog = config.knowledgeCatalog || null;
+    this.brandName = config.brandName || "";
+    this.onInquiry = config.onInquiry;
 
     if (config.llmProvider === "claude-cli") {
       this.backend = new ClaudeCLIBackend(config.claudeCli);
@@ -398,6 +409,14 @@ export class WebsiteChat {
         )
       : messages;
 
+    // An "in chat" flow (order / inquiry) in progress takes every message.
+    const cs = this.collectSessions.get(effectiveSessionKey);
+    if (cs) {
+      const flow = this.context.flows.find((f) => f.id === cs.flowId && f.status === "active");
+      if (flow && Date.now() - cs.at < 30 * 60 * 1000) return this.runCollect(flow, cs, effectiveSessionKey, inputValidation.sanitized);
+      this.collectSessions.delete(effectiveSessionKey);
+    }
+
     // If there's an active flow session collecting remaining inputs
     if (this.hasActiveFlowSession(effectiveSessionKey)) {
       const session = this.flowSessions.get(effectiveSessionKey)!;
@@ -431,6 +450,7 @@ export class WebsiteChat {
       const picked = await this.pickFromCandidates(inputValidation.sanitized, pending.flows);
       this.pendingDisambig.delete(effectiveSessionKey);
       if (picked && picked.executionMode === "agent") return this.startAgentFlow(picked, inputValidation.sanitized);
+      if (picked && picked.executionMode === "collect") return this.startCollect(picked, effectiveSessionKey, inputValidation.sanitized);
       if (picked) {
         const started = this.beginFlowSession(effectiveSessionKey, picked);
         return { message: started.message, sources: [], flowSession: { active: true, status: "choosing", flowId: picked.id, complete: false } };
@@ -445,6 +465,7 @@ export class WebsiteChat {
     if (activeFlows.length > 0) {
       const picked = await this.classifyFlowIntent(inputValidation.sanitized, activeFlows);
       if (picked.length === 1 && picked[0].executionMode === "agent") return this.startAgentFlow(picked[0], inputValidation.sanitized);
+      if (picked.length === 1 && picked[0].executionMode === "collect") return this.startCollect(picked[0], effectiveSessionKey, inputValidation.sanitized);
       if (picked.length === 1) {
         const started = this.beginFlowSession(effectiveSessionKey, picked[0]);
         return {
@@ -785,7 +806,7 @@ export class WebsiteChat {
     // lose streaming for every ordinary question.
     const activeFlowsS = this.context.flows.filter((f) => f.status === "active");
     const pendingS = this.pendingDisambig.get(effectiveSessionKey);
-    const flowInPlay = this.hasActiveFlowSession(effectiveSessionKey)
+    const flowInPlay = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey)
       || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000)
       || (activeFlowsS.length > 0 && (await this.classifyFlowIntent(inputValidation.sanitized, activeFlowsS)).length > 0);
     if (flowInPlay) {
@@ -873,6 +894,42 @@ export class WebsiteChat {
 
   // Start a goal-driven ("agent") flow: no input collection here; the widget
   // drives the page with /api/agent/step and asks the visitor for data as needed.
+  // ── "In chat" flows: the assistant collects an order / inquiry itself ──
+  private startCollect(flow: FlowDefinition, sessionKey: string, message: string): Promise<ChatResponse> {
+    const s = startSession(flow);
+    this.collectSessions.set(sessionKey, s);
+    return this.runCollect(flow, s, sessionKey, message);
+  }
+
+  private async runCollect(flow: FlowDefinition, s: CollectSession, sessionKey: string, message: string): Promise<ChatResponse> {
+    const llm = (system: string, user: string, maxTokens = 700) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
+    try {
+      const r = await collectTurn(flow, s, message, this.brandName, llm);
+      if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [] }; }
+      if ("inquiry" in r) {
+        this.collectSessions.delete(sessionKey);
+        const ok = this.onInquiry ? await this.onInquiry(r.inquiry).catch(() => false) : false;
+        if (ok) return { message: r.reply, sources: [] };
+        console.error(`[collect] inquiry for flow ${flow.id} could not be recorded`);
+        return { message: this.collectFailed(s.language, true), sources: [] };
+      }
+      return { message: r.reply, sources: [] };
+    } catch (e) {
+      console.warn(`[collect] turn failed: ${(e as Error).message}`);
+      return { message: this.collectFailed(s.language, false), sources: [] };
+    }
+  }
+
+  // Honest failure messages for "in chat" flows, when the model itself cannot be
+  // used: Polish or English, by the language the model named earlier in the chat.
+  private collectFailed(language: string | undefined, sending: boolean): string {
+    const pl = language === "Polish";
+    if (sending) return pl
+      ? "Przepraszam, nie udało mi się teraz przekazać zapytania. Skontaktuj się z nami bezpośrednio, a chętnie pomożemy."
+      : "Sorry, I couldn't pass your request on right now. Please contact us directly and we'll be happy to help.";
+    return pl ? "Przepraszam, coś poszło nie tak. Napisz proszę jeszcze raz." : "Sorry, something went wrong. Please write that again.";
+  }
+
   private async startAgentFlow(flow: FlowDefinition, message: string): Promise<ChatResponse> {
     // Language by Jev, not keyword lists: works for any language the visitor uses.
     const l = await jevAsk({ message }, { lang: { type: "choice", instructions: "In which language is `message` written?", criteria: { pl: "Polish", en: "English", other: "Any other language" } } }, 3000);

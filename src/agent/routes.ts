@@ -8,6 +8,8 @@ import type { Express, Request, RequestHandler } from "express";
 import { getFlow, getFlows, saveFlow } from "../flows/flow-store.js";
 import { getTenant } from "../multi-tenant/tenant-registry.js";
 import type { FlowDefinition } from "../context/types.js";
+import { deriveFields } from "../flows/collect.js";
+import { OpenRouterProvider } from "../llm/openrouter-provider.js";
 import { jevAsk, jevEnabled } from "../llm/jev.js";
 import { lexicalSnippets, type KnowledgeCatalog } from "../knowledge/catalog.js";
 import { loadKnowledgeCatalog } from "../multi-tenant/tenant-manager.js";
@@ -56,15 +58,25 @@ export function onTenantSite(url: string, siteUrl: string): boolean {
   } catch { return false; }
 }
 
-// Validates an owner-written agent flow; returns the error message or the clean fields.
-function agentFields(b: any, siteUrl: string): { error: string } | { name: string; goal: string; startUrl: string } {
+// Validates an owner-written flow; returns the error message or the clean fields.
+// mode "agent": the assistant works on a page of the site (start page required);
+// mode "collect": the assistant gathers an order / inquiry in the chat itself.
+function agentFields(b: any, siteUrl: string): { error: string } | { mode: "agent" | "collect"; name: string; goal: string; startUrl?: string } {
+  const mode = b?.mode === "collect" ? "collect" : "agent";
   const name = str(b?.name, 120).trim(), goal = str(b?.goal, 2000).trim();
+  if (name.length < 3) return { error: "Give the flow a short name (e.g. \"Book an appointment\")." };
+  if (goal.length < 20) return { error: mode === "collect" ? "Describe what the assistant should collect from the customer (e.g. product, quantity, delivery date and address, contact)." : "Describe what the assistant should do in a sentence or two." };
+  if (mode === "collect") return { mode, name, goal };
   let startUrl = str(b?.startUrl, 500).trim();
   if (startUrl && !/^https?:\/\//i.test(startUrl)) startUrl = `https://${startUrl}`;
-  if (name.length < 3) return { error: "Give the flow a short name (e.g. \"Book an appointment\")." };
-  if (goal.length < 20) return { error: "Describe what the assistant should do in a sentence or two." };
   if (!onTenantSite(startUrl, siteUrl)) return { error: `The start page must be on your site (${siteUrl}) - the assistant runs the flow there.` };
-  return { name, goal, startUrl };
+  return { mode, name, goal, startUrl };
+}
+
+// The fields an "in chat" flow collects, derived from the owner's description.
+async function collectFieldsFor(goal: string) {
+  const or = new OpenRouterProvider({ maxTokens: 800, temperature: 0 });
+  return deriveFields(goal, async (system, user, maxTokens) => (await or.chat([{ role: "system", content: system }, { role: "user", content: user }], { maxTokens })).content);
 }
 
 export interface AgentRouteDeps { auth: RequestHandler; onFlowsChanged: (tenantId: string) => void }
@@ -77,24 +89,34 @@ export function registerAgentRoutes(app: Express, deps?: AgentRouteDeps): void {
       const f = agentFields(req.body, getTenant(tenantId)?.siteUrl || "");
       if ("error" in f) { res.status(400).json({ error: f.error }); return; }
       if ((await getFlows(tenantId)).length >= 50) { res.status(400).json({ error: "Flow limit reached (50)." }); return; }
+      let requiredInputs: FlowDefinition["requiredInputs"] = [];
+      if (f.mode === "collect") {
+        try { requiredInputs = await collectFieldsFor(f.goal); }
+        catch (e: any) { res.status(400).json({ error: "Could not work out what to collect from that description - try listing the details (e.g. product, quantity, delivery date, phone)." }); return; }
+      }
       const now = new Date().toISOString();
       const flow: FlowDefinition = {
-        id: `agent_${Date.now().toString(36)}`, name: f.name, description: f.goal, triggerPhrases: [], steps: [], requiredInputs: [],
-        createdAt: now, updatedAt: now, status: "active", executionMode: "agent", startUrl: f.startUrl,
+        id: `${f.mode}_${Date.now().toString(36)}`, name: f.name, description: f.goal, triggerPhrases: [], steps: [], requiredInputs,
+        createdAt: now, updatedAt: now, status: "active", executionMode: f.mode, ...(f.startUrl ? { startUrl: f.startUrl } : {}),
       };
       await saveFlow(tenantId, flow);
       deps.onFlowsChanged(tenantId);
-      console.log(`[flows] ${tenantId}: agent flow "${flow.name}" created (${flow.startUrl})`);
+      console.log(`[flows] ${tenantId}: ${f.mode} flow "${flow.name}" created (${flow.startUrl || flow.requiredInputs.map((i) => i.name).join(", ")})`);
       res.json(flow);
     });
     // Edit an agent flow's name / goal / start page.
     app.put("/api/dashboard/flows/:id/agent", deps.auth, async (req, res) => {
       const tenantId = (req as any).tenantId as string;
       const existing = await getFlow(tenantId, String(req.params.id));
-      if (!existing || existing.executionMode !== "agent") { res.status(404).json({ error: "Not found" }); return; }
-      const f = agentFields(req.body, getTenant(tenantId)?.siteUrl || "");
+      if (!existing || (existing.executionMode !== "agent" && existing.executionMode !== "collect")) { res.status(404).json({ error: "Not found" }); return; }
+      const f = agentFields({ ...req.body, mode: existing.executionMode }, getTenant(tenantId)?.siteUrl || "");
       if ("error" in f) { res.status(400).json({ error: f.error }); return; }
-      const flow = await saveFlow(tenantId, { ...existing, name: f.name, description: f.goal, startUrl: f.startUrl, updatedAt: new Date().toISOString() });
+      let requiredInputs = existing.requiredInputs;
+      if (f.mode === "collect" && f.goal !== existing.description) {
+        try { requiredInputs = await collectFieldsFor(f.goal); }
+        catch { res.status(400).json({ error: "Could not work out what to collect from that description." }); return; }
+      }
+      const flow = await saveFlow(tenantId, { ...existing, name: f.name, description: f.goal, requiredInputs, ...(f.startUrl ? { startUrl: f.startUrl } : {}), updatedAt: new Date().toISOString() });
       deps.onFlowsChanged(tenantId);
       res.json(flow);
     });

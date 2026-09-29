@@ -401,6 +401,14 @@
       padding: 2px 7px; border-radius: 999px; color: var(--blue); background: rgba(59,130,246,0.12);
     }
     .form-hint { font-size: 12px; color: var(--text-3); margin: -4px 0 10px; }
+    .mode-switch { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+    .mode-switch label {
+      display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 13px; color: var(--text-2, var(--text));
+      padding: 10px 12px; border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; background: rgba(255,255,255,0.03);
+    }
+    .mode-switch label:has(input:checked) { border-color: var(--blue); background: rgba(59,130,246,0.08); }
+    .mode-switch input { margin-top: 2px; accent-color: var(--blue); }
+    .mode-switch b { color: var(--text); font-weight: 600; }
     .form-error { font-size: 12px; color: #f87171; min-height: 16px; }
 
     /* ─── Knowledge Base ─── */
@@ -778,11 +786,16 @@
     <div class="modal-overlay" id="agent-flow-modal">
       <div class="modal">
         <div class="section-title">Describe a flow</div>
-        <div class="form-hint">The assistant does this on your site for visitors, step by step, asking them for their choices and details. Consents, payment and the final submit always stay with the visitor.</div>
+        <div class="mode-switch">
+          <label><input type="radio" name="agent-flow-mode" value="agent" checked onchange="setAgentFlowMode()" /><span><b>On my website</b> - the assistant goes through a page for the visitor (a booking, a contact form). Consents, payment and the final submit stay with the visitor.</span></label>
+          <label><input type="radio" name="agent-flow-mode" value="collect" onchange="setAgentFlowMode()" /><span><b>In the chat</b> - the assistant takes an order or inquiry itself, shows the customer a summary to confirm, and emails it to you.</span></label>
+        </div>
         <input type="text" id="agent-flow-name" placeholder="Name, e.g. Book an appointment" maxlength="120" />
         <textarea id="agent-flow-goal" rows="5" maxlength="2000" placeholder="What should the assistant do? e.g. Book the visitor for an exam: pick the exam package that fits their job, the location and a date they want, then fill in their details."></textarea>
-        <input type="text" id="agent-flow-url" placeholder="Start page, e.g. https://booking.yoursite.com" maxlength="500" />
-        <div class="form-hint">The page where the process begins. It must be on your site, with the Whisp widget installed.</div>
+        <div id="agent-flow-url-wrap">
+          <input type="text" id="agent-flow-url" placeholder="Start page, e.g. https://booking.yoursite.com" maxlength="500" style="width:100%" />
+          <div class="form-hint" style="margin-top:6px">The page where the process begins. It must be on your site, with the Whisp widget installed.</div>
+        </div>
         <div class="form-error" id="agent-flow-error"></div>
         <div class="modal-actions">
           <button class="btn btn-sm btn-outline" onclick="closeAgentFlowModal()">Cancel</button>
@@ -1070,7 +1083,7 @@
       }
 
       panel.innerHTML = flows.map(function(f) {
-        if (f.executionMode === "agent") return agentSkillRow(f);
+        if (f.executionMode === "agent" || f.executionMode === "collect") return agentSkillRow(f);
         var triggers = (f.triggerPhrases || []).slice(0,3).join(", ");
         return '<div><div class="skill-item">' +
           '<div class="skill-info"><span class="skill-name" onclick="toggleSkillEdit(\'' + f.id + '\')">' + esc(f.name) + '</span>' +
@@ -1084,16 +1097,29 @@
     // ─── Agent flows (goal-driven: described, or recorded once) ────
     var SITE_HREF = "";
     function agentSkillRow(f) {
+      var collect = f.executionMode === "collect";
+      var sub = collect ? "Collects: " + (f.requiredInputs || []).map(function(i) { return i.label; }).join(", ") : (f.description || "");
       return '<div><div class="skill-item">' +
-        '<div class="skill-info"><span class="skill-tag">Agent</span><span class="skill-name" onclick="toggleSkillEdit(\'' + f.id + '\')">' + esc(f.name) + '</span>' +
-        '<span class="skill-triggers">' + esc(f.description || "") + '</span></div>' +
+        '<div class="skill-info"><span class="skill-tag">' + (collect ? "Chat form" : "Agent") + '</span><span class="skill-name" onclick="toggleSkillEdit(\'' + f.id + '\')">' + esc(f.name) + '</span>' +
+        '<span class="skill-triggers">' + esc(sub) + '</span></div>' +
         '<label class="toggle"><input type="checkbox" ' + (f.status === "active" ? "checked" : "") + ' onchange="toggleFlowStatus(\'' + f.id + '\',this.checked)"><span class="toggle-slider"></span></label></div>' +
         '<div class="skill-edit-form" id="skill-edit-' + f.id + '">' +
         '<input type="text" id="agent-edit-name-' + f.id + '" value="' + escAttr(f.name) + '" placeholder="Name" maxlength="120" />' +
         '<textarea id="agent-edit-goal-' + f.id + '" maxlength="2000" placeholder="What should the assistant do?">' + esc(f.description || "") + '</textarea>' +
-        '<input type="text" id="agent-edit-url-' + f.id + '" value="' + escAttr(f.startUrl || "") + '" placeholder="Start page" maxlength="500" />' +
+        (collect ? '' : '<input type="text" id="agent-edit-url-' + f.id + '" value="' + escAttr(f.startUrl || "") + '" placeholder="Start page" maxlength="500" />') +
         '<div class="form-error" id="agent-edit-error-' + f.id + '"></div>' +
         '<div style="display:flex;gap:6px"><button class="btn btn-sm btn-dark" onclick="saveAgentEdit(\'' + f.id + '\')">Save</button><button class="btn btn-sm btn-ghost" onclick="toggleSkillEdit(\'' + f.id + '\')">Cancel</button></div></div></div>';
+    }
+    function agentFlowMode() {
+      var r = document.querySelector('input[name="agent-flow-mode"]:checked');
+      return r ? r.value : "agent";
+    }
+    function setAgentFlowMode() {
+      var collect = agentFlowMode() === "collect";
+      document.getElementById("agent-flow-url-wrap").style.display = collect ? "none" : "";
+      document.getElementById("agent-flow-goal").placeholder = collect
+        ? "What should the assistant collect? e.g. Take a building-materials order: which products and how much, the delivery date and address, the customer's name and phone."
+        : "What should the assistant do? e.g. Book the visitor for an exam: pick the exam package that fits their job, the location and a date they want, then fill in their details.";
     }
     function openAgentFlowModal() {
       var u = document.getElementById("agent-flow-url");
@@ -1119,6 +1145,7 @@
       var btn = document.getElementById("agent-flow-save");
       btn.disabled = true;
       var ok = await postAgentFlow(API + "/api/dashboard/flows/agent", "POST", {
+        mode: agentFlowMode(),
         name: document.getElementById("agent-flow-name").value,
         goal: document.getElementById("agent-flow-goal").value,
         startUrl: document.getElementById("agent-flow-url").value,
@@ -1130,7 +1157,7 @@
       var ok = await postAgentFlow(API + "/api/dashboard/flows/" + id + "/agent", "PUT", {
         name: document.getElementById("agent-edit-name-" + id).value,
         goal: document.getElementById("agent-edit-goal-" + id).value,
-        startUrl: document.getElementById("agent-edit-url-" + id).value,
+        startUrl: (document.getElementById("agent-edit-url-" + id) || { value: "" }).value,
       }, document.getElementById("agent-edit-error-" + id));
       if (ok) loadSkills();
     }

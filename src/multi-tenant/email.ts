@@ -86,3 +86,36 @@ whisp.so`,
     console.error(`[email] Failed to send bot-ready email to ${email}:`, error.message);
   }
 }
+
+/**
+ * A customer's confirmed order / inquiry from an "in chat" flow, to the owner.
+ */
+export async function sendInquiryEmail(
+  email: string,
+  brand: string,
+  inquiry: { flowName: string; fields: { label: string; value: string }[]; transcript: string[]; at: string },
+): Promise<boolean> {
+  const lines = inquiry.fields.map((f) => `${f.label}: ${f.value}`).join("\n");
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: email,
+      replyTo: "jakub@whisp.so",
+      subject: `Nowe zapytanie z czatu: ${inquiry.flowName} (${brand})`,
+      text: `Klient wysłał przez asystenta na stronie zapytanie „${inquiry.flowName}” i potwierdził dane.
+
+${lines}
+
+Rozmowa:
+${inquiry.transcript.join("\n")}
+
+Wysłano ${inquiry.at} przez Whisp.`,
+    });
+    if (error) { console.error(`[email] inquiry email to ${email} failed:`, error.message); return false; }
+    console.log(`[email] Inquiry email sent to ${email} (${inquiry.flowName})`);
+    return true;
+  } catch (e: any) {
+    console.error(`[email] inquiry email to ${email} failed:`, e.message);
+    return false;
+  }
+}

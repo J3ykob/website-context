@@ -15,6 +15,7 @@ import { getFlows } from "../flows/flow-store.js";
 import { getTenant } from "./tenant-registry.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
 import { CATALOG_FILE, type KnowledgeCatalog } from "../knowledge/catalog.js";
+import type { Inquiry } from "../flows/collect.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -158,6 +159,8 @@ export class TenantManager {
         siteUrl: meta.siteUrl,
       },
       systemPromptExtra,
+      brandName: getTenant(tenantId)?.brandName || new URL(meta.siteUrl).hostname.replace(/^www\./, ""),
+      onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
     });
 
     // Load ONLY owner-curated context notes (context_notes.json). We deliberately no
@@ -239,4 +242,31 @@ export async function loadKnowledgeCatalog(tenantId: string): Promise<KnowledgeC
     console.warn(`[tenant-manager] knowledge catalog load failed for ${tenantId}: ${e?.message || e}`);
     return null;
   }
+}
+
+/**
+ * A confirmed "in chat" inquiry: kept in R2 (tenants/<id>/inquiries.json, last
+ * 500) and emailed to the tenant's owner. True when at least one of the two
+ * worked, so the customer is only told "sent" when it really was recorded.
+ */
+async function recordInquiry(tenantId: string, inquiry: Inquiry): Promise<boolean> {
+  const { downloadFromR2, uploadToR2 } = await import("../storage/r2.js");
+  const key = `tenants/${tenantId}/inquiries.json`;
+  let stored = false;
+  try {
+    const buf = await downloadFromR2(key);
+    const list: Inquiry[] = buf ? JSON.parse(buf.toString("utf-8")) : [];
+    list.push(inquiry);
+    stored = await uploadToR2(key, JSON.stringify(list.slice(-500)), "application/json");
+  } catch (e: any) {
+    console.error(`[inquiry] ${tenantId}: store failed: ${e?.message || e}`);
+  }
+  const t = getTenant(tenantId);
+  let emailed = false;
+  if (t?.email) {
+    const { sendInquiryEmail } = await import("./email.js");
+    emailed = await sendInquiryEmail(t.email, t.brandName || t.domain, inquiry);
+  }
+  console.log(`[inquiry] ${tenantId}: "${inquiry.flowName}" stored=${stored} emailed=${emailed}`);
+  return stored || emailed;
 }

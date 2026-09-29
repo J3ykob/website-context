@@ -145,9 +145,11 @@ export interface FlowDefinition {
   updatedAt: string;
   lastTestedAt?: string;
   status: "draft" | "active" | "disabled";
-  executionMode?: "background" | "guided" | "auto" | "highlight" | "agent";
+  executionMode?: "background" | "guided" | "auto" | "highlight" | "agent" | "collect";
   // "agent" flows: the description is the goal; Jev drives the page step by step
   // from the widget (no recorded steps). startUrl = where the process begins.
+  // "collect" flows: the description says what to gather in the chat; the fields
+  // (requiredInputs) are derived from it; confirmed inquiries go to the owner.
   startUrl?: string;
 }
 
