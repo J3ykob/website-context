@@ -157,7 +157,10 @@ class OpenRouterBackend implements LLMBackend {
   // Small, fast model for internal classification (answerability gate, flow/mode
   // intent) — a big model is overkill for a one-word decision and adds latency.
   async classify(system: string, prompt: string): Promise<string> {
-    const model = process.env.OPENROUTER_FAST_MODEL || "ibm-granite/granite-4.1-8b";
+    // Only the fallback when Jev is unavailable, so accuracy beats speed:
+    // gpt-4o-mini routed 6/6 test messages (gemini-2.5-flash-lite 5/6); the
+    // previous default, ibm-granite/granite-4.1-8b, no longer exists (404).
+    const model = process.env.OPENROUTER_FAST_MODEL || "openai/gpt-4o-mini";
     const result = await this.provider.chat(
       [{ role: "system", content: system }, { role: "user", content: prompt }],
       { model, maxTokens: 8, temperature: 0 },
