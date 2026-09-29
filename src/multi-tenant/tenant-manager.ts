@@ -164,7 +164,10 @@ export class TenantManager {
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
       // Every other business of this tenant's ecosystem decides whether it can answer what its own site can't.
       askEcosystem: ecosystemOf(getTenant(tenantId))
-        ? (messages, onStart) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, (id) => this.getChatForTenant(id), onStart)
+        ? (messages, onStart) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
+            chatFor: (id) => this.getChatForTenant(id),
+            embed: (texts) => this.bgeProvider.embed(texts),
+          }, onStart)
         : undefined,
     });
 
