@@ -8,6 +8,7 @@
  * nothing is sent before the customer confirms it.
  */
 import type { FlowDefinition, FlowInput } from "../context/types.js";
+import { jevAsk } from "../llm/jev.js";
 
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
 
@@ -125,12 +126,25 @@ type OfferVerdict = { status: "ok" } | { status: "several" | "not_offered"; opti
 async function checkOffer(value: string, field: FlowInput, knowledge: (q: string) => string[], llm: Llm): Promise<OfferVerdict> {
   const passages = knowledge(value).slice(0, 5);
   if (!passages.length) return { status: "ok" };
+  // Whether it is offered is a classification: Jev (stable across runs; the
+  // answer model flip-flopped). Acted on only when clear; otherwise accepted.
+  const a = await jevAsk({ business_information: passages, customer_request: value }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` part of the business's offer?", criteria: {
+    offered: "Yes: the excerpts show the business offers exactly this, or clearly this.",
+    several: "The excerpts show several different offers that could be what the customer means, and it is unclear which one.",
+    not_offered: "No: the excerpts show what the business offers in this area, and what was asked is not among it (a different kind of product or service).",
+    unknown: "The excerpts do not say whether the business offers this.",
+  } } }, 6000);
+  const probs = ((a?.status as any)?.probabilities || {}) as Record<string, number>;
+  const status = (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : (probs.several ?? 0) >= 0.5 ? "several" : a ? "ok" : "fallback";
+  if (status === "ok") return { status: "ok" };
+  // The concrete alternatives (or, without Jev, the whole judgment) by the model.
   const j = parseJsonObject(await llm(
     "You check a customer's request against a business's own information and output only JSON.",
     `The business's own information (excerpts from its website):
 ${passages.map((p, k) => `[${k + 1}] ${p}`).join("\n")}
 
 The customer asked for (${field.label}): """${value}"""
+${status === "fallback" ? "" : `It was judged: ${status === "several" ? "several different offers could be what they mean" : "not part of the offer"}.`}
 
 Output {"status": "...", "missing": [...], "options": [...]}:
 - "status": "offered" if the excerpts show the business offers what was asked; "several" if the excerpts list several different offers and it is unclear which one the customer means; "not_offered" if the excerpts list what the business offers in this area and (some of) what was asked is not among it; "unknown" if the excerpts do not say.
@@ -138,20 +152,20 @@ Output {"status": "...", "missing": [...], "options": [...]}:
 - "options": for "several" or "not_offered", up to 5 concrete offers from the excerpts that serve the SAME need (the same kind of product or service the customer wants) - names of specific products, product lines, services or packages, each written exactly as in the excerpts. Something that only shares a word with the request (e.g. tiles in a "cement" style for someone who wants cement) is not the same need. Empty if nothing serves that need.`,
     400,
   ));
-  const status = j?.status;
-  if (status !== "several" && status !== "not_offered") return { status: "ok" };
+  const verdict = status === "fallback" ? j?.status : status;
+  if (verdict !== "several" && verdict !== "not_offered") return { status: "ok" };
   const text = passages.join("\n").toLowerCase();
-  const options = (Array.isArray(j.options) ? j.options : [])
+  const options = (Array.isArray(j?.options) ? j.options : [])
     .filter((o: unknown): o is string => typeof o === "string" && o.trim().length > 1 && text.includes(o.trim().toLowerCase()))
     .map((o: string) => o.trim().slice(0, 120))
     .slice(0, 5);
-  const missing = (Array.isArray(j.missing) ? j.missing : []).filter((m: unknown): m is string => typeof m === "string").slice(0, 5);
+  const missing = (Array.isArray(j?.missing) ? j.missing : []).filter((m: unknown): m is string => typeof m === "string").slice(0, 5);
   if (!options.length) {
     // Nothing to offer instead. "several" without names is just unclear: accept.
     // "not offered": keep their words (the team confirms), but say so honestly.
-    return status === "not_offered" ? { status: "not_seen", missing } : { status: "ok" };
+    return verdict === "not_offered" ? { status: "not_seen", missing } : { status: "ok" };
   }
-  return { status, options, missing };
+  return { status: verdict, options, missing };
 }
 
 /**
