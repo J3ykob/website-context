@@ -2805,6 +2805,26 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
   res.json({ ok: true, tenantId: tenant.id });
 });
 
+// Admin: put tenants into an ecosystem (settings.ecosystem). Within an ecosystem,
+// a question one bot can't answer is broadcast to the others (src/ecosystem/ask.ts).
+// body: { ecosystem: "warszawa-budowlanka", tenantIds: [...] } - ecosystem "" removes them.
+app.post("/api/admin/ecosystem", (req, res) => {
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
+  const ecosystem = String(req.body?.ecosystem ?? "").trim().slice(0, 60);
+  const ids: string[] = Array.isArray(req.body?.tenantIds) ? req.body.tenantIds.map(String).slice(0, 1000) : [];
+  const updated: string[] = [], missing: string[] = [];
+  for (const id of ids) {
+    const t = getTenant(id);
+    if (!t) { missing.push(id); continue; }
+    const settings = { ...(t.settings || {}) };
+    if (ecosystem) settings.ecosystem = ecosystem; else delete settings.ecosystem;
+    updateTenant(id, { settings });
+    tenantManager.evictTenant(id);
+    updated.push(id);
+  }
+  res.json({ ok: true, ecosystem, updated, missing });
+});
+
 // Admin upload screenshot (from VPS scraper)
 app.post("/api/admin/screenshot/:tenantId", (req, res) => {
   if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });

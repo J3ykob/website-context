@@ -49,6 +49,10 @@ export interface ChatConfig {
   // not be recorded, so the customer is never told it was sent when it wasn't.
   brandName?: string;
   onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
+  // Ecosystem broadcast (src/ecosystem/ask.ts): when our own content has nothing
+  // on the question, the other businesses of our ecosystem each decide from their
+  // own knowledge whether they can answer; their answers come back here.
+  askEcosystem?: (messages: ChatMessage[]) => Promise<{ tenantId: string; label: string; answer: ChatResponse }[]>;
 }
 
 export interface ChatResponse {
@@ -58,6 +62,8 @@ export interface ChatResponse {
   // is an honest fallback, not grounded in the tenant's content. The server uses
   // this to log/quarantine demos that are active but effectively empty.
   grounded?: boolean;
+  // Set when the answer was relayed from ecosystem businesses' bots.
+  partners?: { tenantId: string; label: string }[];
   // Set when the model flagged that site content does not cover the question
   // ([[gap: ...]] marker or the log_unknown action) — the server logs it to the
   // D1 gap journal that the dashboard's knowledge-gap view reads.
@@ -264,6 +270,7 @@ export class WebsiteChat {
   private context: WebsiteContext;
   private systemPromptExtra: string;
   private knowledgeCatalog: KnowledgeCatalog | null;
+  private askEcosystem: ChatConfig["askEcosystem"];
   private contextNotes: { question: string; answer: string; addedAt: string }[] = [];
   private flowSessions: Map<string, FlowSession> = new Map();
   // When a message plausibly matches 2+ flows, we ask which one and remember
@@ -289,6 +296,7 @@ export class WebsiteChat {
     this.knowledgeCatalog = config.knowledgeCatalog || null;
     this.brandName = config.brandName || "";
     this.onInquiry = config.onInquiry;
+    this.askEcosystem = config.askEcosystem;
 
     if (config.llmProvider === "claude-cli") {
       this.backend = new ClaudeCLIBackend(config.claudeCli);
@@ -387,7 +395,8 @@ export class WebsiteChat {
     }
   }
 
-  async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>): Promise<ChatResponse> {
+  // opts.noPartners: this call is itself an ecosystem query - never ask further businesses.
+  async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>, opts?: { noPartners?: boolean }): Promise<ChatResponse> {
     const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
     const effectiveSessionKey = sessionKey || "default";
 
@@ -488,9 +497,15 @@ export class WebsiteChat {
     // at all to reason over). Otherwise the small model's verdict becomes an
     // advisory the big model weighs (see buildSystemPrompt).
     if (usableChunksC.length === 0) {
+      const viaPartner = await this.answerViaPartner(lastUserMessage, sanitizedMessages, opts?.noPartners);
+      if (viaPartner) return viaPartner;
       return { message: this.refusal(lastUserMessage), sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
     }
     const factCheckC = await this.factCheck(lastUserMessage, usableChunksC);
+    if (factCheckC === "no_evidence") {
+      const viaPartner = await this.answerViaPartner(lastUserMessage, sanitizedMessages, opts?.noPartners);
+      if (viaPartner) return viaPartner;
+    }
     const gapC = this.gapDecision(lastUserMessage, factCheckC); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -823,11 +838,17 @@ export class WebsiteChat {
     // directly answer the question → honest refusal + logged gap, no generation.
     const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
     if (usableStream.length === 0) {
+      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages);
+      if (viaPartner) { onToken(viaPartner.message); return viaPartner; }
       const msg = this.refusal(inputValidation.sanitized);
       onToken(msg);
       return { message: msg, sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(inputValidation.sanitized, "no_evidence"), inputValidation.sanitized, inputValidation.sanitized.trim() || null) };
     }
     const factCheckS = await this.factCheck(inputValidation.sanitized, usableStream);
+    if (factCheckS === "no_evidence") {
+      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages);
+      if (viaPartner) { onToken(viaPartner.message); return viaPartner; }
+    }
     const gapS = this.gapDecision(inputValidation.sanitized, factCheckS); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -949,6 +970,39 @@ export class WebsiteChat {
 
   // Refusal in the visitor's language — an English refusal on a Polish site
   // breaks the "we speak as you" voice, and the gate now fires more often.
+  // Ecosystem: our own content has nothing on the question -> the other businesses
+  // of our ecosystem decide whether they can answer (src/ecosystem/ask.ts), and we
+  // relay what they said, attributed. Only their grounded answers are relayed; the
+  // reply may restate them but never add to them. null = nobody could answer.
+  private async answerViaPartner(question: string, messages: ChatMessage[], noPartners?: boolean): Promise<ChatResponse | null> {
+    if (noPartners || !this.askEcosystem) return null;
+    let found: { tenantId: string; label: string; answer: ChatResponse }[] = [];
+    try {
+      found = await this.askEcosystem(messages);
+    } catch (e) {
+      console.warn(`[ecosystem] ${this.context.tenantId}: broadcast failed: ${(e as Error).message}`);
+      return null;
+    }
+    if (found.length === 0) return null;
+    const brand = this.brandName || this.context.businessProfile?.businessName?.value || this.getAllowedDomain() || "our business";
+    const quoted = found.map((f) => `From "${f.label}":\n"""\n${f.answer.message.slice(0, 1500)}\n"""`).join("\n\n");
+    const system =
+      `You are the website assistant of ${brand}. The visitor asked something our own information does not cover. ` +
+      `On the visitor's behalf we asked businesses we work with, and they answered from their own information:\n\n${quoted}\n\n` +
+      `Write a short reply in the visitor's language: say in one sentence that this is not something we can confirm ourselves and that you checked with businesses we work with, then pass on what each said, naming them. ` +
+      `Use only facts from their answers - add nothing, do not claim that we sell or do it. Keep their contact details if their answers give them. No preamble.`;
+    let reply = "";
+    try { reply = (await this.backend.generate(system, messages, this.maxTokens)).trim(); } catch { return null; }
+    if (!reply) return null;
+    console.log(`[ecosystem] ${this.context.tenantId}: relayed answers from ${found.map((f) => f.tenantId).join(", ")}`);
+    return {
+      message: reply,
+      sources: found.flatMap((f) => f.answer.sources),
+      grounded: true,
+      partners: found.map((f) => ({ tenantId: f.tenantId, label: f.label })),
+    };
+  }
+
   private refusal(question: string): string {
     const q = question.toLowerCase();
     const isPolish = /[ąćęłńóśźż]/.test(q) || /\b(czy|jak|ile|gdzie|jaki|jaka|macie|kiedy|dlaczego|kto|co)\b/.test(q);

@@ -161,6 +161,36 @@ export class CloudflareVectorizeStore implements VectorStore {
     }));
   }
 
+  // Similarity search over SEVERAL tenants' vectors in one query (ecosystem
+  // broadcast). Returns each match with the tenant it belongs to. Metadata
+  // queries cap topK at 20.
+  async searchTenants(query: number[], tenantIds: string[], topK: number = 20): Promise<(SearchResult & { tenantId: string })[]> {
+    if (tenantIds.length === 0) return [];
+    const body = JSON.stringify({
+      vector: query,
+      topK: Math.min(topK, 20),
+      returnValues: false,
+      returnMetadata: "all",
+      filter: { tenant: { $in: tenantIds } },
+    });
+    let resp = await fetch(`${this.base}/query`, { method: "POST", headers: headers(), body });
+    if (resp.status === 401 || resp.status === 403) {
+      await refreshCfToken();
+      resp = await fetch(`${this.base}/query`, { method: "POST", headers: headers(), body });
+    }
+    if (!resp.ok) throw new Error(`Vectorize query failed (HTTP ${resp.status}): ${(await resp.text()).slice(0, 200)}`);
+    const data = await resp.json() as any;
+    return (data.result?.matches || [])
+      .filter((m: any) => typeof m.metadata?.tenant === "string")
+      .map((m: any) => ({
+        id: m.id,
+        tenantId: m.metadata.tenant,
+        content: m.metadata?.content || "",
+        metadata: { title: m.metadata?.title || "", url: m.metadata?.url || "" },
+        score: m.score,
+      }));
+  }
+
   // Id-only similarity probe. returnMetadata:"none" lifts the topK cap from 20 to
   // 100 — pair with getByIds() to list large result sets with metadata.
   async searchIds(query: number[], topK: number = 100): Promise<string[]> {

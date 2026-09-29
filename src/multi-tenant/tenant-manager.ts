@@ -11,6 +11,7 @@ import { fileURLToPath } from "url";
 import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { WebsiteChat } from "../llm/chat.js";
+import { askEcosystem, ecosystemOf } from "../ecosystem/ask.js";
 import { getFlows } from "../flows/flow-store.js";
 import { getTenant } from "./tenant-registry.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
@@ -161,6 +162,13 @@ export class TenantManager {
       systemPromptExtra,
       brandName: getTenant(tenantId)?.brandName || new URL(meta.siteUrl).hostname.replace(/^www\./, ""),
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
+      // Other businesses of this tenant's ecosystem answer what its own site can't.
+      askEcosystem: ecosystemOf(getTenant(tenantId))
+        ? (messages) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
+            embed: (texts) => this.bgeProvider.embed(texts),
+            chatFor: (id) => this.getChatForTenant(id),
+          })
+        : undefined,
     });
 
     // Load ONLY owner-curated context notes (context_notes.json). We deliberately no
@@ -270,3 +278,4 @@ async function recordInquiry(tenantId: string, inquiry: Inquiry): Promise<boolea
   console.log(`[inquiry] ${tenantId}: "${inquiry.flowName}" stored=${stored} emailed=${emailed}`);
   return stored || emailed;
 }
+
