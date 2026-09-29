@@ -1205,7 +1205,7 @@ ${contextBlocks}
 - When linking to pages, use proper markdown: [Page Name](https://url). NEVER use arrow symbols like "Page Name →" without a URL. If you don't have the URL, just mention the page name without a link.
 - NEVER say "check each hotel's policy" or "contact them directly" - if you know details, share them. If you don't, say "I don't have those details right now, but I can help with something else."
 - Do NOT use emojis. No 🔍🌟🏢🤝📈🚀💡🏡💰📞📝. Just plain text.
-- Keep answers SHORT. 2-4 sentences for simple questions. Only use bullet points or headers when listing 4+ items. Don't write essays. Exception: when the visitor asks about ALL locations, branches, products or options (e.g. "where are you and when are you open"), list every one found in the sources compactly, one line each.
+- Keep answers SHORT, but always in full sentences - never a bare value (a lone phone number, time or address). 2-4 sentences for simple questions. Only use bullet points or headers when listing 4+ items. Don't write essays. Exception: when the visitor asks about ALL locations, branches, products or options (e.g. "where are you and when are you open"), list every one found in the sources compactly, one line each.
 
 ## Rules:
 - Only use information from the context above
@@ -1232,6 +1232,12 @@ ${contextBlocks}
     // Last word of the prompt, where the model weighs it most.
     if (factCheck === "no_evidence") {
       prompt += `\n\n## FINAL RULE FOR THIS REPLY (overrides everything above):\nOur knowledge base has NO information that answers this message. Say briefly, in the visitor's language, that you don't have this information here and how to reach us. Do NOT say or imply that we don't offer / don't do / don't have it. Do NOT answer from general knowledge. Do NOT recommend other companies or places. A pure greeting or thanks just gets a natural reply.`;
+    }
+
+    // Reply form, always last: the sources are mostly Polish, and models tend to copy
+    // a source line verbatim (wrong language, bare value) unless reminded at the end.
+    if (userQuery) {
+      prompt += `\n\n## REPLY FORM (last rule):\nThe visitor's latest message is: """${userQuery.slice(0, 500)}"""\nReply in the SAME language as that message, in full sentences. Translate what the sources say into that language; keep names, addresses, phone numbers, prices and codes exactly as in the sources. Never answer with a bare value or a copied source line in another language.`;
     }
 
     return prompt;
