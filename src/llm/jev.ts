@@ -11,7 +11,15 @@
  * JEV_GATE_MIN (default 0.5).
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+
+// Per-request Jev usage (tokens billed + calls), scoped so concurrent requests
+// don't mix: wrap work in jevUsage.run({ inputTokens: 0, calls: 0 }, fn) and read
+// the store afterwards. Hedged duplicate requests count once (the winner).
+export interface JevUsage { inputTokens: number; calls: number }
+export const jevUsage = new AsyncLocalStorage<JevUsage>();
 
 export type JevQuestion =
   | { type: "noul"; instructions: unknown; criteria?: { true?: unknown; false?: unknown } }
@@ -44,8 +52,11 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     controllers.push(c);
     const r = await fetch(ENDPOINT, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body, signal: c.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const answers = ((await r.json()) as any)?.answers;
+    const json = (await r.json()) as any;
+    const answers = json?.answers;
     if (!answers || typeof answers !== "object") throw new Error("no answers");
+    const u = jevUsage.getStore();
+    if (u) { u.inputTokens += Number(json?.usage?.input_tokens) || 0; u.calls++; }
     return answers;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -169,19 +180,29 @@ export async function jevCheckNoEvidenceReply(question: string, reply: string): 
 }
 
 /**
- * Ecosystem relay check: P(a member business's `reply` gives the visitor what
- * `question` asked for). A reply saying it does not offer it, has no information,
- * or only points to contact scores low. null when Jev is unavailable.
+ * Ecosystem: for several businesses at once, P(their own excerpts show they offer,
+ * sell, rent or do what `question` asks for) - one call for all candidates. A
+ * business that only mentions the thing, says it doesn't do it, or is about
+ * something else scores low. null when Jev is unavailable.
  */
-export async function jevReplyFulfils(question: string, reply: string): Promise<number | null> {
-  const answers = await jevAsk({ question, reply }, {
-    fulfils: {
+export async function jevBusinessesOffer(question: string, businesses: { name: string; passages: string[] }[]): Promise<number[] | null> {
+  if (businesses.length === 0) return [];
+  const state: Record<string, string> = { question };
+  const questions: Record<string, JevQuestion> = {};
+  businesses.forEach((b, i) => {
+    state[`business${i}`] = b.name;
+    state[`excerpts${i}`] = b.passages.map((p) => p.slice(0, 900)).join("\n---\n");
+    questions[`o${i}`] = {
       type: "noul",
-      instructions: "Does `reply` give a positive, useful answer to `question`: the business says it offers, has, sells or can do what was asked, or states the specific fact that was asked? Answer no if it says it does not offer or do it, says it has no information about it, or only tells the visitor to get in touch.",
-    },
+      instructions: `Do \`excerpts${i}\` (from the website of \`business${i}\`) show that this business offers, sells, rents or does what \`question\` asks for? Answer no if they only mention it, say the business does not do it, or are about something else.`,
+    };
   });
-  const f = answers?.fulfils as JevNoulAnswer | undefined;
-  return f && typeof f.noul === "number" ? f.noul : null;
+  const answers = await jevAsk(state, questions, 5000);
+  if (!answers) return null;
+  return businesses.map((_, i) => {
+    const a = answers[`o${i}`] as JevNoulAnswer | undefined;
+    return a && typeof a.noul === "number" ? a.noul : 0;
+  });
 }
 
 /** Split a reply into checkable statements (sentences and list items). */

@@ -21,6 +21,7 @@ import {
 } from "../flows/conversation.js";
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
+import type { EcosystemMatch } from "../ecosystem/ask.js";
 import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
@@ -54,7 +55,7 @@ export interface ChatConfig {
   // own knowledge whether they can answer; their answers come back here.
   // onStart fires only when there are other businesses to ask (the widget shows
   // "checking with businesses we work with" while they decide).
-  askEcosystem?: (messages: ChatMessage[], onStart?: () => void) => Promise<{ tenantId: string; label: string; answer: ChatResponse }[]>;
+  askEcosystem?: (messages: ChatMessage[], onStart?: () => void) => Promise<EcosystemMatch[]>;
 }
 
 export interface ChatResponse {
@@ -985,22 +986,14 @@ export class WebsiteChat {
 
   // Refusal in the visitor's language — an English refusal on a Polish site
   // breaks the "we speak as you" voice, and the gate now fires more often.
-  // Ecosystem: another business asks whether WE can answer its visitor's question.
-  // Same path our own bot takes on our site - retrieval (incl. the Jev catalog
-  // stage) and the Jev answerability gate; only "confirmed" counts.
-  async canAnswer(question: string): Promise<boolean> {
-    const chunks = this.filterContextChunks(await this.retrieveContext(question), question);
-    if (chunks.length === 0) return false;
-    return (await this.factCheck(question, chunks)) === "confirmed";
-  }
-
-  // Ecosystem: our own content has nothing on the question -> the other businesses
-  // of our ecosystem decide whether they can answer (src/ecosystem/ask.ts), and we
-  // relay what they said, attributed. Only their grounded answers are relayed; the
-  // reply may restate them but never add to them. null = nobody could answer.
+  // Ecosystem: our own content has nothing on the question -> the best-ranked
+  // businesses of our ecosystem that offer it (src/ecosystem/ask.ts: Jev-judged,
+  // ranked, top 3) come back with excerpts from their own sites, and ONE reply is
+  // written from them, attributed. It may restate them but never add to them.
+  // null = nobody in the ecosystem offers it.
   private async answerViaPartner(question: string, messages: ChatMessage[], noPartners?: boolean, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
     if (noPartners || !this.askEcosystem) return null;
-    let found: { tenantId: string; label: string; answer: ChatResponse }[] = [];
+    let found: EcosystemMatch[] = [];
     try {
       found = await this.askEcosystem(messages, () => onStatus?.({
         kind: "ecosystem",
@@ -1012,19 +1005,21 @@ export class WebsiteChat {
     }
     if (found.length === 0) return null;
     const brand = this.brandName || this.context.businessProfile?.businessName?.value || this.getAllowedDomain() || "our business";
-    const quoted = found.map((f) => `From "${f.label}":\n"""\n${f.answer.message.slice(0, 1500)}\n"""`).join("\n\n");
+    const material = found.map((f) =>
+      `"${f.label}"${f.contact ? ` (contact: ${f.contact})` : ""}:\n` + f.passages.map((p) => `- ${p.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"),
+    ).join("\n\n");
     const system =
       `You are the website assistant of ${brand}. The visitor asked something our own information does not cover. ` +
-      `On the visitor's behalf we asked businesses we work with, and they answered from their own information:\n\n${quoted}\n\n` +
-      `Write a short reply in the visitor's language: say in one sentence that this is not something we can confirm ourselves and that you checked with businesses we work with, then pass on what each said, naming them. ` +
-      `Use only facts from their answers - add nothing, do not claim that we sell or do it. Keep their contact details if their answers give them. No preamble.`;
+      `We checked businesses we work with; excerpts from their own websites:\n\n${material}\n\n` +
+      `Write a short reply in the visitor's language: say in one sentence that this is not something we can confirm ourselves and that you checked with businesses we work with, ` +
+      `then say what each of them offers that answers the question, naming them, with their contact details. ` +
+      `Use only facts from the excerpts - add nothing, do not claim that we sell or do it. Full sentences, no preamble.`;
     let reply = "";
     try { reply = (await this.backend.generate(system, messages, this.maxTokens)).trim(); } catch { return null; }
     if (!reply) return null;
-    console.log(`[ecosystem] ${this.context.tenantId}: relayed answers from ${found.map((f) => f.tenantId).join(", ")}`);
     return {
       message: reply,
-      sources: found.flatMap((f) => f.answer.sources),
+      sources: [...new Map(found.flatMap((f) => f.passages).filter((p) => p.url).map((p) => [p.url, { url: p.url, title: p.title }])).values()],
       grounded: true,
       partners: found.map((f) => ({ tenantId: f.tenantId, label: f.label })),
     };

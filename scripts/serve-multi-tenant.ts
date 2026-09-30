@@ -2827,6 +2827,28 @@ app.post("/api/admin/ecosystem", (req, res) => {
   res.json({ ok: true, ecosystem, updated, missing });
 });
 
+// Admin: set tenants' ecosystem plan (settings.ecosystemPlan = { tier, until }).
+// A paid plan only reorders businesses that already qualify on relevance
+// (src/ecosystem/rank.ts). body: { tenantIds: [...], tier: "free"|"pro"|"premium", until?: ISO date }
+app.post("/api/admin/ecosystem-plan", (req, res) => {
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
+  const tier = String(req.body?.tier || "");
+  if (!["free", "pro", "premium"].includes(tier)) return res.status(400).json({ error: "tier must be free, pro or premium" });
+  const until = req.body?.until ? String(req.body.until) : undefined;
+  if (until && Number.isNaN(Date.parse(until))) return res.status(400).json({ error: "until must be an ISO date" });
+  const ids: string[] = Array.isArray(req.body?.tenantIds) ? req.body.tenantIds.map(String).slice(0, 1000) : [];
+  const updated: string[] = [], missing: string[] = [];
+  for (const id of ids) {
+    const t = getTenant(id);
+    if (!t) { missing.push(id); continue; }
+    const settings = { ...(t.settings || {}) };
+    if (tier === "free") delete settings.ecosystemPlan; else settings.ecosystemPlan = { tier, ...(until ? { until } : {}) };
+    updateTenant(id, { settings });
+    updated.push(id);
+  }
+  res.json({ ok: true, tier, until: until || null, updated, missing });
+});
+
 // Admin upload screenshot (from VPS scraper)
 app.post("/api/admin/screenshot/:tenantId", (req, res) => {
   if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });

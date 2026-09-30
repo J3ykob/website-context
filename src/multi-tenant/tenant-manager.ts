@@ -162,10 +162,9 @@ export class TenantManager {
       systemPromptExtra,
       brandName: getTenant(tenantId)?.brandName || new URL(meta.siteUrl).hostname.replace(/^www\./, ""),
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
-      // Every other business of this tenant's ecosystem decides whether it can answer what its own site can't.
+      // The best-ranked businesses of this tenant's ecosystem answer what its own site can't.
       askEcosystem: ecosystemOf(getTenant(tenantId))
         ? (messages, onStart) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
-            chatFor: (id) => this.getChatForTenant(id),
             embed: (texts) => this.bgeProvider.embed(texts),
           }, onStart)
         : undefined,
