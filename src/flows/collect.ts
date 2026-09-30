@@ -193,7 +193,7 @@ export async function collectTurn(flow: FlowDefinition, s: CollectSession, messa
   s.transcript.push(`Customer: ${message.slice(0, 1000)}`);
 
   const read = parseJsonObject(await llm(
-    "You read one customer message in an order / inquiry chat and output only JSON.",
+    `You read one customer message in an order / inquiry chat for the business ${brand || "(this business)"} and output only JSON.`,
     `Fields (key | label | hint):
 ${fields.map((f) => `${f.name} | ${f.label} | ${f.description || ""}`).join("\n")}
 
@@ -208,7 +208,7 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
 - "language": the language the customer writes their sentences in, named in English (e.g. "Polish", "English", "Ukrainian"). Ignore names of places, streets, people and products (a Polish street name in an English sentence is still English).${s.language ? `
 - "switched": true only if in this message the customer clearly writes whole sentences in a language other than ${s.language}, the language of the conversation so far; otherwise false.` : ""}
 - "intent": "confirm" (they confirm the summary / say it is correct), "cancel" (they want to stop the whole order or inquiry), "change" (they correct something already given), or "answer" (anything else: giving details, asking something).
-- "values": ONLY the fields this new message gives or corrects, as {key: value}. Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their base form (e.g. "do Ząbek" -> "Ząbki") and keep street and number. A question the customer asks (price, availability...) goes into "notes". Empty object if the message gives no values.`,
+- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. A question the customer asks (price, availability...) goes into "notes". Empty object if the message gives no values.`,
     500,
   ));
   if (!read) throw new Error("collect: unparseable model reply");
@@ -223,7 +223,9 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
       const v = typeof read.values[f.name] === "string" ? read.values[f.name].trim().slice(0, 500) : "";
       if (!v) continue;
       if (f.name === NOTES.name) s.values.notes = s.values.notes ? `${s.values.notes}; ${v}` : v;
-      else if (!s.values[f.name] || intent === "change") s.values[f.name] = v;
+      // A value the new message states directly replaces the earlier one (an
+      // address given after a wrongly inferred one); a confirmation changes nothing.
+      else s.values[f.name] = v;
     }
   }
   // Offer fields just given (or corrected): check them against the offer.
