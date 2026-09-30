@@ -13,6 +13,7 @@ import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { WebsiteChat } from "../llm/chat.js";
 import { askEcosystem, ecosystemOf } from "../ecosystem/ask.js";
 import { createHandoffs } from "../ecosystem/handoff.js";
+import { ensureCollectFlow } from "../flows/collect-store.js";
 import { getFlows } from "../flows/flow-store.js";
 import { getTenant } from "./tenant-registry.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
@@ -174,6 +175,8 @@ export class TenantManager {
         const t = getTenant(tenantId);
         const label = t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId;
         const tokens = await createHandoffs({ tenantId, label }, targets, transcript.filter((m) => m.role === "user" || m.role === "assistant") as any, need);
+        // The customer may come to order: make sure each business has its form (once).
+        for (const t of targets) ensureCollectFlow(t.tenantId, (id) => this.evictTenant(id)).catch(() => {});
         const base = process.env.BASE_URL || "https://whisp.so";
         return Object.fromEntries(Object.entries(tokens).map(([id, tok]) => [id, `${base}/h/${tok}`]));
       } : undefined,

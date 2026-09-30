@@ -86,6 +86,7 @@ import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
 import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-llm.js";
 import { registerAgentRoutes } from "../src/agent/routes.js";
 import { getHandoff, markHandoffOpened } from "../src/ecosystem/handoff.js";
+import { ensureCollectFlow } from "../src/flows/collect-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "3211");
@@ -2854,6 +2855,14 @@ app.post("/api/admin/ecosystem", (req, res) => {
     tenantManager.evictTenant(id);
     updated.push(id);
   }
+  // Every member needs an in-chat order/inquiry form: customers handed over from
+  // another business's bot come to order. One at a time, in the background.
+  if (ecosystem) void (async () => {
+    for (const id of updated) {
+      try { await ensureCollectFlow(id, (x) => tenantManager.evictTenant(x)); }
+      catch (e: any) { console.warn(`[ecosystem] ${id}: no inquiry form: ${e?.message || e}`); }
+    }
+  })();
   res.json({ ok: true, ecosystem, updated, missing });
 });
 

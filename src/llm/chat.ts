@@ -1279,6 +1279,11 @@ ${contextBlocks}
       prompt += `\n\n## FINAL RULE FOR THIS REPLY (overrides everything above):\nOur knowledge base has NO information that answers this message. Say briefly, in the visitor's language, that you don't have this information here and how to reach us. Do NOT say or imply that we don't offer / don't do / don't have it. Do NOT answer from general knowledge. Do NOT recommend other companies or places. A pure greeting or thanks just gets a natural reply.`;
     }
 
+    // The bot itself takes no action: it must never tell a customer an order or
+    // request went somewhere (they would wait for a call that never comes). Only an
+    // in-chat form sends anything, and it confirms that itself (collect.ts).
+    prompt += `\n\n## ACTIONS:\nYou cannot place orders, make bookings or send anything to the team yourself. Never say or imply that an order, booking or request has been placed, sent, forwarded or passed on, or that someone will contact the visitor - tell them how to do it instead (the contact details above).`;
+
     // Reply form, always last: the sources are mostly Polish, and models tend to copy
     // a source line verbatim (wrong language, bare value) unless reminded at the end.
     if (userQuery) {
