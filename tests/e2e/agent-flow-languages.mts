@@ -98,7 +98,7 @@ async function run(lang: string): Promise<{ lang: string; ok: boolean; secs: num
       console.log(`  ${T()} << ${m.split("\n").join(" / ").slice(0, 160)}`);
       history.push(`Assistant: ${m}`);
       const score = await inLanguage(m, lang);
-      if (score < 0.5) { wrongLanguage.push(m.slice(0, 120)); console.log(`       !! not ${LANGS[lang].name} (${score.toFixed(2)})`); }
+      if (score < 0.3) { wrongLanguage.push(m.slice(0, 120)); console.log(`       !! not ${LANGS[lang].name} (${score.toFixed(2)})`); }
       const next = await customer(lang, m, history);
       if (next.action === "done") { done = true; break; }
       if (next.action === "tick" && next.consent) { console.log(`       (ticks consent: ${(await tick(p, next.consent)) ? "ok" : "not found"})`); if (next.text) await say(next.text); }

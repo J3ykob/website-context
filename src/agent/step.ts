@@ -124,12 +124,20 @@ async function localize(input: AgentStepInput, r: AgentStepResult): Promise<Agen
   if (!texts.length) return r;
   try {
     const llm = new OpenRouterProvider({ maxTokens: 400, temperature: 0 });
-    const res = await llm.chat([
-      { role: "system", content: "Translate UI messages for a website visitor. Keep quoted names, numbers and line breaks exactly. Reply with JSON only: {\"t\": [\"...\"]}" },
-      { role: "user", content: JSON.stringify({ visitor_wrote: (input.request || "").slice(0, 300), translate_into_the_language_the_visitor_wrote_in: texts }) },
-    ]);
-    const start = res.content.indexOf("{"), end = res.content.lastIndexOf("}");
-    const t = JSON.parse(res.content.slice(start, end + 1)).t as string[];
+    // The target is the language of the visitor's own first message (the request
+    // also holds quoted Polish page text, which once pulled the output to Polish).
+    const visitorText = (input.request || "").split("\n")[0].slice(0, 300);
+    const translate = async (extra: string) => {
+      const res = await llm.chat([
+        { role: "system", content: `Translate UI messages for a website visitor into the language of the visitor's text. Keep quoted names, numbers and line breaks exactly. ${extra}Reply with JSON only: {"t": ["..."]}` },
+        { role: "user", content: JSON.stringify({ visitor_text: visitorText, messages_to_translate: texts }) },
+      ]);
+      const start = res.content.indexOf("{"), end = res.content.lastIndexOf("}");
+      return JSON.parse(res.content.slice(start, end + 1)).t as string[];
+    };
+    let t = await translate("");
+    const same = await jevAsk({ visitor_text: visitorText, text: t[0] || "" }, { ok: { type: "noul", instructions: "Leaving out quoted names, dates and labels, is `text` written in the same language as `visitor_text`?" } }, 3000);
+    if (same && (noul(same, "ok") ?? 1) < 0.5) t = await translate("The previous translation was in the wrong language: write it in the language of visitor_text, not Polish. ");
     const out: AgentStepResult = { ...r, say: t[0] || r.say };
     if (out.note && out.note.kind === "correction" && t[1]) out.note = { ...out.note, say: t[1] };
     return out;
@@ -427,7 +435,8 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
         // without an hour) -> ask which, unless they asked for the earliest within it.
         // None -> tell the visitor and offer the closest ones (same day first).
         const cands = slots.slice(0, 40);
-        const f = await jevAsk({ latest_preferences: latestPrefs, slots: cands.map((e) => e.label) }, {
+        const slotPrefs = answeredSlot ? `${latestPrefs}\nMOST RECENT ANSWER (takes precedence over everything above): ${lastStep.label}` : latestPrefs;
+        const f = await jevAsk({ latest_preferences: slotPrefs, slots: cands.map((e) => e.label) }, {
           ...Object.fromEntries(cands.map((_, k) => [`f${k}`, { type: "noul", instructions: `Does \`slots[${k}]\` satisfy what the visitor asked for in \`latest_preferences\` (the day, date, time or period they named)? If they named a specific clock time, only a slot at exactly that time satisfies it; a nearby time does not.` } as JevQuestion])),
           ...Object.fromEntries(cands.map((_, k) => [`n${k}`, { type: "noul", instructions: `Is \`slots[${k}]\` close to what the visitor asked for in \`latest_preferences\`: on the day they named, or near the time they named?` } as JevQuestion])),
           earliest_within: { type: "noul", instructions: "Does `latest_preferences` ask for the earliest possible time within the day or period it names (for example as early as possible on Wednesday)?" },
@@ -470,9 +479,12 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   const CHOSE = ["VISITOR_CHOSE", "VISITOR_CHOSE_DATE", "VISITOR_CHOSE_TIME", "VISITOR_CORRECTION"];
   const lastH = history[history.length - 1];
   const prevH = history[history.length - 2];
-  const answer = lastH && CHOSE.includes(lastH.op) ? lastH
+  const chose = lastH && CHOSE.includes(lastH.op) ? lastH
     : prevH && CHOSE.includes(prevH.op) && lastH?.op === "CLICK" && lastH.ok !== false && !!lastH.label && clickable.some((e) => e.label.slice(0, 120) === lastH.label) ? prevH : null;
-  const justChose = !!answer;
+  const justChose = !!chose;
+  // Matched on its own only when it answers our choice question; a correction
+  // may be about something else (the package), so it goes with the whole request.
+  const answer = chose && chose.op !== "VISITOR_CORRECTION" ? chose : null;
 
   // ── The rule for every choice (branch, service, package...; slots above follow
   // it too): one clear match -> take it; the visitor's wish fits several options
