@@ -7,7 +7,10 @@
  *   1. one small Vectorize query per member (parallel, top 3 of ITS OWN chunks -
  *      a single shared query gets swamped by the biggest catalogue);
  *   2. the CANDIDATES best by similarity go to ONE Jev call that asks, per
- *      business, whether its own excerpts show it offers what was asked;
+ *      excerpt, whether it shows the business offers what was asked - the
+ *      excerpts are its closest chunks plus its profile (the offer summary of
+ *      its scraped micro-site card: a blog post about X alone doesn't prove the
+ *      business sells X, its offer list does);
  *   3. rankMatches: qualified by Jev, ordered with the paid-plan boost, top K;
  *   4. only those K are returned (excerpts + official contact) - the asking bot
  *      writes one reply from them.
@@ -37,6 +40,15 @@ const QUERY_PARALLEL = 25;
 export function ecosystemOf(tenant: { settings?: any } | null | undefined): string {
   const e = tenant?.settings?.ecosystem;
   return typeof e === "string" ? e.trim() : "";
+}
+
+// "What we offer" in the business's own words: the scraped micro-site card
+// (category + first sections), facts from its site only. "" when there is none.
+function profileOf(t: { settings?: any }): string {
+  const c = t.settings?.siteCard;
+  if (!c) return "";
+  const parts = [c.eyebrow, ...(Array.isArray(c.sections) ? c.sections.slice(0, 2).map((x: any) => `${x.label}: ${x.text}`) : [])];
+  return parts.filter(Boolean).join(" | ").replace(/\s+/g, " ").slice(0, 700);
 }
 
 function labelOf(t: { brandName: string | null; domain: string; settings?: any }): string {
@@ -105,7 +117,7 @@ export async function askEcosystem(
   // 2. One Jev call: does each candidate's own content show it offers this?
   const usage = { inputTokens: 0, calls: 0 };
   const offers = await jevUsage.run(usage, () =>
-    jevBusinessesOffer(question, candidates.map((c) => ({ name: labelOf(c.m), passages: c.hits.map((h) => h.content) }))),
+    jevBusinessesOffer(question, candidates.map((c) => ({ name: labelOf(c.m), passages: [profileOf(c.m), ...c.hits.map((h) => h.content)].filter(Boolean) }))),
   );
   if (!offers) return []; // without Jev nothing is relayed; the asking bot answers honestly itself
 

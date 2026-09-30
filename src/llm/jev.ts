@@ -187,22 +187,26 @@ export async function jevCheckNoEvidenceReply(question: string, reply: string): 
  */
 export async function jevBusinessesOffer(question: string, businesses: { name: string; passages: string[] }[]): Promise<number[] | null> {
   if (businesses.length === 0) return [];
+  // One question per excerpt (a business scores its best excerpt): judging each
+  // excerpt alone is steadier than judging a business's excerpts glued together.
   const state: Record<string, string> = { question };
   const questions: Record<string, JevQuestion> = {};
   businesses.forEach((b, i) => {
     state[`business${i}`] = b.name;
-    state[`excerpts${i}`] = b.passages.map((p) => p.slice(0, 900)).join("\n---\n");
-    questions[`o${i}`] = {
-      type: "noul",
-      instructions: `Do \`excerpts${i}\` (from the website of \`business${i}\`) show that this business offers, sells, rents or does what \`question\` asks for? Answer no if they only mention it, say the business does not do it, or are about something else.`,
-    };
+    b.passages.forEach((p, j) => {
+      state[`excerpt${i}_${j}`] = p.slice(0, 900);
+      questions[`o${i}_${j}`] = {
+        type: "noul",
+        instructions: `Does \`excerpt${i}_${j}\` (from the website of \`business${i}\`) show that this business offers, sells, rents or does what \`question\` asks for? Answer no if it only mentions it, says the business does not do it, or is about something else.`,
+      };
+    });
   });
   const answers = await jevAsk(state, questions, 5000);
   if (!answers) return null;
-  return businesses.map((_, i) => {
-    const a = answers[`o${i}`] as JevNoulAnswer | undefined;
+  return businesses.map((b, i) => Math.max(0, ...b.passages.map((_, j) => {
+    const a = answers[`o${i}_${j}`] as JevNoulAnswer | undefined;
     return a && typeof a.noul === "number" ? a.noul : 0;
-  });
+  })));
 }
 
 /** Split a reply into checkable statements (sentences and list items). */
