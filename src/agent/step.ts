@@ -69,7 +69,7 @@ export type AgentCommand =
   | { op: "DONE" | "BLOCKED" | "STOPPED"; say: string };
 // How the widget must update its own state after this step.
 export type AgentNote =
-  | { kind: "input"; field: string; value: string }
+  | { kind: "input"; field: string; value: string; values?: Record<string, string> } // values: several fields from one reply
   | { kind: "pref"; text: string; op: string }
   | { kind: "correction"; text: string; say: string }
   | { kind: "consent" }
@@ -138,6 +138,36 @@ async function localize(input: AgentStepInput, r: AgentStepResult): Promise<Agen
   }
 }
 
+// Split a data reply onto the page's text fields. Falls back to {} (the whole
+// reply then goes into the asked field) when there is one field or no model.
+async function splitReply(input: AgentStepInput, asked: string, text: string): Promise<Record<string, string>> {
+  const fields = (input.snapshot.elements || []).filter((e) => e.ops.includes("TYPE") && !(e.value || "").trim()).map((e) => e.label).filter(Boolean);
+  if (!fields.includes(asked)) fields.unshift(asked);
+  if (fields.length < 2 || !process.env.OPENROUTER_API_KEY) return {};
+  try {
+    const llm = new OpenRouterProvider({ maxTokens: 300, temperature: 0 });
+    const res = await llm.chat([
+      { role: "system", content: "You split a website visitor's chat reply onto form fields. Output only JSON." },
+      { role: "user", content: `The visitor was asked for: ${asked}
+Form fields still empty on the page: ${JSON.stringify(fields)}
+The visitor's reply: """${text}"""
+
+Output {"values": {"<field exactly as listed>": "<the part of the reply that belongs in it, copied exactly>"}} - only fields the reply actually gives a value for.` },
+    ]);
+    const start = res.content.indexOf("{"), end = res.content.lastIndexOf("}");
+    const v = JSON.parse(res.content.slice(start, end + 1))?.values || {};
+    const out: Record<string, string> = {};
+    const lower = text.toLowerCase();
+    for (const f of fields) {
+      const val = typeof v[f] === "string" ? v[f].trim() : "";
+      if (val && lower.includes(val.toLowerCase())) out[f] = val.slice(0, 200);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 // ── Visitor replies ─────────────────────────────────────────────────────────
 // Whether a reply is the value, a confirmation, a preference, a change of mind
 // or "stop" is one Jev choice, in any language.
@@ -174,9 +204,15 @@ async function applyReply(input: AgentStepInput): Promise<{ input: AgentStepInpu
   if (intent === "stop") return { stop: true };
   if (intent === "change") return correction();
   if (kind === "data") {
-    out.inputs[r.field as string] = text;
-    out.history.push({ op: "VISITOR_GAVE", label: r.field as string });
-    return { input: out, note: { kind: "input", field: r.field as string, value: text } };
+    // Several details in one reply ("Jan Testowy, jan@x.pl, 500600700"): the
+    // model splits them onto the page's fields; each value must be the
+    // visitor's own words (copied from the reply), so nothing is invented.
+    const values = await splitReply(input, r.field as string, text);
+    const asked = values[r.field as string] ?? (Object.keys(values).length ? undefined : text);
+    if (asked !== undefined) values[r.field as string] = asked;
+    for (const [k, v] of Object.entries(values)) { out.inputs[k] = v; out.history.push({ op: "VISITOR_GAVE", label: k }); }
+    const first = Object.keys(values)[0] || (r.field as string);
+    return { input: out, note: { kind: "input", field: first, value: values[first] ?? text, values } };
   }
   if (kind === "choice") {
     const op = r.field === "choice:time" ? "VISITOR_CHOSE_TIME" : r.field === "choice:date" ? "VISITOR_CHOSE_DATE" : "VISITOR_CHOSE";

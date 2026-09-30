@@ -1219,7 +1219,10 @@
   }
   function applyNote(n) {
     if (!n || !agent) return;
-    if (n.kind === "input") { agent.inputs[n.field] = n.value; agent.history.push({ op: "VISITOR_GAVE", label: n.field }); }
+    if (n.kind === "input") {
+      var given = n.values || {}; given[n.field] = given[n.field] || n.value;
+      Object.keys(given).forEach(function (k) { agent.inputs[k] = given[k]; agent.history.push({ op: "VISITOR_GAVE", label: k }); });
+    }
     else if (n.kind === "pref") { agent.request += "\nVisitor's preference: " + n.text; agent.history.push({ op: n.op, label: n.text.slice(0, 100) }); }
     else if (n.kind === "correction") { agent.request += "\nVisitor's correction (latest, overrides earlier choices): " + n.text; agent.history.push({ op: "VISITOR_CORRECTION", label: n.text.slice(0, 100) }); if (n.say) agentSay(n.say); }
     else if (n.kind === "consent") { agent.history.push({ op: "VISITOR_HANDLED_CONSENT" }); }

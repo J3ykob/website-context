@@ -965,7 +965,16 @@ export class WebsiteChat {
       ? `Jasne, przeprowadzę Cię przez to krok po kroku („${flow.name}”). Będę pokazywać, co klikam. O dane osobowe i zgody zapytam Ciebie.`
       : `Sure, I'll take you through it step by step ("${flow.name}"). I'll show what I click and ask you for personal details and consents.`;
     if (lang === "other") {
-      try { text = (await this.backend.generate(`Rewrite this assistant message in the same language as the visitor's message, keeping the meaning and the quoted name. Visitor's message: ${message.slice(0, 300)}. Reply with the rewritten message only.`, [{ role: "user", content: text }], 200)).trim() || text; } catch {}
+      // A plain translation task (the old "rewrite" prompt made the model echo
+      // the visitor's own message back as the greeting).
+      try {
+        const t = (await this.backend.generate(
+          "You translate short UI messages. Reply with the translation only.",
+          [{ role: "user", content: `Translate the MESSAGE into the language that the VISITOR TEXT is written in. Keep the quoted name as it is.\n\nVISITOR TEXT: ${message.slice(0, 300)}\n\nMESSAGE: ${text}` }],
+          200,
+        )).trim();
+        if (t && t !== message.trim()) text = t;
+      } catch {}
     }
     return {
       message: text,
@@ -1257,8 +1266,21 @@ ${contextBlocks}
   // the visitor's message and the active flows, decide which flow (if any) they
   // want to START. Returns [] (just chatting / a question), [flow] (one clear
   // intent), or [flowA, flowB] (genuinely ambiguous -> caller disambiguates).
+  // One decision per message: the streaming path asks first and then hands the
+  // same message to chat(), which asked again - a borderline message (a French
+  // booking request at 0.57) could start the flow in one call and not the other.
+  private intentMemo = new Map<string, { at: number; picked: FlowDefinition[] }>();
   private async classifyFlowIntent(message: string, flows: FlowDefinition[]): Promise<FlowDefinition[]> {
     if (flows.length === 0) return [];
+    const memoKey = `${flows.map((f) => f.id).join(",")}\u0000${message}`;
+    const memo = this.intentMemo.get(memoKey);
+    if (memo && Date.now() - memo.at < 60000) return memo.picked;
+    const picked = await this.classifyFlowIntentOnce(message, flows);
+    if (this.intentMemo.size > 200) this.intentMemo.clear();
+    this.intentMemo.set(memoKey, { at: Date.now(), picked });
+    return picked;
+  }
+  private async classifyFlowIntentOnce(message: string, flows: FlowDefinition[]): Promise<FlowDefinition[]> {
     const jev = await jevPickOption(
       "Does the visitor's `message` ask to START one of these actions right now (e.g. book, order, sign up)? Choose none if they only ask a question, ask about price or info, greet, or chat.",
       message,
