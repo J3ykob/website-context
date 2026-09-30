@@ -150,13 +150,13 @@ async function localize(input: AgentStepInput, r: AgentStepResult): Promise<Agen
 // reply then goes into the asked field) when there is one field or no model.
 async function splitReply(input: AgentStepInput, asked: string, text: string): Promise<Record<string, string>> {
   const fields = (input.snapshot.elements || []).filter((e) => e.ops.includes("TYPE") && !(e.value || "").trim()).map((e) => e.label).filter(Boolean);
-  if (!fields.includes(asked)) fields.unshift(asked);
-  if (fields.length < 2 || !process.env.OPENROUTER_API_KEY) return {};
+  if (asked && !fields.includes(asked)) fields.unshift(asked);
+  if (fields.length < (asked ? 2 : 1) || !process.env.OPENROUTER_API_KEY) return {};
   try {
     const llm = new OpenRouterProvider({ maxTokens: 300, temperature: 0 });
     const res = await llm.chat([
       { role: "system", content: "You split a website visitor's chat reply onto form fields. Output only JSON." },
-      { role: "user", content: `The visitor was asked for: ${asked}
+      { role: "user", content: `The visitor was asked for: ${asked || "(nothing in particular)"}
 Form fields still empty on the page: ${JSON.stringify(fields)}
 The visitor's reply: """${text}"""
 
@@ -197,11 +197,14 @@ async function applyReply(input: AgentStepInput): Promise<{ input: AgentStepInpu
 
   const kind = r.field === null ? "running" : r.field === "consent" ? "consent" : (r.field.startsWith("choice") || r.field === "manual") ? "choice" : "data";
   const criteria: Record<string, string> = {
-    stop: "The visitor wants to stop, cancel or quit the whole process.",
+    stop: "The visitor clearly says they want to stop, cancel or quit the whole process.",
     change: "The visitor wants to change something chosen or entered earlier, go back, or gives a new instruction.",
   };
   if (kind === "data") criteria.value = `The reply is the value asked for (${r.field}).`;
   if (kind === "consent" || kind === "running") criteria.continue = "The visitor just says to continue, ok, done, yes, or acknowledges.";
+  // Typed while the agent works (nothing asked): a name, a date, a choice... is
+  // information, not a reason to stop ("Jan" was once taken as "stop").
+  if (kind === "running") criteria.info = "The visitor gives details or a preference (a name, contact data, a date or time, an option) without asking to stop or change anything.";
   if (kind === "choice") criteria.preference = "The reply states which option, date, time or place the visitor prefers, or says they did it themselves.";
   const a = await jevAsk({ question_asked: r.field === null ? "(the assistant was working, nothing was asked)" : `The assistant asked about: ${r.field}`, reply: text }, {
     intent: { type: "choice", instructions: "What does the visitor's `reply` mean in the context of `question_asked`?", criteria },
@@ -229,6 +232,16 @@ async function applyReply(input: AgentStepInput): Promise<{ input: AgentStepInpu
     return { input: out, note: { kind: "pref", text, op } };
   }
   if (kind === "consent") { out.history.push({ op: "VISITOR_HANDLED_CONSENT" }); return { input: out, note: { kind: "consent" } }; }
+  if (intent === "info") {
+    // Kept as a preference (read for choices and slots) and, when it holds
+    // details for empty fields on the page, split onto them.
+    const values = await splitReply(input, "", text);
+    for (const [k, v] of Object.entries(values)) { out.inputs[k] = v; out.history.push({ op: "VISITOR_GAVE", label: k }); }
+    out.request = `${out.request || ""}\nVisitor's preference: ${text}`;
+    out.history.push({ op: "VISITOR_CHOSE", label: text });
+    const first = Object.keys(values)[0];
+    return { input: out, note: first ? { kind: "input", field: first, value: values[first], values } : { kind: "pref", text, op: "VISITOR_CHOSE" } };
+  }
   out.history.push({ op: "VISITOR_ACKNOWLEDGED" });
   return { input: out, note: { kind: "acted" } };
 }
@@ -304,11 +317,14 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   operations.DONE = "The page visibly shows that the goal is completed.";
   operations.BLOCKED = "No available operation can make progress.";
 
-  // Everything the visitor said, in order; later lines win where they conflict.
-  // (Cutting it at the last correction lost "on Wednesday" when the correction
-  // was about something else, e.g. a different exam package.)
+  // After a correction, it leads and the earlier wishes stay as context where it
+  // does not change them (cutting them off lost "on Wednesday" when the correction
+  // was about the package; giving everything flat weakened "I prefer Friday").
   const reqText = input.request || "";
-  const latestPrefs = reqText.includes("Visitor's correction") ? `(Later lines override earlier ones where they conflict.)\n${reqText}` : reqText;
+  const cIdx = reqText.lastIndexOf("Visitor's correction");
+  const latestPrefs = cIdx >= 0
+    ? `${reqText.slice(cIdx)}\n\nEarlier wishes (still valid where the correction above does not change them):\n${reqText.slice(0, cIdx)}`
+    : reqText;
 
   const common = { goal: input.goal, visitor_request: reqText, rules: RULES };
   const questions: Record<string, JevQuestion> = {

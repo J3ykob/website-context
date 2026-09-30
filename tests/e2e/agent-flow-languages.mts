@@ -42,7 +42,7 @@ async function customer(lang: string, assistant: string, history: string[]): Pro
   const j = json(await llm(
     `${PROFILE}\nYou write only in ${LANGS[lang].name}, briefly, like a real customer in a chat. Output only JSON.`,
     `Conversation so far:\n${history.slice(-10).join("\n")}\n\nThe assistant just wrote:\n"""${assistant}"""\n\nYour next move as JSON:
-- {"action": "wait"} if the message is only a status or needs no answer (e.g. "one moment", "clicking ...").
+- {"action": "wait"} if the message asks you nothing: a status, "one moment", "clicking ...", or an acknowledgement like "OK, taking that into account". Do not repeat answers you already gave.
 - {"action": "tick", "consent": "<the consent's own text, copied from the assistant's message>", "text": "<short 'done' in your language>"} if the assistant asks you to tick a consent yourself.
 - {"action": "done"} if the assistant says everything is ready and asks you to check the details and click the final button.
 - {"action": "manual"} if the assistant asks you to do a step by hand on the page.
