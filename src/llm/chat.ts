@@ -289,6 +289,9 @@ export class WebsiteChat {
   private pendingDisambig: Map<string, { flows: FlowDefinition[]; at: number }> = new Map();
   private recentlyCompletedFlows: Map<string, string> = new Map(); // sessionKey → flowId
   private collectSessions: Map<string, CollectSession> = new Map();
+  // Who sent this visitor here (an ecosystem hand-off link): marks any inquiry
+  // the visitor then completes in this chat. Same idle TTL as collect sessions.
+  private sessionVia: Map<string, { via: CollectVia; at: number }> = new Map();
   private brandName = "";
   private onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
 
@@ -936,8 +939,16 @@ export class WebsiteChat {
   // Start a goal-driven ("agent") flow: no input collection here; the widget
   // drives the page with /api/agent/step and asks the visitor for data as needed.
   // ── "In chat" flows: the assistant collects an order / inquiry itself ──
+  /** Remember who referred this session (called on every hand-off turn). */
+  setSessionVia(sessionKey: string, via: CollectVia): void {
+    const now = Date.now();
+    if (this.sessionVia.size > 500) for (const [k, v] of this.sessionVia) if (now - v.at > 30 * 60 * 1000) this.sessionVia.delete(k);
+    this.sessionVia.set(sessionKey, { via, at: now });
+  }
+
   private startCollect(flow: FlowDefinition, sessionKey: string, message: string, via?: CollectVia): Promise<ChatResponse> {
-    const s = startSession(flow, via);
+    const remembered = this.sessionVia.get(sessionKey);
+    const s = startSession(flow, via || (remembered && Date.now() - remembered.at < 30 * 60 * 1000 ? remembered.via : undefined));
     this.collectSessions.set(sessionKey, s);
     return this.runCollect(flow, s, sessionKey, message);
   }
