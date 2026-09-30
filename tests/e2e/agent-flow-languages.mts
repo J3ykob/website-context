@@ -52,7 +52,9 @@ async function customer(lang: string, assistant: string, history: string[]): Pro
 }
 
 async function inLanguage(text: string, lang: string): Promise<number> {
-  const a: any = await jevAsk({ text }, { ok: { type: "noul", instructions: `Is \`text\` written in ${LANGS[lang].name}? Quoted names, dates or labels from a Polish website inside it do not count against it.` } }, 8000);
+  // The assistant's own words must be in the customer's language; option names,
+  // dates and field labels it lists or quotes from the (Polish) website may not be.
+  const a: any = await jevAsk({ text }, { ok: { type: "noul", instructions: `Leaving out any items listed or quoted from the website (option names, dates, field labels), are the assistant's own sentences in \`text\` written in ${LANGS[lang].name}?` } }, 8000);
   return a?.ok?.noul ?? 1;
 }
 

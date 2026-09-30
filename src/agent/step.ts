@@ -296,10 +296,11 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   operations.DONE = "The page visibly shows that the goal is completed.";
   operations.BLOCKED = "No available operation can make progress.";
 
-  // The latest correction (and later preferences) is what counts for the date.
+  // Everything the visitor said, in order; later lines win where they conflict.
+  // (Cutting it at the last correction lost "on Wednesday" when the correction
+  // was about something else, e.g. a different exam package.)
   const reqText = input.request || "";
-  const cIdx = reqText.lastIndexOf("Visitor's correction");
-  const latestPrefs = cIdx >= 0 ? reqText.slice(cIdx) : reqText;
+  const latestPrefs = reqText.includes("Visitor's correction") ? `(Later lines override earlier ones where they conflict.)\n${reqText}` : reqText;
 
   const common = { goal: input.goal, visitor_request: reqText, rules: RULES };
   const questions: Record<string, JevQuestion> = {
@@ -496,7 +497,9 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
     if (!answer && plausible.length === 0 && m.relevant < 0.5) return null;
     const bullets = (rs: { e: AgentElement }[]) => rs.map((r) => `• ${short(r.e.label, 70)}`).join("\n");
     if (plausible.length >= 2) {
-      const list = bullets(plausible.slice(0, 6));
+      // Near-misses too: across languages the fitting option can score a little
+      // lower (a French request left the full taxi package off the list).
+      const list = bullets(byScore.filter((r) => r.s >= 0.1).slice(0, 6));
       return { op: "ASK", i: 0, field: "choice", say: say(lang, `Pasuje kilka opcji:\n${list}\nKtórą wybierasz?`, `Several options fit:\n${list}\nWhich one do you choose?`) };
     }
     if (plausible.length === 1) {
