@@ -317,12 +317,15 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
   operations.DONE = "The page visibly shows that the goal is completed.";
   operations.BLOCKED = "No available operation can make progress.";
 
-  // After a correction, it leads and the earlier wishes stay as context where it
-  // does not change them (cutting them off lost "on Wednesday" when the correction
-  // was about the package; giving everything flat weakened "I prefer Friday").
+  // The operation decision reads the latest correction on its own - with the
+  // earlier wishes next to it, "I prefer Friday" no longer sent the agent back
+  // to the dates. Date / slot matching reads the correction first plus the
+  // earlier wishes, so a correction about something else (the package) does not
+  // lose "on Wednesday".
   const reqText = input.request || "";
   const cIdx = reqText.lastIndexOf("Visitor's correction");
-  const latestPrefs = cIdx >= 0
+  const latestPrefs = cIdx >= 0 ? reqText.slice(cIdx) : reqText;
+  const slotWishes = cIdx >= 0
     ? `${reqText.slice(cIdx)}\n\nEarlier wishes (still valid where the correction above does not change them):\n${reqText.slice(0, cIdx)}`
     : reqText;
 
@@ -429,8 +432,8 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
       let hasPref = dateChosen || (noul(a, "date_pref") ?? 0) >= 0.5;
       // The main call carries the whole page; its date_pref occasionally misses a
       // plain "na środę". Before asking the visitor, re-check it on its own.
-      if (!hasPref && latestPrefs.trim()) {
-        const d = await jevAsk({ latest_preferences: latestPrefs }, { date_pref: questions.date_pref }, 4000);
+      if (!hasPref && slotWishes.trim()) {
+        const d = await jevAsk({ latest_preferences: slotWishes }, { date_pref: questions.date_pref }, 4000);
         hasPref = (noul(d, "date_pref") ?? 0) >= 0.5;
       }
       // A fresh answer to our date / hour question is applied even when an older
@@ -451,7 +454,7 @@ async function decideCommand(input: AgentStepInput): Promise<AgentCommand> {
         // without an hour) -> ask which, unless they asked for the earliest within it.
         // None -> tell the visitor and offer the closest ones (same day first).
         const cands = slots.slice(0, 40);
-        const slotPrefs = answeredSlot ? `${latestPrefs}\nMOST RECENT ANSWER (takes precedence over everything above): ${lastStep.label}` : latestPrefs;
+        const slotPrefs = answeredSlot ? `${slotWishes}\nMOST RECENT ANSWER (takes precedence over everything above): ${lastStep.label}` : slotWishes;
         const f = await jevAsk({ latest_preferences: slotPrefs, slots: cands.map((e) => e.label) }, {
           ...Object.fromEntries(cands.map((_, k) => [`f${k}`, { type: "noul", instructions: `Does \`slots[${k}]\` satisfy what the visitor asked for in \`latest_preferences\` (the day, date, time or period they named)? If they named a specific clock time, only a slot at exactly that time satisfies it; a nearby time does not.` } as JevQuestion])),
           ...Object.fromEntries(cands.map((_, k) => [`n${k}`, { type: "noul", instructions: `Is \`slots[${k}]\` close to what the visitor asked for in \`latest_preferences\`: on the day they named, or near the time they named?` } as JevQuestion])),
