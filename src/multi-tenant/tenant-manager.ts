@@ -12,7 +12,7 @@ import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { WebsiteChat } from "../llm/chat.js";
 import { askEcosystem, ecosystemOf } from "../ecosystem/ask.js";
-import { ensureCollectFlow } from "../flows/collect-store.js";
+import { createHandoffs } from "../ecosystem/handoff.js";
 import { getFlows } from "../flows/flow-store.js";
 import { getTenant } from "./tenant-registry.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
@@ -169,12 +169,13 @@ export class TenantManager {
             embed: (texts) => this.bgeProvider.embed(texts),
           }, onStart)
         : undefined,
-      // Bot-to-bot inquiries to the businesses it recommended (their own forms).
-      bridge: ecosystemOf(getTenant(tenantId)) ? {
-        askerId: tenantId,
-        askerBrand: () => { const t = getTenant(tenantId); return t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId; },
-        ensureFlow: async (bizId) => (await ensureCollectFlow(bizId, (id) => this.evictTenant(id))).id,
-        talk: async (bizId, key, text, opts) => (await this.getChatForTenant(bizId)).chat([{ role: "user", content: text }], key, undefined, opts),
+      // Hand-off links to the businesses it recommends (their own bots take over).
+      handoffLinks: ecosystemOf(getTenant(tenantId)) ? async (targets, transcript, need) => {
+        const t = getTenant(tenantId);
+        const label = t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId;
+        const tokens = await createHandoffs({ tenantId, label }, targets, transcript.filter((m) => m.role === "user" || m.role === "assistant") as any, need);
+        const base = process.env.BASE_URL || "https://whisp.so";
+        return Object.fromEntries(Object.entries(tokens).map(([id, tok]) => [id, `${base}/h/${tok}`]));
       } : undefined,
     });
 

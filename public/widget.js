@@ -997,6 +997,41 @@
   }
   var activeFlowSession = null;
 
+  // ─── Hand-off from another business's bot ──────────────────────────────
+  // whisp.so/h/<token> lands here with #wctx_handoff=<token>: a fresh
+  // conversation that shows the earlier messages (from the other business's
+  // chat), then this bot answers the visitor's need itself. The token rides
+  // along on every message, so an order placed here records the referral.
+  var HANDOFF = null;
+  (function () {
+    var m = /(?:^|[#&])wctx_handoff=([A-Za-z0-9_-]{22,64})/.exec(window.location.hash || "");
+    if (!m) return;
+    try { history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) {}
+    fetch(API_HOST + "/api/handoff/" + m[1])
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (h) {
+        if (!h || h.toTenant !== TENANT_ID || !h.need) return;
+        HANDOFF = m[1];
+        messages = [];
+        sessionId = "session_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+        els.msgs.innerHTML = "";
+        state = "chat";
+        els.main.classList.remove("wctx-state-idle");
+        els.main.classList.add("wctx-state-chat");
+        // Open the chat once the load-time collapse to the bar (minimizeToBar,
+        // ~480 ms) is over - opening earlier gets undone by it.
+        setTimeout(function () { if (fab.style.display !== "none") openFullChat(); }, 650);
+        appendMsg("system", "\u21aa " + (h.fromLabel || ""));
+        (h.transcript || []).forEach(function (t) {
+          var d = appendMsg(t.role === "user" ? "user" : "assistant", t.content);
+          d.classList.add("wctx-msg-prior");
+        });
+        messages.push({ role: "user", content: h.need }); persistMessages();
+        runAssistantTurn();
+      })
+      .catch(function () {});
+  })();
+
   // ─── Flow form controller bridge (executor v2) ─────────────────────────────
   var wctxFlowActive = false;
   var wctxFlowFields = {}; // name -> target (accumulated from formActions)
@@ -1050,7 +1085,7 @@
     fetch(API_HOST + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: trimHistory(messages), tenantId: TENANT_ID, sessionId: sessionId, stream: true, formState: readFormState() }),
+      body: JSON.stringify({ messages: trimHistory(messages), tenantId: TENANT_ID, sessionId: sessionId, stream: true, formState: readFormState(), handoff: HANDOFF || undefined }),
     })
     .then(function(r) {
       var ct = r.headers.get("content-type") || "";
@@ -1115,8 +1150,12 @@
     els.input.value = "";
     messages.push({ role: "user", content: text }); persistMessages();
     appendMsg("user", text);
-    setLoading(true);
+    runAssistantTurn();
+  }
 
+  // The bot's answer to the conversation as it stands (last message: the visitor's).
+  function runAssistantTurn() {
+    setLoading(true);
     var bubble = null, raw = "";
     streamChat({
       onStatus: function(status) { showStatus(status); },
@@ -1821,6 +1860,7 @@
   border-radius:14px 14px 14px 4px;\
   animation-duration:0.6s;\
 }\
+.wctx-msg.wctx-msg-prior { opacity:0.6 !important; }\
 .wctx-msg-system {\
   align-self:flex-start;\
   font-size:13px;\

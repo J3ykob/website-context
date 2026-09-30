@@ -85,6 +85,7 @@ import type { MetaChannelConfig } from "../src/channels/index.js";
 import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
 import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-llm.js";
 import { registerAgentRoutes } from "../src/agent/routes.js";
+import { getHandoff, markHandoffOpened } from "../src/ecosystem/handoff.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "3211");
@@ -470,6 +471,29 @@ h1 em { color:#3b82f6; font-style:italic; }
 </div>
 </body>
 </html>`);
+});
+
+// Hand-off link from another business's bot: open this business's bot with the
+// conversation so far. The token travels in the URL fragment (#...), so it never
+// reaches the destination site's server logs. Destination: the tenant's demo
+// page (its site + our widget) until the widget runs on its own site.
+app.get("/h/:token", async (req, res) => {
+  const h = await getHandoff(String(req.params.token)).catch(() => null);
+  if (!h || !getTenant(h.toTenant)) {
+    res.status(410).send("<!DOCTYPE html><html lang=\"pl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body style=\"font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#64748b;text-align:center;padding:16px\"><p>Ten link wygasł. / This link has expired.</p></body></html>");
+    return;
+  }
+  res.set("Cache-Control", "no-store");
+  res.redirect(302, `/demo/${encodeURIComponent(h.toTenant)}#wctx_handoff=${h.token}`);
+});
+
+// The widget of the destination business reads the hand-off (and marks it opened).
+app.get("/api/handoff/:token", async (req, res) => {
+  const h = await getHandoff(String(req.params.token)).catch(() => null);
+  if (!h) { res.status(404).json({ error: "expired" }); return; }
+  markHandoffOpened(h.token).catch(() => {});
+  res.set("Cache-Control", "no-store");
+  res.json({ toTenant: h.toTenant, fromLabel: h.fromLabel, transcript: h.transcript, need: h.need });
 });
 
 // Demo page — standalone chat for a tenant (no embed needed)
@@ -1211,6 +1235,12 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const chat = await tenantManager.getChatForTenant(tenantId);
+    // A conversation handed over from another business's bot (whisp.so/h/<token>):
+    // an order placed in this session is recorded as referred by that business.
+    if (typeof req.body.handoff === "string") {
+      const h = await getHandoff(req.body.handoff).catch(() => null);
+      if (h && h.toTenant === tenantId) (chat as any).setSessionVia?.(sessionKey, { tenantId: h.fromTenant, brand: h.fromLabel, sessionKey: h.token });
+    }
     console.log(`[chat:${tenantId}] "${(messages[messages.length - 1]?.content || "").slice(0, 60)}"`);
 
     const lastUserContent = messages[messages.length - 1]?.content || "";
@@ -1263,7 +1293,7 @@ app.post("/api/chat", async (req, res) => {
         }, formState && typeof formState === "object" ? formState : undefined, (status) => {
           res.write(`data: ${JSON.stringify({ status })}\n\n`);
         });
-        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null, partners: full.partners || null, bridge: full.bridge || null })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null, partners: full.partners || null })}\n\n`);
         res.end();
         logResponse(full);
       } catch (error: any) {

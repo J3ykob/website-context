@@ -26,6 +26,10 @@ const realQuery: QueryFn = async (sql, params = []) => {
   return data.result?.[0]?.results || [];
 };
 let query: QueryFn = realQuery;
+/** Run one D1 statement (through the same test seam as this module). */
+export function d1Query(sql: string, params: any[] = []): Promise<any[]> {
+  return query(sql, params);
+}
 /** Test seam: inject a fake D1 query. */
 export function __setQuery(fn: QueryFn | null): void {
   query = fn || realQuery;

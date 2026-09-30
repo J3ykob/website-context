@@ -22,7 +22,6 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import type { EcosystemMatch } from "../ecosystem/ask.js";
-import { EcosystemBridge, type BridgeDeps } from "../ecosystem/bridge.js";
 import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
@@ -57,9 +56,10 @@ export interface ChatConfig {
   // onStart fires only when there are other businesses to ask (the widget shows
   // "checking with businesses we work with" while they decide).
   askEcosystem?: (messages: ChatMessage[], onStart?: () => void) => Promise<EcosystemMatch[]>;
-  // Bot-to-bot inquiries (src/ecosystem/bridge.ts): after a relay, the customer
-  // can send their order/request to a recommended business through its bot.
-  bridge?: BridgeDeps;
+  // Hand-off links (src/ecosystem/handoff.ts): each business we recommend gets a
+  // link that moves the customer to its bot with the conversation so far.
+  // Returns tenantId -> URL.
+  handoffLinks?: (targets: { tenantId: string; label: string }[], transcript: ChatMessage[], need: string) => Promise<Record<string, string>>;
 }
 
 export interface ChatResponse {
@@ -71,8 +71,6 @@ export interface ChatResponse {
   grounded?: boolean;
   // Set when the answer was relayed from ecosystem businesses' bots.
   partners?: { tenantId: string; label: string }[];
-  // Set while the customer talks to a recommended business's bot through ours.
-  bridge?: { tenantId: string; label: string; stage: string };
   // Set when the model flagged that site content does not cover the question
   // ([[gap: ...]] marker or the log_unknown action) — the server logs it to the
   // D1 gap journal that the dashboard's knowledge-gap view reads.
@@ -283,7 +281,7 @@ export class WebsiteChat {
   private systemPromptExtra: string;
   private knowledgeCatalog: KnowledgeCatalog | null;
   private askEcosystem: ChatConfig["askEcosystem"];
-  private bridge?: EcosystemBridge;
+  private handoffLinks: ChatConfig["handoffLinks"];
   private contextNotes: { question: string; answer: string; addedAt: string }[] = [];
   private flowSessions: Map<string, FlowSession> = new Map();
   // When a message plausibly matches 2+ flows, we ask which one and remember
@@ -310,7 +308,7 @@ export class WebsiteChat {
     this.brandName = config.brandName || "";
     this.onInquiry = config.onInquiry;
     this.askEcosystem = config.askEcosystem;
-    if (config.bridge) this.bridge = new EcosystemBridge(config.bridge);
+    this.handoffLinks = config.handoffLinks;
 
     if (config.llmProvider === "claude-cli") {
       this.backend = new ClaudeCLIBackend(config.claudeCli);
@@ -434,13 +432,6 @@ export class WebsiteChat {
         )
       : messages;
 
-    // A customer talking to a recommended business through us: their messages go
-    // to that business's bot (or they just picked one of the recommended ones).
-    if (this.bridge && !opts?.noPartners && !opts?.startFlowId) {
-      const bridged = await this.bridge.handle(effectiveSessionKey, inputValidation.sanitized);
-      if (bridged) return bridged;
-    }
-
     if (opts?.startFlowId && !this.collectSessions.has(effectiveSessionKey)) {
       const flow = this.context.flows.find((f) => f.id === opts.startFlowId && f.status === "active" && f.executionMode === "collect");
       if (flow) return this.startCollect(flow, effectiveSessionKey, inputValidation.sanitized, opts.via);
@@ -524,13 +515,13 @@ export class WebsiteChat {
     // at all to reason over). Otherwise the small model's verdict becomes an
     // advisory the big model weighs (see buildSystemPrompt).
     if (usableChunksC.length === 0) {
-      const viaPartner = await this.answerViaPartner(lastUserMessage, sanitizedMessages, effectiveSessionKey, opts?.noPartners);
+      const viaPartner = await this.answerViaPartner(lastUserMessage, sanitizedMessages, opts?.noPartners);
       if (viaPartner) return viaPartner;
       return { message: this.refusal(lastUserMessage), sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
     }
     const factCheckC = await this.factCheck(lastUserMessage, usableChunksC);
     if (factCheckC === "no_evidence") {
-      const viaPartner = await this.answerViaPartner(lastUserMessage, sanitizedMessages, effectiveSessionKey, opts?.noPartners);
+      const viaPartner = await this.answerViaPartner(lastUserMessage, sanitizedMessages, opts?.noPartners);
       if (viaPartner) return viaPartner;
     }
     const gapC = this.gapDecision(lastUserMessage, factCheckC); // runs alongside generation
@@ -845,11 +836,6 @@ export class WebsiteChat {
       ? messages.map((m, i) => (i === messages.length - 1 && m.role === "user") ? { ...m, content: inputValidation.sanitized } : m)
       : messages;
 
-    if (this.bridge) {
-      const bridged = await this.bridge.handle(effectiveSessionKey, inputValidation.sanitized);
-      if (bridged) { onToken(bridged.message); return bridged; }
-    }
-
     // Flows / tool-calls don't stream cleanly — defer to the full path, emit whole.
     // Only when a flow is actually in play: a tenant merely HAVING flows used to
     // lose streaming for every ordinary question.
@@ -872,7 +858,7 @@ export class WebsiteChat {
     // directly answer the question → honest refusal + logged gap, no generation.
     const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
     if (usableStream.length === 0) {
-      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages, effectiveSessionKey, false, onStatus);
+      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages, false, onStatus);
       if (viaPartner) { onToken(viaPartner.message); return viaPartner; }
       const msg = this.refusal(inputValidation.sanitized);
       onToken(msg);
@@ -880,7 +866,7 @@ export class WebsiteChat {
     }
     const factCheckS = await this.factCheck(inputValidation.sanitized, usableStream);
     if (factCheckS === "no_evidence") {
-      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages, effectiveSessionKey, false, onStatus);
+      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages, false, onStatus);
       if (viaPartner) { onToken(viaPartner.message); return viaPartner; }
     }
     const gapS = this.gapDecision(inputValidation.sanitized, factCheckS); // runs alongside generation
@@ -1021,7 +1007,7 @@ export class WebsiteChat {
   // ranked, top 3) come back with excerpts from their own sites, and ONE reply is
   // written from them, attributed. It may restate them but never add to them.
   // null = nobody in the ecosystem offers it.
-  private async answerViaPartner(question: string, messages: ChatMessage[], sessionKey: string, noPartners?: boolean, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
+  private async answerViaPartner(question: string, messages: ChatMessage[], noPartners?: boolean, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
     if (noPartners || !this.askEcosystem) return null;
     let found: EcosystemMatch[] = [];
     try {
@@ -1044,13 +1030,25 @@ export class WebsiteChat {
       `Write a short reply in the visitor's language: say in one sentence that this is not something we can confirm ourselves and that you checked with businesses we work with, ` +
       `then say what each of them offers that answers the question, naming them, with their contact details. ` +
       `Use only facts from the excerpts - add nothing, do not claim that we sell or do it. Full sentences, no preamble.` +
-      (this.bridge ? ` End with one short sentence offering to pass the visitor's order or request on to ${found.length > 1 ? "whichever of them they choose" : "them"} right here in the chat.` : "");
+      (this.handoffLinks ? ` End with one short sentence saying they can continue the conversation directly with ${found.length > 1 ? "any of them" : "them"} using the link${found.length > 1 ? "s" : ""} below (do not write the links yourself).` : "");
     let reply = "";
     try { reply = (await this.backend.generate(system, messages, this.maxTokens)).trim(); } catch { return null; }
     if (!reply) return null;
-    this.bridge?.remember(sessionKey, found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [question]);
+    // One link per recommended business: the customer continues with that
+    // business's own bot, which gets this conversation (see handoff.ts).
+    let message = reply;
+    if (this.handoffLinks) {
+      try {
+        const need = messages.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join("\n");
+        const links = await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [...messages, { role: "assistant", content: reply }], need);
+        const lines = found.filter((f) => links[f.tenantId]).map((f) => `[${f.label}](${links[f.tenantId]})`);
+        if (lines.length) message += "\n\n" + lines.join("\n");
+      } catch (e) {
+        console.warn(`[handoff] ${this.context.tenantId}: links failed: ${(e as Error).message}`);
+      }
+    }
     return {
-      message: reply,
+      message,
       sources: [...new Map(found.flatMap((f) => f.passages).filter((p) => p.url).map((p) => [p.url, { url: p.url, title: p.title }])).values()],
       grounded: true,
       partners: found.map((f) => ({ tenantId: f.tenantId, label: f.label })),
