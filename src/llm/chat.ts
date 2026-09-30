@@ -25,7 +25,7 @@ import type { EcosystemMatch } from "../ecosystem/ask.js";
 import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
-import { collectTurn, startSession, type CollectSession, type Inquiry } from "../flows/collect.js";
+import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -73,6 +73,9 @@ export interface ChatResponse {
   unknownQuestion?: string;
   navigateTo?: string;
   suggestedAction?: { flowId: string; flowName: string; description: string };
+  // An "in chat" flow (order / inquiry) in progress: where it stands, for a
+  // caller driving it (e.g. another business's bot in an ecosystem referral).
+  collect?: { flowId: string; stage: "collecting" | "confirming" | "sent" | "cancelled" | "failed"; missing: string[] };
   flowSession?: {
     active: boolean;
     status: FlowSession["status"];
@@ -399,7 +402,9 @@ export class WebsiteChat {
   }
 
   // opts.noPartners: this call is itself an ecosystem query - never ask further businesses.
-  async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>, opts?: { noPartners?: boolean }): Promise<ChatResponse> {
+  // opts.startFlowId: start that "in chat" flow for this session right away (no
+  // intent step); opts.via: who asked on the customer's behalf (kept on the inquiry).
+  async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>, opts?: { noPartners?: boolean; startFlowId?: string; via?: CollectVia }): Promise<ChatResponse> {
     const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
     const effectiveSessionKey = sessionKey || "default";
 
@@ -421,6 +426,10 @@ export class WebsiteChat {
         )
       : messages;
 
+    if (opts?.startFlowId && !this.collectSessions.has(effectiveSessionKey)) {
+      const flow = this.context.flows.find((f) => f.id === opts.startFlowId && f.status === "active" && f.executionMode === "collect");
+      if (flow) return this.startCollect(flow, effectiveSessionKey, inputValidation.sanitized, opts.via);
+    }
     // An "in chat" flow (order / inquiry) in progress takes every message.
     const cs = this.collectSessions.get(effectiveSessionKey);
     if (cs) {
@@ -921,30 +930,31 @@ export class WebsiteChat {
   // Start a goal-driven ("agent") flow: no input collection here; the widget
   // drives the page with /api/agent/step and asks the visitor for data as needed.
   // ── "In chat" flows: the assistant collects an order / inquiry itself ──
-  private startCollect(flow: FlowDefinition, sessionKey: string, message: string): Promise<ChatResponse> {
-    const s = startSession(flow);
+  private startCollect(flow: FlowDefinition, sessionKey: string, message: string, via?: CollectVia): Promise<ChatResponse> {
+    const s = startSession(flow, via);
     this.collectSessions.set(sessionKey, s);
     return this.runCollect(flow, s, sessionKey, message);
   }
 
   private async runCollect(flow: FlowDefinition, s: CollectSession, sessionKey: string, message: string): Promise<ChatResponse> {
     const llm = (system: string, user: string, maxTokens = 700) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
+    const status = (stage: NonNullable<ChatResponse["collect"]>["stage"]) => ({ flowId: flow.id, stage, missing: stage === "collecting" || stage === "confirming" ? missingLabels(flow, s) : [] });
     try {
       const cat = this.knowledgeCatalog;
       const knowledge = cat ? (q: string) => lexicalSnippets(q, cat, 5) : undefined;
       const r = await collectTurn(flow, s, message, this.brandName, llm, knowledge);
-      if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [] }; }
+      if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [], collect: status("cancelled") }; }
       if ("inquiry" in r) {
         this.collectSessions.delete(sessionKey);
         const ok = this.onInquiry ? await this.onInquiry(r.inquiry).catch(() => false) : false;
-        if (ok) return { message: r.reply, sources: [] };
+        if (ok) return { message: r.reply, sources: [], collect: status("sent") };
         console.error(`[collect] inquiry for flow ${flow.id} could not be recorded`);
-        return { message: this.collectFailed(s.language, true), sources: [] };
+        return { message: this.collectFailed(s.language, true), sources: [], collect: status("failed") };
       }
-      return { message: r.reply, sources: [] };
+      return { message: r.reply, sources: [], collect: status(s.stage) };
     } catch (e) {
       console.warn(`[collect] turn failed: ${(e as Error).message}`);
-      return { message: this.collectFailed(s.language, false), sources: [] };
+      return { message: this.collectFailed(s.language, false), sources: [], collect: status(s.stage) };
     }
   }
 

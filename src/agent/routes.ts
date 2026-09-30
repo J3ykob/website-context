@@ -8,8 +8,7 @@ import type { Express, Request, RequestHandler } from "express";
 import { getFlow, getFlows, saveFlow } from "../flows/flow-store.js";
 import { getTenant } from "../multi-tenant/tenant-registry.js";
 import type { FlowDefinition } from "../context/types.js";
-import { deriveFields } from "../flows/collect.js";
-import { OpenRouterProvider } from "../llm/openrouter-provider.js";
+import { collectFieldsFor } from "../flows/collect-store.js";
 import { jevAsk, jevEnabled } from "../llm/jev.js";
 import { lexicalSnippets, type KnowledgeCatalog } from "../knowledge/catalog.js";
 import { loadKnowledgeCatalog } from "../multi-tenant/tenant-manager.js";
@@ -73,11 +72,6 @@ function agentFields(b: any, siteUrl: string): { error: string } | { mode: "agen
   return { mode, name, goal, startUrl };
 }
 
-// The fields an "in chat" flow collects, derived from the owner's description.
-async function collectFieldsFor(goal: string) {
-  const or = new OpenRouterProvider({ maxTokens: 800, temperature: 0 });
-  return deriveFields(goal, async (system, user, maxTokens) => (await or.chat([{ role: "system", content: system }, { role: "user", content: user }], { maxTokens })).content);
-}
 
 export interface AgentRouteDeps { auth: RequestHandler; onFlowsChanged: (tenantId: string) => void }
 

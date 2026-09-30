@@ -12,8 +12,12 @@ import { jevAsk } from "../llm/jev.js";
 
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
 
+/** When another business's bot started the inquiry (ecosystem referral). */
+export interface CollectVia { tenantId: string; brand: string; sessionKey: string }
+
 export interface CollectSession {
   flowId: string;
+  via?: CollectVia;
   values: Record<string, string>;
   stage: "collecting" | "confirming";
   transcript: string[];
@@ -27,6 +31,7 @@ export interface CollectSession {
 export interface Inquiry {
   flowId: string;
   flowName: string;
+  via?: CollectVia;
   fields: { label: string; value: string }[];
   transcript: string[];
   at: string;
@@ -56,7 +61,7 @@ export async function deriveFields(description: string, llm: Llm): Promise<FlowI
 
 """${description.slice(0, 2000)}"""
 
-List the fields to collect as JSON: {"fields": [{"key": "snake_case_id", "label": "short label in the same language as the description", "required": true, "from_offer": false, "hint": "what belongs in it"}]}.
+List the fields to collect as JSON: {"fields": [{"key": "snake_case_id", "label": "short label (1-4 words) in the same language as the description", "required": true, "from_offer": false, "hint": "what belongs in it"}]}.
 "from_offer" is true when the value must be something this business itself offers (its products, services, packages, locations), false for the customer's own details (quantities, dates, address, name, contact).
 Rules: at most 10 fields; follow the description; always include the customer's name and one way to contact them (phone or email, required) unless the description says otherwise; do not add fields the description does not need.`,
     800,
@@ -77,8 +82,13 @@ Rules: at most 10 fields; follow the description; always include the customer's 
   return fields;
 }
 
-export function startSession(flow: FlowDefinition): CollectSession {
-  return { flowId: flow.id, values: {}, stage: "collecting", transcript: [], at: Date.now() };
+export function startSession(flow: FlowDefinition, via?: CollectVia): CollectSession {
+  return { flowId: flow.id, values: {}, stage: "collecting", transcript: [], at: Date.now(), ...(via ? { via } : {}) };
+}
+
+/** Required fields still empty (labels) - for callers driving the session. */
+export function missingLabels(flow: FlowDefinition, s: CollectSession): string[] {
+  return missingRequired(flow, s).map((f) => f.label);
 }
 
 const fieldsOf = (flow: FlowDefinition) => [...flow.requiredInputs, NOTES];
@@ -265,7 +275,7 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
 
 Your task: ${task}
 
-Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${shown.map((f) => `"${f.name}": "${f.label} in ${language}"`).join(", ")}}` : ""}}.`;
+Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${shown.map((f) => `"${f.name}": "<'${f.label}' translated into ${language}>"`).join(", ")}}` : ""}}.${outcome === "summary" ? ` "labels" holds each field name translated into ${language} (the summary is shown to the customer).` : ""}`;
   let out = parseJsonObject(await llm(replySystem, replyUser, 300));
   const stray = strayScripts(message, String(out?.message || ""));
   if (stray.length) {
@@ -290,6 +300,7 @@ Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${s
     const inquiry: Inquiry = {
       flowId: flow.id,
       flowName: flow.name,
+      ...(s.via ? { via: s.via } : {}),
       fields: fields.filter((f) => (s.values[f.name] || "").trim()).map((f) => ({ label: f.label, value: s.values[f.name] })),
       transcript: s.transcript.slice(-30),
       at: new Date().toISOString(),

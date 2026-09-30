@@ -93,16 +93,17 @@ whisp.so`,
 export async function sendInquiryEmail(
   email: string,
   brand: string,
-  inquiry: { flowName: string; fields: { label: string; value: string }[]; transcript: string[]; at: string },
+  inquiry: { flowName: string; fields: { label: string; value: string }[]; transcript: string[]; at: string; via?: { brand: string } },
 ): Promise<boolean> {
   const lines = inquiry.fields.map((f) => `${f.label}: ${f.value}`).join("\n");
+  const via = inquiry.via ? ` przez bota ${inquiry.via.brand}` : "";
   try {
     const { error } = await resend.emails.send({
       from: FROM,
       to: email,
       replyTo: "jakub@whisp.so",
-      subject: `Nowe zapytanie z czatu: ${inquiry.flowName} (${brand})`,
-      text: `Klient wysłał przez asystenta na stronie zapytanie „${inquiry.flowName}” i potwierdził dane.
+      subject: `Nowe zapytanie z czatu${via}: ${inquiry.flowName} (${brand})`,
+      text: `Klient wysłał${inquiry.via ? ` przez asystenta firmy ${inquiry.via.brand} (polecenie w ekosystemie)` : " przez asystenta na stronie"} zapytanie „${inquiry.flowName}” i potwierdził dane.
 
 ${lines}
 
