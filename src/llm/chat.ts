@@ -22,7 +22,7 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import type { EcosystemMatch } from "../ecosystem/ask.js";
-import { jevNewNeed, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
+import { jevNewNeed, jevAcceptsOffer, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
@@ -276,6 +276,29 @@ function scriptOf(ch: string): string {
   return "Chinese";
 }
 
+// Fixed texts of the ecosystem offer, by the language Jev named.
+const ECO_OFFER: Record<OfferLang, string> = {
+  pl: "Czy chcesz, żebym sprawdził to u dostawców i firm, z którymi współpracujemy?",
+  en: "Would you like me to check with the suppliers and businesses we work with?",
+  uk: "Хочете, щоб я перевірив це в постачальників і компаній, з якими ми співпрацюємо?",
+  fr: "Voulez-vous que je vérifie auprès des fournisseurs et entreprises avec lesquels nous travaillons ?",
+  de: "Soll ich bei den Lieferanten und Unternehmen nachfragen, mit denen wir zusammenarbeiten?",
+  other: "Would you like me to check with the suppliers and businesses we work with?",
+};
+const ECO_CHECKING: Record<OfferLang, string> = {
+  pl: "Sprawdzam u firm, z którymi współpracujemy…", en: "Checking with businesses we work with…",
+  uk: "Перевіряю в компаній, з якими ми співпрацюємо…", fr: "Je vérifie auprès des entreprises partenaires…",
+  de: "Ich frage bei unseren Partnerunternehmen nach…", other: "Checking with businesses we work with…",
+};
+const ECO_NONE: Record<OfferLang, string> = {
+  pl: "Sprawdziłem u firm, z którymi współpracujemy, ale żadna z nich tego nie oferuje.",
+  en: "I checked with the businesses we work with, but none of them offers this.",
+  uk: "Я перевірив у компаній, з якими ми співпрацюємо, але жодна з них цього не пропонує.",
+  fr: "J'ai vérifié auprès des entreprises avec lesquelles nous travaillons, mais aucune ne le propose.",
+  de: "Ich habe bei unseren Partnerunternehmen nachgefragt, aber keines bietet das an.",
+  other: "I checked with the businesses we work with, but none of them offers this.",
+};
+
 export class WebsiteChat {
   private backend: LLMBackend;
   private maxTokens: number;
@@ -286,6 +309,9 @@ export class WebsiteChat {
   private systemPromptExtra: string;
   private knowledgeCatalog: KnowledgeCatalog | null;
   private askEcosystem: ChatConfig["askEcosystem"];
+  // Sessions where we just said we don't have it and offered to check with
+  // other businesses: the visitor's need, waiting for their yes.
+  private ecoOffers: Map<string, { need: string; lang: OfferLang; at: number }> = new Map();
   private handoffLinks: ChatConfig["handoffLinks"];
   private contextNotes: { question: string; answer: string; addedAt: string }[] = [];
   private flowSessions: Map<string, FlowSession> = new Map();
@@ -454,6 +480,10 @@ export class WebsiteChat {
       this.collectSessions.delete(effectiveSessionKey);
     }
 
+    // The visitor answers our offer to check with other businesses.
+    const ecoC = await this.ecoConsent(effectiveSessionKey, inputValidation.sanitized, sanitizedMessages);
+    if (ecoC) return ecoC;
+
     // If there's an active flow session collecting remaining inputs
     if (this.hasActiveFlowSession(effectiveSessionKey)) {
       const session = this.flowSessions.get(effectiveSessionKey)!;
@@ -525,15 +555,12 @@ export class WebsiteChat {
     // at all to reason over). Otherwise the small model's verdict becomes an
     // advisory the big model weighs (see buildSystemPrompt).
     if (usableChunksC.length === 0) {
-      const viaPartner = await this.answerViaPartner(lastUserMessage, sanitizedMessages, opts?.noPartners);
-      if (viaPartner) return viaPartner;
-      return { message: this.refusal(lastUserMessage), sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
+      const offerC = await this.ecoOffer(effectiveSessionKey, lastUserMessage, sanitizedMessages, opts?.noPartners);
+      return { message: this.refusal(lastUserMessage) + offerC, sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
     }
     const factCheckC = await this.factCheck(lastUserMessage, usableChunksC);
-    if (factCheckC === "no_evidence") {
-      const viaPartner = await this.answerViaPartner(lastUserMessage, sanitizedMessages, opts?.noPartners);
-      if (viaPartner) return viaPartner;
-    }
+    // We don't have it: the reply says so (below) and ends with the offer.
+    const offerTailC = factCheckC === "no_evidence" ? await this.ecoOffer(effectiveSessionKey, lastUserMessage, sanitizedMessages, opts?.noPartners) : "";
     const gapC = this.gapDecision(lastUserMessage, factCheckC); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -625,7 +652,7 @@ export class WebsiteChat {
         // log_unknown is handled by the MCP server (writes to file directly)
       }
 
-      return { message: safeText, sources };
+      return { message: safeText + offerTailC, sources };
     }
 
     // Fallback to structured output if backend supports it (e.g., non-CLI backends)
@@ -691,10 +718,10 @@ export class WebsiteChat {
 
       if (result.action?.type === "log_unknown" && result.action.question) {
         this.logUnknownQuestion(result.action.question, lastUserMessage);
-        return { message: safeMessage, sources, unknownQuestion: result.action.question };
+        return { message: safeMessage + offerTailC, sources, unknownQuestion: result.action.question };
       }
 
-      return { message: safeMessage, sources };
+      return { message: safeMessage + offerTailC, sources };
     }
 
     // GROUNDING GATE: if nothing survived retrieval+filtering, the demo has no
@@ -736,7 +763,7 @@ export class WebsiteChat {
 
     const plainOutputCheck = validateOutput(this.guardReplyLinks(responseText), this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
-    return { message: plainOutputCheck.sanitized, sources, grounded: true, unknownQuestion: await this.resolveGap(gapC, lastUserMessage, gapPlain.question) };
+    return { message: plainOutputCheck.sanitized + offerTailC, sources, grounded: true, unknownQuestion: await this.resolveGap(gapC, lastUserMessage, gapPlain.question) };
   }
 
   // Parallel retrieval shared by chat() and chatStream(). Each Vectorize query is ~2s,
@@ -854,6 +881,12 @@ export class WebsiteChat {
       ? messages.map((m, i) => (i === messages.length - 1 && m.role === "user") ? { ...m, content: inputValidation.sanitized } : m)
       : messages;
 
+    // The visitor answers our offer to check with other businesses.
+    if (!this.collectSessions.has(effectiveSessionKey)) {
+      const ecoS = await this.ecoConsent(effectiveSessionKey, inputValidation.sanitized, sanitizedMessages, onStatus);
+      if (ecoS) { onToken(ecoS.message); return ecoS; }
+    }
+
     // Flows / tool-calls don't stream cleanly — defer to the full path, emit whole.
     // Only when a flow is actually in play: a tenant merely HAVING flows used to
     // lose streaming for every ordinary question.
@@ -876,17 +909,12 @@ export class WebsiteChat {
     // directly answer the question → honest refusal + logged gap, no generation.
     const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
     if (usableStream.length === 0) {
-      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages, false, onStatus);
-      if (viaPartner) { onToken(viaPartner.message); return viaPartner; }
-      const msg = this.refusal(inputValidation.sanitized);
+      const msg = this.refusal(inputValidation.sanitized) + await this.ecoOffer(effectiveSessionKey, inputValidation.sanitized, sanitizedMessages);
       onToken(msg);
       return { message: msg, sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(inputValidation.sanitized, "no_evidence"), inputValidation.sanitized, inputValidation.sanitized.trim() || null) };
     }
     const factCheckS = await this.factCheck(inputValidation.sanitized, usableStream);
-    if (factCheckS === "no_evidence") {
-      const viaPartner = await this.answerViaPartner(inputValidation.sanitized, sanitizedMessages, false, onStatus);
-      if (viaPartner) { onToken(viaPartner.message); return viaPartner; }
-    }
+    const offerTailS = factCheckS === "no_evidence" ? await this.ecoOffer(effectiveSessionKey, inputValidation.sanitized, sanitizedMessages) : "";
     const gapS = this.gapDecision(inputValidation.sanitized, factCheckS); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -904,7 +932,7 @@ export class WebsiteChat {
       let draft = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
       draft = await this.guardNoEvidence(inputValidation.sanitized, systemPrompt, sanitizedMessages, draft);
       const g = this.extractGapMarker(draft);
-      raw = g.text;
+      raw = g.text + offerTailS;
       onToken(raw);
       emitted = raw.length;
     } else await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
@@ -1034,6 +1062,37 @@ export class WebsiteChat {
 
   // Refusal in the visitor's language — an English refusal on a Polish site
   // breaks the "we speak as you" voice, and the gate now fires more often.
+  // We don't have it: if the visitor asks for something another business could
+  // provide (Jev: a new need, not a follow-up or a question about us), the reply
+  // ends with an offer to check with the businesses we work with - fixed text in
+  // the visitor's language - and the need waits for their yes. "" otherwise.
+  private async ecoOffer(sessionKey: string, question: string, messages: ChatMessage[], noPartners?: boolean): Promise<string> {
+    if (noPartners || !this.askEcosystem) return "";
+    const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
+    const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
+    const g = await jevNewNeed(prevUser, prevReply, question);
+    if (!g || g.need < 0.5) {
+      console.log(`[ecosystem] ${this.context.tenantId}: no offer (new need ${g?.need.toFixed(2) ?? "?"}): "${question.slice(0, 60)}"`);
+      return "";
+    }
+    this.ecoOffers.set(sessionKey, { need: question, lang: g.lang, at: Date.now() });
+    if (this.ecoOffers.size > 2000) this.ecoOffers.delete(this.ecoOffers.keys().next().value!);
+    return "\n\n" + ECO_OFFER[g.lang];
+  }
+
+  // The visitor's reply to that offer: a yes (Jev) runs the search for the need
+  // they asked about; anything else drops the offer and the chat goes on.
+  private async ecoConsent(sessionKey: string, message: string, messages: ChatMessage[], onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
+    const o = this.ecoOffers.get(sessionKey);
+    if (!o) return null;
+    this.ecoOffers.delete(sessionKey);
+    if (Date.now() - o.at > 30 * 60 * 1000) return null;
+    const yes = await jevAcceptsOffer(message);
+    if (yes === null || yes < 0.5) return null;
+    const r = await this.answerViaPartner(o.need, messages, false, onStatus ? (st) => onStatus({ ...st, text: ECO_CHECKING[o.lang] }) : undefined);
+    return r || { message: ECO_NONE[o.lang], sources: [] };
+  }
+
   // Ecosystem: our own content has nothing on the question -> the best-ranked
   // businesses of our ecosystem that offer it (src/ecosystem/ask.ts: Jev-judged,
   // ranked, top 3) come back with excerpts from their own sites, and ONE reply is
@@ -1041,16 +1100,6 @@ export class WebsiteChat {
   // null = nobody in the ecosystem offers it.
   private async answerViaPartner(question: string, messages: ChatMessage[], noPartners?: boolean, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
     if (noPartners || !this.askEcosystem) return null;
-    // Only a request for something another business could provide goes out - not
-    // a follow-up on what was just discussed ("ok, but what do YOU have?") nor a
-    // question about this business itself. Fails closed (no Jev -> no broadcast).
-    const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
-    const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
-    const newNeed = await jevNewNeed(prevUser, prevReply, question);
-    if (newNeed === null || newNeed < 0.5) {
-      console.log(`[ecosystem] ${this.context.tenantId}: not broadcast (new need ${newNeed?.toFixed(2) ?? "?"}): "${question.slice(0, 60)}"`);
-      return null;
-    }
     let found: EcosystemMatch[] = [];
     try {
       found = await this.askEcosystem(messages, () => onStatus?.({
@@ -1069,7 +1118,7 @@ export class WebsiteChat {
     const system =
       `You are the website assistant of ${brand}. The visitor asked something our own information does not cover. ` +
       `We checked businesses we work with; excerpts from their own websites:\n\n${material}\n\n` +
-      `Write a short reply in the visitor's language: say in one sentence that this is not something we can confirm ourselves and that you checked with businesses we work with, ` +
+      `Write a short reply in the visitor's language: say in one short sentence that you checked with businesses we work with (the visitor asked you to), ` +
       `then say what each of them offers that answers the question, naming them, with their contact details. ` +
       `Use only facts from the excerpts - add nothing, do not claim that we sell or do it, and do not describe our own offer. Full sentences, no preamble.` +
       (this.handoffLinks ? ` End with one short sentence saying they can continue the conversation directly with ${found.length > 1 ? "any of them" : "them"} using the link${found.length > 1 ? "s" : ""} below (do not write the links yourself).` : "");
@@ -1086,7 +1135,7 @@ export class WebsiteChat {
     let message = reply;
     if (this.handoffLinks) {
       try {
-        const need = messages.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join("\n");
+        const need = question;
         const links = await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [...messages, { role: "assistant", content: reply }], need);
         const lines = found.filter((f) => links[f.tenantId]).map((f) => `[${f.label}](${links[f.tenantId]})`);
         if (lines.length) message += "\n\n" + lines.join("\n");

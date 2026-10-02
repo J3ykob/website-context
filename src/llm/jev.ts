@@ -210,20 +210,49 @@ export async function jevBusinessesOffer(question: string, businesses: { name: s
 }
 
 /**
- * Ecosystem gate: P(the visitor's latest message asks for a product or service
- * that ANOTHER business could provide - a new need - rather than following up
- * on what was just discussed or asking about this business itself). Sees the
- * previous exchange, so "ok but what exactly do YOU have?" after a referral is a
- * follow-up, not a new need. null when Jev is unavailable.
+ * Ecosystem gate, one call: P(the visitor's latest message asks for a product or
+ * service ANOTHER business could provide - a new need - rather than following up
+ * on what was just discussed or asking about this business itself), and the
+ * language of the message (for the fixed offer sentence). Sees the previous
+ * exchange, so "ok but what do YOU have?" after a referral is a follow-up.
+ * null when Jev is unavailable.
  */
-export async function jevNewNeed(previousUser: string, previousReply: string, message: string): Promise<number | null> {
+export const OFFER_LANGS = ["pl", "en", "uk", "fr", "de", "other"] as const;
+export type OfferLang = (typeof OFFER_LANGS)[number];
+export async function jevNewNeed(previousUser: string, previousReply: string, message: string): Promise<{ need: number; lang: OfferLang } | null> {
   const answers = await jevAsk({ previous_visitor_message: previousUser.slice(0, 600), previous_reply: previousReply.slice(0, 900), message: message.slice(0, 600) }, {
     need: {
       type: "noul",
-      instructions: "A visitor is chatting with a business's assistant. Is `message` a request for a product or a service (something a business could provide), stated in `message` itself or clearly continuing `previous_visitor_message`'s request for one? Answer no if `message` asks about this business itself (who they are, what they themselves have or do, their contact, opening hours, prices of what was already offered), pushes back on or asks for details of `previous_reply`, or is small talk.",
+      instructions: "A visitor is chatting with a business's assistant. Does `message` ask for a product or a service (something a business could provide) - including asking whether this business has or does it? Answer no if it asks about this business's own details (who they are, contact, address, opening hours) or is small talk.",
+    },
+    followup: {
+      type: "noul",
+      instructions: "Is `message` a follow-up on `previous_reply`: asking for more details, prices or specifics of the businesses, products or offers that `previous_reply` names, or pushing back on it without naming anything new? Naming a specific product or kind of product that `previous_reply` does not name is NOT a follow-up.",
+    },
+    lang: {
+      type: "choice",
+      instructions: "In which language is `message` written?",
+      criteria: { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German", other: "Any other language" },
     },
   });
-  const a = answers?.need as JevNoulAnswer | undefined;
+  const n = answers?.need as JevNoulAnswer | undefined;
+  const f = answers?.followup as JevNoulAnswer | undefined;
+  const l = (answers?.lang as JevChoiceAnswer | undefined)?.choice as OfferLang | undefined;
+  if (!n || typeof n.noul !== "number") return null;
+  // A follow-up only counts when there was something to follow up on.
+  const follow = previousReply.trim() && f && typeof f.noul === "number" ? f.noul : 0;
+  return { need: n.noul * (1 - follow), lang: l && (OFFER_LANGS as readonly string[]).includes(l) ? l : "en" };
+}
+
+/** P(`message` accepts the assistant's offer to check with other suppliers). */
+export async function jevAcceptsOffer(message: string): Promise<number | null> {
+  const answers = await jevAsk({ offer: "Would you like me to check with other suppliers and businesses we work with?", message: message.slice(0, 400) }, {
+    yes: {
+      type: "noul",
+      instructions: "The assistant asked the visitor `offer`. Does the visitor's `message` accept it (yes, please, go ahead, check)? Answer no if it declines, or asks or says something else.",
+    },
+  });
+  const a = answers?.yes as JevNoulAnswer | undefined;
   return a && typeof a.noul === "number" ? a.noul : null;
 }
 
