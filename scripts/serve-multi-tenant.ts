@@ -1776,8 +1776,8 @@ app.put("/api/dashboard/site-card", ownerAuth, async (req, res) => {
     ? b.suggestions.slice(0, 6).map((s: any) => str(s, 160)).filter(Boolean)
     : [];
   const siteCard: any = {
-    brand: str(b.brand, 120) || tenant.settings?.siteCard?.brand || undefined,
     tagline: str(b.tagline, 120) || undefined,
+    brand: str(b.brand, 120) || tenant.settings?.siteCard?.brand || undefined,
     eyebrow: str(b.eyebrow, 80) || undefined,
     phone: str(b.phone, 40) || undefined,
     suggestions,
