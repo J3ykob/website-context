@@ -133,8 +133,8 @@ type OfferVerdict = { status: "ok" } | { status: "several" | "not_offered"; opti
  * login), the customer's words are accepted as they are. Suggested names must
  * appear in the knowledge text itself, so nothing is invented.
  */
-async function checkOffer(value: string, field: FlowInput, knowledge: (q: string) => string[], llm: Llm): Promise<OfferVerdict> {
-  const passages = knowledge(value).slice(0, 5);
+async function checkOffer(value: string, field: FlowInput, knowledge: (q: string) => string[] | Promise<string[]>, llm: Llm): Promise<OfferVerdict> {
+  const passages = (await knowledge(value)).slice(0, 6);
   if (!passages.length) return { status: "ok" };
   // Whether it is offered is a classification: Jev (stable across runs; the
   // answer model flip-flopped). Acted on only when clear; otherwise accepted.
@@ -186,7 +186,7 @@ Output {"status": "...", "missing": [...], "options": [...]}:
  * An existing value changes only on an explicit correction; a confirmation
  * never touches the values.
  */
-export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[]): Promise<CollectResult> {
+export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>): Promise<CollectResult> {
   s.at = Date.now();
   const fields = fieldsOf(flow);
   const prior = s.transcript.slice(-12).join("\n");

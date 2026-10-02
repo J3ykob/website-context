@@ -418,6 +418,23 @@
       gap: 12px;
     }
     .kb-head .section-title { margin-right: auto; }
+    .offer-row { display:grid; grid-template-columns: minmax(0,2.2fr) minmax(0,1.2fr) minmax(0,1fr) 110px 70px; gap:12px; align-items:center; padding:12px 24px; border-bottom:1px solid var(--border); font-size:13px; }
+    .offer-row:last-child { border-bottom:none; }
+    .offer-row.head { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-4); padding-top:10px; padding-bottom:10px; }
+    .offer-name { color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .offer-sub { color:var(--text-4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .offer-pill { font-size:11px; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,0.06); color:var(--text-3); justify-self:start; }
+    .offer-pill.available { color: var(--green); background: rgba(34,197,94,0.1); }
+    .offer-pill.unavailable { color:#f87171; background: rgba(248,113,113,0.1); }
+    .offer-actions { display:flex; gap:6px; justify-content:flex-end; }
+    .offer-actions button { background:none; border:none; color:var(--text-4); cursor:pointer; font-size:12px; padding:2px 4px; }
+    .offer-actions button:hover { color:var(--text); }
+    .modal select { width:100%; font-family:var(--font); font-size:13px; padding:10px 14px; margin-bottom:10px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; background:rgba(255,255,255,0.05); color:var(--text); }
+    .review-list { max-height: 360px; overflow-y: auto; border:1px solid rgba(255,255,255,0.08); border-radius:10px; margin: 8px 0 4px; }
+    .review-item { display:flex; gap:10px; align-items:flex-start; padding:9px 12px; border-bottom:1px solid rgba(255,255,255,0.06); font-size:13px; }
+    .review-item:last-child { border-bottom:none; }
+    .review-item input { margin-top:3px; accent-color: var(--blue); }
+    @media (max-width: 720px) { .offer-row { grid-template-columns: minmax(0,1fr) 90px 60px; } .offer-row .c-cat, .offer-row .c-avail { display:none; } }
     .kb-search {
       font-family: var(--font);
       font-size: 13px;
@@ -757,6 +774,50 @@
       <div class="card" id="chunks-panel" style="max-height:600px;overflow-y:auto"><div class="loading"></div></div>
     </div>
 
+    <div>
+      <div class="section-head kb-head">
+        <span class="section-title">Products &amp; services<span class="badge badge-green" id="offer-badge">0</span></span>
+        <input type="text" id="offer-search" class="kb-search" placeholder="Search offer..." oninput="renderOffer()" />
+        <button class="btn btn-sm btn-outline" onclick="offerFromSite()" id="offer-site-btn">Find on my website</button>
+        <button class="btn btn-sm btn-outline" onclick="document.getElementById('offer-file').click()" id="offer-file-btn">Import price list</button>
+        <input type="file" id="offer-file" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.jpg,.jpeg,.png,.webp,.heic,image/*" style="display:none" onchange="offerFromFile(this)" />
+        <button class="btn btn-sm btn-outline" onclick="openOfferItem()">+ Add</button>
+      </div>
+      <div class="card" id="offer-panel" style="max-height:600px;overflow-y:auto"><div class="loading"></div></div>
+    </div>
+
+    <div class="modal-overlay" id="offer-item-modal">
+      <div class="modal">
+        <div class="section-title" id="offer-item-title">Add product or service</div>
+        <div class="form-hint">The assistant answers "do you have it / how much / is it available" from this list and checks orders against it.</div>
+        <input type="hidden" id="oi-id" />
+        <input type="text" id="oi-name" placeholder="Name, e.g. Cement CEM II 32,5 R 25 kg" maxlength="200" />
+        <select id="oi-kind"><option value="product">Product</option><option value="service">Service</option></select>
+        <input type="text" id="oi-category" placeholder="Category, e.g. Cements" maxlength="100" />
+        <input type="text" id="oi-price" placeholder="Price as you want it shown, e.g. 32 zł / bag, from 150 zł" maxlength="100" />
+        <select id="oi-availability"><option value="available">Available</option><option value="on_request">On request / to be confirmed</option><option value="unavailable">Not available</option></select>
+        <textarea id="oi-description" rows="3" maxlength="1000" placeholder="Short description (optional)"></textarea>
+        <div class="form-error" id="oi-error"></div>
+        <div class="modal-actions">
+          <button class="btn btn-sm btn-outline" onclick="closeModal('offer-item-modal')">Cancel</button>
+          <button class="btn btn-sm btn-dark" onclick="saveOfferItem()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="offer-review-modal">
+      <div class="modal">
+        <div class="section-title">Review what was found</div>
+        <div class="form-hint" id="offer-review-hint"></div>
+        <div class="review-list" id="offer-review-list"></div>
+        <div class="form-error" id="offer-review-error"></div>
+        <div class="modal-actions">
+          <button class="btn btn-sm btn-outline" onclick="closeModal('offer-review-modal')">Cancel</button>
+          <button class="btn btn-sm btn-dark" id="offer-review-save" onclick="saveOfferReview()">Add selected</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="add-chunk-modal">
       <div class="modal">
         <div class="section-title">Add Knowledge</div>
@@ -856,7 +917,7 @@
     var chunksSearch = "";
 
     async function loadAll() {
-      await Promise.all([loadSiteInfo(), loadStats(), loadIntents(), loadGaps(), loadActivity(), loadSkills(), loadChunks()]);
+      await Promise.all([loadSiteInfo(), loadStats(), loadIntents(), loadGaps(), loadActivity(), loadSkills(), loadChunks(), loadOffer()]);
     }
 
     // "select_automotive_pl" -> "Select Automotive PL" (display fallback when the
@@ -1160,6 +1221,107 @@
         startUrl: (document.getElementById("agent-edit-url-" + id) || { value: "" }).value,
       }, document.getElementById("agent-edit-error-" + id));
       if (ok) loadSkills();
+    }
+
+    // ─── Products & services (structured offer) ────
+    var OFFER = [], OFFER_REVIEW = [];
+    var AVAIL = { available: "Available", on_request: "On request", unavailable: "Not available" };
+    function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+    async function loadOffer() {
+      try {
+        var r = await authFetch(API + "/api/dashboard/offer");
+        OFFER = ((await r.json()).items) || [];
+        renderOffer();
+      } catch (e) {
+        document.getElementById("offer-panel").innerHTML = emptyState('alert', 'amber', 'Could not load the offer.', 'Retry', 'loadOffer()');
+      }
+    }
+    function renderOffer() {
+      var panel = document.getElementById("offer-panel");
+      document.getElementById("offer-badge").textContent = OFFER.length;
+      if (!OFFER.length) {
+        panel.innerHTML = emptyState('zap', '', 'No products or services yet. Import a price list or catalog, find them on your website, or add them one by one - the assistant then answers about availability and prices from this list.', 'Import price list', "document.getElementById('offer-file').click()", true);
+        return;
+      }
+      var q = (document.getElementById("offer-search").value || "").toLowerCase();
+      var list = OFFER.filter(function(i) { return !q || (i.name + " " + i.category + " " + i.description).toLowerCase().indexOf(q) >= 0; });
+      panel.innerHTML = '<div class="offer-row head"><span>Name</span><span class="c-cat">Category</span><span>Price</span><span class="c-avail">Availability</span><span></span></div>' +
+        list.map(function(i) {
+          return '<div class="offer-row"><div style="min-width:0"><div class="offer-name">' + esc(i.name) + '</div>' + (i.description ? '<div class="offer-sub">' + esc(i.description) + '</div>' : '') + '</div>' +
+            '<span class="offer-sub c-cat">' + esc(i.category || "-") + '</span><span>' + esc(i.price || "-") + '</span>' +
+            '<span class="offer-pill c-avail ' + i.availability + '">' + AVAIL[i.availability] + '</span>' +
+            '<span class="offer-actions"><button onclick="openOfferItem(\'' + i.id + '\')">Edit</button><button onclick="deleteOfferItem(\'' + i.id + '\')">Delete</button></span></div>';
+        }).join("");
+    }
+    function openOfferItem(id) {
+      var it = OFFER.find(function(x) { return x.id === id; }) || { id: "", name: "", kind: "product", category: "", price: "", availability: "available", description: "" };
+      document.getElementById("offer-item-title").textContent = id ? "Edit product or service" : "Add product or service";
+      ["id", "name", "kind", "category", "price", "availability", "description"].forEach(function(k) { document.getElementById("oi-" + k).value = it[k] || ""; });
+      if (!it.kind) document.getElementById("oi-kind").value = "product";
+      if (!it.availability) document.getElementById("oi-availability").value = "available";
+      document.getElementById("oi-error").textContent = "";
+      document.getElementById("offer-item-modal").classList.add("open");
+      document.getElementById("oi-name").focus();
+    }
+    async function saveOfferItem() {
+      var body = {};
+      ["id", "name", "kind", "category", "price", "availability", "description"].forEach(function(k) { body[k] = document.getElementById("oi-" + k).value; });
+      if (!body.name.trim()) { document.getElementById("oi-error").textContent = "Give it a name."; return; }
+      var r = await authFetch(API + "/api/dashboard/offer/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) { document.getElementById("oi-error").textContent = ((await r.json().catch(function() { return {}; })).error) || "Could not save."; return; }
+      OFFER = (await r.json()).items || []; renderOffer(); closeModal("offer-item-modal");
+    }
+    async function deleteOfferItem(id) {
+      var it = OFFER.find(function(x) { return x.id === id; });
+      if (!it || !confirm('Delete "' + it.name + '"?')) return;
+      var r = await authFetch(API + "/api/dashboard/offer/items/" + encodeURIComponent(id), { method: "DELETE" });
+      if (r.ok) { OFFER = (await r.json()).items || []; renderOffer(); }
+    }
+    function busy(btnId, on, label) {
+      var b = document.getElementById(btnId); if (!b) return;
+      if (on) { b.dataset.label = b.textContent; b.textContent = label; b.disabled = true; } else { b.textContent = b.dataset.label || b.textContent; b.disabled = false; }
+    }
+    function openReview(items, hint) {
+      OFFER_REVIEW = items || [];
+      document.getElementById("offer-review-error").textContent = "";
+      document.getElementById("offer-review-hint").textContent = OFFER_REVIEW.length
+        ? hint + " Untick anything that is wrong, then add. Items with the same name as an existing one replace it."
+        : "Nothing that looks like a product or service was found.";
+      document.getElementById("offer-review-list").innerHTML = OFFER_REVIEW.map(function(i, k) {
+        return '<label class="review-item"><input type="checkbox" checked data-k="' + k + '" /><span><b>' + esc(i.name) + '</b>' +
+          (i.price ? ' · ' + esc(i.price) : '') + (i.category ? '<br><span class="offer-sub">' + esc(i.category) + '</span>' : '') + '</span></label>';
+      }).join("");
+      document.getElementById("offer-review-save").style.display = OFFER_REVIEW.length ? "" : "none";
+      document.getElementById("offer-review-modal").classList.add("open");
+    }
+    async function offerFromFile(input) {
+      var f = input.files && input.files[0]; if (!f) return;
+      busy("offer-file-btn", true, "Reading…");
+      try {
+        var r = await authFetch(API + "/api/dashboard/offer/import-file?filename=" + encodeURIComponent(f.name), { method: "POST", headers: { "Content-Type": f.type || "application/octet-stream" }, body: f });
+        var d = await r.json().catch(function() { return {}; });
+        if (!r.ok) { alert(d.error || "Could not read the file."); return; }
+        openReview(d.items, "Found " + (d.items || []).length + " item(s) in " + f.name + ".");
+      } finally { busy("offer-file-btn", false); input.value = ""; }
+    }
+    async function offerFromSite() {
+      busy("offer-site-btn", true, "Reading your site…");
+      try {
+        var r = await authFetch(API + "/api/dashboard/offer/extract-site", { method: "POST" });
+        var d = await r.json().catch(function() { return {}; });
+        if (!r.ok) { alert(d.error || "Could not read the website content."); return; }
+        openReview(d.items, "Found " + (d.items || []).length + " item(s) on your website.");
+      } finally { busy("offer-site-btn", false); }
+    }
+    async function saveOfferReview() {
+      var picked = [].slice.call(document.querySelectorAll("#offer-review-list input:checked")).map(function(cb) { return OFFER_REVIEW[+cb.dataset.k]; });
+      if (!picked.length) { closeModal("offer-review-modal"); return; }
+      busy("offer-review-save", true, "Adding…");
+      try {
+        var r = await authFetch(API + "/api/dashboard/offer/items/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: picked }) });
+        if (!r.ok) { document.getElementById("offer-review-error").textContent = "Could not save."; return; }
+        OFFER = (await r.json()).items || []; renderOffer(); closeModal("offer-review-modal");
+      } finally { busy("offer-review-save", false); }
     }
 
     // ─── Actions ────

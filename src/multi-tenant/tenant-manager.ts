@@ -19,6 +19,7 @@ import { getTenant } from "./tenant-registry.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
 import { CATALOG_FILE, type KnowledgeCatalog } from "../knowledge/catalog.js";
 import type { Inquiry } from "../flows/collect.js";
+import { loadOffer } from "../offer/store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = resolve(__dirname, "../../data");
@@ -164,6 +165,7 @@ export class TenantManager {
       systemPromptExtra,
       brandName: getTenant(tenantId)?.brandName || new URL(meta.siteUrl).hostname.replace(/^www\./, ""),
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
+      offerItems: (await loadOffer(tenantId).catch(() => null))?.items || [],
       // The best-ranked businesses of this tenant's ecosystem answer what its own site can't.
       askEcosystem: ecosystemOf(getTenant(tenantId))
         ? (messages, onStart) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {

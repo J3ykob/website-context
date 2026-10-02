@@ -85,6 +85,7 @@ import type { MetaChannelConfig } from "../src/channels/index.js";
 import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
 import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-llm.js";
 import { registerAgentRoutes } from "../src/agent/routes.js";
+import { registerOfferRoutes } from "../src/offer/routes.js";
 import { getHandoff, markHandoffOpened } from "../src/ecosystem/handoff.js";
 import { ensureCollectFlow } from "../src/flows/collect-store.js";
 
@@ -1181,6 +1182,7 @@ let lastChatError: { tenantId: string; cause: string; msg: string; at: string } 
 
 // Goal-driven ("agent") flows: one Jev-decided step per call (src/agent/routes.ts).
 registerAgentRoutes(app, { auth: authMiddleware, onFlowsChanged: (id) => tenantManager.evictTenant(id) });
+registerOfferRoutes(app, { auth: authMiddleware, onChanged: (id) => tenantManager.evictTenant(id) });
 
 app.post("/api/chat", async (req, res) => {
   try {
@@ -1774,8 +1776,8 @@ app.put("/api/dashboard/site-card", ownerAuth, async (req, res) => {
     ? b.suggestions.slice(0, 6).map((s: any) => str(s, 160)).filter(Boolean)
     : [];
   const siteCard: any = {
-    tagline: str(b.tagline, 120) || undefined,
     brand: str(b.brand, 120) || tenant.settings?.siteCard?.brand || undefined,
+    tagline: str(b.tagline, 120) || undefined,
     eyebrow: str(b.eyebrow, 80) || undefined,
     phone: str(b.phone, 40) || undefined,
     suggestions,

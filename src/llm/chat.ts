@@ -25,6 +25,8 @@ import type { EcosystemMatch } from "../ecosystem/ask.js";
 import { jevNewNeed, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
+import { findOfferItems } from "../offer/search.js";
+import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 
 export interface ChatMessage {
@@ -50,6 +52,9 @@ export interface ChatConfig {
   // not be recorded, so the customer is never told it was sent when it wasn't.
   brandName?: string;
   onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
+  // The owner's structured offer (products & services) - authoritative for
+  // "do you have X / how much is Y", and for the offer check in chat forms.
+  offerItems?: OfferItem[];
   // Ecosystem broadcast (src/ecosystem/ask.ts): when our own content has nothing
   // on the question, the other businesses of our ecosystem each decide from their
   // own knowledge whether they can answer; their answers come back here.
@@ -293,6 +298,7 @@ export class WebsiteChat {
   // the visitor then completes in this chat. Same idle TTL as collect sessions.
   private sessionVia: Map<string, { via: CollectVia; at: number }> = new Map();
   private brandName = "";
+  private offerItems: OfferItem[] = [];
   private onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
 
   constructor(
@@ -309,6 +315,7 @@ export class WebsiteChat {
     this.systemPromptExtra = config.systemPromptExtra || "";
     this.knowledgeCatalog = config.knowledgeCatalog || null;
     this.brandName = config.brandName || "";
+    this.offerItems = config.offerItems || [];
     this.onInquiry = config.onInquiry;
     this.askEcosystem = config.askEcosystem;
     this.handoffLinks = config.handoffLinks;
@@ -759,6 +766,7 @@ export class WebsiteChat {
     if (langKeyTerms.length > 2) {
       tasks.push(searchContext(langKeyTerms, this.embeddingProvider, this.store, { topK: Math.floor(this.topK / 2) }));
     }
+    const offerHits = this.offerItems.length ? findOfferItems(lastUserMessage, this.offerItems).catch(() => [] as OfferItem[]) : Promise.resolve([] as OfferItem[]);
     const [mainChunks, ...extraResults] = await Promise.all(tasks);
     const retrievedChunks = mainChunks;
     const seen = new Set(retrievedChunks.map((c) => c.content.slice(0, 50)));
@@ -768,7 +776,14 @@ export class WebsiteChat {
         if (!seen.has(key)) { seen.add(key); retrievedChunks.push(chunk); }
       }
     }
-    return this.catalogRetrieve(lastUserMessage, retrievedChunks);
+    const fromCatalog = await this.catalogRetrieve(lastUserMessage, retrievedChunks);
+    // The owner's offer items the message is about (judged by Jev), first.
+    const offer = (await offerHits).map((it) => ({
+      content: renderItem(it),
+      metadata: { url: "", title: `Oferta: ${it.name}`, headingHierarchy: ["Oferta", it.category].filter(Boolean), type: "product", offer: true, jevScore: 1 } as Record<string, unknown>,
+      score: 1,
+    }));
+    return offer.length ? [...offer, ...fromCatalog] : fromCatalog;
   }
 
   // Catalog stage: Jev picks the relevant catalogs and judges every chunk in them
@@ -958,7 +973,13 @@ export class WebsiteChat {
     const status = (stage: NonNullable<ChatResponse["collect"]>["stage"]) => ({ flowId: flow.id, stage, missing: stage === "collecting" || stage === "confirming" ? missingLabels(flow, s) : [] });
     try {
       const cat = this.knowledgeCatalog;
-      const knowledge = cat ? (q: string) => lexicalSnippets(q, cat, 5) : undefined;
+      const offerItems = this.offerItems;
+      const knowledge = cat || offerItems.length
+        ? async (q: string) => [
+            ...(offerItems.length ? (await findOfferItems(q, offerItems, 5).catch(() => [] as OfferItem[])).map(renderItem) : []),
+            ...(cat ? lexicalSnippets(q, cat, 5) : []),
+          ]
+        : undefined;
       const r = await collectTurn(flow, s, message, this.brandName, llm, knowledge);
       if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [], collect: status("cancelled") }; }
       if ("inquiry" in r) {
