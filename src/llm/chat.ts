@@ -22,7 +22,7 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import type { EcosystemMatch } from "../ecosystem/ask.js";
-import { jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
+import { jevNewNeed, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
@@ -1020,6 +1020,16 @@ export class WebsiteChat {
   // null = nobody in the ecosystem offers it.
   private async answerViaPartner(question: string, messages: ChatMessage[], noPartners?: boolean, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
     if (noPartners || !this.askEcosystem) return null;
+    // Only a request for something another business could provide goes out - not
+    // a follow-up on what was just discussed ("ok, but what do YOU have?") nor a
+    // question about this business itself. Fails closed (no Jev -> no broadcast).
+    const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
+    const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
+    const newNeed = await jevNewNeed(prevUser, prevReply, question);
+    if (newNeed === null || newNeed < 0.5) {
+      console.log(`[ecosystem] ${this.context.tenantId}: not broadcast (new need ${newNeed?.toFixed(2) ?? "?"}): "${question.slice(0, 60)}"`);
+      return null;
+    }
     let found: EcosystemMatch[] = [];
     try {
       found = await this.askEcosystem(messages, () => onStatus?.({
@@ -1040,11 +1050,16 @@ export class WebsiteChat {
       `We checked businesses we work with; excerpts from their own websites:\n\n${material}\n\n` +
       `Write a short reply in the visitor's language: say in one sentence that this is not something we can confirm ourselves and that you checked with businesses we work with, ` +
       `then say what each of them offers that answers the question, naming them, with their contact details. ` +
-      `Use only facts from the excerpts - add nothing, do not claim that we sell or do it. Full sentences, no preamble.` +
+      `Use only facts from the excerpts - add nothing, do not claim that we sell or do it, and do not describe our own offer. Full sentences, no preamble.` +
       (this.handoffLinks ? ` End with one short sentence saying they can continue the conversation directly with ${found.length > 1 ? "any of them" : "them"} using the link${found.length > 1 ? "s" : ""} below (do not write the links yourself).` : "");
+    // Written from this question alone: the earlier conversation (other businesses,
+    // our own offer) is not material for it and got mixed in.
+    const asked: ChatMessage[] = [{ role: "user", content: question }];
     let reply = "";
-    try { reply = (await this.backend.generate(system, messages, this.maxTokens)).trim(); } catch { return null; }
+    try { reply = (await this.backend.generate(system, asked, this.maxTokens)).trim(); } catch { return null; }
     if (!reply) return null;
+    // Same statement check as our own answers, against the relayed excerpts.
+    reply = (await this.verifyAnswer(question, system, asked, reply, found.flatMap((f) => [...f.passages, { content: `${f.label}: ${f.contact}` }]))).trim() || reply;
     // One link per recommended business: the customer continues with that
     // business's own bot, which gets this conversation (see handoff.ts).
     let message = reply;

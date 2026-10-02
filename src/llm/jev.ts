@@ -209,6 +209,24 @@ export async function jevBusinessesOffer(question: string, businesses: { name: s
   })));
 }
 
+/**
+ * Ecosystem gate: P(the visitor's latest message asks for a product or service
+ * that ANOTHER business could provide - a new need - rather than following up
+ * on what was just discussed or asking about this business itself). Sees the
+ * previous exchange, so "ok but what exactly do YOU have?" after a referral is a
+ * follow-up, not a new need. null when Jev is unavailable.
+ */
+export async function jevNewNeed(previousUser: string, previousReply: string, message: string): Promise<number | null> {
+  const answers = await jevAsk({ previous_visitor_message: previousUser.slice(0, 600), previous_reply: previousReply.slice(0, 900), message: message.slice(0, 600) }, {
+    need: {
+      type: "noul",
+      instructions: "A visitor is chatting with a business's assistant. Is `message` a request for a product or a service (something a business could provide), stated in `message` itself or clearly continuing `previous_visitor_message`'s request for one? Answer no if `message` asks about this business itself (who they are, what they themselves have or do, their contact, opening hours, prices of what was already offered), pushes back on or asks for details of `previous_reply`, or is small talk.",
+    },
+  });
+  const a = answers?.need as JevNoulAnswer | undefined;
+  return a && typeof a.noul === "number" ? a.noul : null;
+}
+
 /** Split a reply into checkable statements (sentences and list items). */
 export function splitStatements(reply: string): string[] {
   return reply
