@@ -1102,7 +1102,8 @@ export class WebsiteChat {
     if (noPartners || !this.askEcosystem) return null;
     let found: EcosystemMatch[] = [];
     try {
-      found = await this.askEcosystem(messages, () => onStatus?.({
+      // The need itself (after "yes" the latest message is just the consent).
+      found = await this.askEcosystem([{ role: "user", content: question }], () => onStatus?.({
         kind: "ecosystem",
         text: this.isPolish(question) ? "Sprawdzam u firm, z którymi współpracujemy…" : "Checking with businesses we work with…",
       }));
