@@ -22,7 +22,7 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import type { EcosystemMatch } from "../ecosystem/ask.js";
-import { jevNewNeed, jevAcceptsOffer, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
+import { jevNewNeed, jevOfferReply, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
@@ -284,6 +284,14 @@ const ECO_OFFER: Record<OfferLang, string> = {
   fr: "Voulez-vous que je vérifie auprès des fournisseurs et entreprises avec lesquels nous travaillons ?",
   de: "Soll ich bei den Lieferanten und Unternehmen nachfragen, mit denen wir zusammenarbeiten?",
   other: "Would you like me to check with the suppliers and businesses we work with?",
+};
+const ECO_EXPLAIN: Record<OfferLang, (need: string) => string> = {
+  pl: (n) => `Mogę zapytać firmy, z którymi współpracujemy (np. dostawców i wypożyczalnie), czy mają to, o co pytasz: „${n}”, i podać Ci ich kontakt. Sprawdzić?`,
+  en: (n) => `I can ask the businesses we work with (such as suppliers and rental companies) whether they have what you asked about: "${n}", and give you their contact details. Shall I check?`,
+  uk: (n) => `Я можу запитати компанії, з якими ми співпрацюємо (наприклад, постачальників і прокат), чи є в них те, про що ви питаєте: «${n}», і дати їхні контакти. Перевірити?`,
+  fr: (n) => `Je peux demander aux entreprises avec lesquelles nous travaillons (fournisseurs, location) si elles ont ce que vous cherchez : « ${n} », et vous donner leurs coordonnées. Je vérifie ?`,
+  de: (n) => `Ich kann bei unseren Partnerunternehmen (z. B. Lieferanten und Verleihern) nachfragen, ob sie das haben, wonach Sie fragen: „${n}“, und Ihnen ihre Kontaktdaten geben. Soll ich nachfragen?`,
+  other: (n) => `I can ask the businesses we work with (such as suppliers and rental companies) whether they have what you asked about: "${n}", and give you their contact details. Shall I check?`,
 };
 const ECO_CHECKING: Record<OfferLang, string> = {
   pl: "Sprawdzam u firm, z którymi współpracujemy…", en: "Checking with businesses we work with…",
@@ -1087,8 +1095,13 @@ export class WebsiteChat {
     if (!o) return null;
     this.ecoOffers.delete(sessionKey);
     if (Date.now() - o.at > 30 * 60 * 1000) return null;
-    const yes = await jevAcceptsOffer(message);
-    if (yes === null || yes < 0.5) return null;
+    const answer = await jevOfferReply(message);
+    // "Check what?" - say what we'd do, and keep the offer open.
+    if (answer === "what") {
+      this.ecoOffers.set(sessionKey, { ...o, at: Date.now() });
+      return { message: ECO_EXPLAIN[o.lang](o.need.slice(0, 200)), sources: [] };
+    }
+    if (answer !== "yes") return null;
     const r = await this.answerViaPartner(o.need, messages, false, onStatus ? (st) => onStatus({ ...st, text: ECO_CHECKING[o.lang] }) : undefined);
     return r || { message: ECO_NONE[o.lang], sources: [] };
   }

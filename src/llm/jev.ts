@@ -244,16 +244,27 @@ export async function jevNewNeed(previousUser: string, previousReply: string, me
   return { need: n.noul * (1 - follow), lang: l && (OFFER_LANGS as readonly string[]).includes(l) ? l : "en" };
 }
 
-/** P(`message` accepts the assistant's offer to check with other suppliers). */
-export async function jevAcceptsOffer(message: string): Promise<number | null> {
+/**
+ * The visitor's reply to the offer to check with other suppliers: "yes" (accepts),
+ * "what" (asks what the offer means / what would be checked), "no" (declines) or
+ * "other" (says or asks something else). null when Jev is unavailable.
+ */
+export type OfferReply = "yes" | "what" | "no" | "other";
+export async function jevOfferReply(message: string): Promise<OfferReply | null> {
   const answers = await jevAsk({ offer: "Would you like me to check with other suppliers and businesses we work with?", message: message.slice(0, 400) }, {
-    yes: {
-      type: "noul",
-      instructions: "The assistant asked the visitor `offer`. Does the visitor's `message` accept it (yes, please, go ahead, check)? Answer no if it declines, or asks or says something else.",
+    reply: {
+      type: "choice",
+      instructions: "The assistant asked the visitor `offer`. How does the visitor's `message` respond to it?",
+      criteria: {
+        yes: "Accepts it: yes, please, go ahead, check.",
+        what: "Asks what the offer means, what would be checked, or with whom.",
+        no: "Declines it.",
+        other: "Says or asks something else.",
+      },
     },
   });
-  const a = answers?.yes as JevNoulAnswer | undefined;
-  return a && typeof a.noul === "number" ? a.noul : null;
+  const c = (answers?.reply as JevChoiceAnswer | undefined)?.choice;
+  return c === "yes" || c === "what" || c === "no" || c === "other" ? c : null;
 }
 
 /** Split a reply into checkable statements (sentences and list items). */
