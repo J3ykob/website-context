@@ -1010,7 +1010,7 @@ export class WebsiteChat {
       const r = await runCompare({ message, customerSession: sessionKey, askingTenantId: this.context.tenantId, businesses, llm, language: language === "other" ? undefined : language });
       if (!r || !r.lines.some((x) => x.quotes.length)) return null;
       // Ordering: an order placed in this chat (by intent) is marked with the project.
-      this.setSessionVia(sessionKey, { tenantId: this.context.tenantId, brand: this.brandName, sessionKey, projectId: r.projectId });
+      this.setSessionVia(sessionKey, { tenantId: this.context.tenantId, brand: this.brandName, sessionKey, ...(r.projectId ? { projectId: r.projectId } : {}) });
       let message2 = r.message;
       const others = [...new Map(r.lines.filter((x) => x.assigned && x.assigned.tenantId !== this.context.tenantId).map((x) => [x.assigned!.tenantId, { tenantId: x.assigned!.tenantId, label: x.assigned!.label }])).values()];
       if (others.length && this.handoffLinks) {
@@ -1021,7 +1021,7 @@ export class WebsiteChat {
         } catch (e) { console.warn(`[project] ${this.context.tenantId}: links failed: ${(e as Error).message}`); }
       }
       console.log(`[project] ${this.context.tenantId}: ${r.projectId} compare_offers lines=${r.lines.length} total=${r.total} tbd=${r.tbdLines}`);
-      return { message: message2, sources: [], grounded: true, project: { id: r.projectId, type: "compare_offers@1" } };
+      return { message: message2, sources: [], grounded: true, ...(r.projectId ? { project: { id: r.projectId, type: "compare_offers@1" } } : {}) };
     } catch (e) {
       console.warn(`[project] ${this.context.tenantId}: estimate failed: ${(e as Error).message}`);
       return null;

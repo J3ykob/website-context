@@ -23,7 +23,7 @@ import { createProject, addParticipant, addEvent, setMemory, addUsage, setStatus
 
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
 export interface Business { tenantId: string; label: string; items: OfferItem[] }
-export interface Line { need: string; quantity: number | null; unit: string }
+export interface Line { need: string; quantity: number | null; unit: string; needInCatalog: string }
 export interface Quote {
   tenantId: string;
   label: string;
@@ -64,13 +64,14 @@ function numbersIn(t: string): string[] {
 function json(raw: string): any { const a = raw.indexOf("{"), b = raw.lastIndexOf("}"); try { return a >= 0 && b > a ? JSON.parse(raw.slice(a, b + 1)) : null; } catch { return null; } }
 
 /** The request as lines. Quantities must appear in the customer's own words. */
-export async function parseLines(message: string, llm: Llm): Promise<Line[]> {
+export async function parseLines(message: string, llm: Llm, catalogSample: string[] = []): Promise<Line[]> {
   const units = Object.keys(FIELDS.unit.values).join("|");
   const j = json(await llm(
     "You split a customer's request into the products / services it asks for. Output only JSON.",
     `Customer's message: """${message.slice(0, 2000)}"""
 
-Output {"lines": [{"need": "what they need, in their words", "quantity": number|null, "unit": ${units}}]}.
+Output {"lines": [{"need": "what they need, in their words", "need_in_catalog": "the same need written the way the business's catalog names it", "quantity": number|null, "unit": ${units}}]}.
+${catalogSample.length ? `The business's catalog names items like this: ${catalogSample.slice(0, 15).join("; ")}. "need_in_catalog" uses that language and the common trade name a professional in that language would use (a translation of the meaning if the customer writes in another language, e.g. "demolition hammer" -> "młot wyburzeniowy").` : `"need_in_catalog": same as need.`}
 - One line per distinct product or service (a job like "remont łazienki 6 m2" is one line: need "remont łazienki", quantity 6, unit "m2").
 - "need" keeps everything that describes the product, including sizes, weights and models ("zagęszczarka 90 kg").
 - quantity = HOW MANY or HOW LONG the customer wants it (pieces, m², tonnes ordered, days or hours of rental) - never a size, weight or model number that is part of the product ("zagęszczarka 90 kg na 3 doby" -> quantity 3, unit "doba"). Only as the customer states it; null / "unknown" otherwise. Never guess.`,
@@ -81,6 +82,7 @@ Output {"lines": [{"need": "what they need, in their words", "quantity": number|
     const q = typeof l?.quantity === "number" && l.quantity > 0 ? l.quantity : null;
     return {
       need: String(l?.need || "").trim().slice(0, 200),
+      needInCatalog: String(l?.need_in_catalog || l?.need || "").trim().slice(0, 200),
       quantity: q !== null && md.includes(digitsOf(String(q))) ? q : null,
       unit: q !== null ? validValue("unit", l?.unit) : "unknown",
     };
@@ -135,15 +137,23 @@ export async function runCompare(opts: {
 }): Promise<CompareResult | null> {
   const { message, businesses, llm } = opts;
   let llmCalls = 0, jevCalls = 0;
-  const lines = await parseLines(message, llm); llmCalls++;
+  const sample = businesses.flatMap((b) => b.items.slice(0, 5).map((i) => i.name)).slice(0, 15);
+  const lines = await parseLines(message, llm, sample); llmCalls++;
   if (!lines.length) return null;
-  const project = await createProject("compare_offers@1", { customerSession: opts.customerSession, initiatorTenantId: opts.askingTenantId, title: lines.map((l) => l.need).join(", ").slice(0, 200), memory: { request: message.slice(0, 2000), lines } });
+  // The project record must never block or break the customer's answer.
+  const project = await Promise.race([
+    createProject("compare_offers@1", { customerSession: opts.customerSession, initiatorTenantId: opts.askingTenantId, title: lines.map((l) => l.need).join(", ").slice(0, 200), memory: { request: message.slice(0, 2000), lines } }),
+    new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+  ]).catch((e) => { console.warn(`[project] create failed: ${(e as Error).message}`); return null; });
+  if (!project) console.warn("[project] compare_offers: no project record (D1 slow or failing) - answering anyway");
+  const record = (fn: () => Promise<unknown>) => (project ? fn().catch((e) => console.warn(`[project] ${project.id}: write failed: ${(e as Error).message}`)) : Promise.resolve());
 
   const results: LineResult[] = await Promise.all(lines.map(async (line) => {
     const quotes = (await Promise.all(businesses.map(async (b) => {
       if (!b.items.length) return null;
       jevCalls++;
-      const hit = (await findOfferItems(line.need, b.items, 1, 0.7).catch(() => []))[0];
+      let hit = (await findOfferItems(line.need, b.items, 1, 0.7).catch(() => []))[0];
+      if (!hit && line.needInCatalog && line.needInCatalog !== line.need) { jevCalls++; hit = (await findOfferItems(line.needInCatalog, b.items, 1, 0.7).catch(() => []))[0]; }
       return hit ? priceLine(hit, line, b) : null;
     }))).filter(Boolean) as Quote[];
     const priced = quotes.filter((q) => q.total !== null && q.tbd.length === 0);
@@ -157,8 +167,9 @@ export async function runCompare(opts: {
   const total = r2(results.reduce((s, r) => s + (r.status === "priced" ? r.assigned!.total! : 0), 0));
   const tbdLines = results.filter((r) => r.status !== "priced").length;
   const involved = new Set(results.flatMap((r) => r.quotes.map((q) => q.tenantId)));
-  for (const t of involved) if (t !== opts.askingTenantId) await addParticipant(project.id, t, results.some((r) => r.assigned?.tenantId === t) ? "chosen" : "quoting");
-  await addEvent(project.id, { kind: "quotes", actor: "system", data: { lines: results.length, priced: results.length - tbdLines, businesses: involved.size } });
+  const writes: Promise<unknown>[] = [];
+  for (const t of involved) if (t !== opts.askingTenantId) writes.push(record(() => addParticipant(project!.id, t, results.some((r) => r.assigned?.tenantId === t) ? "chosen" : "quoting")));
+  writes.push(record(() => addEvent(project!.id, { kind: "quotes", actor: "system", data: { lines: results.length, priced: results.length - tbdLines, businesses: involved.size } })));
 
   // Words by the model, numbers checked by code.
   const data = results.map((r) => ({
@@ -170,19 +181,26 @@ export async function runCompare(opts: {
     lead_time: r.assigned?.leadTime || "", availability: r.assigned?.availability || "",
     other_offers: r.quotes.filter((q) => q !== r.assigned && q.total !== null).map((q) => ({ business: q.label, total: q.total })).slice(0, 3),
   }));
-  let msg = (await llm(
+  let msg = "";
+  try {
+    msg = (await llm(
     `You present a price comparison to a customer. Write in ${opts.language || "the same language as the customer's message"}, using the natural business term for "to be priced" in that language (Polish: "do wyceny"). Use only the numbers, names and facts in DATA - never compute, round or add any other number. Short; one line per need. For a need with status "tbd" or "not_found", do not present a price as the amount to pay: say it is to be priced, giving exactly the reason in why_not_priced (a unit price may be mentioned as information). End with the known total ${total} zł${tbdLines ? " plus the items to be priced" : ""}, and say the businesses confirm final prices when ordering.`,
     `Customer's message: """${message.slice(0, 600)}"""\n\nDATA: ${JSON.stringify(data)}`,
     900,
   )).trim(); llmCalls++;
+  } catch (e) { console.warn(`[project] summary wording failed: ${(e as Error).message}`); }
   const allowed = new Set<string>([String(total), ...numbersIn(JSON.stringify(data)), ...numbersIn(message)].map((n) => String(Number(n))));
   const ok = !!msg && numbersIn(msg).every((n) => allowed.has(String(Number(n))));
   if (!ok) msg = renderTable(results, total, tbdLines);
 
-  await setMemory(project.id, { results: data, total, tbdLines });
-  await addUsage(project.id, { llmCalls, jevCalls });
-  await setStatus(project.id, "waiting_customer", "system");
-  return { projectId: project.id, lines: results, total, tbdLines, currency: "PLN", message: msg };
+  writes.push(record(async () => {
+    await setMemory(project!.id, { results: data, total, tbdLines });
+    await addUsage(project!.id, { llmCalls, jevCalls });
+    await setStatus(project!.id, "waiting_customer", "system");
+  }));
+  // Wait for the record at most a few seconds; the answer goes out regardless.
+  await Promise.race([Promise.all(writes), new Promise((r) => setTimeout(r, 4000))]);
+  return { projectId: project?.id || "", lines: results, total, tbdLines, currency: "PLN", message: msg };
 }
 
 /** The comparison as a plain table, built by code (fallback; Polish). */

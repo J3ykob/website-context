@@ -17,6 +17,8 @@ type QueryFn = (sql: string, params?: any[]) => Promise<any[]>;
 const realQuery: QueryFn = async (sql, params = []) => {
   const { getCfToken } = await import("./cf-auth.js"); // lazy: avoid R2 boot-throw in tests
   const resp = await fetch(D1_BASE, {
+    // A stalled Cloudflare API call must not hang the request that made it.
+    signal: AbortSignal.timeout(Number(process.env.D1_TIMEOUT_MS) || 15000),
     method: "POST",
     headers: { Authorization: `Bearer ${getCfToken()}`, "Content-Type": "application/json" },
     body: JSON.stringify({ sql, params }),

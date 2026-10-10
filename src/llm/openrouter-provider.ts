@@ -30,7 +30,10 @@ export class OpenRouterProvider {
   }
 
   async chat(messages: OpenRouterMessage[], overrides?: { model?: string; maxTokens?: number; temperature?: number }): Promise<{ content: string; usage: { prompt_tokens: number; completion_tokens: number } }> {
+    // A stalled provider must not hang the caller (and the visitor's chat) forever:
+    // abort after OPENROUTER_TIMEOUT_MS (default 60 s). Covers the whole response.
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      signal: AbortSignal.timeout(Number(process.env.OPENROUTER_TIMEOUT_MS) || 60000),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -66,6 +69,7 @@ export class OpenRouterProvider {
   // Lets the chat surface a response token-by-token (first token ~1s vs ~3.5s full).
   async chatStream(messages: OpenRouterMessage[], onToken: (delta: string) => void): Promise<{ content: string }> {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      signal: AbortSignal.timeout(Number(process.env.OPENROUTER_STREAM_TIMEOUT_MS) || 120000),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
