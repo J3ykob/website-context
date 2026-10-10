@@ -778,6 +778,7 @@
       <div class="section-head kb-head">
         <span class="section-title">Products &amp; services<span class="badge badge-green" id="offer-badge">0</span></span>
         <input type="text" id="offer-search" class="kb-search" placeholder="Search offer..." oninput="renderOffer()" />
+        <button class="btn btn-sm btn-outline" onclick="downloadOfferSheet()" id="offer-sheet-btn">Download spreadsheet</button>
         <button class="btn btn-sm btn-outline" onclick="offerFromSite()" id="offer-site-btn">Find on my website</button>
         <button class="btn btn-sm btn-outline" onclick="document.getElementById('offer-file').click()" id="offer-file-btn">Import price list</button>
         <input type="file" id="offer-file" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.jpg,.jpeg,.png,.webp,.heic,image/*" style="display:none" onchange="offerFromFile(this)" />
@@ -792,10 +793,9 @@
         <div class="form-hint">The assistant answers "do you have it / how much / is it available" from this list and checks orders against it.</div>
         <input type="hidden" id="oi-id" />
         <input type="text" id="oi-name" placeholder="Name, e.g. Cement CEM II 32,5 R 25 kg" maxlength="200" />
-        <select id="oi-kind"><option value="product">Product</option><option value="service">Service</option></select>
         <input type="text" id="oi-category" placeholder="Category, e.g. Cements" maxlength="100" />
-        <input type="text" id="oi-price" placeholder="Price as you want it shown, e.g. 32 zł / bag, from 150 zł" maxlength="100" />
-        <select id="oi-availability"><option value="available">Available</option><option value="on_request">On request / to be confirmed</option><option value="unavailable">Not available</option></select>
+        <div style="display:flex;gap:8px"><input type="text" id="oi-price_value" placeholder="Price (number), e.g. 28.90" style="flex:1" /><input type="text" id="oi-price_max" placeholder="Up to (range)" style="flex:1" /></div>
+        <div id="oi-fields"></div>
         <textarea id="oi-description" rows="3" maxlength="1000" placeholder="Short description (optional)"></textarea>
         <div class="form-error" id="oi-error"></div>
         <div class="modal-actions">
@@ -1225,12 +1225,14 @@
 
     // ─── Products & services (structured offer) ────
     var OFFER = [], OFFER_REVIEW = [];
-    var AVAIL = { available: "Available", on_request: "On request", unavailable: "Not available" };
+    var OFFER_SCHEMA = {}, OFFER_EDIT_FIELDS = ["kind", "price_type", "unit", "availability", "lead_time", "fulfilment", "delivery_cost", "min_order", "booking", "payment"];
+    function fieldLabel(f, v) { return (OFFER_SCHEMA[f] && OFFER_SCHEMA[f].values[v]) || ""; }
     function closeModal(id) { document.getElementById(id).classList.remove("open"); }
     async function loadOffer() {
       try {
         var r = await authFetch(API + "/api/dashboard/offer");
-        OFFER = ((await r.json()).items) || [];
+        var d = await r.json();
+        OFFER = d.items || []; OFFER_SCHEMA = d.schema || OFFER_SCHEMA;
         renderOffer();
       } catch (e) {
         document.getElementById("offer-panel").innerHTML = emptyState('alert', 'amber', 'Could not load the offer.', 'Retry', 'loadOffer()');
@@ -1247,35 +1249,46 @@
       var list = OFFER.filter(function(i) { return !q || (i.name + " " + i.category + " " + i.description).toLowerCase().indexOf(q) >= 0; });
       panel.innerHTML = '<div class="offer-row head"><span>Name</span><span class="c-cat">Category</span><span>Price</span><span class="c-avail">Availability</span><span></span></div>' +
         list.map(function(i) {
-          return '<div class="offer-row"><div style="min-width:0"><div class="offer-name">' + esc(i.name) + '</div>' + (i.description ? '<div class="offer-sub">' + esc(i.description) + '</div>' : '') + '</div>' +
-            '<span class="offer-sub c-cat">' + esc(i.category || "-") + '</span><span>' + esc(i.price || "-") + '</span>' +
-            '<span class="offer-pill c-avail ' + i.availability + '">' + AVAIL[i.availability] + '</span>' +
+          var f = i.fields || {}, av = f.availability || "unknown";
+          var sub = [i.components && i.components.length ? i.components.length + " price parts" : "", fieldLabel("lead_time", f.lead_time)].filter(Boolean).join(" · ") || i.description || "";
+          return '<div class="offer-row"><div style="min-width:0"><div class="offer-name">' + esc(i.name) + '</div>' + (sub ? '<div class="offer-sub">' + esc(sub) + '</div>' : '') + '</div>' +
+            '<span class="offer-sub c-cat">' + esc(i.category || "-") + '</span><span>' + esc(i.price_display || "-") + '</span>' +
+            '<span class="offer-pill c-avail ' + (av === "in_stock" ? "available" : av === "unavailable" ? "unavailable" : "") + '">' + esc(fieldLabel("availability", av) || "-") + '</span>' +
             '<span class="offer-actions"><button onclick="openOfferItem(\'' + i.id + '\')">Edit</button><button onclick="deleteOfferItem(\'' + i.id + '\')">Delete</button></span></div>';
         }).join("");
     }
     function openOfferItem(id) {
-      var it = OFFER.find(function(x) { return x.id === id; }) || { id: "", name: "", kind: "product", category: "", price: "", availability: "available", description: "" };
+      var it = OFFER.find(function(x) { return x.id === id; }) || { id: "", name: "", category: "", description: "", fields: {}, price_value: null, price_max: null };
       document.getElementById("offer-item-title").textContent = id ? "Edit product or service" : "Add product or service";
-      ["id", "name", "kind", "category", "price", "availability", "description"].forEach(function(k) { document.getElementById("oi-" + k).value = it[k] || ""; });
-      if (!it.kind) document.getElementById("oi-kind").value = "product";
-      if (!it.availability) document.getElementById("oi-availability").value = "available";
+      ["id", "name", "category", "description"].forEach(function(k) { document.getElementById("oi-" + k).value = it[k] || ""; });
+      document.getElementById("oi-price_value").value = it.price_value === null || it.price_value === undefined ? "" : it.price_value;
+      document.getElementById("oi-price_max").value = it.price_max === null || it.price_max === undefined ? "" : it.price_max;
+      document.getElementById("oi-fields").innerHTML = OFFER_EDIT_FIELDS.filter(function(f) { return OFFER_SCHEMA[f]; }).map(function(f) {
+        var cur = (it.fields || {})[f] || "unknown";
+        return '<select id="oi-f-' + f + '" title="' + escAttr(OFFER_SCHEMA[f].label) + '">' + Object.keys(OFFER_SCHEMA[f].values).map(function(v) {
+          return '<option value="' + v + '"' + (v === cur ? " selected" : "") + '>' + esc(OFFER_SCHEMA[f].label + ": " + OFFER_SCHEMA[f].values[v]) + '</option>';
+        }).join("") + '</select>';
+      }).join("");
       document.getElementById("oi-error").textContent = "";
       document.getElementById("offer-item-modal").classList.add("open");
       document.getElementById("oi-name").focus();
     }
     async function saveOfferItem() {
-      var body = {};
-      ["id", "name", "kind", "category", "price", "availability", "description"].forEach(function(k) { body[k] = document.getElementById("oi-" + k).value; });
+      var body = { fields: {} };
+      ["id", "name", "category", "description", "price_value", "price_max"].forEach(function(k) { body[k] = document.getElementById("oi-" + k).value; });
+      OFFER_EDIT_FIELDS.forEach(function(f) { var el = document.getElementById("oi-f-" + f); if (el && el.value !== "unknown") body.fields[f] = el.value; });
+      var prev = OFFER.find(function(x) { return x.id === body.id; });
+      if (prev) body.components = prev.components;
       if (!body.name.trim()) { document.getElementById("oi-error").textContent = "Give it a name."; return; }
       var r = await authFetch(API + "/api/dashboard/offer/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!r.ok) { document.getElementById("oi-error").textContent = ((await r.json().catch(function() { return {}; })).error) || "Could not save."; return; }
-      OFFER = (await r.json()).items || []; renderOffer(); closeModal("offer-item-modal");
+      var d = await r.json(); OFFER = d.items || []; OFFER_SCHEMA = d.schema || OFFER_SCHEMA; renderOffer(); closeModal("offer-item-modal");
     }
     async function deleteOfferItem(id) {
       var it = OFFER.find(function(x) { return x.id === id; });
       if (!it || !confirm('Delete "' + it.name + '"?')) return;
       var r = await authFetch(API + "/api/dashboard/offer/items/" + encodeURIComponent(id), { method: "DELETE" });
-      if (r.ok) { OFFER = (await r.json()).items || []; renderOffer(); }
+      if (r.ok) { var d = await r.json(); OFFER = d.items || []; renderOffer(); }
     }
     function busy(btnId, on, label) {
       var b = document.getElementById(btnId); if (!b) return;
@@ -1289,7 +1302,7 @@
         : "Nothing that looks like a product or service was found.";
       document.getElementById("offer-review-list").innerHTML = OFFER_REVIEW.map(function(i, k) {
         return '<label class="review-item"><input type="checkbox" checked data-k="' + k + '" /><span><b>' + esc(i.name) + '</b>' +
-          (i.price ? ' · ' + esc(i.price) : '') + (i.category ? '<br><span class="offer-sub">' + esc(i.category) + '</span>' : '') + '</span></label>';
+          (i.price_value !== null && i.price_value !== undefined ? ' · ' + esc(String(i.price_value)) + ' ' + esc(i.currency || "") : (i.fields && i.fields.price_type === "on_request" ? ' · on request' : '')) + (i.category ? '<br><span class="offer-sub">' + esc(i.category) + '</span>' : '') + '</span></label>';
       }).join("");
       document.getElementById("offer-review-save").style.display = OFFER_REVIEW.length ? "" : "none";
       document.getElementById("offer-review-modal").classList.add("open");
@@ -1301,6 +1314,11 @@
         var r = await authFetch(API + "/api/dashboard/offer/import-file?filename=" + encodeURIComponent(f.name), { method: "POST", headers: { "Content-Type": f.type || "application/octet-stream" }, body: f });
         var d = await r.json().catch(function() { return {}; });
         if (!r.ok) { alert(d.error || "Could not read the file."); return; }
+        if (d.template) {
+          OFFER = (d.offer && d.offer.items) || OFFER; renderOffer();
+          alert("Imported " + d.saved + " row(s) from your spreadsheet." + (d.problems && d.problems.length ? "\n\nPlease fix:\n" + d.problems.join("\n") : ""));
+          return;
+        }
         openReview(d.items, "Found " + (d.items || []).length + " item(s) in " + f.name + ".");
       } finally { busy("offer-file-btn", false); input.value = ""; }
     }
@@ -1313,6 +1331,17 @@
         openReview(d.items, "Found " + (d.items || []).length + " item(s) on your website.");
       } finally { busy("offer-site-btn", false); }
     }
+    async function downloadOfferSheet() {
+      busy("offer-sheet-btn", true, "Preparing…");
+      try {
+        var r = await authFetch(API + "/api/dashboard/offer/template");
+        if (!r.ok) { alert("Could not prepare the spreadsheet."); return; }
+        var blob = await r.blob(), a = document.createElement("a");
+        var cd = r.headers.get("Content-Disposition") || "", name = cd.split('filename="')[1];
+        a.href = URL.createObjectURL(blob); a.download = name ? name.split('"')[0] : "oferta.xlsx";
+        document.body.appendChild(a); a.click(); a.remove();
+      } finally { busy("offer-sheet-btn", false); }
+    }
     async function saveOfferReview() {
       var picked = [].slice.call(document.querySelectorAll("#offer-review-list input:checked")).map(function(cb) { return OFFER_REVIEW[+cb.dataset.k]; });
       if (!picked.length) { closeModal("offer-review-modal"); return; }
@@ -1320,7 +1349,7 @@
       try {
         var r = await authFetch(API + "/api/dashboard/offer/items/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: picked }) });
         if (!r.ok) { document.getElementById("offer-review-error").textContent = "Could not save."; return; }
-        OFFER = (await r.json()).items || []; renderOffer(); closeModal("offer-review-modal");
+        var d = await r.json(); OFFER = d.items || []; renderOffer(); closeModal("offer-review-modal");
       } finally { busy("offer-review-save", false); }
     }
 

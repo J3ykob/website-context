@@ -6,10 +6,15 @@
  *   POST   /api/dashboard/offer/items/bulk      add reviewed items {items} (same name -> replaced)
  *   POST   /api/dashboard/offer/import-file     raw body + ?filename= -> {items} to review (not saved)
  *   POST   /api/dashboard/offer/extract-site    {items} found on the scraped website, to review (not saved)
+ *   GET    /api/dashboard/offer/template        the onboarding spreadsheet (xlsx), pre-filled
+ *   Our spreadsheet uploaded to import-file is read column by column (no model) and saved at once.
  */
 import type { Express, RequestHandler } from "express";
-import { loadOffer, saveOffer, clean, mergeItems, type OfferItem } from "./store.js";
+import { loadOffer, saveOffer, clean, mergeItems, priceText, type OfferItem } from "./store.js";
 import { extractFromBlocks, type Llm } from "./extract.js";
+import { buildTemplate, isTemplate, readTemplate } from "./sheet.js";
+import { FIELDS, type FieldId } from "./schema.js";
+import { getTenant } from "../multi-tenant/tenant-registry.js";
 import { extractFile } from "../knowledge/extract-file.js";
 import { isImageUpload, extractImage, imageTextToBlocks } from "../knowledge/extract-image.js";
 import { loadKnowledgeCatalog } from "../multi-tenant/tenant-manager.js";
@@ -25,24 +30,32 @@ const llm: Llm = async (system, user, maxTokens = 2500) => {
 export function registerOfferRoutes(app: Express, deps: OfferRouteDeps): void {
   const tid = (req: any) => req.tenantId as string;
 
+  // Items with their price in words and field labels, plus the schema for the editor.
+  const view = (offer: Awaited<ReturnType<typeof loadOffer>>) => ({
+    ...offer,
+    items: offer.items.map((i) => ({ ...i, price_display: priceText(i) })),
+    schema: Object.fromEntries((Object.keys(FIELDS) as FieldId[]).map((f) => [f, { label: FIELDS[f].label, values: Object.fromEntries(Object.entries(FIELDS[f].values).map(([k, d]) => [k, d.label])) }])),
+  });
   app.get("/api/dashboard/offer", deps.auth, async (req, res) => {
-    res.json(await loadOffer(tid(req)));
+    res.json(view(await loadOffer(tid(req))));
   });
 
   app.post("/api/dashboard/offer/items", deps.auth, async (req, res) => {
-    const it = clean(req.body);
+    const it = clean(req.body, "manual");
     if (!it) { res.status(400).json({ error: "The item needs a name." }); return; }
+    // Everything the owner sets in the dashboard is theirs (kept on re-scrape).
+    it.owner_set = (Object.keys(FIELDS) as FieldId[]).filter((f) => it.fields[f] && it.fields[f] !== "unknown");
     const offer = await loadOffer(tid(req));
     const items = offer.items.some((x) => x.id === it.id)
-      ? offer.items.map((x) => (x.id === it.id ? { ...it, source: x.source, updatedAt: new Date().toISOString() } : x))
-      : [...offer.items, { ...it, source: "manual" as const }];
-    res.json(await saveOffer(tid(req), items));
+      ? offer.items.map((x) => (x.id === it.id ? { ...it, source: x.source, url: x.url, owner_set: [...new Set([...x.owner_set, ...it.owner_set])], updatedAt: new Date().toISOString() } : x))
+      : [...offer.items, it];
+    res.json(view(await saveOffer(tid(req), items)));
     deps.onChanged(tid(req));
   });
 
   app.delete("/api/dashboard/offer/items/:id", deps.auth, async (req, res) => {
     const offer = await loadOffer(tid(req));
-    res.json(await saveOffer(tid(req), offer.items.filter((x) => x.id !== req.params.id)));
+    res.json(view(await saveOffer(tid(req), offer.items.filter((x) => x.id !== req.params.id))));
     deps.onChanged(tid(req));
   });
 
@@ -50,7 +63,7 @@ export function registerOfferRoutes(app: Express, deps: OfferRouteDeps): void {
     const incoming = (Array.isArray(req.body?.items) ? req.body.items : []).slice(0, 2000).map((x: any) => clean(x)).filter(Boolean) as OfferItem[];
     if (!incoming.length) { res.status(400).json({ error: "No items to add." }); return; }
     const offer = await loadOffer(tid(req));
-    res.json(await saveOffer(tid(req), mergeItems(offer.items, incoming)));
+    res.json(view(await saveOffer(tid(req), mergeItems(offer.items, incoming))));
     deps.onChanged(tid(req));
   });
 
@@ -64,6 +77,16 @@ export function registerOfferRoutes(app: Express, deps: OfferRouteDeps): void {
       const buffer = Buffer.concat(parts);
       if (!buffer.length) { res.status(400).json({ error: "Empty file" }); return; }
       try {
+        if (await isTemplate(buffer)) {
+          // Our spreadsheet: read exactly, saved at once (the owner already reviewed it in Excel).
+          const { items, problems } = await readTemplate(buffer);
+          const offer = await loadOffer(tid(req));
+          const saved = await saveOffer(tid(req), mergeItems(offer.items, items));
+          deps.onChanged(tid(req));
+          console.log(`[offer] ${tid(req)}: spreadsheet imported (${items.length} rows, ${problems.length} problems)`);
+          res.json({ template: true, saved: items.length, problems, offer: view(saved) });
+          return;
+        }
         const blocks = isImageUpload(filename, req.headers["content-type"])
           ? imageTextToBlocks((await extractImage(buffer, filename, req.headers["content-type"])).text)
           : (await extractFile(buffer, filename, req.headers["content-type"])).blocks;
@@ -76,6 +99,15 @@ export function registerOfferRoutes(app: Express, deps: OfferRouteDeps): void {
         res.status(500).json({ error: "Could not read the file." });
       }
     });
+  });
+
+  app.get("/api/dashboard/offer/template", deps.auth, async (req, res) => {
+    const t = getTenant(tid(req));
+    const name = t?.brandName || t?.domain || tid(req);
+    const buf = await buildTemplate(await loadOffer(tid(req)), name);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="oferta-${(t?.domain || tid(req)).split(".").join("-")}.xlsx"`);
+    res.send(buf);
   });
 
   app.post("/api/dashboard/offer/extract-site", deps.auth, async (req, res) => {

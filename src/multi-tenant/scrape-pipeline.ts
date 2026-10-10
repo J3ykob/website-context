@@ -9,6 +9,8 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { crawlSite, closeBrowser } from "../scraper/index.js";
 import { createContextBuilder } from "../context/store.js";
+import { createOfferIndexer } from "../offer/index-scrape.js";
+import { loadOffer, saveOffer, mergeItems } from "../offer/store.js";
 import { BGEEmbeddingProvider } from "../embeddings/bge-provider.js";
 import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { embedChunks } from "../embeddings/pipeline.js";
@@ -58,7 +60,13 @@ export async function scrapeTenant(
   // Pages are converted to chunks as they arrive (their HTML dropped at once),
   // so memory stays flat however large the site is.
   const builder = createContextBuilder();
-  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, onPage: builder.addPage });
+  // Products & services index: JSON-LD + each page's readable text, taken
+  // before the context builder drops the page's HTML.
+  const offerIndexer = createOfferIndexer();
+  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, onPage: (page) => {
+    if (page.fetch?.html) offerIndexer.addPage(page.fetch.html, page.url);
+    return builder.addPage(page);
+  } });
   await closeBrowser();
 
   const pagesScraped = crawlResult.stats.successPages;
@@ -269,6 +277,23 @@ export async function scrapeTenant(
     } catch (err) {
       await rm(resolve(tenantDir, CATALOG_FILE), { force: true }).catch(() => {});
       console.warn(`[scrape-pipeline] Knowledge catalog skipped: ${(err as Error).message}`);
+    }
+  }
+
+  // Products & services index (LLM reads the offer pages, code checks it). It
+  // updates the offer: values the owner set are kept. Non-fatal.
+  if (offerIndexer.size > 0) {
+    try {
+      const or = new OpenRouterProvider({ maxTokens: 3000, temperature: 0 });
+      const llm = async (system: string, user: string, maxTokens = 3000) => (await or.chat([{ role: "system", content: system }, { role: "user", content: user }], { maxTokens })).content;
+      const idx = await offerIndexer.finish(llm);
+      const prev = await loadOffer(tenantId);
+      // Items found on a previous scrape but not now are dropped unless the owner touched them.
+      const kept = prev.items.filter((i) => i.source !== "website" || i.owner_set.length > 0);
+      await saveOffer(tenantId, mergeItems(kept, idx.items), idx.businessTypes.length ? idx.businessTypes : prev.businessTypes);
+      console.log(`[scrape-pipeline] Offer index: ${JSON.stringify(idx.stats)} types=${idx.businessTypes.join(",")}`);
+    } catch (err) {
+      console.warn(`[scrape-pipeline] Offer index skipped: ${(err as Error).message}`);
     }
   }
 
