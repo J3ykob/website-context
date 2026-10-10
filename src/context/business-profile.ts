@@ -23,6 +23,13 @@
 import * as cheerio from "cheerio";
 import type { OfficialBusinessInfo, BusinessFact } from "./types.js";
 
+// A phone number someone can call: enough digits, no template placeholders.
+// Site templates ship JSON-LD like "+48 XXX XXX XXX", which is not a number.
+export function isRealPhone(v: string): boolean {
+  if (/[xX*#_]{2,}/.test(v)) return false;
+  return v.replace(/\D/g, "").length >= 7;
+}
+
 const BIZ_TYPE = /localbusiness|organization|restaurant|store|realestateagent|hotel|professionalservice|lodgingbusiness|foodestablishment|legalservice|school|medicalbusiness|autodealer|autorepair|dentist|attorney|bakery|cafe|barorpub|nightclub|spa|gym|salon/i;
 
 const digits = (s: string): string => (s || "").replace(/\D/g, "");
@@ -127,7 +134,7 @@ export function extractOfficialInfo(
         const ts = Array.isArray(t) ? t.join(" ") : String(t || "");
         if (!BIZ_TYPE.test(ts)) continue;
         if (!jl.name && node.name && typeof node.name === "string") jl.name = node.name;
-        if (!jl.tel && node.telephone) { jl.tel = String(node.telephone); jlTelPageUrl = pg.url; }
+        if (!jl.tel && node.telephone && isRealPhone(String(node.telephone))) { jl.tel = String(node.telephone); jlTelPageUrl = pg.url; }
         if (!jl.email && node.email && typeof node.email === "string") jl.email = node.email;
         if (!jl.address) { const a = fmtAddress(node.address); if (a) jl.address = a; }
         if (!jl.hours) { const h = fmtHours(node.openingHours ?? node.openingHoursSpecification); if (h) jl.hours = h; }

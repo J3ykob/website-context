@@ -1107,7 +1107,13 @@ export class WebsiteChat {
     try { reply = (await this.backend.generate(system, asked, this.maxTokens)).trim(); } catch { return null; }
     if (!reply) return null;
     // Same statement check as our own answers, against the relayed excerpts.
-    reply = (await this.verifyAnswer(question, system, asked, reply, found.flatMap((f) => [...f.passages, { content: `${f.label}: ${f.contact}` }]))).trim() || reply;
+    // Each excerpt carries its business's name (statements name the business), plus
+    // the fact that we checked these businesses (the reply's opening line).
+    const evidence = [
+      { content: `We checked with these businesses we work with: ${found.map((f) => f.label).join(", ")}.` },
+      ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }]),
+    ];
+    reply = (await this.verifyAnswer(question, system, asked, reply, evidence)).trim() || reply;
     // One link per recommended business: the customer continues with that
     // business's own bot, which gets this conversation (see handoff.ts).
     let message = reply;
