@@ -210,20 +210,24 @@ export async function jevBusinessesOffer(question: string, businesses: { name: s
 }
 
 /**
- * Ecosystem gate, one call: P(the visitor's latest message asks for a product or
- * service ANOTHER business could provide - a new need - rather than following up
- * on what was just discussed or asking about this business itself), and the
- * language of the message (for the fixed offer sentence). Sees the previous
- * exchange, so "ok but what do YOU have?" after a referral is a follow-up.
- * null when Jev is unavailable.
+ * Ecosystem gate, one Jev call, asked only when the business itself has no answer.
+ * The network is asked only for a real need: the visitor explicitly wants it
+ * found elsewhere ("where else can I get it?", "can you recommend someone?"), or
+ * asks for one specific, concrete product or service - not a broad category
+ * ("building materials") and not a follow-up on the previous reply. Also names
+ * the visitor's language (for the fixed "checking" line). null without Jev.
  */
 export const OFFER_LANGS = ["pl", "en", "uk", "fr", "de", "other"] as const;
 export type OfferLang = (typeof OFFER_LANGS)[number];
-export async function jevNewNeed(previousUser: string, previousReply: string, message: string): Promise<{ need: number; lang: OfferLang } | null> {
+export async function jevNetworkNeed(previousUser: string, previousReply: string, message: string): Promise<{ ask: boolean; lang: OfferLang; explicit: number; specific: number; followup: number } | null> {
   const answers = await jevAsk({ previous_visitor_message: previousUser.slice(0, 600), previous_reply: previousReply.slice(0, 900), message: message.slice(0, 600) }, {
-    need: {
+    explicit: {
       type: "noul",
-      instructions: "A visitor is chatting with a business's assistant. Does `message` ask for a product or a service (something a business could provide) - including asking whether this business has or does it? Answer no if it asks about this business's own details (who they are, contact, address, opening hours) or is small talk.",
+      instructions: "Does `message` explicitly ask the assistant to find it somewhere else: to check with or recommend other businesses, suppliers or places (e.g. 'where else can I get it?', 'can you recommend someone who does it?', 'check with others')?",
+    },
+    specific: {
+      type: "noul",
+      instructions: "Does `message` (read with `previous_visitor_message` if it continues it) ask for one specific, concrete product or service, named precisely enough to ask a supplier for it - a specific kind, grade, model, size or parameter (e.g. 'waterproof concrete', 'facade scaffolding rental', 'an 18 m boom lift', '60x60 porcelain tiles')? Answer no for a broad category ('building materials', 'something for a renovation', 'what do you have'), a question about this business itself, or small talk.",
     },
     followup: {
       type: "noul",
@@ -235,36 +239,17 @@ export async function jevNewNeed(previousUser: string, previousReply: string, me
       criteria: { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German", other: "Any other language" },
     },
   });
-  const n = answers?.need as JevNoulAnswer | undefined;
-  const f = answers?.followup as JevNoulAnswer | undefined;
-  const l = (answers?.lang as JevChoiceAnswer | undefined)?.choice as OfferLang | undefined;
-  if (!n || typeof n.noul !== "number") return null;
+  const num = (k: string) => { const a = answers?.[k] as JevNoulAnswer | undefined; return a && typeof a.noul === "number" ? a.noul : null; };
+  const explicit = num("explicit"), specific = num("specific"), f = num("followup");
+  if (explicit === null || specific === null) return null;
   // A follow-up only counts when there was something to follow up on.
-  const follow = previousReply.trim() && f && typeof f.noul === "number" ? f.noul : 0;
-  return { need: n.noul * (1 - follow), lang: l && (OFFER_LANGS as readonly string[]).includes(l) ? l : "en" };
-}
-
-/**
- * The visitor's reply to the offer to check with other suppliers: "yes" (accepts),
- * "what" (asks what the offer means / what would be checked), "no" (declines) or
- * "other" (says or asks something else). null when Jev is unavailable.
- */
-export type OfferReply = "yes" | "what" | "no" | "other";
-export async function jevOfferReply(message: string): Promise<OfferReply | null> {
-  const answers = await jevAsk({ offer: "Would you like me to check with other suppliers and businesses we work with?", message: message.slice(0, 400) }, {
-    reply: {
-      type: "choice",
-      instructions: "The assistant asked the visitor `offer`. How does the visitor's `message` respond to it?",
-      criteria: {
-        yes: "Accepts it: yes, please, go ahead, check.",
-        what: "Asks what the offer means, what would be checked, or with whom.",
-        no: "Declines it.",
-        other: "Says or asks something else.",
-      },
-    },
-  });
-  const c = (answers?.reply as JevChoiceAnswer | undefined)?.choice;
-  return c === "yes" || c === "what" || c === "no" || c === "other" ? c : null;
+  const followup = previousReply.trim() && f !== null ? f : 0;
+  const l = (answers?.lang as JevChoiceAnswer | undefined)?.choice as OfferLang | undefined;
+  return {
+    ask: explicit >= 0.5 || (specific >= 0.5 && followup < 0.5),
+    lang: l && (OFFER_LANGS as readonly string[]).includes(l) ? l : "en",
+    explicit, specific, followup,
+  };
 }
 
 /** Split a reply into checkable statements (sentences and list items). */

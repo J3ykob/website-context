@@ -22,7 +22,7 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import type { EcosystemMatch } from "../ecosystem/ask.js";
-import { jevNewNeed, jevOfferReply, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
+import { jevNetworkNeed, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
@@ -276,36 +276,16 @@ function scriptOf(ch: string): string {
   return "Chinese";
 }
 
-// Fixed texts of the ecosystem offer, by the language Jev named.
-const ECO_OFFER: Record<OfferLang, string> = {
-  pl: "Czy chcesz, żebym sprawdził to u dostawców i firm, z którymi współpracujemy?",
-  en: "Would you like me to check with the suppliers and businesses we work with?",
-  uk: "Хочете, щоб я перевірив це в постачальників і компаній, з якими ми співпрацюємо?",
-  fr: "Voulez-vous que je vérifie auprès des fournisseurs et entreprises avec lesquels nous travaillons ?",
-  de: "Soll ich bei den Lieferanten und Unternehmen nachfragen, mit denen wir zusammenarbeiten?",
-  other: "Would you like me to check with the suppliers and businesses we work with?",
-};
-const ECO_EXPLAIN: Record<OfferLang, (need: string) => string> = {
-  pl: (n) => `Mogę zapytać firmy, z którymi współpracujemy (np. dostawców i wypożyczalnie), czy mają to, o co pytasz: „${n}”, i podać Ci ich kontakt. Sprawdzić?`,
-  en: (n) => `I can ask the businesses we work with (such as suppliers and rental companies) whether they have what you asked about: "${n}", and give you their contact details. Shall I check?`,
-  uk: (n) => `Я можу запитати компанії, з якими ми співпрацюємо (наприклад, постачальників і прокат), чи є в них те, про що ви питаєте: «${n}», і дати їхні контакти. Перевірити?`,
-  fr: (n) => `Je peux demander aux entreprises avec lesquelles nous travaillons (fournisseurs, location) si elles ont ce que vous cherchez : « ${n} », et vous donner leurs coordonnées. Je vérifie ?`,
-  de: (n) => `Ich kann bei unseren Partnerunternehmen (z. B. Lieferanten und Verleihern) nachfragen, ob sie das haben, wonach Sie fragen: „${n}“, und Ihnen ihre Kontaktdaten geben. Soll ich nachfragen?`,
-  other: (n) => `I can ask the businesses we work with (such as suppliers and rental companies) whether they have what you asked about: "${n}", and give you their contact details. Shall I check?`,
-};
+// The line shown under our own reply while the network is being asked, by the
+// language Jev named; replaced by the final message when the search is done.
 const ECO_CHECKING: Record<OfferLang, string> = {
   pl: "Sprawdzam u firm, z którymi współpracujemy…", en: "Checking with businesses we work with…",
   uk: "Перевіряю в компаній, з якими ми співпрацюємо…", fr: "Je vérifie auprès des entreprises partenaires…",
   de: "Ich frage bei unseren Partnerunternehmen nach…", other: "Checking with businesses we work with…",
 };
-const ECO_NONE: Record<OfferLang, string> = {
-  pl: "Sprawdziłem u firm, z którymi współpracujemy, ale żadna z nich tego nie oferuje.",
-  en: "I checked with the businesses we work with, but none of them offers this.",
-  uk: "Я перевірив у компаній, з якими ми співпрацюємо, але жодна з них цього не пропонує.",
-  fr: "J'ai vérifié auprès des entreprises avec lesquelles nous travaillons, mais aucune ne le propose.",
-  de: "Ich habe bei unseren Partnerunternehmen nachgefragt, aber keines bietet das an.",
-  other: "I checked with the businesses we work with, but none of them offers this.",
-};
+
+// A network search started alongside our own reply (see networkStart).
+interface NetworkAsk { need: string; lang: OfferLang; matches: Promise<EcosystemMatch[]> }
 
 export class WebsiteChat {
   private backend: LLMBackend;
@@ -317,9 +297,6 @@ export class WebsiteChat {
   private systemPromptExtra: string;
   private knowledgeCatalog: KnowledgeCatalog | null;
   private askEcosystem: ChatConfig["askEcosystem"];
-  // Sessions where we just said we don't have it and offered to check with
-  // other businesses: the visitor's need, waiting for their yes.
-  private ecoOffers: Map<string, { need: string; lang: OfferLang; at: number }> = new Map();
   private handoffLinks: ChatConfig["handoffLinks"];
   private contextNotes: { question: string; answer: string; addedAt: string }[] = [];
   private flowSessions: Map<string, FlowSession> = new Map();
@@ -488,10 +465,6 @@ export class WebsiteChat {
       this.collectSessions.delete(effectiveSessionKey);
     }
 
-    // The visitor answers our offer to check with other businesses.
-    const ecoC = await this.ecoConsent(effectiveSessionKey, inputValidation.sanitized, sanitizedMessages);
-    if (ecoC) return ecoC;
-
     // If there's an active flow session collecting remaining inputs
     if (this.hasActiveFlowSession(effectiveSessionKey)) {
       const session = this.flowSessions.get(effectiveSessionKey)!;
@@ -563,12 +536,16 @@ export class WebsiteChat {
     // at all to reason over). Otherwise the small model's verdict becomes an
     // advisory the big model weighs (see buildSystemPrompt).
     if (usableChunksC.length === 0) {
-      const offerC = await this.ecoOffer(effectiveSessionKey, lastUserMessage, sanitizedMessages, opts?.noPartners);
-      return { message: this.refusal(lastUserMessage) + offerC, sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
+      const netC0 = await this.networkStart(lastUserMessage, sanitizedMessages, opts?.noPartners);
+      const viaNet = netC0 ? await this.networkReply(netC0) : null;
+      if (viaNet) return { ...viaNet, message: this.refusal(lastUserMessage) + "\n\n" + viaNet.message };
+      return { message: this.refusal(lastUserMessage), sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
     }
     const factCheckC = await this.factCheck(lastUserMessage, usableChunksC);
-    // We don't have it: the reply says so (below) and ends with the offer.
-    const offerTailC = factCheckC === "no_evidence" ? await this.ecoOffer(effectiveSessionKey, lastUserMessage, sanitizedMessages, opts?.noPartners) : "";
+    // We don't have it: for a real need the network is asked while we write our
+    // own reply, and what it finds is added under that reply.
+    const netC = factCheckC === "no_evidence" ? await this.networkStart(lastUserMessage, sanitizedMessages, opts?.noPartners) : null;
+    const netTail = async () => { const r = netC ? await this.networkReply(netC) : null; return r ? "\n\n" + r.message : ""; };
     const gapC = this.gapDecision(lastUserMessage, factCheckC); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -660,7 +637,7 @@ export class WebsiteChat {
         // log_unknown is handled by the MCP server (writes to file directly)
       }
 
-      return { message: safeText + offerTailC, sources };
+      return { message: safeText + await netTail(), sources };
     }
 
     // Fallback to structured output if backend supports it (e.g., non-CLI backends)
@@ -726,10 +703,10 @@ export class WebsiteChat {
 
       if (result.action?.type === "log_unknown" && result.action.question) {
         this.logUnknownQuestion(result.action.question, lastUserMessage);
-        return { message: safeMessage + offerTailC, sources, unknownQuestion: result.action.question };
+        return { message: safeMessage + await netTail(), sources, unknownQuestion: result.action.question };
       }
 
-      return { message: safeMessage + offerTailC, sources };
+      return { message: safeMessage + await netTail(), sources };
     }
 
     // GROUNDING GATE: if nothing survived retrieval+filtering, the demo has no
@@ -771,7 +748,7 @@ export class WebsiteChat {
 
     const plainOutputCheck = validateOutput(this.guardReplyLinks(responseText), this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
-    return { message: plainOutputCheck.sanitized + offerTailC, sources, grounded: true, unknownQuestion: await this.resolveGap(gapC, lastUserMessage, gapPlain.question) };
+    return { message: plainOutputCheck.sanitized + await netTail(), sources, grounded: true, unknownQuestion: await this.resolveGap(gapC, lastUserMessage, gapPlain.question) };
   }
 
   // Parallel retrieval shared by chat() and chatStream(). Each Vectorize query is ~2s,
@@ -889,12 +866,6 @@ export class WebsiteChat {
       ? messages.map((m, i) => (i === messages.length - 1 && m.role === "user") ? { ...m, content: inputValidation.sanitized } : m)
       : messages;
 
-    // The visitor answers our offer to check with other businesses.
-    if (!this.collectSessions.has(effectiveSessionKey)) {
-      const ecoS = await this.ecoConsent(effectiveSessionKey, inputValidation.sanitized, sanitizedMessages, onStatus);
-      if (ecoS) { onToken(ecoS.message); return ecoS; }
-    }
-
     // Flows / tool-calls don't stream cleanly — defer to the full path, emit whole.
     // Only when a flow is actually in play: a tenant merely HAVING flows used to
     // lose streaming for every ordinary question.
@@ -917,12 +888,20 @@ export class WebsiteChat {
     // directly answer the question → honest refusal + logged gap, no generation.
     const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
     if (usableStream.length === 0) {
-      const msg = this.refusal(inputValidation.sanitized) + await this.ecoOffer(effectiveSessionKey, inputValidation.sanitized, sanitizedMessages);
+      const msg = this.refusal(inputValidation.sanitized);
+      const netS0 = await this.networkStart(inputValidation.sanitized, sanitizedMessages);
+      if (netS0) {
+        onToken(msg + "\n\n" + ECO_CHECKING[netS0.lang]);
+        const viaNet = await this.networkReply(netS0);
+        if (viaNet) return { ...viaNet, message: msg + "\n\n" + viaNet.message };
+        return { message: msg, sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(inputValidation.sanitized, "no_evidence"), inputValidation.sanitized, inputValidation.sanitized.trim() || null) };
+      }
       onToken(msg);
       return { message: msg, sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(inputValidation.sanitized, "no_evidence"), inputValidation.sanitized, inputValidation.sanitized.trim() || null) };
     }
     const factCheckS = await this.factCheck(inputValidation.sanitized, usableStream);
-    const offerTailS = factCheckS === "no_evidence" ? await this.ecoOffer(effectiveSessionKey, inputValidation.sanitized, sanitizedMessages) : "";
+    // A real need we can't meet: the network search runs while we write our reply.
+    const netS = factCheckS === "no_evidence" ? await this.networkStart(inputValidation.sanitized, sanitizedMessages) : null;
     const gapS = this.gapDecision(inputValidation.sanitized, factCheckS); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -940,8 +919,9 @@ export class WebsiteChat {
       let draft = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
       draft = await this.guardNoEvidence(inputValidation.sanitized, systemPrompt, sanitizedMessages, draft);
       const g = this.extractGapMarker(draft);
-      raw = g.text + offerTailS;
-      onToken(raw);
+      raw = g.text;
+      // Our reply now, with a "checking…" line until the network has answered.
+      onToken(netS ? raw + "\n\n" + ECO_CHECKING[netS.lang] : raw);
       emitted = raw.length;
     } else await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
       raw += delta;
@@ -978,6 +958,10 @@ export class WebsiteChat {
       .replace(/One moment,? please!?\s*/gi, "")
       .trim();
     const outputCheck = validateOutput(this.guardReplyLinks(cleaned), this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
+    // What the network found goes under our reply (after validation: its links are
+    // our own hand-off links, not the business's site).
+    const viaNet = netS ? await this.networkReply(netS) : null;
+    if (viaNet) return { ...viaNet, message: outputCheck.sanitized + "\n\n" + viaNet.message };
     return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: await this.resolveGap(gapS, inputValidation.sanitized, gapStream.question) };
   }
 
@@ -1070,40 +1054,32 @@ export class WebsiteChat {
 
   // Refusal in the visitor's language — an English refusal on a Polish site
   // breaks the "we speak as you" voice, and the gate now fires more often.
-  // We don't have it: if the visitor asks for something another business could
-  // provide (Jev: a new need, not a follow-up or a question about us), the reply
-  // ends with an offer to check with the businesses we work with - fixed text in
-  // the visitor's language - and the need waits for their yes. "" otherwise.
-  private async ecoOffer(sessionKey: string, question: string, messages: ChatMessage[], noPartners?: boolean): Promise<string> {
-    if (noPartners || !this.askEcosystem) return "";
+  // We don't have an answer. Only a real need goes to the network (Jev, one call):
+  // the visitor explicitly asks to find it elsewhere, or asks for one specific
+  // product or service - never a broad category or a follow-up. The search starts
+  // now and runs while our own reply is written. null = nothing is asked.
+  private async networkStart(question: string, messages: ChatMessage[], noPartners?: boolean): Promise<NetworkAsk | null> {
+    if (noPartners || !this.askEcosystem) return null;
     const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
     const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
-    const g = await jevNewNeed(prevUser, prevReply, question);
-    if (!g || g.need < 0.5) {
-      console.log(`[ecosystem] ${this.context.tenantId}: no offer (new need ${g?.need.toFixed(2) ?? "?"}): "${question.slice(0, 60)}"`);
-      return "";
+    const g = await jevNetworkNeed(prevUser, prevReply, question);
+    if (!g || !g.ask) {
+      console.log(`[ecosystem] ${this.context.tenantId}: not asked (explicit ${g?.explicit.toFixed(2) ?? "?"}, specific ${g?.specific.toFixed(2) ?? "?"}, follow-up ${g?.followup.toFixed(2) ?? "?"}): "${question.slice(0, 60)}"`);
+      return null;
     }
-    this.ecoOffers.set(sessionKey, { need: question, lang: g.lang, at: Date.now() });
-    if (this.ecoOffers.size > 2000) this.ecoOffers.delete(this.ecoOffers.keys().next().value!);
-    return "\n\n" + ECO_OFFER[g.lang];
+    // "Where else can I get it?" names nothing: the need is in the previous message.
+    const need = g.specific < 0.5 && prevUser ? `${prevUser}\n${question}` : question;
+    const matches = this.askEcosystem([{ role: "user", content: need }]).catch((e) => {
+      console.warn(`[ecosystem] ${this.context.tenantId}: broadcast failed: ${(e as Error).message}`);
+      return [] as EcosystemMatch[];
+    });
+    return { need, lang: g.lang, matches };
   }
 
-  // The visitor's reply to that offer: a yes (Jev) runs the search for the need
-  // they asked about; anything else drops the offer and the chat goes on.
-  private async ecoConsent(sessionKey: string, message: string, messages: ChatMessage[], onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
-    const o = this.ecoOffers.get(sessionKey);
-    if (!o) return null;
-    this.ecoOffers.delete(sessionKey);
-    if (Date.now() - o.at > 30 * 60 * 1000) return null;
-    const answer = await jevOfferReply(message);
-    // "Check what?" - say what we'd do, and keep the offer open.
-    if (answer === "what") {
-      this.ecoOffers.set(sessionKey, { ...o, at: Date.now() });
-      return { message: ECO_EXPLAIN[o.lang](o.need.slice(0, 200)), sources: [] };
-    }
-    if (answer !== "yes") return null;
-    const r = await this.answerViaPartner(o.need, messages, false, onStatus ? (st) => onStatus({ ...st, text: ECO_CHECKING[o.lang] }) : undefined);
-    return r || { message: ECO_NONE[o.lang], sources: [] };
+  /** What the network found, as a reply to add under ours; null when nobody fits. */
+  private async networkReply(net: NetworkAsk): Promise<ChatResponse | null> {
+    const found = await net.matches;
+    return found.length ? this.answerViaPartner(net.need, found) : null;
   }
 
   // Ecosystem: our own content has nothing on the question -> the best-ranked
@@ -1111,19 +1087,7 @@ export class WebsiteChat {
   // ranked, top 3) come back with excerpts from their own sites, and ONE reply is
   // written from them, attributed. It may restate them but never add to them.
   // null = nobody in the ecosystem offers it.
-  private async answerViaPartner(question: string, messages: ChatMessage[], noPartners?: boolean, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse | null> {
-    if (noPartners || !this.askEcosystem) return null;
-    let found: EcosystemMatch[] = [];
-    try {
-      // The need itself (after "yes" the latest message is just the consent).
-      found = await this.askEcosystem([{ role: "user", content: question }], () => onStatus?.({
-        kind: "ecosystem",
-        text: this.isPolish(question) ? "Sprawdzam u firm, z którymi współpracujemy…" : "Checking with businesses we work with…",
-      }));
-    } catch (e) {
-      console.warn(`[ecosystem] ${this.context.tenantId}: broadcast failed: ${(e as Error).message}`);
-      return null;
-    }
+  private async answerViaPartner(question: string, found: EcosystemMatch[]): Promise<ChatResponse | null> {
     if (found.length === 0) return null;
     const brand = this.brandName || this.context.businessProfile?.businessName?.value || this.getAllowedDomain() || "our business";
     const material = found.map((f) =>
@@ -1132,7 +1096,7 @@ export class WebsiteChat {
     const system =
       `You are the website assistant of ${brand}. The visitor asked something our own information does not cover. ` +
       `We checked businesses we work with; excerpts from their own websites:\n\n${material}\n\n` +
-      `Write a short reply in the visitor's language: say in one short sentence that you checked with businesses we work with (the visitor asked you to), ` +
+      `Write a short reply in the visitor's language: say in one short sentence that you also checked with businesses we work with, ` +
       `then say what each of them offers that answers the question, naming them, with their contact details. ` +
       `Use only facts from the excerpts - add nothing, do not claim that we sell or do it, and do not describe our own offer. Full sentences, no preamble.` +
       (this.handoffLinks ? ` End with one short sentence saying they can continue the conversation directly with ${found.length > 1 ? "any of them" : "them"} using the link${found.length > 1 ? "s" : ""} below (do not write the links yourself).` : "");
@@ -1150,7 +1114,7 @@ export class WebsiteChat {
     if (this.handoffLinks) {
       try {
         const need = question;
-        const links = await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [...messages, { role: "assistant", content: reply }], need);
+        const links = await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [{ role: "user", content: question }, { role: "assistant", content: reply }], need);
         const lines = found.filter((f) => links[f.tenantId]).map((f) => `[${f.label}](${links[f.tenantId]})`);
         if (lines.length) message += "\n\n" + lines.join("\n");
       } catch (e) {
