@@ -26,6 +26,7 @@ import { jevNetworkNeed, type OfferLang, jevPassageRelevance, jevPickOption, jev
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
+import { runCompare, type Business } from "../projects/compare.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 
@@ -55,6 +56,9 @@ export interface ChatConfig {
   // The owner's structured offer (products & services) - authoritative for
   // "do you have X / how much is Y", and for the offer check in chat forms.
   offerItems?: OfferItem[];
+  // The businesses of our network (this one included) that have a structured
+  // offer - for "what would this list / job cost?" projects (compare_offers@1).
+  networkOffers?: () => Promise<Business[]>;
   // Ecosystem broadcast (src/ecosystem/ask.ts): when our own content has nothing
   // on the question, the other businesses of our ecosystem each decide from their
   // own knowledge whether they can answer; their answers come back here.
@@ -85,6 +89,8 @@ export interface ChatResponse {
   // An "in chat" flow (order / inquiry) in progress: where it stands, for a
   // caller driving it (e.g. another business's bot in an ecosystem referral).
   collect?: { flowId: string; stage: "collecting" | "confirming" | "sent" | "cancelled" | "failed"; missing: string[] };
+  // The project this reply belongs to (multi-business work, src/projects).
+  project?: { id: string; type: string };
   flowSession?: {
     active: boolean;
     status: FlowSession["status"];
@@ -310,6 +316,7 @@ export class WebsiteChat {
   private sessionVia: Map<string, { via: CollectVia; at: number }> = new Map();
   private brandName = "";
   private offerItems: OfferItem[] = [];
+  private networkOffers?: () => Promise<Business[]>;
   private onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
 
   constructor(
@@ -327,6 +334,7 @@ export class WebsiteChat {
     this.knowledgeCatalog = config.knowledgeCatalog || null;
     this.brandName = config.brandName || "";
     this.offerItems = config.offerItems || [];
+    this.networkOffers = config.networkOffers;
     this.onInquiry = config.onInquiry;
     this.askEcosystem = config.askEcosystem;
     this.handoffLinks = config.handoffLinks;
@@ -464,6 +472,10 @@ export class WebsiteChat {
       if (flow && Date.now() - cs.at < 30 * 60 * 1000) return this.runCollect(flow, cs, effectiveSessionKey, inputValidation.sanitized);
       this.collectSessions.delete(effectiveSessionKey);
     }
+
+    // "What would this list / job cost?" -> a compare_offers project.
+    const estimate = await this.estimateProject(inputValidation.sanitized, effectiveSessionKey);
+    if (estimate) return estimate;
 
     // If there's an active flow session collecting remaining inputs
     if (this.hasActiveFlowSession(effectiveSessionKey)) {
@@ -871,7 +883,7 @@ export class WebsiteChat {
     // lose streaming for every ordinary question.
     const activeFlowsS = this.context.flows.filter((f) => f.status === "active");
     const pendingS = this.pendingDisambig.get(effectiveSessionKey);
-    const flowInPlay = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey)
+    const flowInPlay = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey) || (await this.isEstimateRequest(inputValidation.sanitized))
       || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000)
       || (activeFlowsS.length > 0 && (await this.classifyFlowIntent(inputValidation.sanitized, activeFlowsS)).length > 0);
     if (flowInPlay) {
@@ -973,6 +985,49 @@ export class WebsiteChat {
 
   // Start a goal-driven ("agent") flow: no input collection here; the widget
   // drives the page with /api/agent/step and asks the visitor for data as needed.
+  // ── Projects: a price estimate across the network's offers ──
+  private estimateMemo = new Map<string, { at: number; yes: boolean }>();
+  /** Jev: is the message asking for a price estimate of a list / a job? (memoized per message) */
+  private async isEstimateRequest(message: string): Promise<boolean> {
+    if (!this.networkOffers || !jevEnabled() || message.trim().length < 8) return false;
+    const hit = this.estimateMemo.get(message);
+    if (hit && Date.now() - hit.at < 60000) return hit.yes;
+    const a = await jevAsk({ message }, { estimate: { type: "noul", instructions: "Does `message` ask what it would cost to buy, rent or have done one or more specific products or services, with a quantity, a rental period, a job size or a list of several items (a request for a quote or an estimate)? A general question about prices, opening hours or what is offered is not." } }, 3000);
+    const yes = (((a?.estimate as any)?.noul as number) ?? 0) >= 0.7;
+    if (this.estimateMemo.size > 200) this.estimateMemo.clear();
+    this.estimateMemo.set(message, { at: Date.now(), yes });
+    return yes;
+  }
+
+  private async estimateProject(message: string, sessionKey: string): Promise<ChatResponse | null> {
+    if (!(await this.isEstimateRequest(message))) return null;
+    try {
+      const businesses = (await this.networkOffers!()).filter((b) => b.items.length);
+      if (!businesses.length) return null;
+      const l = await jevAsk({ message }, { lang: { type: "choice", instructions: "In which language is `message` written?", criteria: { Polish: "Polish", English: "English", Ukrainian: "Ukrainian", French: "French", German: "German", other: "Another language" } } }, 3000);
+      const language = ((l?.lang as any)?.choice as string) || undefined;
+      const llm = (system: string, user: string, maxTokens = 900) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
+      const r = await runCompare({ message, customerSession: sessionKey, askingTenantId: this.context.tenantId, businesses, llm, language: language === "other" ? undefined : language });
+      if (!r || !r.lines.some((x) => x.quotes.length)) return null;
+      // Ordering: an order placed in this chat (by intent) is marked with the project.
+      this.setSessionVia(sessionKey, { tenantId: this.context.tenantId, brand: this.brandName, sessionKey, projectId: r.projectId });
+      let message2 = r.message;
+      const others = [...new Map(r.lines.filter((x) => x.assigned && x.assigned.tenantId !== this.context.tenantId).map((x) => [x.assigned!.tenantId, { tenantId: x.assigned!.tenantId, label: x.assigned!.label }])).values()];
+      if (others.length && this.handoffLinks) {
+        try {
+          const links = await this.handoffLinks(others, [{ role: "user", content: message }, { role: "assistant", content: r.message }], message);
+          const rows = others.filter((o) => links[o.tenantId]).map((o) => `[${o.label}](${links[o.tenantId]})`);
+          if (rows.length) message2 += "\n\n" + rows.join("\n");
+        } catch (e) { console.warn(`[project] ${this.context.tenantId}: links failed: ${(e as Error).message}`); }
+      }
+      console.log(`[project] ${this.context.tenantId}: ${r.projectId} compare_offers lines=${r.lines.length} total=${r.total} tbd=${r.tbdLines}`);
+      return { message: message2, sources: [], grounded: true, project: { id: r.projectId, type: "compare_offers@1" } };
+    } catch (e) {
+      console.warn(`[project] ${this.context.tenantId}: estimate failed: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
   // ── "In chat" flows: the assistant collects an order / inquiry itself ──
   /** Remember who referred this session (called on every hand-off turn). */
   setSessionVia(sessionKey: string, via: CollectVia): void {

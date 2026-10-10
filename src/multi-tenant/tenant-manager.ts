@@ -166,6 +166,7 @@ export class TenantManager {
       brandName: getTenant(tenantId)?.brandName || new URL(meta.siteUrl).hostname.replace(/^www\./, ""),
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
       offerItems: (await loadOffer(tenantId).catch(() => null))?.items || [],
+      networkOffers: () => networkOffers(tenantId),
       // The best-ranked businesses of this tenant's ecosystem answer what its own site can't.
       askEcosystem: ecosystemOf(getTenant(tenantId))
         ? (messages, onStart) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
@@ -289,6 +290,31 @@ async function recordInquiry(tenantId: string, inquiry: Inquiry): Promise<boolea
     emailed = await sendInquiryEmail(t.email, t.brandName || t.domain, inquiry);
   }
   console.log(`[inquiry] ${tenantId}: "${inquiry.flowName}" stored=${stored} emailed=${emailed}`);
+  // An order that came out of a project is part of it.
+  if (inquiry.via?.projectId && (stored || emailed)) {
+    try {
+      const { addEvent, addParticipant } = await import("../projects/store.js");
+      await addParticipant(inquiry.via.projectId, tenantId, "chosen");
+      await addEvent(inquiry.via.projectId, { kind: "order_sent", actor: tenantId, data: { flow: inquiry.flowName, fields: inquiry.fields.map((f) => f.label) } });
+    } catch (e: any) { console.warn(`[inquiry] project event failed: ${e?.message || e}`); }
+  }
   return stored || emailed;
 }
 
+/**
+ * The businesses of this tenant's network that have a structured offer: the
+ * tenant itself plus the members of its ecosystem (settings.ecosystem).
+ */
+async function networkOffers(tenantId: string): Promise<{ tenantId: string; label: string; items: import("../offer/store.js").OfferItem[] }[]> {
+  const self = getTenant(tenantId);
+  const eco = typeof self?.settings?.ecosystem === "string" ? self.settings.ecosystem.trim() : "";
+  const { listTenants } = await import("./tenant-registry.js");
+  const members = eco ? listTenants().filter((t) => t.id !== tenantId && t.settings?.ecosystem === eco && t.status === "active").slice(0, 40) : [];
+  const all = [self, ...members].filter(Boolean) as NonNullable<typeof self>[];
+  const out = await Promise.all(all.map(async (t) => ({
+    tenantId: t.id,
+    label: t.settings?.siteCard?.brand || t.brandName || t.domain,
+    items: (await loadOffer(t.id).catch(() => null))?.items || [],
+  })));
+  return out.filter((b) => b.items.length);
+}

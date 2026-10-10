@@ -13,7 +13,7 @@ import { jevAsk } from "../llm/jev.js";
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
 
 /** When another business's bot started the inquiry (ecosystem referral). */
-export interface CollectVia { tenantId: string; brand: string; sessionKey: string }
+export interface CollectVia { tenantId: string; brand: string; sessionKey: string; projectId?: string }
 
 export interface CollectSession {
   flowId: string;

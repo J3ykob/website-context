@@ -22,7 +22,7 @@ async function judge(question: string, labels: string[], what: string): Promise<
 }
 
 /** The items the message is about, best first (at most `limit`). [] when none / Jev down. */
-export async function findOfferItems(question: string, items: OfferItem[], limit = 8): Promise<OfferItem[]> {
+export async function findOfferItems(question: string, items: OfferItem[], limit = 8, minScore = ITEM_MIN): Promise<OfferItem[]> {
   if (!items.length || !question.trim()) return [];
   let pool = items;
   if (items.length > DIRECT_MAX) {
@@ -38,7 +38,7 @@ export async function findOfferItems(question: string, items: OfferItem[], limit
   if (!scores) return [];
   return pool
     .map((it, k) => ({ it, s: scores[k] }))
-    .filter((r) => r.s >= ITEM_MIN)
+    .filter((r) => r.s >= minScore)
     .sort((a, b) => b.s - a.s)
     .slice(0, limit)
     .map((r) => r.it);
