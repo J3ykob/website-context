@@ -17,6 +17,7 @@
  * Everything is recorded in the project (memory, participants, events, usage).
  */
 import { findOfferItems } from "../offer/search.js";
+import { jevAsk, type JevQuestion } from "../llm/jev.js";
 import { FIELDS, validValue } from "../offer/schema.js";
 import type { OfferItem } from "../offer/store.js";
 import { createProject, addParticipant, addEvent, setMemory, addUsage, setStatus } from "./store.js";
@@ -172,26 +173,38 @@ export async function runCompare(opts: {
   writes.push(record(() => addEvent(project!.id, { kind: "quotes", actor: "system", data: { lines: results.length, priced: results.length - tbdLines, businesses: involved.size } })));
 
   // Words by the model, numbers checked by code.
-  const data = results.map((r) => ({
-    need: r.line.need, quantity: r.line.quantity, unit: r.line.unit === "unknown" ? "" : FIELDS.unit.values[r.line.unit].label,
-    status: r.status,
-    business: r.assigned?.label || "", item: r.assigned?.item || "",
-    unit_price: r.assigned?.unitPrice ?? null, price_unit: r.assigned && r.assigned.unit !== "unknown" ? FIELDS.unit.values[r.assigned.unit]?.label : "",
-    total: r.status === "priced" ? r.assigned!.total : null, note: r.assigned?.priceNote || "", why_not_priced: r.reason,
-    lead_time: r.assigned?.leadTime || "", availability: r.assigned?.availability || "",
-    other_offers: r.quotes.filter((q) => q !== r.assigned && q.total !== null).map((q) => ({ business: q.label, total: q.total })).slice(0, 3),
-  }));
+  const data = results.map((r) => {
+    const a = r.assigned;
+    const base = { need: r.line.need, quantity: r.line.quantity, unit: r.line.unit === "unknown" ? "" : FIELDS.unit.values[r.line.unit].label };
+    if (r.status === "priced") return {
+      ...base, state: "PRICED", business: a!.label, item: a!.item, total: a!.total,
+      unit_price: a!.unitPrice, price_unit: a!.unit !== "unknown" ? FIELDS.unit.values[a!.unit]?.label : "",
+      lead_time: a!.leadTime, availability: a!.availability,
+      other_offers: r.quotes.filter((q) => q !== a && q.total !== null).map((q) => ({ business: q.label, total: q.total })).slice(0, 3),
+    };
+    return {
+      ...base, state: "TO BE PRICED", reason: r.reason, business: a?.label || "", item: a?.item || "",
+      unit_price_for_information: a?.unitPrice ?? null, price_unit: a && a.unit !== "unknown" ? FIELDS.unit.values[a.unit]?.label : "",
+    };
+  });
   let msg = "";
   try {
     msg = (await llm(
-    `You present a price comparison to a customer. Write in ${opts.language || "the same language as the customer's message"}, using the natural business term for "to be priced" in that language (Polish: "do wyceny"). Use only the numbers, names and facts in DATA - never compute, round or add any other number. Short; one line per need. For a need with status "tbd" or "not_found", do not present a price as the amount to pay: say it is to be priced, giving exactly the reason in why_not_priced (a unit price may be mentioned as information). End with the known total ${total} zł${tbdLines ? " plus the items to be priced" : ""}, and say the businesses confirm final prices when ordering.`,
+    `You present a price comparison to a customer. Write in ${opts.language || "the same language as the customer's message"}. Use only the numbers, names and facts in DATA - never compute, round or add any other number. Short; one line per need. A need with state "PRICED" has its total - present it as the price, never as "to be priced". A need with state "TO BE PRICED" has no total: say it is to be priced and give exactly its reason (a unit price may be mentioned as information). End with the known total ${total} zł${tbdLines ? " plus the items to be priced" : ""}, and say the businesses confirm final prices when ordering.`,
     `Customer's message: """${message.slice(0, 600)}"""\n\nDATA: ${JSON.stringify(data)}`,
     900,
   )).trim(); llmCalls++;
   } catch (e) { console.warn(`[project] summary wording failed: ${(e as Error).message}`); }
   const allowed = new Set<string>([String(total), ...numbersIn(JSON.stringify(data)), ...numbersIn(message)].map((n) => String(Number(n))));
-  const ok = !!msg && numbersIn(msg).every((n) => allowed.has(String(Number(n))));
-  if (!ok) msg = renderTable(results, total, tbdLines);
+  let ok = !!msg && numbersIn(msg).every((n) => allowed.has(String(Number(n))));
+  // Jev: a priced need must not be presented as "to be priced" (or the reverse).
+  const priced = data.filter((d) => d.state === "PRICED").map((d) => d.need);
+  if (ok && priced.length) {
+    const j = await jevAsk({ message: msg, priced_needs: priced }, Object.fromEntries(priced.map((_, k) => [`p${k}`, { type: "noul", instructions: `Does \`message\` present \`priced_needs[${k}]\` as having a price to pay (not as still to be priced, quoted or confirmed)?` } as JevQuestion])), 5000);
+    if (j) ok = priced.every((_, k) => (((j[`p${k}`] as any)?.noul as number) ?? 1) >= 0.5);
+    jevCalls++;
+  }
+  if (!ok) { console.warn("[project] compare summary failed its checks - showing the table"); msg = renderTable(results, total, tbdLines); }
 
   writes.push(record(async () => {
     await setMemory(project!.id, { results: data, total, tbdLines });
