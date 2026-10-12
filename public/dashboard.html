@@ -762,6 +762,15 @@
           <button class="btn btn-sm btn-outline" onclick="startRecording()">Record new</button>
         </div>
         <div class="card" id="skills-panel"><div class="loading"></div></div>
+
+        <div class="section-head" style="margin-top:32px">
+          <span class="section-title">Work for customers</span>
+        </div>
+        <div class="card" id="review-panel">
+          <p style="margin:0 0 12px;color:#94a3b8;font-size:14px">When a customer asks for real work - a calculation, a comparison, a plan or a document - the assistant prepares it. Choose whether it reaches the customer right away or after you approve it.</p>
+          <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0;cursor:pointer"><input type="radio" name="agent-review" value="auto" onchange="saveAgentReview(this.value)"> <span><b>Send automatically</b><br><span style="color:#94a3b8;font-size:13px">After the automatic checks (numbers, language, completeness).</span></span></label>
+          <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0;cursor:pointer"><input type="radio" name="agent-review" value="approve" onchange="saveAgentReview(this.value)"> <span><b>I approve first</b><br><span style="color:#94a3b8;font-size:13px">You get an email with a link: send as is, edit, ask the assistant for changes, or reply in your own words.</span></span></label>
+        </div>
       </div>
     </div>
 
@@ -917,7 +926,7 @@
     var chunksSearch = "";
 
     async function loadAll() {
-      await Promise.all([loadSiteInfo(), loadStats(), loadIntents(), loadGaps(), loadActivity(), loadSkills(), loadChunks(), loadOffer()]);
+      await Promise.all([loadSiteInfo(), loadStats(), loadIntents(), loadGaps(), loadActivity(), loadSkills(), loadChunks(), loadOffer(), loadAgentReview()]);
     }
 
     // "select_automotive_pl" -> "Select Automotive PL" (display fallback when the
@@ -1001,6 +1010,20 @@
       } catch (e) {
         document.getElementById("activity-panel").innerHTML = emptyState('alert', 'amber', 'Could not load recent activity.', 'Retry', 'loadActivity()');
       }
+    }
+
+    async function loadAgentReview() {
+      try {
+        var res = await authFetch(API + "/api/dashboard/agent-review");
+        var d = await res.json();
+        document.querySelectorAll('input[name="agent-review"]').forEach(function (r) { r.checked = r.value === d.mode; });
+      } catch (e) {}
+    }
+    async function saveAgentReview(mode) {
+      try {
+        var res = await authFetch(API + "/api/dashboard/agent-review", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: mode }) });
+        if (!res.ok) throw new Error();
+      } catch (e) { loadAgentReview(); }
     }
 
     async function loadSkills() {

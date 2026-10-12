@@ -1077,44 +1077,58 @@
 
   // ─── Work done by the project agent ─────────────────────────────────────
   // Some requests (calculations, comparisons, plans, lists) are worked on in the background; the reply
-  // said so. Poll for the result and add it to the conversation when ready (resumes after a reload).
+  // said so. Poll for the result and add it to the conversation when ready. A business may approve
+  // results first ("review"): the visitor is told once, and the result arrives when approved - also
+  // after a reload or a later visit (polling resumes from localStorage).
   var PROJECT_KEY = CHAT_KEY + ":agent";
+  var WATCH_MS = 7 * 24 * 60 * 60 * 1000;
   var watching = null;
+  function savedWatch() { try { return JSON.parse(localStorage.getItem(PROJECT_KEY) || "null"); } catch (e) { return null; } }
+  function saveWatch(w) { try { localStorage.setItem(PROJECT_KEY, JSON.stringify(w)); } catch (e) {} }
   function watchProject(p) {
     if (!p || !p.agent || p.agent.status !== "running" || !p.id) return;
-    try { localStorage.setItem(PROJECT_KEY, JSON.stringify({ id: p.id, t: Date.now(), s: sessionId })); } catch (e) {}
-    pollProject(p.id, Date.now());
+    saveWatch({ id: p.id, t: Date.now(), s: sessionId, review: false });
+    pollProject(p.id);
   }
-  function pollProject(id, since) {
+  function pollProject(id) {
     if (watching === id) return;
     watching = id;
-    var tries = 0;
     (function tick() {
       if (watching !== id) return;
-      if (++tries > 240 || Date.now() - since > 25 * 60 * 1000) { stopWatching(); return; }
+      var w = savedWatch();
+      if (!w || w.id !== id || Date.now() - w.t > WATCH_MS) { stopWatching(); return; }
       fetch(API_HOST + "/api/chat/agent?tenantId=" + encodeURIComponent(TENANT_ID) + "&sessionId=" + encodeURIComponent(sessionId) + "&projectId=" + encodeURIComponent(id))
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(d) {
-          if (!d || d.status === "running") { setTimeout(tick, 5000); return; }
+          if (!d) { setTimeout(tick, 15000); return; }
+          if (d.status === "running") { setTimeout(tick, 5000); return; }
+          if (d.status === "review") {
+            if (!w.review && d.message) { w.review = true; saveWatch(w); addAssistant(d.message); }
+            setTimeout(tick, 60000);
+            return;
+          }
           stopWatching();
           if (d.status === "none" || !d.message) return;
           var text = d.message;
           if (d.files && d.files.length) text += "\n\n" + d.files.map(function(f) { return "[" + f.name + "](" + API_HOST + f.url + ")"; }).join("\n");
-          messages.push({ role: "assistant", content: text }); persistMessages();
-          appendMsg("assistant", text);
-          if (typeof syncBarMessages === "function") syncBarMessages();
+          addAssistant(text);
         })
-        .catch(function() { setTimeout(tick, 8000); });
+        .catch(function() { setTimeout(tick, 15000); });
     })();
+  }
+  function addAssistant(text) {
+    messages.push({ role: "assistant", content: text }); persistMessages();
+    appendMsg("assistant", text);
+    if (typeof syncBarMessages === "function") syncBarMessages();
   }
   function stopWatching() {
     watching = null;
     try { localStorage.removeItem(PROJECT_KEY); } catch (e) {}
   }
-  try {
-    var pendingProject = JSON.parse(localStorage.getItem(PROJECT_KEY) || "null");
-    if (pendingProject && pendingProject.s === sessionId && Date.now() - pendingProject.t < 25 * 60 * 1000) setTimeout(function() { pollProject(pendingProject.id, pendingProject.t); }, 1500);
-  } catch (e) {}
+  (function() {
+    var w = savedWatch();
+    if (w && w.s === sessionId && Date.now() - w.t < WATCH_MS) setTimeout(function() { pollProject(w.id); }, 1500);
+  })();
 
   // Stream a chat response over SSE. Calls cbs.onFirst() just before the first token
   // (clear the typing indicator), cbs.onDelta(text) per token, cbs.onDone(data) with the

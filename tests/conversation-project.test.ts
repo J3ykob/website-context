@@ -108,3 +108,54 @@ live("every conversation is a project; the system routes each turn", () => {
     }, 20 * 60 * 1000);
   }
 });
+
+live("the business approves before the customer gets the result", () => {
+  it("held for review -> owner asks for changes -> reworked -> owner edits and approves -> customer gets it", async () => {
+    const review = await import("../src/projects/review.js");
+    // Approve mode for this process only (never the business's real setting).
+    process.env.AGENT_REVIEW_FORCE = TENANT;
+    const session = `test-conv-${run}-review`;
+    sessions.push(session);
+    const w = await turn(session, [], WORK[0].text);
+    expect(w.project?.agent?.status).toBe("running");
+    const pid = w.project!.id;
+
+    const delivered: string[] = [];
+    const poll = async (want: string) => {
+      const end = Date.now() + 15 * 60 * 1000;
+      for (;;) {
+        const d = await M.agentDelivery(pid, async (m) => { delivered.push(m); });
+        if (d.status === want) return d;
+        if (d.status !== "running" && d.status !== "review") throw new Error(`unexpected ${d.status}`);
+        if (Date.now() > end) throw new Error(`no ${want}`);
+        await new Promise((ok) => setTimeout(ok, 10_000));
+      }
+    };
+    const first = await poll("review");
+    expect(delivered.length).toBe(1); // "the business is checking it" - once
+    const run1 = ((await M.projectDetail(pid))!.project.memory.agentRun as any).runId;
+    const rv1 = (await review.reviewForRun(pid, run1))!;
+    expect(rv1.status).toBe("pending");
+    expect(rv1.draft).toContain("280");
+    console.log(`[review] draft 1:\n${rv1.draft}`);
+
+    const { reworkWithGuidance } = await import("../src/projects/conversation.js");
+    expect(await review.decide(rv1.token, "changes_requested", { note: "Dolicz do każdej opcji transport w obie strony: 150 zł." })).not.toBeNull();
+    await reworkWithGuidance(pid, "Dolicz do każdej opcji transport w obie strony: 150 zł.");
+    await new Promise((ok) => setTimeout(ok, 5000));
+    await poll("review");
+    const run2 = ((await M.projectDetail(pid))!.project.memory.agentRun as any).runId;
+    expect(run2).not.toBe(run1);
+    const rv2 = (await review.reviewForRun(pid, run2))!;
+    console.log(`[review] draft 2:\n${rv2.draft}`);
+    expect(rv2.draft).toContain("150");
+
+    const edited = rv2.draft + "\n\nZapraszamy - Rentbud (test)";
+    expect(await review.decide(rv2.token, "approved", { final: edited })).not.toBeNull();
+    const done = await poll("done");
+    expect(done.message).toBe(edited.trim());
+    expect(delivered[delivered.length - 1]).toBe(edited.trim());
+    void first;
+    delete process.env.AGENT_REVIEW_FORCE;
+  }, 40 * 60 * 1000);
+});

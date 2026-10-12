@@ -120,3 +120,46 @@ Wysłano ${inquiry.at} przez Whisp.`,
     return false;
   }
 }
+
+// The owner's review of work the assistant prepared for a customer (src/projects/review.ts).
+// New template: until the user approves it (REVIEW_EMAIL_APPROVED=1), it goes only to the Whisp owner's
+// own address - never to a business.
+export async function sendReviewEmail(
+  email: string,
+  brand: string,
+  r: { request: string; draft: string; files: string[]; link: string },
+): Promise<boolean> {
+  if (process.env.REVIEW_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
+    console.log(`[email] review email to ${email} not sent - template awaiting approval`);
+    return false;
+  }
+  const files = r.files.length ? `\nPliki dla klienta: ${r.files.map((f) => f.split("/").pop()).join(", ")}\n` : "";
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: email,
+      replyTo: "jakub@whisp.so",
+      subject: `Do akceptacji: odpowiedź dla klienta (${brand})`,
+      text: `Asystent na stronie przygotował odpowiedź na prośbę klienta. Klient dostanie ją dopiero po Twojej akceptacji.
+
+Prośba klienta:
+${r.request}
+
+Proponowana odpowiedź:
+${r.draft || "(asystent nie zdołał przygotować odpowiedzi - napisz ją sam)"}
+${files}
+Zobacz szczegóły, popraw albo zaakceptuj (bez logowania):
+${r.link}
+
+Możesz: wysłać bez zmian, poprawić tekst, poprosić asystenta o zmiany albo odpowiedzieć klientowi po swojemu.
+
+Whisp`,
+    });
+    if (error) { console.error(`[email] review email to ${email} failed:`, error.message); return false; }
+    console.log(`[email] Review email sent to ${email}`);
+    return true;
+  } catch (e: any) {
+    console.error(`[email] review email to ${email} failed:`, e.message);
+    return false;
+  }
+}

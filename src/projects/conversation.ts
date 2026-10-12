@@ -10,6 +10,7 @@ import { createProject, findOpenProject, addEvent, getProject, setMemory } from 
 import { writeFile, readFile, listFiles } from "./repo.js";
 import { agentEnabled, startAgentRun, agentStatus, type AgentRunState } from "./agent.js";
 import { jevAsk } from "../llm/jev.js";
+import { reviewMode, reviewForRun, openReview } from "./review.js";
 
 export const CONVERSATION = "conversation@1";
 const TTL_HOURS = 30 * 24;
@@ -119,6 +120,13 @@ export const BUSY: Record<string, string> = {
   fr: "Je travaille encore sur votre demande précédente - le résultat s'affichera ici. Je tiendrai compte de ce message juste après.",
   de: "Ich arbeite noch an Ihrer vorherigen Anfrage - das Ergebnis erscheint hier. Diese Nachricht berücksichtige ich direkt danach.",
 };
+export const REVIEWING: Record<string, string> = {
+  pl: "Gotowe - firma jeszcze to sprawdza, zanim do Ciebie trafi. Odpowiedź pojawi się tutaj, gdy tylko ją zatwierdzi.",
+  en: "Done - the business is checking it before it reaches you. The reply will appear here as soon as they approve it.",
+  uk: "Готово - компанія ще перевіряє це, перш ніж надіслати вам. Відповідь з'явиться тут, щойно її затвердять.",
+  fr: "C'est prêt - l'entreprise le vérifie avant de vous l'envoyer. La réponse s'affichera ici dès qu'elle l'aura validée.",
+  de: "Fertig - das Unternehmen prüft es noch, bevor Sie es erhalten. Die Antwort erscheint hier, sobald es freigegeben ist.",
+};
 export const COULD_NOT: Record<string, string> = {
   pl: "Niestety nie udało mi się tego teraz przygotować. Zapisałem Twoje zapytanie - firma odpowie na nie bezpośrednio.",
   en: "Sorry, I couldn't prepare this right now. Your request is saved and the business will get back to you directly.",
@@ -152,7 +160,24 @@ export async function beginConversationAgent(projectId: string, transcript: { ro
   return "started";
 }
 
-export interface AgentDelivery { status: "none" | "running" | "done" | "failed"; message?: string; files?: string[]; projectId: string }
+/**
+ * The owner asked for changes (review): the agent reworks the result with their guidance, and the new
+ * version comes back for review. Runs in the background like any agent turn.
+ */
+export async function reworkWithGuidance(projectId: string, note: string): Promise<void> {
+  const at = Date.now();
+  await setMemory(projectId, { agentPending: at });
+  const previous = ((await readFile(projectId, "odpowiedz.txt").catch(() => null)) || "").trim();
+  await writeFile(projectId, "uwagi_firmy.md", `# Uwagi firmy do poprzedniej wersji\n\n${note}\n\n## Poprzednia wersja odpowiedzi\n\n${previous || "(brak)"}\n`, "md", "business");
+  if (previous) await writeFile(projectId, `historia/odpowiedz-${at}.txt`, previous, "txt", "system");
+  await writeFile(projectId, "odpowiedz.txt", "", "txt", "system");
+  const instruction = `${INSTRUCTION}\n\nFirma przejrzała poprzednią wersję i prosi o zmiany: uwzględnij uwagi z uwagi_firmy.md (tam też poprzednia wersja odpowiedzi). Uwagi firmy mają pierwszeństwo.`;
+  void startAgentRun(projectId, instruction, "business").then(async (r) => {
+    if ("error" in r) await setMemory(projectId, { agentRun: { runId: `failed-${at}`, status: "failed", error: r.error, startedAt: new Date(at).toISOString(), attempt: 1, model: "", instruction: "" } });
+  }).catch(() => {});
+}
+
+export interface AgentDelivery { status: "none" | "running" | "review" | "done" | "failed"; message?: string; files?: string[]; projectId: string }
 
 /**
  * For the visitor's widget: the agent's result once ready - the text for the customer and the files
@@ -172,17 +197,33 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   if (s.status === "running" || s.status === "collecting") return { status: "running", projectId };
   const p = await getProject(projectId);
   const delivered = (p?.memory.delivered as string | undefined) === s.runId;
-  const files = (await listFiles(projectId)).filter((f) => f.path.startsWith(`${CUSTOMER_DIR}/`)).map((f) => f.path);
-  let message: string;
-  if (s.status === "done") message = ((await readFile(projectId, "odpowiedz.txt")) || "").trim();
-  else message = "";
+  let files = (s.files || []).filter((f) => f.startsWith(`${CUSTOMER_DIR}/`));
+  const draft = s.status === "done" ? ((await readFile(projectId, "odpowiedz.txt")) || "").trim() : "";
+  let message = draft;
+  // The business approves first (its choice): the customer is told it is being checked; the result
+  // goes out once the owner decides.
+  const tenantId = p?.initiatorTenantId || "";
+  if (tenantId && reviewMode(tenantId) === "approve") {
+    const rv = (await reviewForRun(projectId, s.runId)) || (await openReview(projectId, tenantId, s.runId, draft, files));
+    if (rv.status === "pending" || rv.status === "changes_requested") {
+      const lang = await replyLanguage(projectId);
+      const text = REVIEWING[lang] || REVIEWING.en;
+      if ((p?.memory.reviewNotified as string | undefined) !== s.runId) {
+        await setMemory(projectId, { reviewNotified: s.runId });
+        await onDeliver(text).catch(() => {});
+      }
+      return { status: "review", message: text, projectId };
+    }
+    if (rv.status === "approved") message = (rv.final || draft).trim();
+    else { message = rv.final.trim(); files = []; }
+  }
   if (!message) message = COULD_NOT[await replyLanguage(projectId)] || COULD_NOT.en;
   if (!delivered) {
     await setMemory(projectId, { delivered: s.runId });
     await onDeliver(message).catch(() => {});
     await addEvent(projectId, { kind: "delivered", actor: "chat", data: { runId: s.runId, status: s.status, files } }).catch(() => {});
   }
-  return { status: s.status === "done" ? "done" : "failed", message, files, projectId };
+  return { status: s.status === "done" || message !== draft ? "done" : "failed", message, files, projectId };
 }
 
 async function replyLanguage(projectId: string): Promise<string> {
