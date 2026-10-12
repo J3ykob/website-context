@@ -20,7 +20,7 @@ import { findOfferItems } from "../offer/search.js";
 import { jevAsk, type JevQuestion } from "../llm/jev.js";
 import { FIELDS, validValue } from "../offer/schema.js";
 import type { OfferItem } from "../offer/store.js";
-import { createProject, addParticipant, addEvent, setMemory, addUsage, setStatus } from "./store.js";
+import { createProject, getProject, addParticipant, addEvent, setMemory, addUsage, setStatus } from "./store.js";
 import { writeFile, addRequirement, recordVerification, toCsv, calc, type ReqStatus } from "./repo.js";
 
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
@@ -136,6 +136,8 @@ export function priceLine(it: OfferItem, line: Line, b: Business): Quote {
 /** Runs the whole comparison and records it as a project. */
 export async function runCompare(opts: {
   message: string; customerSession: string; askingTenantId: string; businesses: Business[]; llm: Llm; language?: string;
+  // The conversation's project (every conversation is one); without it a compare_offers project is made.
+  projectId?: string;
 }): Promise<CompareResult | null> {
   const { message, businesses, llm } = opts;
   let llmCalls = 0, jevCalls = 0;
@@ -144,6 +146,7 @@ export async function runCompare(opts: {
   if (!lines.length) return null;
   // The project record must never block or break the customer's answer.
   const project = await Promise.race([
+    opts.projectId ? getProject(opts.projectId).then((p) => p && setMemory(p.id, { estimate: { request: message.slice(0, 2000), lines } }).then(() => p)) :
     createProject("compare_offers@1", { customerSession: opts.customerSession, initiatorTenantId: opts.askingTenantId, title: lines.map((l) => l.need).join(", ").slice(0, 200), memory: { request: message.slice(0, 2000), lines } }),
     new Promise<null>((r) => setTimeout(() => r(null), 8000)),
   ]).catch((e) => { console.warn(`[project] create failed: ${(e as Error).message}`); return null; });

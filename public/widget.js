@@ -617,6 +617,7 @@
           setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
         }
         handleFlowSession(data.flowSession);
+        watchProject(data.project);
       },
       onError: function(msg) {
         var t = document.getElementById("wctx-bar-thinking"); if (t) t.remove();
@@ -1074,6 +1075,47 @@
     return out;
   }
 
+  // ─── Work done by the project agent ─────────────────────────────────────
+  // Some requests (calculations, comparisons, plans, lists) are worked on in the background; the reply
+  // said so. Poll for the result and add it to the conversation when ready (resumes after a reload).
+  var PROJECT_KEY = CHAT_KEY + ":agent";
+  var watching = null;
+  function watchProject(p) {
+    if (!p || !p.agent || p.agent.status !== "running" || !p.id) return;
+    try { localStorage.setItem(PROJECT_KEY, JSON.stringify({ id: p.id, t: Date.now(), s: sessionId })); } catch (e) {}
+    pollProject(p.id, Date.now());
+  }
+  function pollProject(id, since) {
+    if (watching === id) return;
+    watching = id;
+    var tries = 0;
+    (function tick() {
+      if (watching !== id) return;
+      if (++tries > 240 || Date.now() - since > 25 * 60 * 1000) { stopWatching(); return; }
+      fetch(API_HOST + "/api/chat/agent?tenantId=" + encodeURIComponent(TENANT_ID) + "&sessionId=" + encodeURIComponent(sessionId) + "&projectId=" + encodeURIComponent(id))
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (!d || d.status === "running") { setTimeout(tick, 5000); return; }
+          stopWatching();
+          if (d.status === "none" || !d.message) return;
+          var text = d.message;
+          if (d.files && d.files.length) text += "\n\n" + d.files.map(function(f) { return "[" + f.name + "](" + API_HOST + f.url + ")"; }).join("\n");
+          messages.push({ role: "assistant", content: text }); persistMessages();
+          appendMsg("assistant", text);
+          if (typeof syncBarMessages === "function") syncBarMessages();
+        })
+        .catch(function() { setTimeout(tick, 8000); });
+    })();
+  }
+  function stopWatching() {
+    watching = null;
+    try { localStorage.removeItem(PROJECT_KEY); } catch (e) {}
+  }
+  try {
+    var pendingProject = JSON.parse(localStorage.getItem(PROJECT_KEY) || "null");
+    if (pendingProject && pendingProject.s === sessionId && Date.now() - pendingProject.t < 25 * 60 * 1000) setTimeout(function() { pollProject(pendingProject.id, pendingProject.t); }, 1500);
+  } catch (e) {}
+
   // Stream a chat response over SSE. Calls cbs.onFirst() just before the first token
   // (clear the typing indicator), cbs.onDelta(text) per token, cbs.onDone(data) with the
   // canonical {message, sources, navigateTo, flowSession}, cbs.onError(msg) on failure,
@@ -1180,6 +1222,7 @@
           setTimeout(function() { navigateToPage(data.navigateTo, ""); }, 1000);
         }
         handleFlowSession(data.flowSession);
+        watchProject(data.project);
       },
       onError: function(msg) {
         setLoading(false);

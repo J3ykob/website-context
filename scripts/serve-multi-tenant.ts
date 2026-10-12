@@ -1298,7 +1298,7 @@ app.post("/api/chat", async (req, res) => {
         }, formState && typeof formState === "object" ? formState : undefined, (status) => {
           res.write(`data: ${JSON.stringify({ status })}\n\n`);
         });
-        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null, partners: full.partners || null })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null, partners: full.partners || null, project: full.project || null })}\n\n`);
         res.end();
         logResponse(full);
       } catch (error: any) {

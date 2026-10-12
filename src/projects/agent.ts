@@ -173,7 +173,8 @@ export async function startAgentRun(projectId: string, instruction: string, acto
     if (f.size > MAX_INPUT_FILE || f.kind === "bin") continue;
     const body = await readFile(projectId, f.path);
     if (body === null) continue;
-    if (f.path.startsWith(`${PRICE_DIR}/`)) publicFiles[f.path] = withoutBom(body);
+    // Business data (offers, the business's own site content) is public: not masked.
+    if (f.path.startsWith(`${PRICE_DIR}/`) || f.path.startsWith("wiedza/")) publicFiles[f.path] = withoutBom(body);
     else files[f.path] = withoutBom(body);
   }
   const prompt = `Zadanie projektu "${project.title || project.type}":\n${instruction}\n\nZasady pracy są w AGENTS.md.`;
@@ -394,8 +395,15 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
   const piiOk = !r.unknownPlaceholders.length && !r.alteredPlaceholders.length;
   results.push({ reqId: "sys-agent-pii", status: piiOk ? "met" : "failed", evidence: piiOk ? `${r.piiMasked} values masked, all placeholders restored` : `unknown: ${r.unknownPlaceholders.join(", ")}; altered: ${r.alteredPlaceholders.join(", ")}` });
 
+  // A requested file counts when the agent wrote it or it exists (non-empty) in the repository (an
+  // instruction also names its input files).
   const wanted = requestedFiles(instruction);
-  const missing = wanted.filter((p) => !r.files.some((f) => f.path === p));
+  const missing: string[] = [];
+  for (const p of wanted) {
+    if (r.files.some((f) => f.path === p && f.size > 0)) continue;
+    const existing = await readFile(id, p).catch(() => null);
+    if (!existing || !existing.trim()) missing.push(p);
+  }
   if (wanted.length) {
     await req("sys-agent-files", `The files the task asks for exist: ${wanted.join(", ")}.`, "code");
     results.push({ reqId: "sys-agent-files", status: missing.length ? "failed" : "met", evidence: missing.length ? `missing: ${missing.join(", ")}` : "all present" });

@@ -27,6 +27,7 @@ import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type Catal
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
 import { runCompare, type Business } from "../projects/compare.js";
+import { conversationProject, recordTurn, turnKind, beginConversationAgent, WORKING, BUSY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 
@@ -90,7 +91,7 @@ export interface ChatResponse {
   // caller driving it (e.g. another business's bot in an ecosystem referral).
   collect?: { flowId: string; stage: "collecting" | "confirming" | "sent" | "cancelled" | "failed"; missing: string[] };
   // The project this reply belongs to (multi-business work, src/projects).
-  project?: { id: string; type: string };
+  project?: { id: string; type: string; agent?: { status: "running" } };
   flowSession?: {
     active: boolean;
     status: FlowSession["status"];
@@ -439,7 +440,22 @@ export class WebsiteChat {
   // opts.noPartners: this call is itself an ecosystem query - never ask further businesses.
   // opts.startFlowId: start that "in chat" flow for this session right away (no
   // intent step); opts.via: who asked on the customer's behalf (kept on the inquiry).
+  // Every conversation is a project (src/projects/conversation.ts): the turn is answered, then
+  // recorded in the conversation's project with how it was handled.
   async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>, opts?: { noPartners?: boolean; startFlowId?: string; via?: CollectVia }): Promise<ChatResponse> {
+    const r = await this.chatInner(messages, sessionKey, formState, opts);
+    this.recordConversationTurn(messages, sessionKey, r);
+    return r;
+  }
+
+  private recordConversationTurn(messages: ChatMessage[], sessionKey: string | undefined, r: ChatResponse): void {
+    const user = messages.findLast((m) => m.role === "user")?.content || "";
+    const route: Route = r.project?.agent ? "agent" : r.project ? "estimate" : r.collect ? "collect" : r.flowSession ? "flow"
+      : r.partners?.length ? "network" : r.grounded === false ? "refusal" : "knowledge";
+    void conversationProject(this.context.tenantId, sessionKey || "default", user).then((pid) => recordTurn(pid, { user, assistant: r.message, route, data: r.project ? { project: r.project } : undefined }));
+  }
+
+  private async chatInner(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>, opts?: { noPartners?: boolean; startFlowId?: string; via?: CollectVia }): Promise<ChatResponse> {
     const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
     const effectiveSessionKey = sessionKey || "default";
 
@@ -474,8 +490,15 @@ export class WebsiteChat {
     }
 
     // "What would this list / job cost?" -> a compare_offers project.
-    const estimate = await this.estimateProject(inputValidation.sanitized, effectiveSessionKey);
+    // The turn's kind: pricing a given list (fast estimate), work on data (the project agent:
+    // calculate, compare, choose, plan, build a list or document), or an ordinary answer.
+    const kind = await this.kindOf(inputValidation.sanitized, sanitizedMessages);
+    const estimate = kind === "estimate" ? await this.estimateProject(inputValidation.sanitized, effectiveSessionKey) : null;
     if (estimate) return estimate;
+    if (kind === "work") {
+      const viaAgent = await this.agentTurn(sanitizedMessages, inputValidation.sanitized, effectiveSessionKey);
+      if (viaAgent) return viaAgent;
+    }
 
     // If there's an active flow session collecting remaining inputs
     if (this.hasActiveFlowSession(effectiveSessionKey)) {
@@ -860,8 +883,14 @@ export class WebsiteChat {
   // onStatus: interim progress for the widget while no tokens flow yet (e.g. the
   // ecosystem broadcast), in the visitor's language.
   async chatStream(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void, formState?: Record<string, string>, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse> {
+    const r = await this.chatStreamInner(messages, sessionKey, onToken, formState, onStatus);
+    this.recordConversationTurn(messages, sessionKey, r);
+    return r;
+  }
+
+  private async chatStreamInner(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void, formState?: Record<string, string>, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse> {
     if (!this.backend.generateStream) {
-      const r = await this.chat(messages, sessionKey);
+      const r = await this.chatInner(messages, sessionKey);
       onToken(r.message);
       return r;
     }
@@ -883,11 +912,12 @@ export class WebsiteChat {
     // lose streaming for every ordinary question.
     const activeFlowsS = this.context.flows.filter((f) => f.status === "active");
     const pendingS = this.pendingDisambig.get(effectiveSessionKey);
-    const flowInPlay = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey) || (await this.isEstimateRequest(inputValidation.sanitized))
+    const kindS = await this.kindOf(inputValidation.sanitized, sanitizedMessages);
+    const flowInPlay = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey) || kindS !== "other"
       || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000)
       || (activeFlowsS.length > 0 && (await this.classifyFlowIntent(inputValidation.sanitized, activeFlowsS)).length > 0);
     if (flowInPlay) {
-      const r = await this.chat(messages, sessionKey, formState);
+      const r = await this.chatInner(messages, sessionKey, formState);
       onToken(r.message);
       return r;
     }
@@ -985,29 +1015,43 @@ export class WebsiteChat {
 
   // Start a goal-driven ("agent") flow: no input collection here; the widget
   // drives the page with /api/agent/step and asks the visitor for data as needed.
-  // ── Projects: a price estimate across the network's offers ──
-  private estimateMemo = new Map<string, { at: number; yes: boolean }>();
-  /** Jev: is the message asking for a price estimate of a list / a job? (memoized per message) */
-  private async isEstimateRequest(message: string): Promise<boolean> {
-    if (!this.networkOffers || !jevEnabled() || message.trim().length < 8) return false;
-    const hit = this.estimateMemo.get(message);
-    if (hit && Date.now() - hit.at < 60000) return hit.yes;
-    const a = await jevAsk({ message }, { estimate: { type: "noul", instructions: "Does `message` ask what it would cost to buy, rent or have done one or more specific products or services, with a quantity, a rental period, a job size or a list of several items (a request for a quote or an estimate)? A general question about prices, opening hours or what is offered is not." } }, 3000);
-    const yes = (((a?.estimate as any)?.noul as number) ?? 0) >= 0.7;
-    if (this.estimateMemo.size > 200) this.estimateMemo.clear();
-    this.estimateMemo.set(message, { at: Date.now(), yes });
-    return yes;
+  // ── Projects: work on data by the project agent (sandbox, tools) ──
+  /** The turn's kind (estimate / work / other) - one Jev choice, memoized per message. */
+  private kindOf(message: string, messages: ChatMessage[]): Promise<"estimate" | "work" | "other"> {
+    const prev = [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
+    return turnKind(message, prev, !!this.networkOffers && jevEnabled()).catch(() => "other" as const);
   }
 
+  /**
+   * Hands the message to the project agent and answers at once that the work is under way; the result
+   * reaches the visitor through the widget (GET /api/chat/agent). Null without a project record (D1
+   * down): the turn falls back to the knowledge answer.
+   */
+  private async agentTurn(messages: ChatMessage[], message: string, sessionKey: string): Promise<ChatResponse | null> {
+    const projectId = await conversationProject(this.context.tenantId, sessionKey, message);
+    if (!projectId) return null;
+    const chunks = await this.retrieveContext(message).catch(() => []);
+    const knowledge = chunks.slice(0, 10).map((c) => `${c.metadata?.title ? `## ${c.metadata.title}\n` : ""}${c.content}`);
+    const [begun, lang] = await Promise.all([
+      beginConversationAgent(projectId, messages, knowledge),
+      jevAsk({ message }, { lang: { type: "choice", instructions: "In which language is `message` written?", criteria: { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German", other: "Another language" } } }, 3000),
+    ]);
+    const l = ((lang?.lang as any)?.choice as string) || "en";
+    console.log(`[conversation] ${this.context.tenantId}: ${projectId} agent ${begun}`);
+    return { message: (begun === "busy" ? BUSY : WORKING)[l] || (begun === "busy" ? BUSY : WORKING).en, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" } } };
+  }
+
+  // ── Projects: a price estimate across the network's offers ──
   private async estimateProject(message: string, sessionKey: string): Promise<ChatResponse | null> {
-    if (!(await this.isEstimateRequest(message))) return null;
+    if (!this.networkOffers) return null;
     try {
       const businesses = (await this.networkOffers!()).filter((b) => b.items.length);
       if (!businesses.length) return null;
       const l = await jevAsk({ message }, { lang: { type: "choice", instructions: "In which language is `message` written?", criteria: { Polish: "Polish", English: "English", Ukrainian: "Ukrainian", French: "French", German: "German", other: "Another language" } } }, 3000);
       const language = ((l?.lang as any)?.choice as string) || undefined;
       const llm = (system: string, user: string, maxTokens = 900) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
-      const r = await runCompare({ message, customerSession: sessionKey, askingTenantId: this.context.tenantId, businesses, llm, language: language === "other" ? undefined : language });
+      const projectId = await Promise.race([conversationProject(this.context.tenantId, sessionKey, message), new Promise<null>((ok) => setTimeout(() => ok(null), 4000))]);
+      const r = await runCompare({ message, customerSession: sessionKey, askingTenantId: this.context.tenantId, businesses, llm, language: language === "other" ? undefined : language, projectId: projectId || undefined });
       if (!r || !r.lines.some((x) => x.quotes.length)) return null;
       // Ordering: an order placed in this chat (by intent) is marked with the project.
       this.setSessionVia(sessionKey, { tenantId: this.context.tenantId, brand: this.brandName, sessionKey, ...(r.projectId ? { projectId: r.projectId } : {}) });
@@ -1021,7 +1065,7 @@ export class WebsiteChat {
         } catch (e) { console.warn(`[project] ${this.context.tenantId}: links failed: ${(e as Error).message}`); }
       }
       console.log(`[project] ${this.context.tenantId}: ${r.projectId} compare_offers lines=${r.lines.length} total=${r.total} tbd=${r.tbdLines}`);
-      return { message: message2, sources: [], grounded: true, ...(r.projectId ? { project: { id: r.projectId, type: "compare_offers@1" } } : {}) };
+      return { message: message2, sources: [], grounded: true, ...(r.projectId ? { project: { id: r.projectId, type: projectId ? CONVERSATION : "compare_offers@1" } } : {}) };
     } catch (e) {
       console.warn(`[project] ${this.context.tenantId}: estimate failed: ${(e as Error).message}`);
       return null;
