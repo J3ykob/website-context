@@ -23,6 +23,7 @@ const INSTRUCTION = "Przygotuj wycenę dla klienta (kosztorys.csv i odpowiedz.tx
 const ids: string[] = [];
 beforeAll(async () => { await hydrateRegistry(); });
 afterAll(async () => {
+  if (process.env.KEEP_PROJECTS) { console.log("kept projects:", ids.join(", ")); return; }
   const { deleteFromR2 } = await import("../src/storage/r2.js");
   for (const id of ids) {
     for (const f of await listFiles(id).catch(() => [])) await deleteFromR2(`projects/${id}/${f.path}`).catch(() => {});
@@ -66,7 +67,7 @@ const OTHER: { name: string; request: string; instruction: string; check: (read:
   {
     name: "owner data task",
     request: "(wiadomość od właściciela firmy Ostap) Przygotuj mi listę pozycji z mojej oferty, które nie mają żadnej ceny, żebym mógł je uzupełnić.",
-    instruction: "Zapisz do_uzupelnienia.csv (kolumny: id;nazwa) - wszystkie pozycje oferty Ostap bez ceny (pusta cena i brak składników ceny). Bez tekstu dla klienta.",
+    instruction: "Zapisz do_uzupelnienia.csv (kolumny: id;nazwa) - wszystkie pozycje oferty Ostap, które nie mają żadnej ceny - ani w cenniku, ani w żadnym ze składników ceny. Bez tekstu dla klienta.",
     check: async (read) => {
       const { loadOffer } = await import("../src/offer/store.js");
       const offer = await loadOffer("www_ostap_pl");

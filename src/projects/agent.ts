@@ -14,7 +14,7 @@
  * Numbers in anything the customer reads must come from files (prices, computed totals); the checks
  * enforce it. Env: PROJECT_AGENT_URL, PROJECT_AGENT_SECRET, PROJECT_AGENT_MODEL, PROJECT_AGENT_FALLBACK_MODEL.
  */
-import { getProject, setMemory, addEvent, addUsage, listParticipants, type Project } from "./store.js";
+import { getProject, setMemory, addEvent, addUsage, listParticipants, claimAgentCollect, type Project } from "./store.js";
 import { listFiles, readFile, writeFile, writeBinaryFile, addRequirement, listRequirements, recordVerification, toCsv, type FileKind, type ReqStatus } from "./repo.js";
 import { loadOffer, priceText, type OfferItem } from "../offer/store.js";
 import { FIELDS } from "../offer/schema.js";
@@ -81,7 +81,8 @@ Zasady:
 1. Fakty tylko z danych. Ceny, terminy, dostępność, warunki, nazwy - wyłącznie z plików repozytorium.
    Niczego nie wymyślaj. Czego nie ma w danych, oznacz wprost jako nieznane / do ustalenia (np. status "do_wyceny").
 2. Każde obliczenie (sumy, ilości, przeliczenia jednostek, daty, porównania) wykonuj kodem (python3) i zostaw
-   skrypt w repozytorium. Nigdy nie licz w pamięci. Każda liczba w wynikach musi wynikać z danych albo z obliczenia.
+   skrypt w repozytorium. Nigdy nie licz w pamięci. Wyniki obliczeń zapisuj do pliku (np. obliczenia.csv) -
+   każda liczba podana w tekście musi występować w danych albo w zapisanym pliku z obliczeniami.
 3. Nazwy z danych (pozycje, firmy) przepisuj dokładnie, bez tłumaczenia - także w tekstach w innym języku.
 4. Pliki, o które prosi zadanie, zapisz dokładnie pod podanymi nazwami i w podanym formacie.
    Domyślnie: tabele jako CSV (separator ";", kropka dziesiętna, nagłówek w pierwszym wierszu), teksty jako .md lub .txt,
@@ -225,8 +226,9 @@ export async function agentStatus(projectId: string): Promise<AgentRunState | nu
     await setMemory(projectId, { agentRun: failed });
     return failed;
   }
+  // One collector only (the poller and a status request can both get here).
+  if (!(await claimAgentCollect(projectId, state.runId))) return ((await getProject(projectId))?.memory.agentRun as AgentRunState) || state;
   const collecting: AgentRunState = { ...state, status: "collecting", finishedAt: new Date().toISOString() };
-  await setMemory(projectId, { agentRun: collecting });
   return collect(project, collecting, s.result);
 }
 
@@ -343,7 +345,15 @@ export function numbersIn(text: string): number[] {
     if (isDigit) { cur += ch; continue; }
     const next3 = chars.slice(i + 1, i + 4);
     if (cur && (ch === " " || ch === " " || ch === " ") && next3.length === 3 && next3.every((c) => c >= "0" && c <= "9") && !(chars[i + 4] >= "0" && chars[i + 4] <= "9")) continue;
-    if (cur && (ch === "," || ch === ".") && chars[i + 1] >= "0" && chars[i + 1] <= "9" && !cur.includes(".")) { cur += "."; continue; }
+    if (cur && (ch === "," || ch === ".") && chars[i + 1] >= "0" && chars[i + 1] <= "9" && !cur.includes(".")) {
+      // "2,352.00" / "2.352,00": a separator followed by exactly three digits and then the other separator
+      // is a thousands separator; otherwise it is the decimal point.
+      const d3 = chars.slice(i + 1, i + 4).every((c) => c >= "0" && c <= "9");
+      const other = ch === "," ? "." : ",";
+      if (d3 && chars[i + 4] === other && chars[i + 5] >= "0" && chars[i + 5] <= "9") continue;
+      cur += ".";
+      continue;
+    }
     if (cur) { const n = Number(cur); if (Number.isFinite(n)) out.push(n); }
     cur = "";
   }

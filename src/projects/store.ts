@@ -124,6 +124,18 @@ export async function addUsage(id: string, u: { llmCalls?: number; jevCalls?: nu
 }
 
 /** Everything about one project, for the dashboard / an integration. */
+/**
+ * Atomically moves the agent run from "running" to "collecting" (one collector across processes and
+ * instances). True when this caller won.
+ */
+export async function claimAgentCollect(id: string, runId: string): Promise<boolean> {
+  await ensureSchema();
+  const rows = await d1Query(
+    "UPDATE projects SET memory = json_set(memory, '$.agentRun.status', 'collecting', '$.agentRun.finishedAt', ?), updated_at = ? WHERE id = ? AND json_extract(memory, '$.agentRun.runId') = ? AND json_extract(memory, '$.agentRun.status') = 'running' RETURNING id",
+    [now(), now(), id, runId]);
+  return rows.length > 0;
+}
+
 export async function listParticipants(id: string): Promise<Participant[]> {
   await ensureSchema();
   return (await d1Query("SELECT tenant_id, role, joined_at FROM project_participants WHERE project_id = ?", [id]))

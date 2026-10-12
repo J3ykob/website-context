@@ -9,6 +9,7 @@ GET  /health  -> {"ok": true}
 Stateless: the placeholder mapping (state) is kept by the caller, never here.
 """
 import json
+import socketserver
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from masker import Vault
@@ -58,5 +59,13 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+class Server(ThreadingHTTPServer):
+    # HTTPServer.server_bind resolves the host's FQDN; Cloudflare container hostnames are 64-character
+    # labels, which the idna codec rejects ("label too long") - the server died at start.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "masker", self.server_address[1]
+
+
 if __name__ == "__main__":
-    ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+    Server(("0.0.0.0", 8080), Handler).serve_forever()

@@ -60,14 +60,19 @@ export class PiiMasker extends DurableObject<Env> {
     }
     // The model takes a few seconds to load after a start.
     const deadline = Date.now() + READY_TIMEOUT_MS;
+    let last = "";
     for (;;) {
       try {
         const r = await this.#container.getTcpPort(PORT).fetch("http://masker/health");
         if (r.ok) return;
-      } catch {
-        // not listening yet
+        last = `health ${r.status}`;
+      } catch (e) {
+        last = e instanceof Error ? e.message : String(e);
       }
-      if (Date.now() > deadline) throw new Error("masker did not become ready");
+      if (Date.now() > deadline) {
+        const info = await this.#container.inspect().catch((e) => `inspect failed: ${e}`);
+        throw new Error(`masker did not become ready (running=${this.#container.running}; last: ${last}; ${JSON.stringify(info).slice(0, 400)})`);
+      }
       await new Promise((ok) => setTimeout(ok, 500));
     }
   }
