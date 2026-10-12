@@ -124,6 +124,12 @@ export async function addUsage(id: string, u: { llmCalls?: number; jevCalls?: nu
 }
 
 /** Everything about one project, for the dashboard / an integration. */
+export async function listParticipants(id: string): Promise<Participant[]> {
+  await ensureSchema();
+  return (await d1Query("SELECT tenant_id, role, joined_at FROM project_participants WHERE project_id = ?", [id]))
+    .map((r: any) => ({ tenantId: r.tenant_id, role: r.role, joinedAt: r.joined_at }));
+}
+
 export async function projectDetail(id: string): Promise<{ project: Project; participants: Participant[]; events: ProjectEvent[]; consents: Consent[] } | null> {
   const project = await getProject(id);
   if (!project) return null;

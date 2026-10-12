@@ -17,7 +17,7 @@
 import { d1Query } from "../storage/conversation-store.js";
 import { addEvent } from "./store.js";
 
-export type FileKind = "csv" | "json" | "md" | "txt";
+export type FileKind = "csv" | "json" | "md" | "txt" | "bin";
 export interface RepoFile { path: string; kind: FileKind; size: number; author: string; createdAt: string }
 export type ReqStatus = "open" | "met" | "failed" | "not_applicable";
 export interface Requirement { id: string; text: string; source: "customer" | "system" | "business"; check: string; status: ReqStatus; evidence: string; verifiedAt: string | null }
@@ -49,10 +49,25 @@ export async function writeFile(id: string, path: string, content: string, kind:
     [id, p, kind, Buffer.byteLength(content), author.slice(0, 120), new Date().toISOString()]);
 }
 
+/** Writes (or replaces) a binary file (e.g. a spreadsheet an agent made). */
+export async function writeBinaryFile(id: string, path: string, content: Buffer, author: string): Promise<void> {
+  await ensureSchema();
+  const p = safePath(path);
+  const { uploadToR2 } = await import("../storage/r2.js");
+  if (!(await uploadToR2(key(id, p), content, "application/octet-stream"))) throw new Error(`could not store ${p}`);
+  await d1Query("INSERT INTO project_files (project_id, path, kind, size, author, created_at) VALUES (?, ?, 'bin', ?, ?, ?) ON CONFLICT(project_id, path) DO UPDATE SET kind = excluded.kind, size = excluded.size, author = excluded.author, created_at = excluded.created_at",
+    [id, p, content.byteLength, author.slice(0, 120), new Date().toISOString()]);
+}
+
 export async function readFile(id: string, path: string): Promise<string | null> {
   const { downloadFromR2 } = await import("../storage/r2.js");
   const buf = await downloadFromR2(key(id, safePath(path)));
   return buf ? buf.toString("utf-8") : null;
+}
+
+export async function readFileBuffer(id: string, path: string): Promise<Buffer | null> {
+  const { downloadFromR2 } = await import("../storage/r2.js");
+  return downloadFromR2(key(id, safePath(path)));
 }
 
 export async function listFiles(id: string): Promise<RepoFile[]> {
@@ -81,11 +96,11 @@ export async function listRequirements(id: string): Promise<Requirement[]> {
 }
 
 /** Records the outcome of a set of checks: requirement statuses, a report file, an event. */
-export async function recordVerification(id: string, results: { reqId: string; status: ReqStatus; evidence: string }[], author = "system"): Promise<{ met: number; failed: number }> {
+export async function recordVerification(id: string, results: { reqId: string; status: ReqStatus; evidence: string }[], author = "system", file = "verification.json"): Promise<{ met: number; failed: number }> {
   for (const r of results) await setRequirement(id, r.reqId, r.status, r.evidence);
   const met = results.filter((r) => r.status === "met").length, failed = results.filter((r) => r.status === "failed").length;
-  await writeFile(id, "verification.json", JSON.stringify({ at: new Date().toISOString(), met, failed, results }, null, 2), "json", author);
-  await addEvent(id, { kind: "verification", actor: author, data: { met, failed } });
+  await writeFile(id, file, JSON.stringify({ at: new Date().toISOString(), met, failed, results }, null, 2), "json", author);
+  await addEvent(id, { kind: "verification", actor: author, data: { met, failed, file } });
   return { met, failed };
 }
 

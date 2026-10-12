@@ -1,0 +1,38 @@
+{
+  // Project agent runner: one sandbox per project (opencode + DeepSeek via OpenRouter), personal data
+  // masked before it enters the sandbox and unmasked on the way out. Called by the Render server.
+  "name": "whisp-project-agent",
+  "main": "src/index.ts",
+  "account_id": "98e447c9e14d384e1b7e6f4d42c39ad2",
+  "compatibility_date": "2026-09-15",
+  // Files resolves native Linux errno names through node:os.
+  "compatibility_flags": ["nodejs_compat"],
+  "secrets": {
+    // RUNNER_SECRET: bearer token the Render server sends. OPENROUTER_API_KEY: added to the agent's
+    // model calls by the outbound handler; it never enters the sandbox.
+    "required": ["RUNNER_SECRET", "OPENROUTER_API_KEY"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "AGENT", "class_name": "ProjectAgent" },
+      { "name": "MASKER", "class_name": "PiiMasker" }
+    ]
+  },
+  "containers": [
+    {
+      "class_name": "ProjectAgent",
+      "scheduling_policy": "durable_object",
+      "images": { "sandbox": { "dockerfile": "./Dockerfile" } }
+    },
+    {
+      "class_name": "PiiMasker",
+      "scheduling_policy": "durable_object",
+      "images": { "masker": { "dockerfile": "./masker/Dockerfile" } }
+    }
+  ],
+  "exports": {
+    "ProjectAgent": { "type": "durable-object", "storage": "sqlite" },
+    "PiiMasker": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "observability": { "enabled": true }
+}

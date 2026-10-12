@@ -39,6 +39,15 @@ services:
         sync: false
       # Multilingual embeddings (2026-09-27): bge-m3 vectors live in whisp-vectors-m3.
       # The two must always match (bge-large-en -> whisp-vectors).
+      # Project agent runner (workers/project-agent): URL of the Worker + its bearer secret.
+      - key: PROJECT_AGENT_URL
+        value: "https://whisp-project-agent.kubalol7982.workers.dev"
+      - key: PROJECT_AGENT_SECRET
+        sync: false
+      - key: PROJECT_AGENT_MODEL
+        value: deepseek/deepseek-v4.1-flash
+      - key: PROJECT_AGENT_FALLBACK_MODEL
+        value: xiaomi/mimo-v2.6-flash
       - key: EMBED_MODEL
         value: bge-m3
       - key: VECTORIZE_INDEX
