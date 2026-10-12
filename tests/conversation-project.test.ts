@@ -142,7 +142,16 @@ live("the business approves before the customer gets the result", () => {
     const { reworkWithGuidance } = await import("../src/projects/conversation.js");
     expect(await review.decide(rv1.token, "changes_requested", { note: "Dolicz do każdej opcji transport w obie strony: 150 zł." })).not.toBeNull();
     await reworkWithGuidance(pid, "Dolicz do każdej opcji transport w obie strony: 150 zł.");
-    await new Promise((ok) => setTimeout(ok, 5000));
+    // Nobody polls from the chat now: the review must open as soon as the rework finishes.
+    const { agentStatus } = await import("../src/projects/agent.js");
+    await new Promise((ok) => setTimeout(ok, 15_000));
+    for (let i = 0; i < 90; i++) {
+      const st = await agentStatus(pid);
+      if (st && (st.status === "done" || st.status === "failed") && !st.runId.startsWith(run1)) break;
+      await new Promise((ok) => setTimeout(ok, 10_000));
+    }
+    const reworked = ((await M.projectDetail(pid))!.project.memory.agentRun as any).runId;
+    expect(await review.reviewForRun(pid, reworked)).not.toBeNull();
     await poll("review");
     const run2 = ((await M.projectDetail(pid))!.project.memory.agentRun as any).runId;
     expect(run2).not.toBe(run1);

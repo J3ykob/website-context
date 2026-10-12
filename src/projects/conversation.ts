@@ -183,6 +183,21 @@ export interface AgentDelivery { status: "none" | "running" | "review" | "done" 
  * For the visitor's widget: the agent's result once ready - the text for the customer and the files
  * prepared for them. Delivered once into the conversation log (onDeliver).
  */
+/**
+ * Called when an agent run has finished (src/projects/agent.ts): a business that approves first gets
+ * the review right away - not only when the customer's chat next checks in (the customer may have
+ * left; a reworked version has no customer waiting at all).
+ */
+export async function onRunFinished(projectId: string): Promise<void> {
+  const p = await getProject(projectId);
+  const s = p?.memory.agentRun as AgentRunState | undefined;
+  if (!p || p.type !== CONVERSATION || !s || (s.status !== "done" && s.status !== "failed")) return;
+  if (reviewMode(p.initiatorTenantId) !== "approve" || (await reviewForRun(projectId, s.runId))) return;
+  const files = (s.files || []).filter((f) => f.startsWith(`${CUSTOMER_DIR}/`));
+  const draft = s.status === "done" ? ((await readFile(projectId, "odpowiedz.txt")) || "").trim() : "";
+  await openReview(projectId, p.initiatorTenantId, s.runId, draft, files);
+}
+
 export async function agentDelivery(projectId: string, onDeliver: (message: string) => Promise<void>): Promise<AgentDelivery> {
   const before = await getProject(projectId);
   if (!before) return { status: "none", projectId };

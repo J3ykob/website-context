@@ -270,13 +270,15 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
     costUsd: result.usage.costUsd, finishedAt: new Date().toISOString(),
   };
   await setMemory(id, { agentRun: done });
-  if (ok || state.attempt > 1) return done;
+  const finished = () => import("./conversation.js").then((m) => m.onRunFinished(id)).catch((e) => console.warn(`[project-agent] ${id} after-run: ${e?.message || e}`));
+  if (ok || state.attempt > 1) { await finished(); return done; }
   // One more attempt: a run that failed goes to the fallback model; a run whose outputs did not verify
   // gets a repair pass on the same model, told exactly what to fix (its files are in the repository now).
   const again = result.state !== "succeeded"
     ? await startAgentRun(id, state.instruction, "system", 2, fallbackModel().id !== state.model ? fallbackModel() : primaryModel())
     : await startAgentRun(id, `${state.instruction}\n\nPOPRAWKA - poprzednia wersja plików jest w repozytorium; popraw ją:\n${(await repairNotes(id, result, verification?.missing || [])).join("\n")}`, "system", 2, MODELS[state.model] || primaryModel());
-  return "error" in again ? done : again;
+  if ("error" in again) { await finished(); return done; }
+  return again;
 }
 
 /** What to fix, from the failed requirements and placeholders (shown to the agent in a repair pass). */
