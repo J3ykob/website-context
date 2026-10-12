@@ -86,6 +86,7 @@ import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
 import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-llm.js";
 import { registerAgentRoutes } from "../src/agent/routes.js";
 import { registerOfferRoutes } from "../src/offer/routes.js";
+import { registerProjectRoutes } from "../src/projects/routes.js";
 import { getHandoff, markHandoffOpened } from "../src/ecosystem/handoff.js";
 import { ensureCollectFlow } from "../src/flows/collect-store.js";
 
@@ -1183,6 +1184,7 @@ let lastChatError: { tenantId: string; cause: string; msg: string; at: string } 
 // Goal-driven ("agent") flows: one Jev-decided step per call (src/agent/routes.ts).
 registerAgentRoutes(app, { auth: authMiddleware, onFlowsChanged: (id) => tenantManager.evictTenant(id) });
 registerOfferRoutes(app, { auth: authMiddleware, onChanged: (id) => tenantManager.evictTenant(id) });
+registerProjectRoutes(app, { auth: authMiddleware });
 
 app.post("/api/chat", async (req, res) => {
   try {

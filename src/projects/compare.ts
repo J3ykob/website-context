@@ -21,6 +21,7 @@ import { jevAsk, type JevQuestion } from "../llm/jev.js";
 import { FIELDS, validValue } from "../offer/schema.js";
 import type { OfferItem } from "../offer/store.js";
 import { createProject, addParticipant, addEvent, setMemory, addUsage, setStatus } from "./store.js";
+import { writeFile, addRequirement, recordVerification, toCsv, calc, type ReqStatus } from "./repo.js";
 
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
 export interface Business { tenantId: string; label: string; items: OfferItem[] }
@@ -197,15 +198,19 @@ export async function runCompare(opts: {
   } catch (e) { console.warn(`[project] summary wording failed: ${(e as Error).message}`); }
   const allowed = new Set<string>([String(total), ...numbersIn(JSON.stringify(data)), ...numbersIn(message)].map((n) => String(Number(n))));
   let ok = !!msg && numbersIn(msg).every((n) => allowed.has(String(Number(n))));
+  const numbersOk = ok;
+  let wordingOk = true;
   // Jev: a priced need must not be presented as "to be priced" (or the reverse).
   const priced = data.filter((d) => d.state === "PRICED").map((d) => d.need);
   if (ok && priced.length) {
     const j = await jevAsk({ message: msg, priced_needs: priced }, Object.fromEntries(priced.map((_, k) => [`p${k}`, { type: "noul", instructions: `Does \`message\` present \`priced_needs[${k}]\` as having a price to pay (not as still to be priced, quoted or confirmed)?` } as JevQuestion])), 5000);
-    if (j) ok = priced.every((_, k) => (((j[`p${k}`] as any)?.noul as number) ?? 1) >= 0.5);
+    if (j) { wordingOk = priced.every((_, k) => (((j[`p${k}`] as any)?.noul as number) ?? 1) >= 0.5); ok = wordingOk; }
     jevCalls++;
   }
   if (!ok) { console.warn("[project] compare summary failed its checks - showing the table"); msg = renderTable(results, total, tbdLines); }
 
+  // The project repository: files, requirements and their verification.
+  writes.push(record(() => writeRepository(project!.id, message, results, total, msg, { numbersOk, wordingOk })));
   writes.push(record(async () => {
     await setMemory(project!.id, { results: data, total, tbdLines });
     await addUsage(project!.id, { llmCalls, jevCalls });
@@ -226,4 +231,38 @@ export function renderTable(results: LineResult[], total: number, tbdLines: numb
     return `• ${r.line.need}${q}: ${a.label} - ${a.item}: ${a.total} zł${a.leadTime ? `, ${a.leadTime}` : ""}`;
   });
   return `${rows.join("\n")}\n\nRazem znane pozycje: ${total} zł${tbdLines ? ` + ${tbdLines} poz. do wyceny` : ""}. Ostateczne ceny firmy potwierdzają przy zamówieniu.`;
+}
+
+/**
+ * Files (request, lines, every quote, the cost estimate, the summary), the
+ * requirements (one per customer need + system checks) and their verification.
+ */
+async function writeRepository(id: string, request: string, results: LineResult[], total: number, summary: string, checks: { numbersOk: boolean; wordingOk: boolean }): Promise<void> {
+  const unitLabel = (u: string) => (u && u !== "unknown" ? FIELDS.unit.values[u]?.label || u : "");
+  await writeFile(id, "request.txt", request, "txt", "customer");
+  await writeFile(id, "lines.csv", toCsv(["nr", "potrzeba", "potrzeba (język katalogu)", "ilość", "jednostka"], results.map((r, k) => [k + 1, r.line.need, r.line.needInCatalog, r.line.quantity, unitLabel(r.line.unit)])), "csv", "system");
+  await writeFile(id, "quotes.csv", toCsv(["nr", "potrzeba", "firma", "pozycja z oferty", "cena jedn.", "jednostka ceny", "wartość", "uwagi", "do wyceny", "czas realizacji", "dostępność", "wybrana"],
+    results.flatMap((r, k) => r.quotes.map((q) => [k + 1, r.line.need, q.label, q.item, q.unitPrice, unitLabel(q.unit), q.total, q.priceNote, q.tbd.join(", "), q.leadTime, q.availability, q === r.assigned ? "tak" : ""]))), "csv", "system");
+  await writeFile(id, "kosztorys.csv", toCsv(["nr", "potrzeba", "ilość", "jednostka", "firma", "pozycja", "cena jedn.", "wartość", "status", "powód"],
+    [...results.map((r, k) => [k + 1, r.line.need, r.line.quantity, unitLabel(r.line.unit), r.assigned?.label || "", r.assigned?.item || "", r.assigned?.unitPrice ?? null, r.status === "priced" ? r.assigned!.total : null, r.status === "priced" ? "wycenione" : r.status === "tbd" ? "do wyceny" : "brak w sieci", r.reason]),
+     ["", "RAZEM (znane pozycje)", null, "", "", "", null, total, "", ""]]), "csv", "system");
+  await writeFile(id, "summary.md", summary, "md", "system");
+
+  // Requirements: what the customer asked for, and what every answer must satisfy.
+  const reqs: { id: string; text: string; source: "customer" | "system"; check: string; status: ReqStatus; evidence: string }[] = results.map((r, k) => ({
+    id: `need-${k + 1}`,
+    text: `Wycena: ${r.line.need}${r.line.quantity !== null ? ` (${r.line.quantity} ${unitLabel(r.line.unit)})` : ""}`,
+    source: "customer", check: "line_priced",
+    status: r.status === "priced" ? "met" : r.status === "tbd" ? "open" : "failed",
+    evidence: r.status === "priced" ? `${r.assigned!.label}: ${r.assigned!.item} = ${r.assigned!.total} zł` : r.reason,
+  }));
+  const pricedTotals = results.filter((r) => r.status === "priced").map((r) => r.assigned!.total!);
+  const sumOk = calc.sum(pricedTotals) === total;
+  reqs.push(
+    { id: "sys-total", text: "Suma = suma wycenionych pozycji", source: "system", check: "code_sum", status: sumOk ? "met" : "failed", evidence: `${pricedTotals.join(" + ") || "0"} = ${calc.sum(pricedTotals)}; podano ${total}` },
+    { id: "sys-numbers", text: "Każda liczba w odpowiedzi pochodzi z ofert lub z prośby klienta", source: "system", check: "code_numbers", status: checks.numbersOk ? "met" : "failed", evidence: checks.numbersOk ? "wszystkie liczby znalezione w danych" : "odpowiedź modelu zastąpiona tabelą z kodu" },
+    { id: "sys-wording", text: "Wycenione pozycje nie są przedstawione jako „do wyceny”", source: "system", check: "jev_wording", status: checks.wordingOk ? "met" : "failed", evidence: checks.wordingOk ? "Jev: zgodne" : "Jev: niezgodne - pokazano tabelę z kodu" },
+  );
+  for (const r of reqs) await addRequirement(id, r);
+  await recordVerification(id, reqs.map((r) => ({ reqId: r.id, status: r.status, evidence: r.evidence })));
 }
