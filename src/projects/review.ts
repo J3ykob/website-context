@@ -47,6 +47,45 @@ export async function reviewForRun(projectId: string, runId: string): Promise<Re
   return r ? row(r) : null;
 }
 
+export async function reviewsForProject(projectId: string): Promise<Review[]> {
+  await ensureSchema();
+  return (await d1Query("SELECT * FROM project_reviews WHERE project_id = ? ORDER BY created_at", [projectId])).map(row);
+}
+
+export interface TimelineEntry { at: string; who: "customer" | "assistant" | "owner"; kind: string; text: string }
+
+/**
+ * The project's history for the owner: the customer's messages and the assistant's replies, every
+ * version the assistant prepared for review, and every decision and note of the owner - in order, so
+ * the owner can always trace back what was asked, proposed, changed and sent.
+ */
+export async function timeline(projectId: string): Promise<TimelineEntry[]> {
+  const { projectDetail } = await import("./store.js");
+  const { readFile } = await import("./repo.js");
+  const [d, reviews] = await Promise.all([projectDetail(projectId), reviewsForProject(projectId)]);
+  const out: TimelineEntry[] = [];
+  for (const e of d?.events || []) {
+    if (e.kind !== "turn") continue;
+    if (e.data.user) out.push({ at: e.at, who: "customer", kind: "message", text: String(e.data.user) });
+    if (e.data.assistant) out.push({ at: e.at, who: "assistant", kind: "reply", text: String(e.data.assistant) });
+  }
+  // A project started outside the chat has no turns: its request stands for the customer.
+  if (!out.length && d) {
+    const req = await readFile(projectId, "request.txt").catch(() => null);
+    if (req) out.push({ at: d.project.createdAt, who: "customer", kind: "message", text: req });
+  }
+  reviews.forEach((r, k) => {
+    out.push({ at: r.createdAt, who: "assistant", kind: "draft", text: `Wersja ${k + 1} do akceptacji:\n\n${r.draft || "(brak odpowiedzi)"}` });
+    if (!r.decidedAt) return;
+    const text = r.status === "changes_requested" ? `Prośba o zmiany:\n\n${r.note}`
+      : r.status === "declined" ? `Własna odpowiedź wysłana klientowi:\n\n${r.final}`
+      : r.final.trim() && r.final.trim() !== r.draft.trim() ? `Zaakceptowano z poprawkami i wysłano klientowi:\n\n${r.final}`
+      : "Zaakceptowano i wysłano klientowi bez zmian.";
+    out.push({ at: r.decidedAt, who: "owner", kind: r.status, text });
+  });
+  return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+
 export async function reviewByToken(token: string): Promise<Review | null> {
   if (!token || token.length > 100) return null;
   await ensureSchema();

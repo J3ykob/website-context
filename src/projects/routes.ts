@@ -23,7 +23,7 @@ import { projectsForTenant, projectDetail } from "./store.js";
 import { listFiles, listRequirements, readFile, readFileBuffer } from "./repo.js";
 import { agentEnabled, agentStatus, startAgentRun } from "./agent.js";
 import { agentDelivery, reworkWithGuidance, CUSTOMER_DIR } from "./conversation.js";
-import { reviewByToken, decide, reviewMode } from "./review.js";
+import { reviewByToken, decide, reviewMode, timeline } from "./review.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
 import { resolve } from "path";
 import { getProject } from "./store.js";
@@ -132,9 +132,9 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     const rv = await reviewByToken(String(req.params.token)).catch(() => null);
     if (!rv) { res.status(404).json({ error: "This link has expired or does not exist." }); return; }
     const t = getTenant(rv.tenantId);
-    const [request, conversation, files, requirements, run] = await Promise.all([
+    const [request, history, files, requirements, run] = await Promise.all([
       readFile(rv.projectId, "request.txt").catch(() => null),
-      readFile(rv.projectId, "rozmowa.md").catch(() => null),
+      timeline(rv.projectId).catch(() => []),
       listFiles(rv.projectId),
       listRequirements(rv.projectId),
       getProject(rv.projectId).then((p) => p?.memory.agentRun as any),
@@ -143,7 +143,7 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     res.json({
       brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "",
       status: rv.status, draft: rv.draft, final: rv.final, note: rv.note, createdAt: rv.createdAt,
-      request: request || "", conversation: conversation || "",
+      request: request || "", history,
       files: forCustomer.map((f) => ({ path: f.path, name: f.path.split("/").pop(), size: f.size, url: `/api/review/${encodeURIComponent(rv.token)}/file?path=${encodeURIComponent(f.path)}` })),
       checks: requirements.filter((q) => q.id.startsWith("sys-agent")).map((q) => ({ text: q.text, status: q.status, evidence: q.evidence })),
     });
