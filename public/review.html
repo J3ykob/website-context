@@ -51,6 +51,13 @@
       <details style="margin-top:12px"><summary>Cała historia (klient, asystent, Twoje decyzje)</summary><div id="history" style="margin-top:8px"></div></details>
     </div>
 
+    <div class="card hidden" id="questions-card" style="border-color:rgba(245,158,11,.35)">
+      <p class="label">Pytania asystenta do Ciebie (klient ich nie widzi)</p>
+      <p style="margin:0 0 10px;color:var(--muted);font-size:14px">Asystent przygotował odpowiedź na założeniach. Odpowiedz, a przygotuje poprawioną wersję do Twojej akceptacji.</p>
+      <div id="questions"></div>
+      <div class="row"><button class="primary" id="send-answers">Odpowiedz asystentowi</button></div>
+    </div>
+
     <div class="card">
       <p class="label">Odpowiedź dla klienta (możesz ją poprawić)</p>
       <textarea id="draft"></textarea>
@@ -103,11 +110,25 @@
     });
     $("draft").value = d.final || d.draft;
     if (d.files.length) {
-      $("files").innerHTML = '<p class="label">Pliki dla klienta</p>';
+      $("files").innerHTML = '<p class="label">Pliki dla klienta (możesz je poprawić)</p>';
       d.files.forEach(function (f) {
-        var a = document.createElement("a"); a.href = f.url; a.textContent = f.name; a.style.marginRight = "14px";
-        $("files").appendChild(a);
+        var box = document.createElement("div"); box.style.margin = "8px 0 14px";
+        var a = document.createElement("a"); a.href = f.url; a.textContent = f.name;
+        box.appendChild(a);
+        if (f.content !== null) {
+          var ta = document.createElement("textarea"); ta.className = "small file-edit"; ta.value = f.content; ta.dataset.path = f.path; ta.dataset.orig = f.content; ta.style.marginTop = "6px"; ta.style.fontFamily = "ui-monospace, Menlo, monospace"; ta.style.fontSize = "13px";
+          box.appendChild(ta);
+        }
+        $("files").appendChild(box);
       });
+    }
+    if (d.questions && d.questions.length && d.status === "pending") {
+      d.questions.forEach(function (q, k) {
+        var p = document.createElement("p"); p.style.margin = "10px 0 4px"; p.textContent = (k + 1) + ". " + q;
+        var ta = document.createElement("textarea"); ta.className = "small q-answer"; ta.dataset.q = q; ta.style.minHeight = "56px";
+        $("questions").appendChild(p); $("questions").appendChild(ta);
+      });
+      show("questions-card", true);
     }
     if (d.checks.length) {
       $("checks").innerHTML = '<details><summary>Automatyczne kontrole (' + d.checks.filter(function (c) { return c.status === "met"; }).length + "/" + d.checks.length + ")</summary></details>";
@@ -129,11 +150,22 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (x) {
         if (!x.ok) { btn.disabled = false; fail(x.d.error || "Nie udało się."); return; }
-        show("actions", false); $("draft").disabled = true;
+        show("actions", false); show("questions-card", false); $("draft").disabled = true;
+        document.querySelectorAll(".file-edit").forEach(function (t) { t.disabled = true; });
         $("done").textContent = STATUS[x.d.status] || "Zapisano."; show("done", true); show("error", false);
       }).catch(function () { btn.disabled = false; fail("Nie udało się - spróbuj ponownie."); });
   }
-  $("approve").onclick = function () { send({ action: "approve", message: $("draft").value }, this); };
+  function editedFiles() {
+    var out = {};
+    document.querySelectorAll(".file-edit").forEach(function (t) { if (t.value !== t.dataset.orig) out[t.dataset.path] = t.value; });
+    return out;
+  }
+  $("approve").onclick = function () { send({ action: "approve", message: $("draft").value, files: editedFiles() }, this); };
+  $("send-answers").onclick = function () {
+    var answers = [];
+    document.querySelectorAll(".q-answer").forEach(function (t) { answers.push({ q: t.dataset.q, a: t.value }); });
+    send({ action: "answer", answers: answers }, this);
+  };
   $("show-changes").onclick = function () { show("changes-box", true); show("decline-box", false); $("note").focus(); };
   $("show-decline").onclick = function () { show("decline-box", true); show("changes-box", false); $("own").focus(); };
   $("send-changes").onclick = function () { send({ action: "changes", note: $("note").value }, this); };

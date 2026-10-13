@@ -127,13 +127,16 @@ Wysłano ${inquiry.at} przez Whisp.`,
 export async function sendReviewEmail(
   email: string,
   brand: string,
-  r: { request: string; draft: string; files: string[]; link: string },
+  r: { request: string; draft: string; files: string[]; link: string; questions?: string[] },
 ): Promise<boolean> {
   if (process.env.REVIEW_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
     console.log(`[email] review email to ${email} not sent - template awaiting approval`);
     return false;
   }
   const files = r.files.length ? `\nPliki dla klienta: ${r.files.map((f) => f.split("/").pop()).join(", ")}\n` : "";
+  // The questions block is an addition to the approved template: included once approved.
+  const questions = r.questions?.length && process.env.REVIEW_EMAIL_QUESTIONS_APPROVED === "1"
+    ? `\nAsystent ma pytania do Ciebie (klient ich nie widzi):\n${r.questions.map((q, k) => `${k + 1}. ${q}`).join("\n")}\nOdpowiedz na nie pod linkiem poniżej - asystent poprawi odpowiedź.\n` : "";
   try {
     const { error } = await resend.emails.send({
       from: FROM,
@@ -147,7 +150,7 @@ ${r.request}
 
 Proponowana odpowiedź:
 ${r.draft || "(asystent nie zdołał przygotować odpowiedzi - napisz ją sam)"}
-${files}
+${files}${questions}
 Zobacz szczegóły, popraw albo zaakceptuj (bez logowania):
 ${r.link}
 

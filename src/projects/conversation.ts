@@ -11,6 +11,7 @@ import { writeFile, readFile, listFiles } from "./repo.js";
 import { agentEnabled, startAgentRun, agentStatus, type AgentRunState } from "./agent.js";
 import { jevAsk } from "../llm/jev.js";
 import { reviewMode, reviewForRun, openReview } from "./review.js";
+import { BUSINESS_QUESTIONS } from "./agent.js";
 
 export const CONVERSATION = "conversation@1";
 const TTL_HOURS = 30 * 24;
@@ -86,7 +87,8 @@ export async function turnKind(message: string, previousReply: string, estimateA
 const INSTRUCTION = `Klient w tej rozmowie (rozmowa.md; jego ostatnia wiadomość: request.txt) prosi o coś, co wymaga pracy na danych.
 Wykonaj to na podstawie danych projektu: oferty firm w cenniki/, informacje z witryny firmy w ${KNOWLEDGE_DIR}/, wcześniejsze pliki projektu.
 Odpowiedź dla klienta zapisz w odpowiedz.txt - w języku klienta, jako wiadomość w czacie (bez nagłówków e-maila i podpisu).
-Pliki dla klienta (tabele, listy, zestawienia, plany) zapisz w katalogu ${CUSTOMER_DIR}/ (CSV, MD lub TXT) i wspomnij o nich w odpowiedzi.`;
+Pliki dla klienta (tabele, listy, zestawienia, plany) zapisz w katalogu ${CUSTOMER_DIR}/ (CSV, MD lub TXT) i wspomnij o nich w odpowiedzi.
+Pytania do firmy - tylko w ${BUSINESS_QUESTIONS}, nigdy w odpowiedzi dla klienta.`;
 
 /**
  * Starts the agent on the conversation's latest message. `knowledge` = passages from the business's
@@ -101,6 +103,7 @@ export async function startConversationAgent(projectId: string, transcript: { ro
   const prev = await readFile(projectId, "odpowiedz.txt").catch(() => null);
   if (prev && prev.trim()) await writeFile(projectId, `historia/odpowiedz-${Date.now()}.txt`, prev, "txt", "system");
   await writeFile(projectId, "odpowiedz.txt", "", "txt", "system");
+  await writeFile(projectId, BUSINESS_QUESTIONS, "", "md", "system");
   if (knowledge.length) await writeFile(projectId, `${KNOWLEDGE_DIR}/strona.md`, `# Informacje z witryny firmy (do tej wiadomości)\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system");
   return startAgentRun(projectId, INSTRUCTION, "chat");
 }
@@ -165,12 +168,14 @@ export async function beginConversationAgent(projectId: string, transcript: { ro
  * version comes back for review. Runs in the background like any agent turn.
  */
 export async function reworkWithGuidance(projectId: string, note: string): Promise<void> {
+  // A new version: the owner reviews it again (no auto-send of reworked results).
   const at = Date.now();
-  await setMemory(projectId, { agentPending: at });
+  await setMemory(projectId, { agentPending: at, ownerLoop: true });
   const previous = ((await readFile(projectId, "odpowiedz.txt").catch(() => null)) || "").trim();
   await writeFile(projectId, "uwagi_firmy.md", `# Uwagi firmy do poprzedniej wersji\n\n${note}\n\n## Poprzednia wersja odpowiedzi\n\n${previous || "(brak)"}\n`, "md", "business");
   if (previous) await writeFile(projectId, `historia/odpowiedz-${at}.txt`, previous, "txt", "system");
   await writeFile(projectId, "odpowiedz.txt", "", "txt", "system");
+  await writeFile(projectId, BUSINESS_QUESTIONS, "", "md", "system");
   const instruction = `${INSTRUCTION}\n\nFirma przejrzała poprzednią wersję i prosi o zmiany: uwzględnij uwagi z uwagi_firmy.md (tam też poprzednia wersja odpowiedzi). Uwagi firmy mają pierwszeństwo.`;
   void startAgentRun(projectId, instruction, "business").then(async (r) => {
     if ("error" in r) await setMemory(projectId, { agentRun: { runId: `failed-${at}`, status: "failed", error: r.error, startedAt: new Date(at).toISOString(), attempt: 1, model: "", instruction: "" } });
@@ -188,11 +193,48 @@ export interface AgentDelivery { status: "none" | "running" | "review" | "done" 
  * the review right away - not only when the customer's chat next checks in (the customer may have
  * left; a reworked version has no customer waiting at all).
  */
+/**
+ * The agent's open questions for the business from this run - only those the result really depends on:
+ * Jev keeps a question when the customer's request needs its answer and the project data does not
+ * have it (the agent tends to add generic ones: availability, transport nobody asked about).
+ * Decided once per run and kept in the project's memory.
+ */
+export async function businessQuestions(projectId: string, run?: AgentRunState): Promise<string[]> {
+  if (run && !(run.files || []).includes(BUSINESS_QUESTIONS)) return [];
+  const p = await getProject(projectId);
+  const kept = p?.memory.businessQuestions as { runId: string; questions: string[] } | undefined;
+  if (run && kept?.runId === run.runId) return kept.questions;
+  const t = (await readFile(projectId, BUSINESS_QUESTIONS).catch(() => null)) || "";
+  const raw = t.split("\n").map((l) => { let x = l.trim(); while (x.startsWith("-") || x.startsWith("*") || x.startsWith("#")) x = x.slice(1).trim(); return x; }).filter((l) => l.length > 3).slice(0, 10);
+  let questions = raw;
+  if (raw.length) {
+    const [conversation, request] = await Promise.all([readFile(projectId, "rozmowa.md").catch(() => null), readFile(projectId, "request.txt").catch(() => null)]);
+    // Asked as a fact about the conversation: did the customer raise what the question is about?
+    const qs: Record<string, { type: "noul"; instructions: string }> = {};
+    raw.forEach((q, k) => {
+      qs[`q${k}`] = { type: "noul", instructions: `Question for the business: "${q}". Did the customer, in \`conversation\`, mention or ask about the specific thing this question is about? It counts only if the customer brought it up: a question about delivery counts only if the customer mentioned delivery; about availability or dates only if the customer gave dates or asked about availability; about a price detail only if the customer asked about that detail.` };
+    });
+    const a = await jevAsk({ conversation: (conversation || "").slice(-3000) || (request || "").slice(0, 1500) }, qs, 8000);
+    if (a) questions = raw.filter((_, k) => (((a as any)[`q${k}`]?.noul as number) ?? 1) >= 0.5);
+  }
+  if (run) await setMemory(projectId, { businessQuestions: { runId: run.runId, questions } }).catch(() => {});
+  return questions;
+}
+
+/** The owner reviews first when the business chose so, or whenever the agent has questions for it. */
+async function ownerFirst(projectId: string, tenantId: string, run: AgentRunState): Promise<boolean> {
+  if (reviewMode(tenantId) === "approve" || run.needsOwner) return true;
+  // Once the owner has stepped in (answered questions, asked for changes), new versions come back to them.
+  const p = await getProject(projectId);
+  if (p?.memory.ownerLoop) return true;
+  return (await businessQuestions(projectId, run)).length > 0;
+}
+
 export async function onRunFinished(projectId: string): Promise<void> {
   const p = await getProject(projectId);
   const s = p?.memory.agentRun as AgentRunState | undefined;
   if (!p || p.type !== CONVERSATION || !s || (s.status !== "done" && s.status !== "failed")) return;
-  if (reviewMode(p.initiatorTenantId) !== "approve" || (await reviewForRun(projectId, s.runId))) return;
+  if (!(await ownerFirst(projectId, p.initiatorTenantId, s)) || (await reviewForRun(projectId, s.runId))) return;
   const files = (s.files || []).filter((f) => f.startsWith(`${CUSTOMER_DIR}/`));
   const draft = s.status === "done" ? ((await readFile(projectId, "odpowiedz.txt")) || "").trim() : "";
   await openReview(projectId, p.initiatorTenantId, s.runId, draft, files);
@@ -218,7 +260,7 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   // The business approves first (its choice): the customer is told it is being checked; the result
   // goes out once the owner decides.
   const tenantId = p?.initiatorTenantId || "";
-  if (tenantId && reviewMode(tenantId) === "approve") {
+  if (tenantId && (await ownerFirst(projectId, tenantId, s))) {
     const rv = (await reviewForRun(projectId, s.runId)) || (await openReview(projectId, tenantId, s.runId, draft, files));
     if (rv.status === "pending" || rv.status === "changes_requested") {
       const lang = await replyLanguage(projectId);
@@ -234,7 +276,7 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   }
   if (!message) message = COULD_NOT[await replyLanguage(projectId)] || COULD_NOT.en;
   if (!delivered) {
-    await setMemory(projectId, { delivered: s.runId });
+    await setMemory(projectId, { delivered: s.runId, ownerLoop: false });
     await onDeliver(message).catch(() => {});
     await addEvent(projectId, { kind: "delivered", actor: "chat", data: { runId: s.runId, status: s.status, files } }).catch(() => {});
   }

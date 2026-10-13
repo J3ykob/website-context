@@ -20,9 +20,9 @@
  */
 import type { Express, RequestHandler } from "express";
 import { projectsForTenant, projectDetail } from "./store.js";
-import { listFiles, listRequirements, readFile, readFileBuffer } from "./repo.js";
+import { listFiles, listRequirements, readFile, readFileBuffer, writeFile } from "./repo.js";
 import { agentEnabled, agentStatus, startAgentRun } from "./agent.js";
-import { agentDelivery, reworkWithGuidance, CUSTOMER_DIR } from "./conversation.js";
+import { agentDelivery, reworkWithGuidance, businessQuestions, CUSTOMER_DIR } from "./conversation.js";
 import { reviewByToken, decide, reviewMode, timeline } from "./review.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
 import { resolve } from "path";
@@ -140,11 +140,15 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
       getProject(rv.projectId).then((p) => p?.memory.agentRun as any),
     ]);
     const forCustomer = files.filter((f) => f.path.startsWith(`${CUSTOMER_DIR}/`) && (run?.files || []).includes(f.path));
+    // Text files the owner can edit before they go out.
+    const contents = await Promise.all(forCustomer.map((f) => f.kind !== "bin" && f.size < 200_000 ? readFile(rv.projectId, f.path).catch(() => null) : Promise.resolve(null)));
+    const questions = rv.runId === run?.runId ? await businessQuestions(rv.projectId, run).catch(() => []) : [];
     res.json({
       brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "",
       status: rv.status, draft: rv.draft, final: rv.final, note: rv.note, createdAt: rv.createdAt,
       request: request || "", history,
-      files: forCustomer.map((f) => ({ path: f.path, name: f.path.split("/").pop(), size: f.size, url: `/api/review/${encodeURIComponent(rv.token)}/file?path=${encodeURIComponent(f.path)}` })),
+      questions,
+      files: forCustomer.map((f, k) => ({ path: f.path, name: f.path.split("/").pop(), size: f.size, content: contents[k] === null ? null : (contents[k] as string).startsWith("\uFEFF") ? (contents[k] as string).slice(1) : contents[k], url: `/api/review/${encodeURIComponent(rv.token)}/file?path=${encodeURIComponent(f.path)}` })),
       checks: requirements.filter((q) => q.id.startsWith("sys-agent")).map((q) => ({ text: q.text, status: q.status, evidence: q.evidence })),
     });
   });
@@ -165,13 +169,33 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     const token = String(req.params.token);
     const action = String(req.body?.action || "");
     const message = String(req.body?.message || "").trim();
-    const note = String(req.body?.note || "").trim();
+    let note = String(req.body?.note || "").trim();
+    // Answers to the assistant's questions: the agent reworks the result with them (same as changes).
+    if (action === "answer") {
+      const answers = (Array.isArray(req.body?.answers) ? req.body.answers : []).map((x: any) => ({ q: String(x?.q || "").slice(0, 500), a: String(x?.a || "").trim().slice(0, 2000) })).filter((x: any) => x.a);
+      if (!answers.length && !note) { res.status(400).json({ error: "Answer at least one question." }); return; }
+      note = [...answers.map((x: any) => `Pytanie: ${x.q}\nOdpowiedź firmy: ${x.a}`), ...(note ? [`Dodatkowo: ${note}`] : [])].join("\n\n");
+    }
     if (action === "decline" && !message) { res.status(400).json({ error: "Write the message the customer will get." }); return; }
     if (action === "changes" && !note) { res.status(400).json({ error: "Describe what to change." }); return; }
-    if (!["approve", "decline", "changes"].includes(action)) { res.status(400).json({ error: "Unknown action." }); return; }
+    if (!["approve", "decline", "changes", "answer"].includes(action)) { res.status(400).json({ error: "Unknown action." }); return; }
+    // Files the owner edited (only the customer's files of this result).
+    const edits: Record<string, string> = action === "approve" && req.body?.files && typeof req.body.files === "object" ? req.body.files : {};
+    const current = await reviewByToken(token).catch(() => null);
+    if (current?.status === "pending" && Object.keys(edits).length) {
+      const run = (await getProject(current.projectId))?.memory.agentRun as any;
+      for (const [path, content] of Object.entries(edits)) {
+        if (typeof content !== "string" || !path.startsWith(`${CUSTOMER_DIR}/`) || !(run?.files || []).includes(path) || content.length > 500_000) continue;
+        const old = await readFile(current.projectId, path).catch(() => null);
+        const plain = old && old.startsWith("\uFEFF") ? old.slice(1) : old;
+        if (plain === content) continue;
+        const ext = path.split(".").pop();
+        await writeFile(current.projectId, path, content, ext === "csv" ? "csv" : ext === "md" ? "md" : ext === "json" ? "json" : "txt", `business:${current.tenantId}`);
+      }
+    }
     const rv = await decide(token, action === "approve" ? "approved" : action === "decline" ? "declined" : "changes_requested", { final: message, note }).catch(() => null);
     if (!rv) { res.status(409).json({ error: "This result was already decided, or the link has expired." }); return; }
-    if (action === "changes") await reworkWithGuidance(rv.projectId, note);
+    if (action === "changes" || action === "answer") await reworkWithGuidance(rv.projectId, note);
     res.json({ ok: true, status: rv.status });
   });
 }

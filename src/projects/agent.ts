@@ -51,6 +51,7 @@ export interface AgentRunState {
   files?: string[];
   verification?: { met: number; failed: number };
   costUsd?: number;
+  needsOwner?: boolean; // the reply may contain content for the business: the owner reviews it first
 }
 
 export function agentEnabled(): boolean {
@@ -70,6 +71,8 @@ async function runner(path: string, init: RequestInit = {}, timeoutMs = 180_000)
 // General working rules for any project (a quote, a comparison, an order list, a schedule, an analysis,
 // a document...). What to deliver comes from the task; these say how to work. Anything specific to one
 // kind of project belongs in its task text, not here.
+export const BUSINESS_QUESTIONS = "pytania_do_firmy.md";
+
 const RULES = `# Agent projektu Whisp
 
 Pracujesz w repozytorium projektu (bieżący katalog): to są wszystkie dane projektu - wiadomości klienta,
@@ -93,6 +96,12 @@ Zasady:
 6. Gdy kilka firm oferuje to samo, porównuj na tych samych warunkach (ilość, okres, jednostka) i wyjaśnij wybór.
 7. Sprawdź swoje wyniki przed zakończeniem (np. czy sumy się zgadzają, czy każda pozycja z zadania jest ujęta).
    Na końcu napisz krótko, co zrobiłeś i jakie pliki powstały.
+8. Tekst i pliki dla klienta są gotowe do wysłania: bez pytań do firmy, bez notatek wewnętrznych, bez próśb
+   o potwierdzenie czegokolwiek przez firmę. Pytanie do firmy zapisz w ${BUSINESS_QUESTIONS} (jedno w linii) tylko
+   wtedy, gdy bez odpowiedzi firmy wynik dla klienta może być błędny - czyli dotyczy tego, o co klient prosi, a danych
+   o tym nie ma (np. klient chce koszt z dowozem, a cennik nie podaje ceny dowozu). Nie pytaj o sprawy, których klient
+   nie poruszył (dostępność terminów, dowóz, kaucja itp.) ani o rzeczy, które wynikają z danych. Wynik przygotuj
+   na najrozsądniejszym założeniu (zapisanym w zalozenia.md); firma odpowie, zanim klient go dostanie.
 `;
 
 // cenniki/README.md: how the offer files are laid out (general, for any business type).
@@ -154,12 +163,13 @@ function fileSlug(s: string): string {
 }
 
 /** Starts the agent on a project. Returns the run state, or an error message when it cannot start. */
-export async function startAgentRun(projectId: string, instruction: string, actor: string, attempt = 1, model = primaryModel()): Promise<AgentRunState | { error: string }> {
+export async function startAgentRun(projectId: string, instruction: string, actor: string, attempt = 1, model = primaryModel(), retryOf?: string): Promise<AgentRunState | { error: string }> {
   if (!agentEnabled()) return { error: "The project agent is not configured." };
   const project = await getProject(projectId);
   if (!project) return { error: "Project not found." };
   const prev = project.memory.agentRun as AgentRunState | undefined;
-  if (prev && (prev.status === "running" || prev.status === "collecting") && Date.now() - Date.parse(prev.startedAt) < MAX_RUN_MS) return { error: "The agent is already working on this project." };
+  // A retry of the run being collected (retryOf = its runId) may replace it; anything else waits.
+  if (prev && prev.runId !== retryOf && (prev.status === "running" || prev.status === "collecting") && Date.now() - Date.parse(prev.startedAt) < MAX_RUN_MS) return { error: "The agent is already working on this project." };
 
   // The businesses' current offers become part of the repository (what the agent priced from), sent
   // unmasked: they are public data. Everything else may hold customer data and is masked by the runner.
@@ -263,21 +273,31 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
     console.warn(`[project-agent] ${id} verification error: ${e?.message || e}`);
     return null;
   });
-  const ok = result.state === "succeeded" && result.unknownPlaceholders.length === 0 && result.alteredPlaceholders.length === 0 && !verification?.failed;
+  // A reply that may speak to the business is not a failed run: the owner sees it first (needsOwner).
+  const hard = (verification?.failed || 0) - (verification?.customerOnlyFailed ? 1 : 0);
+  const ok = result.state === "succeeded" && result.unknownPlaceholders.length === 0 && result.alteredPlaceholders.length === 0 && hard === 0;
   const done: AgentRunState = {
     ...state, status: ok ? "done" : "failed", stopReason: result.stopReason, error: result.error?.slice(0, 500),
     files: written, verification: verification ? { met: verification.met, failed: verification.failed } : undefined,
+    needsOwner: !!verification?.customerOnlyFailed,
     costUsd: result.usage.costUsd, finishedAt: new Date().toISOString(),
   };
-  await setMemory(id, { agentRun: done });
-  const finished = () => import("./conversation.js").then((m) => m.onRunFinished(id)).catch((e) => console.warn(`[project-agent] ${id} after-run: ${e?.message || e}`));
-  if (ok || state.attempt > 1) { await finished(); return done; }
-  // One more attempt: a run that failed goes to the fallback model; a run whose outputs did not verify
-  // gets a repair pass on the same model, told exactly what to fix (its files are in the repository now).
+  const finished = async () => {
+    await setMemory(id, { agentRun: done });
+    await import("./conversation.js").then((m) => m.onRunFinished(id)).catch((e) => console.warn(`[project-agent] ${id} after-run: ${e?.message || e}`));
+    return done;
+  };
+  if (ok || state.attempt > 1) return finished();
+  // One more attempt, started before this run is marked finished (so nobody delivers the failure in
+  // between): a run that failed goes to the fallback model; a run whose outputs did not verify gets a
+  // repair pass on the same model, told exactly what to fix (its files are in the repository now).
   const again = result.state !== "succeeded"
-    ? await startAgentRun(id, state.instruction, "system", 2, fallbackModel().id !== state.model ? fallbackModel() : primaryModel())
-    : await startAgentRun(id, `${state.instruction}\n\nPOPRAWKA - poprzednia wersja plików jest w repozytorium; popraw ją:\n${(await repairNotes(id, result, verification?.missing || [])).join("\n")}`, "system", 2, MODELS[state.model] || primaryModel());
-  if ("error" in again) { await finished(); return done; }
+    ? await startAgentRun(id, state.instruction, "system", 2, fallbackModel().id !== state.model ? fallbackModel() : primaryModel(), state.runId)
+    : await startAgentRun(id, `${state.instruction}\n\nPOPRAWKA - poprzednia wersja plików jest w repozytorium; popraw ją:\n${(await repairNotes(id, result, verification?.missing || [])).join("\n")}`, "system", 2, MODELS[state.model] || primaryModel(), state.runId);
+  if ("error" in again) {
+    console.warn(`[project-agent] ${id} retry did not start: ${again.error}`);
+    return finished();
+  }
   return again;
 }
 
@@ -385,7 +405,7 @@ const num = (s: string | undefined) => {
   return n.length === 1 ? n[0] : null;
 };
 
-async function verifyOutputs(id: string, r: RunResult, instruction: string): Promise<{ met: number; failed: number; missing: string[] }> {
+async function verifyOutputs(id: string, r: RunResult, instruction: string): Promise<{ met: number; failed: number; missing: string[]; customerOnlyFailed: boolean }> {
   const text = (p: string) => r.files.find((f) => f.path === p && f.encoding === "utf-8")?.content;
   const results: { reqId: string; status: ReqStatus; evidence: string }[] = [];
   const req = async (reqId: string, textReq: string, check: string) => addRequirement(id, { id: reqId, text: textReq, source: "system", check });
@@ -399,7 +419,7 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
 
   // A requested file counts when the agent wrote it or it exists (non-empty) in the repository (an
   // instruction also names its input files).
-  const wanted = requestedFiles(instruction);
+  const wanted = requestedFiles(instruction).filter((p) => p !== BUSINESS_QUESTIONS);
   const missing: string[] = [];
   for (const p of wanted) {
     if (r.files.some((f) => f.path === p && f.size > 0)) continue;
@@ -417,8 +437,12 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
   const TOTAL_LABELS = ["razem", "suma", "łącznie", "lacznie", "total", "sum", "разом", "всього", "итого", "total général"];
   const badTotals: string[] = [];
   let tables = 0;
+  // Only tables someone receives (customer files, files the task asked for) - the agent's own working
+  // files (calculations listing alternatives) need not add up.
+  const delivered = new Set(wanted);
   for (const f of r.files) {
     if (f.encoding !== "utf-8" || !f.path.toLowerCase().endsWith(".csv")) continue;
+    if (!delivered.has(f.path) && !f.path.startsWith("dla_klienta/")) continue;
     const rows = csvRows(f.content).filter((row) => row.some((c) => c.trim()));
     rows.forEach((row, k) => {
       if (!TOTAL_LABELS.includes(row[0].trim().toLowerCase()) || k === 0) return;
@@ -463,13 +487,19 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
     for (const t of [...sources, inputs.all]) for (const n of numbersIn(t)) known.add(Math.round(n * 100));
     const unsupported = [...new Set(numbersIn(reply).filter((n) => !known.has(Math.round(n * 100))))];
     results.push({ reqId: "sys-agent-numbers", status: unsupported.length ? "failed" : "met", evidence: unsupported.length ? `not in any file: ${unsupported.join(", ")}` : "ok" });
+    // The reply is final for the customer: questions and notes for the business go to the business.
+    await req("sys-agent-customer-only", `The text for the customer has no questions or notes meant for the business (those belong in ${BUSINESS_QUESTIONS}).`, "jev");
+    const cq = await jevAsk({ text_for_customer: reply.slice(0, 3000) }, { b: { type: "noul", instructions: "Does `text_for_customer` contain anything meant for the business rather than the customer: a question to the business or its staff, a request that the business confirms or checks something, an internal note about assumptions the business should verify, or instructions for the business? Telling the customer what is unknown or still to be agreed with the business is fine and does not count." } }, 8000);
+    const pb = (cq?.b as any)?.noul as number | undefined;
+    results.push({ reqId: "sys-agent-customer-only", status: pb === undefined ? "open" : pb < 0.5 ? "met" : "failed", evidence: `P(content for the business) = ${pb?.toFixed(2) ?? "n/a"}` });
     if (totals.length) {
       await req("sys-agent-reply-total", "The text for the customer states the total of the produced tables.", "code");
       const has = numbersIn(reply).some((n) => totals.some((t) => Math.abs(n - t) < 0.005));
       results.push({ reqId: "sys-agent-reply-total", status: has ? "met" : "failed", evidence: `totals ${totals.join(", ")} ${has ? "stated" : "not stated"}` });
     }
   }
-  return { ...(await recordVerification(id, results, "system", "agent/verification.json")), missing };
+  const customerOnlyFailed = results.some((x) => x.reqId === "sys-agent-customer-only" && x.status === "failed");
+  return { ...(await recordVerification(id, results, "system", "agent/verification.json")), missing, customerOnlyFailed };
 }
 
 async function inputTexts(id: string): Promise<{ request: string | null; all: string }> {

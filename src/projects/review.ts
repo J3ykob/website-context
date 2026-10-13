@@ -111,7 +111,10 @@ export async function openReview(projectId: string, tenantId: string, runId: str
     const { readFile } = await import("./repo.js");
     const base = process.env.BASE_URL || "https://whisp.so";
     const request = ((await readFile(projectId, "request.txt").catch(() => null)) || String(project?.title || "")).slice(0, 600);
-    await sendReviewEmail(t.email, t.settings?.siteCard?.brand || t.brandName || t.domain, { request, draft, files, link: `${base}/review/${token}` });
+    const { businessQuestions } = await import("./conversation.js");
+    const run = project?.memory.agentRun as any;
+    const questions = run?.runId === runId ? await businessQuestions(projectId, run).catch(() => []) : [];
+    await sendReviewEmail(t.email, t.settings?.siteCard?.brand || t.brandName || t.domain, { request, draft, files, questions, link: `${base}/review/${token}` });
   } catch (e) {
     console.warn(`[review] ${projectId}: owner not emailed (${(e as Error).message})`);
   }

@@ -168,3 +168,51 @@ live("the business approves before the customer gets the result", () => {
     delete process.env.AGENT_REVIEW_FORCE;
   }, 40 * 60 * 1000);
 });
+
+live("questions for the business go to the owner, never to the customer", () => {
+  it("auto mode: a question forces review -> owner answers -> reworked -> approved", async () => {
+    const review = await import("../src/projects/review.js");
+    const conv = await import("../src/projects/conversation.js");
+    delete process.env.AGENT_REVIEW_FORCE; // the business sends automatically
+    const session = `test-conv-${run}-questions`;
+    sessions.push(session);
+    const w = await turn(session, [], "Robię podjazd z kostki, ok. 60 m2, podbudowę będę zagęszczał przez 2 dni. Dobierz mi odpowiednią zagęszczarkę i policz cały koszt razem z dowozem i odbiorem na Ursynów.");
+    expect(w.project?.agent?.status).toBe("running");
+    const pid = w.project!.id;
+    const delivered: string[] = [];
+    const poll = async (want: string) => {
+      const end = Date.now() + 15 * 60 * 1000;
+      for (;;) {
+        const d = await M.agentDelivery(pid, async (m) => { delivered.push(m); });
+        if (d.status === want) return d;
+        if (d.status !== "running" && d.status !== "review") throw new Error(`unexpected ${d.status}: ${d.message}`);
+        if (Date.now() > end) throw new Error(`no ${want}`);
+        await new Promise((ok) => setTimeout(ok, 10_000));
+      }
+    };
+    await poll("review");
+    const run1 = ((await M.projectDetail(pid))!.project.memory.agentRun as any);
+    const qs = await conv.businessQuestions(pid, run1);
+    const rv1 = (await review.reviewForRun(pid, run1.runId))!;
+    console.log(`[questions] ${JSON.stringify(qs)}\n[draft 1]\n${rv1.draft}`);
+    expect(qs.length).toBeGreaterThan(0);
+    expect(delivered.length).toBe(1); // only "the business is checking it"
+    const reqs = await (await import("../src/projects/repo.js")).listRequirements(pid);
+    expect(reqs.find((q) => q.id === "sys-agent-customer-only")?.status).toBe("met");
+
+    const note = qs.map((q) => `Pytanie: ${q}\nOdpowiedź firmy: Transport na Ursynów kosztuje 120 zł w obie strony (dowóz i odbiór razem); na podjazd 60 m2 polecamy zagęszczarkę 130 kg.`).join("\n\n");
+    expect(await review.decide(rv1.token, "changes_requested", { note })).not.toBeNull();
+    await conv.reworkWithGuidance(pid, note);
+    await new Promise((ok) => setTimeout(ok, 15_000));
+    await poll("review"); // comes back to the owner even in auto mode
+    const run2 = ((await M.projectDetail(pid))!.project.memory.agentRun as any);
+    expect(run2.runId).not.toBe(run1.runId);
+    const rv2 = (await review.reviewForRun(pid, run2.runId))!;
+    console.log(`[draft 2]\n${rv2.draft}`);
+    expect(rv2.draft).toContain("120");
+    expect(await review.decide(rv2.token, "approved", {})).not.toBeNull();
+    const done = await poll("done");
+    expect(done.message).toBe(rv2.draft.trim());
+    expect(delivered[delivered.length - 1]).toBe(rv2.draft.trim());
+  }, 40 * 60 * 1000);
+});
