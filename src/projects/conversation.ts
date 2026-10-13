@@ -185,6 +185,46 @@ export async function reworkWithGuidance(projectId: string, note: string): Promi
   }).catch(() => {});
 }
 
+// The customer can leave their email to get the result when it is ready (with consent, per project).
+export const NOTIFY: Record<string, { prompt: string; consent: string; button: string; saved: string; invalid: string }> = {
+  pl: { prompt: "Nie musisz czekać - wyślę wynik na e-mail:", consent: "Zgadzam się, aby {brand} wysłał mi wynik tego zapytania na podany e-mail.", button: "Wyślij mi wynik", saved: "Dziękuję - wynik wyślę na {email}.", invalid: "Sprawdź adres e-mail." },
+  en: { prompt: "No need to wait - I can email you the result:", consent: "I agree that {brand} emails me the result of this request.", button: "Email me the result", saved: "Thanks - I'll send the result to {email}.", invalid: "Please check the email address." },
+  uk: { prompt: "Не потрібно чекати - надішлю результат на e-mail:", consent: "Я погоджуюся, щоб {brand} надіслав мені результат цього запиту на вказаний e-mail.", button: "Надіслати результат", saved: "Дякую - результат надішлю на {email}.", invalid: "Перевірте адресу e-mail." },
+  fr: { prompt: "Inutile d'attendre - je peux vous envoyer le résultat par e-mail :", consent: "J'accepte que {brand} m'envoie le résultat de cette demande par e-mail.", button: "M'envoyer le résultat", saved: "Merci - j'enverrai le résultat à {email}.", invalid: "Vérifiez l'adresse e-mail." },
+  de: { prompt: "Sie müssen nicht warten - ich sende Ihnen das Ergebnis per E-Mail:", consent: "Ich bin einverstanden, dass {brand} mir das Ergebnis dieser Anfrage per E-Mail sendet.", button: "Ergebnis senden", saved: "Danke - ich sende das Ergebnis an {email}.", invalid: "Bitte prüfen Sie die E-Mail-Adresse." },
+};
+
+/** The customer's email for this project's result, with the consent they gave (recorded). */
+export async function setCustomerContact(projectId: string, tenantId: string, email: string, lang: string, consentText: string): Promise<void> {
+  const { recordConsent } = await import("./store.js");
+  await recordConsent(projectId, { toTenantId: tenantId, fields: ["email"], text: consentText });
+  await setMemory(projectId, { customerContact: { email, lang, at: new Date().toISOString() } });
+}
+
+/**
+ * Server-side delivery (the customer may have left): once the result is ready - sent automatically or
+ * decided by the owner - it is logged into the conversation and emailed if the customer asked for that.
+ * Idempotent: agentDelivery delivers each run once.
+ */
+export async function deliverNow(projectId: string): Promise<void> {
+  const p = await getProject(projectId);
+  if (!p || p.type !== CONVERSATION) return;
+  const { logMessage } = await import("../storage/conversation-store.js");
+  await agentDelivery(projectId, async (message) => {
+    await logMessage(p.initiatorTenantId, p.customerSession, "assistant", message, { flowInvoked: "project-agent" }).catch(() => {});
+  }, async (message, files, status) => {
+    const contact = p.memory.customerContact as { email: string; lang: string } | undefined;
+    if (!contact?.email || status === "review") return;
+    const { sendResultEmail } = await import("../multi-tenant/email.js");
+    const { getTenant } = await import("../multi-tenant/d1-registry.js");
+    const t = getTenant(p.initiatorTenantId);
+    const base = process.env.BASE_URL || "https://whisp.so";
+    const links = files.map((f) => ({ name: f.split("/").pop() || f, url: `${base}/api/chat/agent/file?tenantId=${encodeURIComponent(p.initiatorTenantId)}&sessionId=${encodeURIComponent(p.customerSession)}&projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(f)}` }));
+    const sent = await sendResultEmail(contact.email, { brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "", replyTo: t?.email || "", lang: contact.lang, message, files: links, site: t?.siteUrl || "" }).catch(() => false);
+    await addEvent(projectId, { kind: "result_emailed", actor: "system", data: { sent, files: files.length } }).catch(() => {});
+  });
+}
+
 export interface AgentDelivery { status: "none" | "running" | "review" | "done" | "failed"; message?: string; files?: string[]; projectId: string }
 
 /**
@@ -258,9 +298,11 @@ export async function onRunFinished(projectId: string): Promise<void> {
   }
   // A business answering another business's request without review: the answer goes straight back.
   if (p.type === net.BUSINESS_REQUEST) await net.settle(projectId, draft, draft ? "answered" : "no_answer");
+  // The customer's result, also when nobody is on the page.
+  else await deliverNow(projectId).catch((e) => console.warn(`[conversation] ${projectId}: delivery: ${(e as Error).message}`));
 }
 
-export async function agentDelivery(projectId: string, onDeliver: (message: string) => Promise<void>): Promise<AgentDelivery> {
+export async function agentDelivery(projectId: string, onDeliver: (message: string) => Promise<void>, onFinal?: (message: string, files: string[], status: string) => Promise<void>): Promise<AgentDelivery> {
   const before = await getProject(projectId);
   if (!before) return { status: "none", projectId };
   const pendingAt = Number(before.memory.agentPending) || 0;
@@ -305,6 +347,7 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   if (!delivered) {
     await setMemory(projectId, { delivered: s.runId, ownerLoop: false });
     await onDeliver(message).catch(() => {});
+    if (onFinal) await onFinal(message, files, "final").catch(() => {});
     await addEvent(projectId, { kind: "delivered", actor: "chat", data: { runId: s.runId, status: s.status, files } }).catch(() => {});
   }
   // Done when the customer gets real content: the agent's reply, or the owner's approved / own text.

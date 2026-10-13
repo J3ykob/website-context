@@ -28,7 +28,7 @@ import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
 import { runCompare, type Business } from "../projects/compare.js";
 import { agentEnabled } from "../projects/agent.js";
-import { conversationProject, recordTurn, turnKind, beginConversationAgent, WORKING, BUSY, CONVERSATION, type Route } from "../projects/conversation.js";
+import { conversationProject, recordTurn, turnKind, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 
@@ -92,7 +92,7 @@ export interface ChatResponse {
   // caller driving it (e.g. another business's bot in an ecosystem referral).
   collect?: { flowId: string; stage: "collecting" | "confirming" | "sent" | "cancelled" | "failed"; missing: string[] };
   // The project this reply belongs to (multi-business work, src/projects).
-  project?: { id: string; type: string; agent?: { status: "running" } };
+  project?: { id: string; type: string; agent?: { status: "running" }; notify?: { lang: string; prompt: string; consent: string; button: string } };
   flowSession?: {
     active: boolean;
     status: FlowSession["status"];
@@ -1053,7 +1053,9 @@ export class WebsiteChat {
     ]);
     const l = ((lang?.lang as any)?.choice as string) || "en";
     console.log(`[conversation] ${this.context.tenantId}: ${projectId} agent ${begun}`);
-    return { message: (begun === "busy" ? BUSY : WORKING)[l] || (begun === "busy" ? BUSY : WORKING).en, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" } } };
+    const n = NOTIFY[l] || NOTIFY.en;
+    const notify = { lang: NOTIFY[l] ? l : "en", prompt: n.prompt, consent: n.consent.split("{brand}").join((await import("../projects/network.js")).businessLabel(this.context.tenantId) || this.brandName || ""), button: n.button };
+    return { message: (begun === "busy" ? BUSY : WORKING)[l] || (begun === "busy" ? BUSY : WORKING).en, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" }, ...(begun === "busy" ? {} : { notify }) } };
   }
 
   // ── Projects: a price estimate across the network's offers ──

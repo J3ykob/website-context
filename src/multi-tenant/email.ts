@@ -166,3 +166,47 @@ Whisp`,
     return false;
   }
 }
+
+// The result of a customer's request, sent when the customer asked for it in the chat (with consent).
+// New template: until the user approves it (CUSTOMER_RESULT_EMAIL_APPROVED=1), it goes only to the Whisp
+// owner's own address.
+const RESULT_TEXT: Record<string, { subject: string; intro: string; files: string; reply: string }> = {
+  pl: { subject: "Wynik Twojego zapytania - {brand}", intro: "Oto odpowiedź na Twoje zapytanie w czacie na stronie {brand}:", files: "Pliki:", reply: "Możesz odpowiedzieć na tę wiadomość - trafi bezpośrednio do firmy." },
+  en: { subject: "The result of your request - {brand}", intro: "Here is the answer to your request in the chat on the {brand} website:", files: "Files:", reply: "You can reply to this email - it goes directly to the business." },
+  uk: { subject: "Результат вашого запиту - {brand}", intro: "Ось відповідь на ваш запит у чаті на сайті {brand}:", files: "Файли:", reply: "Ви можете відповісти на цей лист - він надійде безпосередньо до компанії." },
+  fr: { subject: "Le résultat de votre demande - {brand}", intro: "Voici la réponse à votre demande dans le chat du site {brand} :", files: "Fichiers :", reply: "Vous pouvez répondre à cet e-mail - il est envoyé directement à l'entreprise." },
+  de: { subject: "Das Ergebnis Ihrer Anfrage - {brand}", intro: "Hier ist die Antwort auf Ihre Anfrage im Chat auf der Website von {brand}:", files: "Dateien:", reply: "Sie können auf diese E-Mail antworten - sie geht direkt an das Unternehmen." },
+};
+
+export async function sendResultEmail(
+  email: string,
+  r: { brand: string; replyTo: string; lang: string; message: string; files: { name: string; url: string }[]; site: string },
+): Promise<boolean> {
+  if (process.env.CUSTOMER_RESULT_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
+    console.log(`[email] result email to ${email} not sent - template awaiting approval`);
+    return false;
+  }
+  const t = RESULT_TEXT[r.lang] || RESULT_TEXT.en;
+  const fill = (x: string) => x.split("{brand}").join(r.brand);
+  const files = r.files.length ? `\n${t.files}\n${r.files.map((f) => `${f.name}: ${f.url}`).join("\n")}\n` : "";
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to: email,
+      replyTo: r.replyTo || "jakub@whisp.so",
+      subject: fill(t.subject),
+      text: `${fill(t.intro)}
+
+${r.message}
+${files}
+${t.reply}
+${r.site ? `\n${r.brand} - ${r.site}` : `\n${r.brand}`}`,
+    });
+    if (error) { console.error(`[email] result email to ${email} failed:`, error.message); return false; }
+    console.log(`[email] Result email sent to ${email}`);
+    return true;
+  } catch (e: any) {
+    console.error(`[email] result email to ${email} failed:`, e.message);
+    return false;
+  }
+}

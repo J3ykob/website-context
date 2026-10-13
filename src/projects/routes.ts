@@ -22,7 +22,7 @@ import type { Express, RequestHandler } from "express";
 import { projectsForTenant, projectDetail } from "./store.js";
 import { listFiles, listRequirements, readFile, readFileBuffer, writeFile } from "./repo.js";
 import { agentEnabled, agentStatus } from "./agent.js";
-import { agentDelivery, reworkWithGuidance, businessQuestions, CUSTOMER_DIR } from "./conversation.js";
+import { agentDelivery, reworkWithGuidance, businessQuestions, deliverNow, setCustomerContact, NOTIFY, CUSTOMER_DIR } from "./conversation.js";
 import { reviewByToken, decide, reviewMode, timeline } from "./review.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
 import { resolve } from "path";
@@ -214,10 +214,12 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     if (!rv) { res.status(409).json({ error: "This result was already decided, or the link has expired." }); return; }
     if (action === "changes" || action === "answer") await reworkWithGuidance(rv.projectId, note);
     else {
-      // A business's answer to another business: back into the customer's project.
+      // A business's answer to another business: back into the customer's project. A customer's result:
+      // delivered now (logged in the chat, emailed if the customer asked) - the customer may have left.
       const { BUSINESS_REQUEST, settle } = await import("./network.js");
       const proj = await getProject(rv.projectId);
       if (proj?.type === BUSINESS_REQUEST) await settle(rv.projectId, (rv.final || rv.draft).trim(), (rv.final || rv.draft).trim() ? "answered" : "no_answer");
+      else await deliverNow(rv.projectId).catch((e) => console.warn(`[review] ${rv.projectId}: delivery: ${e?.message || e}`));
     }
     res.json({ ok: true, status: rv.status });
   });
@@ -237,5 +239,23 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
       console.warn(`[owner-chat] ${rv.projectId}: ${e?.message || e}`);
       res.status(502).json({ error: "The assistant is not available right now - try again." });
     }
+  });
+
+  // The customer leaves an email to get the result of this project (consent recorded with its text).
+  app.post("/api/chat/agent/notify", async (req, res) => {
+    const p = await ownProject(req.body || {});
+    if (!p) { res.status(404).json({ error: "Not found" }); return; }
+    const email = String(req.body?.email || "").trim().slice(0, 200);
+    const lang = NOTIFY[String(req.body?.lang)] ? String(req.body.lang) : "en";
+    const at = email.indexOf("@");
+    // Shape check of what the customer typed into the email field (not extraction from text).
+    if (at < 1 || email.indexOf(".", at) < at + 2 || email.endsWith(".") || email.includes(" ") || req.body?.consent !== true) {
+      res.status(400).json({ error: NOTIFY[lang].invalid }); return;
+    }
+    const brand = getTenant(p.initiatorTenantId)?.settings?.siteCard?.brand || getTenant(p.initiatorTenantId)?.brandName || getTenant(p.initiatorTenantId)?.domain || "";
+    await setCustomerContact(p.id, p.initiatorTenantId, email, lang, NOTIFY[lang].consent.split("{brand}").join(brand));
+    // Already finished while the customer was typing: send it now.
+    await deliverNow(p.id).catch(() => {});
+    res.json({ ok: true, message: NOTIFY[lang].saved.split("{email}").join(email) });
   });
 }

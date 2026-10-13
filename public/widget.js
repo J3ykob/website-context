@@ -1085,8 +1085,42 @@
   var watching = null;
   function savedWatch() { try { return JSON.parse(localStorage.getItem(PROJECT_KEY) || "null"); } catch (e) { return null; } }
   function saveWatch(w) { try { localStorage.setItem(PROJECT_KEY, JSON.stringify(w)); } catch (e) {} }
+  // Under the "working on it" message: the customer may leave an email to get the result (with consent).
+  function notifyForm(p) {
+    var n = p.notify;
+    var box = document.createElement("form");
+    box.className = "wctx-msg wctx-msg-assistant wctx-notify";
+    box.style.cssText = "display:flex;flex-direction:column;gap:8px;font-size:13px";
+    var t = document.createElement("div"); t.textContent = n.prompt; box.appendChild(t);
+    var input = document.createElement("input"); input.type = "email"; input.required = true; input.placeholder = "e-mail"; input.autocomplete = "email";
+    input.style.cssText = "padding:8px 10px;border-radius:10px;border:1px solid rgba(127,127,127,.35);background:transparent;color:inherit;font:inherit";
+    box.appendChild(input);
+    var lab = document.createElement("label"); lab.style.cssText = "display:flex;gap:8px;align-items:flex-start;font-size:12px;opacity:.85;cursor:pointer";
+    var cb = document.createElement("input"); cb.type = "checkbox"; cb.required = true; cb.style.marginTop = "2px";
+    var ct = document.createElement("span"); ct.textContent = n.consent;
+    lab.appendChild(cb); lab.appendChild(ct); box.appendChild(lab);
+    var btn = document.createElement("button"); btn.type = "submit"; btn.textContent = n.button;
+    btn.style.cssText = "align-self:flex-start;padding:7px 14px;border-radius:10px;border:0;background:#3b82f6;color:#fff;font:inherit;cursor:pointer";
+    box.appendChild(btn);
+    var err = document.createElement("div"); err.style.cssText = "color:#ef4444;font-size:12px;display:none"; box.appendChild(err);
+    box.addEventListener("submit", function(e) {
+      e.preventDefault();
+      btn.disabled = true;
+      fetch(API_HOST + "/api/chat/agent/notify", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: TENANT_ID, sessionId: sessionId, projectId: p.id, email: input.value, consent: cb.checked, lang: n.lang }) })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+        .then(function(x) {
+          if (!x.ok) { btn.disabled = false; err.textContent = x.d.error || ""; err.style.display = "block"; return; }
+          box.innerHTML = ""; var ok = document.createElement("div"); ok.textContent = x.d.message; box.appendChild(ok);
+        })
+        .catch(function() { btn.disabled = false; });
+    });
+    els.msgs.appendChild(box);
+    els.msgs.scrollTop = els.msgs.scrollHeight;
+  }
   function watchProject(p) {
     if (!p || !p.agent || p.agent.status !== "running" || !p.id) return;
+    if (p.notify) notifyForm(p);
     saveWatch({ id: p.id, t: Date.now(), s: sessionId, review: false });
     pollProject(p.id);
   }
