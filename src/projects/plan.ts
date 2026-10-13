@@ -115,7 +115,11 @@ async function llm(system: string, user: string): Promise<string> {
     method: "POST",
     signal: AbortSignal.timeout(Number(process.env.PLANNER_TIMEOUT_MS) || 90_000),
     headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: process.env.PLANNER_MODEL || "qwen/qwen3-235b-a22b-2507", temperature: 0, max_tokens: 1500, response_format: { type: "json_object" }, provider: { sort: "throughput" }, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
+    body: JSON.stringify({ model: process.env.PLANNER_MODEL || "deepseek/deepseek-v4.1-flash", temperature: 0, max_tokens: 1500, response_format: { type: "json_object" }, provider: { sort: "throughput" },
+      // No hidden reasoning: it multiplies latency and can eat the token budget before any JSON is written.
+      // Benchmark 2026-10-13 (4 real requests): deepseek-v4.1-flash without reasoning 10-20 s and faithful to the
+      // requester's words; qwen3-235b 22-39 s and mistranslated product names.
+      reasoning: JSON.parse(process.env.PLANNER_REASONING || '{"enabled":false}'), messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
   });
   if (!r.ok) throw new Error(`planner ${r.status}: ${(await r.text()).slice(0, 200)}`);
   return ((await r.json()) as any).choices?.[0]?.message?.content || "";
