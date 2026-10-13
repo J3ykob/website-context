@@ -48,6 +48,9 @@ services:
         value: deepseek/deepseek-v4.1-flash
       - key: PROJECT_AGENT_FALLBACK_MODEL
         value: xiaomi/mimo-v2.6-flash
+      # Owner review email (src/multi-tenant/email.ts sendReviewEmail) - template approved 2026-10-13.
+      - key: REVIEW_EMAIL_APPROVED
+        value: "1"
       - key: EMBED_MODEL
         value: bge-m3
       - key: VECTORIZE_INDEX
