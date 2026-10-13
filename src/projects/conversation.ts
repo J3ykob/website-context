@@ -105,6 +105,7 @@ export async function startConversationAgent(projectId: string, transcript: { ro
   await writeFile(projectId, "odpowiedz.txt", "", "txt", "system");
   await writeFile(projectId, BUSINESS_QUESTIONS, "", "md", "system");
   if (knowledge.length) await writeFile(projectId, `${KNOWLEDGE_DIR}/strona.md`, `# Informacje z witryny firmy (do tej wiadomości)\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system");
+  await setMemory(projectId, { baseInstruction: INSTRUCTION, networkAsked: false, networkContinued: false, subRequests: [] });
   return startAgentRun(projectId, INSTRUCTION, "chat");
 }
 
@@ -176,7 +177,8 @@ export async function reworkWithGuidance(projectId: string, note: string): Promi
   if (previous) await writeFile(projectId, `historia/odpowiedz-${at}.txt`, previous, "txt", "system");
   await writeFile(projectId, "odpowiedz.txt", "", "txt", "system");
   await writeFile(projectId, BUSINESS_QUESTIONS, "", "md", "system");
-  const instruction = `${INSTRUCTION}\n\nFirma przejrzała poprzednią wersję i prosi o zmiany: uwzględnij uwagi z uwagi_firmy.md (tam też poprzednia wersja odpowiedzi). Uwagi firmy mają pierwszeństwo.`;
+  const base = String((await getProject(projectId))?.memory.baseInstruction || INSTRUCTION);
+  const instruction = `${base}\n\nFirma przejrzała poprzednią wersję i prosi o zmiany: uwzględnij uwagi z uwagi_firmy.md (tam też poprzednia wersja odpowiedzi). Uwagi firmy mają pierwszeństwo.`;
   void startAgentRun(projectId, instruction, "business").then(async (r) => {
     if ("error" in r) await setMemory(projectId, { agentRun: { runId: `failed-${at}`, status: "failed", error: r.error, startedAt: new Date(at).toISOString(), attempt: 1, model: "", instruction: "" } });
   }).catch(() => {});
@@ -233,11 +235,24 @@ async function ownerFirst(projectId: string, tenantId: string, run: AgentRunStat
 export async function onRunFinished(projectId: string): Promise<void> {
   const p = await getProject(projectId);
   const s = p?.memory.agentRun as AgentRunState | undefined;
-  if (!p || p.type !== CONVERSATION || !s || (s.status !== "done" && s.status !== "failed")) return;
-  if (!(await ownerFirst(projectId, p.initiatorTenantId, s)) || (await reviewForRun(projectId, s.runId))) return;
+  if (!p || !s || (s.status !== "done" && s.status !== "failed")) return;
+  const net = await import("./network.js");
+  if (p.type === CONVERSATION) {
+    // Requests to other businesses first: the result waits for their answers.
+    if ((s.files || []).includes(net.REQUESTS_FILE) && p.memory.networkChecked !== s.runId) {
+      const asked = await net.askBusinesses(projectId, (p.memory.businessSlugs as Record<string, string>) || {}).catch((e) => { console.warn(`[network] ${projectId}: ${(e as Error).message}`); return false; });
+      await setMemory(projectId, { networkChecked: s.runId });
+      if (asked) return;
+    }
+  } else if (p.type !== net.BUSINESS_REQUEST) return;
   const files = (s.files || []).filter((f) => f.startsWith(`${CUSTOMER_DIR}/`));
   const draft = s.status === "done" ? ((await readFile(projectId, "odpowiedz.txt")) || "").trim() : "";
-  await openReview(projectId, p.initiatorTenantId, s.runId, draft, files);
+  if (await ownerFirst(projectId, p.initiatorTenantId, s)) {
+    if (!(await reviewForRun(projectId, s.runId))) await openReview(projectId, p.initiatorTenantId, s.runId, draft, files);
+    return;
+  }
+  // A business answering another business's request without review: the answer goes straight back.
+  if (p.type === net.BUSINESS_REQUEST) await net.settle(projectId, draft, draft ? "answered" : "no_answer");
 }
 
 export async function agentDelivery(projectId: string, onDeliver: (message: string) => Promise<void>): Promise<AgentDelivery> {
@@ -252,6 +267,12 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   const s = run && run.runId.startsWith("failed-") ? run : await agentStatus(projectId);
   if (!s) return { status: "none", projectId };
   if (s.status === "running" || s.status === "collecting") return { status: "running", projectId };
+  // Waiting for other businesses (or about to ask them): not ready for the customer yet.
+  const net = await import("./network.js");
+  const now = await getProject(projectId);
+  if ((s.files || []).includes(net.REQUESTS_FILE) && now?.memory.networkChecked !== s.runId) return { status: "running", projectId };
+  if (now && net.waitingOnBusinesses(now.memory)) { await net.checkDeadlines(projectId); return { status: "running", projectId }; }
+  if (now?.memory.networkContinued && Number(now.memory.agentPending) > Date.parse(s.startedAt)) return { status: "running", projectId };
   const p = await getProject(projectId);
   const delivered = (p?.memory.delivered as string | undefined) === s.runId;
   let files = (s.files || []).filter((f) => f.startsWith(`${CUSTOMER_DIR}/`));

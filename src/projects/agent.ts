@@ -102,6 +102,11 @@ Zasady:
    o tym nie ma (np. klient chce koszt z dowozem, a cennik nie podaje ceny dowozu). Nie pytaj o sprawy, których klient
    nie poruszył (dostępność terminów, dowóz, kaucja itp.) ani o rzeczy, które wynikają z danych. Wynik przygotuj
    na najrozsądniejszym założeniu (zapisanym w zalozenia.md); firma odpowie, zanim klient go dostanie.
+9. Inne firmy z sieci (cenniki/firmy.md, jeśli jest): gdy część zadania należy do innej firmy z tej listy, a jej
+   cennik nie podaje potrzebnej ceny lub informacji (albo firma nie ma cennika), zapytaj ją: zapisz
+   zapytania_do_firm.json - lista [{"firma": "<identyfikator z firmy.md>", "pytanie": "konkretne pytanie z ilościami
+   i warunkami"}]. W pytaniach nie podawaj danych osobowych klienta. Wynik przygotuj tak, jakby ta część była do
+   wyceny; gdy firmy odpowiedzą, dostaniesz zadanie dokończenia. Nie pytaj firmy prowadzącej projekt.
 `;
 
 // cenniki/README.md: how the offer files are laid out (general, for any business type).
@@ -119,8 +124,12 @@ Dla każdej firmy:
 `;
 
 /** Offers of the businesses in the project as CSV price lists (public data). */
-async function priceLists(project: Project, tenantIds: string[]): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[] }> {
+async function priceLists(project: Project, tenantIds: string[]): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
   const files: Record<string, string> = {};
+  const slugs: Record<string, string> = {};
+  const { networkMembers } = await import("./network.js");
+  const about = new Map((await networkMembers(project.initiatorTenantId).catch(() => [])).map((m) => [m.tenantId, m.about]));
+  const directory: string[] = [];
   const allow: string[] = [];
   const catalog = new Set<string>();
   const used = new Set<string>();
@@ -129,10 +138,13 @@ async function priceLists(project: Project, tenantIds: string[]): Promise<{ file
     const t = getTenant(tenantId);
     const label = t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId;
     allow.push(label, t?.domain || "", t?.siteUrl || "");
-    if (!offer?.items.length) continue;
     let slug = fileSlug(label) || fileSlug(tenantId);
     while (used.has(slug)) slug += "_";
     used.add(slug);
+    slugs[slug] = tenantId;
+    const own = tenantId === project.initiatorTenantId ? " (firma prowadząca ten projekt)" : "";
+    directory.push(`## ${slug}: ${label}${own}\n${about.get(tenantId) || "(brak opisu)"}\n${offer?.items.length ? `Oferta: cennik_${slug}.csv` : "Brak cennika w danych - o ceny trzeba zapytać firmę."}`);
+    if (!offer?.items.length) continue;
     const unit = (u?: string) => (u && u !== "unknown" ? FIELDS.unit.values[u]?.label || u : "");
     const val = (f: keyof typeof FIELDS, v?: string) => (v && v !== "unknown" ? (FIELDS[f].values as any)[v]?.label || v : "");
     files[`cennik_${slug}.csv`] = toCsv(
@@ -144,8 +156,8 @@ async function priceLists(project: Project, tenantIds: string[]): Promise<{ file
     if (comps.length) files[`skladniki_${slug}.csv`] = toCsv(["id_pozycji", "pozycja", "skladnik", "cena", "cena_do", "jednostka", "polaczenie", "ilosc_od_klienta"], comps).slice(1);
     for (const i of offer.items) for (const w of i.name.split(" ")) if (w.length > 2) catalog.add(w);
   }
-  void project;
-  return { files, allow: allow.filter(Boolean), catalog: [...catalog].slice(0, 3000) };
+  if (directory.length > 1) files["firmy.md"] = `# Firmy w tym projekcie (sieć współpracujących firm)\n\n${directory.join("\n\n")}\n`;
+  return { files, allow: allow.filter(Boolean), catalog: [...catalog].slice(0, 3000), slugs };
 }
 
 const withoutBom = (t: string) => (t.startsWith("\uFEFF") ? t.slice(1) : t);
@@ -173,10 +185,16 @@ export async function startAgentRun(projectId: string, instruction: string, acto
 
   // The businesses' current offers become part of the repository (what the agent priced from), sent
   // unmasked: they are public data. Everything else may hold customer data and is masked by the runner.
-  const tenantIds = [...new Set([project.initiatorTenantId, ...(await listParticipants(projectId)).map((p) => p.tenantId)])];
+  // Which businesses' data the agent sees: a business answering a request - only its own; the
+  // customer's project - the whole network of the business the customer talks to.
+  const { networkMembers, BUSINESS_REQUEST, REQUESTS_FILE } = await import("./network.js");
+  const tenantIds = project.type === BUSINESS_REQUEST ? [project.initiatorTenantId]
+    : [...new Set([project.initiatorTenantId, ...(await listParticipants(projectId)).map((p) => p.tenantId), ...(await networkMembers(project.initiatorTenantId).catch(() => [])).map((m) => m.tenantId)])];
   const offers = await priceLists(project, tenantIds);
+  await setMemory(projectId, { businessSlugs: offers.slugs });
   for (const [name, body] of Object.entries(offers.files)) await writeFile(projectId, `${PRICE_DIR}/${name}`, body, "csv", "system");
   if (Object.keys(offers.files).length) await writeFile(projectId, `${PRICE_DIR}/README.md`, PRICE_README, "md", "system");
+  if (!offers.files["firmy.md"]) await writeFile(projectId, `${PRICE_DIR}/firmy.md`, "", "md", "system");
   const files: Record<string, string> = {};
   const publicFiles: Record<string, string> = {};
   for (const f of await listFiles(projectId)) {
@@ -191,7 +209,7 @@ export async function startAgentRun(projectId: string, instruction: string, acto
 
   const r = await runner(`/projects/${encodeURIComponent(projectId)}/run`, {
     method: "POST",
-    body: JSON.stringify({ prompt, rules: RULES, files, publicFiles, model, maxSteps: 60, timeoutSec: 900, maxCostUsd: 0.5, allow: offers.allow, catalog: offers.catalog }),
+    body: JSON.stringify({ prompt, rules: RULES, files, publicFiles, keepMasked: [REQUESTS_FILE], model, maxSteps: 60, timeoutSec: 900, maxCostUsd: 0.5, allow: offers.allow, catalog: offers.catalog }),
   }).catch((e) => ({ ok: false, status: 0, text: async () => String(e?.message || e) }) as unknown as Response);
   if (r.status === 409) return { error: "The agent is already working on this project." };
   if (!r.ok) return { error: `The agent could not start (${r.status}): ${(await r.text()).slice(0, 200)}` };

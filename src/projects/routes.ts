@@ -196,6 +196,12 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     const rv = await decide(token, action === "approve" ? "approved" : action === "decline" ? "declined" : "changes_requested", { final: message, note }).catch(() => null);
     if (!rv) { res.status(409).json({ error: "This result was already decided, or the link has expired." }); return; }
     if (action === "changes" || action === "answer") await reworkWithGuidance(rv.projectId, note);
+    else {
+      // A business's answer to another business: back into the customer's project.
+      const { BUSINESS_REQUEST, settle } = await import("./network.js");
+      const proj = await getProject(rv.projectId);
+      if (proj?.type === BUSINESS_REQUEST) await settle(rv.projectId, (rv.final || rv.draft).trim(), (rv.final || rv.draft).trim() ? "answered" : "no_answer");
+    }
     res.json({ ok: true, status: rv.status });
   });
 }

@@ -47,6 +47,8 @@ export class TenantManager {
 
     // Run eviction every 5 minutes
     this.evictionInterval = setInterval(() => this.evictStale(), 5 * 60 * 1000);
+    // Projects: a business answering another business's request uses its own site knowledge.
+    void import("../projects/network.js").then((m) => m.setKnowledgeProvider(async (id, q) => (await this.getChatForTenant(id)).knowledgePassages(q)));
   }
 
   /**

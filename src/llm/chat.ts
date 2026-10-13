@@ -27,6 +27,7 @@ import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type Catal
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
 import { runCompare, type Business } from "../projects/compare.js";
+import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, turnKind, beginConversationAgent, WORKING, BUSY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
@@ -494,8 +495,11 @@ export class WebsiteChat {
     // calculate, compare, choose, plan, build a list or document), or an ordinary answer.
     const kind = await this.kindOf(inputValidation.sanitized, sanitizedMessages);
     const estimate = kind === "estimate" ? await this.estimateProject(inputValidation.sanitized, effectiveSessionKey) : null;
-    if (estimate) return estimate;
-    if (kind === "work") {
+    // Lines the offers do not price: other businesses of the network may - the agent asks them.
+    const unpriced = estimate ? this.lastEstimateTbd.get(effectiveSessionKey) || 0 : 0;
+    const escalate = kind === "estimate" && (!estimate || unpriced > 0) && agentEnabled() && (await this.hasNetwork());
+    if (estimate && !escalate) return estimate;
+    if (kind === "work" || escalate) {
       const viaAgent = await this.agentTurn(sanitizedMessages, inputValidation.sanitized, effectiveSessionKey);
       if (viaAgent) return viaAgent;
     }
@@ -1015,6 +1019,18 @@ export class WebsiteChat {
 
   // Start a goal-driven ("agent") flow: no input collection here; the widget
   // drives the page with /api/agent/step and asks the visitor for data as needed.
+  private lastEstimateTbd = new Map<string, number>();
+  private async hasNetwork(): Promise<boolean> {
+    const { networkMembers } = await import("../projects/network.js");
+    return (await networkMembers(this.context.tenantId).catch(() => [])).length > 1;
+  }
+
+  /** Passages of this business's own site for a query (for its answers inside projects). */
+  async knowledgePassages(query: string, limit = 10): Promise<string[]> {
+    const chunks = await this.retrieveContext(query).catch(() => []);
+    return chunks.slice(0, limit).map((c) => `${c.metadata?.title ? `## ${c.metadata.title}\n` : ""}${c.content}`);
+  }
+
   // ── Projects: work on data by the project agent (sandbox, tools) ──
   /** The turn's kind (estimate / work / other) - one Jev choice, memoized per message. */
   private kindOf(message: string, messages: ChatMessage[]): Promise<"estimate" | "work" | "other"> {
@@ -1030,8 +1046,7 @@ export class WebsiteChat {
   private async agentTurn(messages: ChatMessage[], message: string, sessionKey: string): Promise<ChatResponse | null> {
     const projectId = await conversationProject(this.context.tenantId, sessionKey, message);
     if (!projectId) return null;
-    const chunks = await this.retrieveContext(message).catch(() => []);
-    const knowledge = chunks.slice(0, 10).map((c) => `${c.metadata?.title ? `## ${c.metadata.title}\n` : ""}${c.content}`);
+    const knowledge = await this.knowledgePassages(message);
     const [begun, lang] = await Promise.all([
       beginConversationAgent(projectId, messages, knowledge),
       jevAsk({ message }, { lang: { type: "choice", instructions: "In which language is `message` written?", criteria: { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German", other: "Another language" } } }, 3000),
@@ -1065,6 +1080,8 @@ export class WebsiteChat {
         } catch (e) { console.warn(`[project] ${this.context.tenantId}: links failed: ${(e as Error).message}`); }
       }
       console.log(`[project] ${this.context.tenantId}: ${r.projectId} compare_offers lines=${r.lines.length} total=${r.total} tbd=${r.tbdLines}`);
+      this.lastEstimateTbd.set(sessionKey, r.tbdLines);
+      if (this.lastEstimateTbd.size > 1000) this.lastEstimateTbd.clear();
       return { message: message2, sources: [], grounded: true, ...(r.projectId ? { project: { id: r.projectId, type: projectId ? CONVERSATION : "compare_offers@1" } } : {}) };
     } catch (e) {
       console.warn(`[project] ${this.context.tenantId}: estimate failed: ${(e as Error).message}`);

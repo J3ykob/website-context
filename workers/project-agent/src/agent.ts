@@ -84,6 +84,7 @@ export interface RunRequest {
   maxCostUsd?: number;
   allow?: string[]; // the business's own public data: never masked
   catalog?: string[]; // words from the business's offer (brands, product names): never masked as companies
+  keepMasked?: string[]; // outputs returned with placeholders (e.g. requests to other businesses: no customer data leaves)
 }
 
 export interface RunUsage { steps: number; costUsd: number; tokensIn: number; tokensOut: number; tokensCached: number; toolCalls: number; toolErrors: number }
@@ -109,7 +110,7 @@ export type RunStatus =
   | { state: "running"; runId: string; startedAt: string; elapsedMs: number; usage: RunUsage }
   | { state: "done"; result: RunResult };
 
-interface Meta { runId: string; projectId: string; model: string; startedAt: string; maxCostUsd: number; maxSteps: number; piiMasked: number; stopReason?: RunResult["stopReason"] }
+interface Meta { runId: string; projectId: string; model: string; startedAt: string; maxCostUsd: number; maxSteps: number; piiMasked: number; keepMasked?: string[]; stopReason?: RunResult["stopReason"] }
 
 interface AgentState extends DurableObjectState {
   readonly exports: { readonly Outbound: (opts: object) => Fetcher } & Record<string, unknown>;
@@ -152,7 +153,7 @@ export class ProjectAgent extends DurableObject<Env> {
       const runId = crypto.randomUUID();
       const m: Meta = {
         runId, projectId: req.projectId, model: req.model.id, startedAt: new Date().toISOString(),
-        maxCostUsd: req.maxCostUsd ?? 0.5, maxSteps: req.maxSteps ?? 60, piiMasked: masked.found,
+        maxCostUsd: req.maxCostUsd ?? 0.5, maxSteps: req.maxSteps ?? 60, piiMasked: masked.found, keepMasked: (req.keepMasked ?? []).slice(0, 20),
       };
       this.ctx.storage.kv.put("vault", JSON.stringify(masked.state));
       this.ctx.storage.kv.put("meta", JSON.stringify(m));
@@ -264,10 +265,11 @@ export class ProjectAgent extends DurableObject<Env> {
         log("files");
         // Unmask every text output and the final message in one call.
         const texts: Record<string, string> = { "\u0000final": ev.finalText };
-        for (const f of files) if (f.encoding === "utf-8") texts[f.path] = f.content;
+        const keep = new Set(meta.keepMasked ?? []);
+        for (const f of files) if (f.encoding === "utf-8" && !keep.has(f.path)) texts[f.path] = f.content;
         const un = await this.env.MASKER.getByName("pii").unmask(texts, vault);
         log("unmask");
-        for (const f of files) if (f.encoding === "utf-8") { f.content = un.texts[f.path]; f.size = byteLength(f.content); }
+        for (const f of files) if (f.encoding === "utf-8" && !keep.has(f.path)) { f.content = un.texts[f.path]; f.size = byteLength(f.content); }
         const stopReason: RunResult["stopReason"] = meta.stopReason
           ?? (exitCode === 124 || exitCode === 137 ? "timeout" : exitCode !== 0 ? "error" : ev.usage.steps >= meta.maxSteps ? "step_cap" : "done");
         // On failure: the end of stderr, else the last events, so the cause is visible to the caller.
