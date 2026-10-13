@@ -56,6 +56,9 @@ services:
       # The agent's questions block in the owner review email - approved 2026-10-13.
       - key: REVIEW_EMAIL_QUESTIONS_APPROVED
         value: "1"
+      # Result email to the customer (with consent from the chat) - approved 2026-10-13.
+      - key: CUSTOMER_RESULT_EMAIL_APPROVED
+        value: "1"
       - key: EMBED_MODEL
         value: bge-m3
       - key: VECTORIZE_INDEX

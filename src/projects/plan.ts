@@ -64,7 +64,10 @@ Return ONLY a JSON object:
 Rules:
 - Only what the request needs. No outputs nobody asked for or needs.
 - The text for the requester is always odpowiedz.txt (audience customer for a customer, business for a business).
-- Files for the customer go to ${CUSTOMER_DIR}/ (csv for tables, md for documents).
+- A file for the customer only when the result is something they will keep or work with: a cost sheet or
+  list with several items, a comparison table, a plan or document. A short answer (one item, one price, a
+  simple choice) stays in odpowiedz.txt alone - no file. Customer files go to ${CUSTOMER_DIR}/ (csv for
+  tables, md for documents).
 - Inputs: only files listed in the inventory.
 - Facts: only what was stated, copied in the requester's own words and language (quote them); never translate,
   paraphrase or rename products or terms - a wrong rewording changes the request. If something essential is

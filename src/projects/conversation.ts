@@ -87,7 +87,7 @@ export async function turnKind(message: string, previousReply: string, estimateA
 const INSTRUCTION = `Klient w tej rozmowie (rozmowa.md; jego ostatnia wiadomość: request.txt) prosi o coś, co wymaga pracy na danych.
 Wykonaj to na podstawie danych projektu: oferty firm w cenniki/, informacje z witryny firmy w ${KNOWLEDGE_DIR}/, wcześniejsze pliki projektu.
 Odpowiedź dla klienta zapisz w odpowiedz.txt - w języku klienta, jako wiadomość w czacie (bez nagłówków e-maila i podpisu).
-Pliki dla klienta (tabele, listy, zestawienia, plany) zapisz w katalogu ${CUSTOMER_DIR}/ (CSV, MD lub TXT) i wspomnij o nich w odpowiedzi.
+Plik dla klienta tylko wtedy, gdy wynik jest czymś do zachowania (zestawienie wielu pozycji, porównanie, plan) - zapisz go w ${CUSTOMER_DIR}/ (CSV, MD lub TXT) i wspomnij o nim w odpowiedzi; krótka odpowiedź nie potrzebuje pliku.
 Pytania do firmy - tylko w ${BUSINESS_QUESTIONS}, nigdy w odpowiedzi dla klienta.`;
 
 /**
@@ -218,9 +218,16 @@ export async function deliverNow(projectId: string): Promise<void> {
     const { sendResultEmail } = await import("../multi-tenant/email.js");
     const { getTenant } = await import("../multi-tenant/d1-registry.js");
     const t = getTenant(p.initiatorTenantId);
-    const base = process.env.BASE_URL || "https://whisp.so";
-    const links = files.map((f) => ({ name: f.split("/").pop() || f, url: `${base}/api/chat/agent/file?tenantId=${encodeURIComponent(p.initiatorTenantId)}&sessionId=${encodeURIComponent(p.customerSession)}&projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(f)}` }));
-    const sent = await sendResultEmail(contact.email, { brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "", replyTo: t?.email || "", lang: contact.lang, message, files: links, site: t?.siteUrl || "" }).catch(() => false);
+    // The customer's files, attached (CSV with a BOM so Excel opens Polish characters correctly).
+    const { readFileBuffer } = await import("./repo.js");
+    const attachments: { name: string; content: Buffer }[] = [];
+    for (const f of files.slice(0, 10)) {
+      let buf = await readFileBuffer(projectId, f).catch(() => null);
+      if (!buf) continue;
+      if (f.toLowerCase().endsWith(".csv") && !(buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf)) buf = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), buf]);
+      attachments.push({ name: f.split("/").pop() || f, content: buf });
+    }
+    const sent = await sendResultEmail(contact.email, { brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "", replyTo: t?.email || "", lang: contact.lang, message, files: attachments, site: t?.siteUrl || "" }).catch(() => false);
     await addEvent(projectId, { kind: "result_emailed", actor: "system", data: { sent, files: files.length } }).catch(() => {});
   });
 }

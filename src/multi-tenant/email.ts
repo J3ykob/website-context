@@ -172,15 +172,15 @@ Whisp`,
 // owner's own address.
 const RESULT_TEXT: Record<string, { subject: string; intro: string; files: string; reply: string }> = {
   pl: { subject: "Wynik Twojego zapytania - {brand}", intro: "Oto odpowiedź na Twoje zapytanie w czacie na stronie {brand}:", files: "Pliki:", reply: "Możesz odpowiedzieć na tę wiadomość - trafi bezpośrednio do firmy." },
-  en: { subject: "The result of your request - {brand}", intro: "Here is the answer to your request in the chat on the {brand} website:", files: "Files:", reply: "You can reply to this email - it goes directly to the business." },
-  uk: { subject: "Результат вашого запиту - {brand}", intro: "Ось відповідь на ваш запит у чаті на сайті {brand}:", files: "Файли:", reply: "Ви можете відповісти на цей лист - він надійде безпосередньо до компанії." },
-  fr: { subject: "Le résultat de votre demande - {brand}", intro: "Voici la réponse à votre demande dans le chat du site {brand} :", files: "Fichiers :", reply: "Vous pouvez répondre à cet e-mail - il est envoyé directement à l'entreprise." },
-  de: { subject: "Das Ergebnis Ihrer Anfrage - {brand}", intro: "Hier ist die Antwort auf Ihre Anfrage im Chat auf der Website von {brand}:", files: "Dateien:", reply: "Sie können auf diese E-Mail antworten - sie geht direkt an das Unternehmen." },
+  en: { subject: "The result of your request - {brand}", intro: "Here is the answer to your request in the chat on the {brand} website:", files: "Attached:", reply: "You can reply to this email - it goes directly to the business." },
+  uk: { subject: "Результат вашого запиту - {brand}", intro: "Ось відповідь на ваш запит у чаті на сайті {brand}:", files: "У вкладенні:", reply: "Ви можете відповісти на цей лист - він надійде безпосередньо до компанії." },
+  fr: { subject: "Le résultat de votre demande - {brand}", intro: "Voici la réponse à votre demande dans le chat du site {brand} :", files: "En pièce jointe :", reply: "Vous pouvez répondre à cet e-mail - il est envoyé directement à l'entreprise." },
+  de: { subject: "Das Ergebnis Ihrer Anfrage - {brand}", intro: "Hier ist die Antwort auf Ihre Anfrage im Chat auf der Website von {brand}:", files: "Im Anhang:", reply: "Sie können auf diese E-Mail antworten - sie geht direkt an das Unternehmen." },
 };
 
 export async function sendResultEmail(
   email: string,
-  r: { brand: string; replyTo: string; lang: string; message: string; files: { name: string; url: string }[]; site: string },
+  r: { brand: string; replyTo: string; lang: string; message: string; files: { name: string; content: Buffer }[]; site: string },
 ): Promise<boolean> {
   if (process.env.CUSTOMER_RESULT_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
     console.log(`[email] result email to ${email} not sent - template awaiting approval`);
@@ -188,13 +188,15 @@ export async function sendResultEmail(
   }
   const t = RESULT_TEXT[r.lang] || RESULT_TEXT.en;
   const fill = (x: string) => x.split("{brand}").join(r.brand);
-  const files = r.files.length ? `\n${t.files}\n${r.files.map((f) => `${f.name}: ${f.url}`).join("\n")}\n` : "";
+  // The files themselves, attached (the text names them).
+  const files = r.files.length ? `\n${t.files} ${r.files.map((f) => f.name).join(", ")}\n` : "";
   try {
     const { error } = await resend.emails.send({
       from: FROM,
       to: email,
       replyTo: r.replyTo || "jakub@whisp.so",
       subject: fill(t.subject),
+      attachments: r.files.map((f) => ({ filename: f.name, content: f.content })),
       text: `${fill(t.intro)}
 
 ${r.message}
