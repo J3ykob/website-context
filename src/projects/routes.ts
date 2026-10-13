@@ -143,11 +143,25 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     // Text files the owner can edit before they go out.
     const contents = await Promise.all(forCustomer.map((f) => f.kind !== "bin" && f.size < 200_000 ? readFile(rv.projectId, f.path).catch(() => null) : Promise.resolve(null)));
     const questions = rv.runId === run?.runId ? await businessQuestions(rv.projectId, run).catch(() => []) : [];
+    // The businesses whose parts are in this result: each gets a colour on the page (own business first).
+    const proj = await getProject(rv.projectId);
+    const subs = ((proj?.memory.subRequests as any[]) || []);
+    const slugs = (proj?.memory.businessSlugs as Record<string, string>) || {};
+    const { businessLabel } = await import("./network.js");
+    const nameKeys = (tenantId: string) => [businessLabel(tenantId), ...Object.entries(slugs).filter(([, id]) => id === tenantId).map(([sl]) => sl), getTenant(tenantId)?.domain || ""].filter(Boolean);
+    const businesses = [
+      { tenantId: rv.tenantId, label: businessLabel(rv.tenantId), own: true, status: "own", question: "", answer: "", keys: nameKeys(rv.tenantId) },
+      ...subs.map((x) => ({ tenantId: x.tenantId, label: x.label, own: false, status: x.status, question: x.question, answer: "", keys: nameKeys(x.tenantId) })),
+    ];
+    for (const b of businesses) if (!b.own) {
+      const ans = proj ? (await timeline(proj.id).catch(() => [])).find((e) => e.who === "business" && e.text.startsWith(b.label)) : null;
+      b.answer = ans ? ans.text.slice(ans.text.indexOf("\n\n") + 2) : "";
+    }
     res.json({
       brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "",
       status: rv.status, draft: rv.draft, final: rv.final, note: rv.note, createdAt: rv.createdAt,
       request: request || "", history,
-      questions,
+      questions, businesses,
       files: forCustomer.map((f, k) => ({ path: f.path, name: f.path.split("/").pop(), size: f.size, content: contents[k] === null ? null : (contents[k] as string).startsWith("\uFEFF") ? (contents[k] as string).slice(1) : contents[k], url: `/api/review/${encodeURIComponent(rv.token)}/file?path=${encodeURIComponent(f.path)}` })),
       checks: requirements.filter((q) => q.id.startsWith("sys-agent")).map((q) => ({ text: q.text, status: q.status, evidence: q.evidence })),
     });

@@ -52,7 +52,7 @@ export async function reviewsForProject(projectId: string): Promise<Review[]> {
   return (await d1Query("SELECT * FROM project_reviews WHERE project_id = ? ORDER BY created_at", [projectId])).map(row);
 }
 
-export interface TimelineEntry { at: string; who: "customer" | "assistant" | "owner" | "business"; kind: string; text: string }
+export interface TimelineEntry { at: string; who: "customer" | "assistant" | "owner" | "business"; kind: string; text: string; tenantId?: string }
 
 /**
  * The project's history for the owner: the customer's messages and the assistant's replies, every
@@ -72,8 +72,8 @@ export async function timeline(projectId: string): Promise<TimelineEntry[]> {
   // Exchanges with other businesses of the network (asked by the assistant, their answers).
   const { businessLabel } = await import("./network.js");
   for (const e of d?.events || []) {
-    if (e.kind === "business_asked") out.push({ at: e.at, who: "assistant", kind: "business_asked", text: `Zapytanie do firmy ${businessLabel(String(e.data.to))}:\n\n${e.data.question}` });
-    if (e.kind === "business_answered") out.push({ at: e.at, who: "business", kind: String(e.data.status), text: `${businessLabel(e.actor)}${e.data.status === "answered" ? "" : " (brak odpowiedzi w terminie)"}:\n\n${e.data.answer}` });
+    if (e.kind === "business_asked") out.push({ at: e.at, who: "assistant", kind: "business_asked", tenantId: String(e.data.to), text: `Zapytanie do firmy ${businessLabel(String(e.data.to))}:\n\n${e.data.question}` });
+    if (e.kind === "business_answered") out.push({ at: e.at, who: "business", kind: String(e.data.status), tenantId: e.actor, text: `${businessLabel(e.actor)}${e.data.status === "answered" ? "" : " (brak odpowiedzi w terminie)"}:\n\n${e.data.answer}` });
   }
   // A project started outside the chat has no turns: its request stands for the customer.
   if (!out.length && d) {

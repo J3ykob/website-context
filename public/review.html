@@ -29,6 +29,13 @@
   .met { color:var(--ok); } .failed { color:var(--bad); } .open { color:var(--warn); }
   .pill { display:inline-block; border-radius:999px; padding:2px 10px; font-size:12px; border:1px solid var(--border); color:var(--muted); }
   .hidden { display:none; }
+  .chip { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:3px 10px; font-size:13px; margin:0 6px 6px 0; border:1px solid var(--border); }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex:none; }
+  .biz { border-left:3px solid; padding:6px 0 6px 12px; margin:10px 0; }
+  .biz .text { white-space:pre-wrap; font-size:14px; color:var(--muted); margin-top:4px; }
+  table.csv { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; display:block; overflow-x:auto; }
+  table.csv td, table.csv th { border-bottom:1px solid var(--border); padding:5px 8px; text-align:left; vertical-align:top; }
+  table.csv th { color:var(--dim); font-weight:500; }
   .entry { border-left:2px solid var(--border); padding:6px 0 6px 12px; margin:10px 0; }
   .entry.customer { border-color:#64748b; } .entry.assistant { border-color:var(--accent); } .entry.owner { border-color:var(--warn); } .entry.business { border-color:var(--ok); }
   .entry .who { font-size:12px; color:var(--dim); margin-bottom:2px; }
@@ -49,6 +56,11 @@
       <p class="label">Prośba klienta</p>
       <div class="pre" id="request"></div>
       <details style="margin-top:12px"><summary>Cała historia (klient, asystent, Twoje decyzje)</summary><div id="history" style="margin-top:8px"></div></details>
+    </div>
+
+    <div class="card hidden" id="biz-card">
+      <p class="label">Firmy w tym wyniku</p>
+      <div id="biz"></div>
     </div>
 
     <div class="card hidden" id="questions-card" style="border-color:rgba(245,158,11,.35)">
@@ -100,11 +112,58 @@
     var d = x.d;
     $("sub").textContent = (d.brand ? d.brand + " - " : "") + "asystent przygotował tę odpowiedź. Klient dostanie ją dopiero po Twojej decyzji.";
     $("request").textContent = d.request;
+    // One colour per business: the parts each business answered are marked with it everywhere.
+    var PALETTE = ["#3b82f6", "#10b981", "#f59e0b", "#a855f7", "#ec4899", "#14b8a6", "#f97316", "#84cc16"];
+    var colorOf = {}, labelOf = {}, keysOf = [];
+    (d.businesses || []).forEach(function (b, k) {
+      colorOf[b.tenantId] = PALETTE[k % PALETTE.length]; labelOf[b.tenantId] = b.label;
+      b.keys.forEach(function (key) { keysOf.push({ key: key.toLowerCase(), id: b.tenantId }); });
+    });
+    function bizOfText(t) {
+      var low = String(t || "").toLowerCase(), best = null;
+      keysOf.forEach(function (x) { if (x.key && low.indexOf(x.key) !== -1 && (!best || x.key.length > best.key.length)) best = x; });
+      return best ? best.id : null;
+    }
+    if ((d.businesses || []).length > 1) {
+      var STATUS_TXT = { own: "Twoja firma", answered: "odpowiedziała", no_answer: "brak odpowiedzi - do wyceny", waiting: "czeka na odpowiedź" };
+      d.businesses.forEach(function (b) {
+        var div = document.createElement("div"); div.className = "biz"; div.style.borderColor = colorOf[b.tenantId];
+        var head = document.createElement("div"); head.innerHTML = '<span class="dot"></span> ';
+        head.firstChild.style.background = colorOf[b.tenantId];
+        head.appendChild(document.createTextNode(b.label + " - " + (STATUS_TXT[b.status] || b.status)));
+        div.appendChild(head);
+        if (!b.own && b.question) { var q = document.createElement("div"); q.className = "text"; q.textContent = "Pytanie: " + b.question; div.appendChild(q); }
+        if (!b.own && b.answer) { var a = document.createElement("div"); a.className = "text"; a.style.color = "var(--text)"; a.textContent = "Odpowiedź: " + b.answer; div.appendChild(a); }
+        $("biz").appendChild(div);
+      });
+      show("biz-card", true);
+    }
+    // CSV previews: each row tinted with the colour of the business it comes from.
+    function csvTable(text) {
+      var rows = [], row = [], cell = "", q = false;
+      for (var i = 0; i < text.length; i++) {
+        var ch = text[i];
+        if (q) { if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') q = false; else cell += ch; }
+        else if (ch === '"') q = true; else if (ch === ";") { row.push(cell); cell = ""; }
+        else if (ch === "\n") { row.push(cell.replace("\r", "")); rows.push(row); row = []; cell = ""; } else cell += ch;
+      }
+      if (cell || row.length) { row.push(cell); rows.push(row); }
+      var t = document.createElement("table"); t.className = "csv";
+      rows.forEach(function (r, k) {
+        var tr = document.createElement("tr");
+        var biz = k ? bizOfText(r.join(" ")) : null;
+        if (biz) { tr.style.background = colorOf[biz] + "1f"; tr.style.boxShadow = "inset 3px 0 0 " + colorOf[biz]; }
+        r.forEach(function (c) { var td = document.createElement(k ? "td" : "th"); td.textContent = c; tr.appendChild(td); });
+        t.appendChild(tr);
+      });
+      return t;
+    }
     var WHO = { customer: "Klient", assistant: "Asystent", owner: "Ty (firma)", business: "Firma z sieci" };
     (d.history || []).forEach(function (e) {
       var div = document.createElement("div"); div.className = "entry " + e.who;
+      if (e.tenantId && colorOf[e.tenantId]) div.style.borderColor = colorOf[e.tenantId];
       var who = document.createElement("div"); who.className = "who";
-      who.textContent = WHO[e.who] + " - " + new Date(e.at).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" });
+      who.textContent = (e.who === "business" && labelOf[e.tenantId] ? labelOf[e.tenantId] : WHO[e.who]) + " - " + new Date(e.at).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" });
       var t = document.createElement("div"); t.className = "text"; t.textContent = e.text;
       div.appendChild(who); div.appendChild(t); $("history").appendChild(div);
     });
@@ -115,6 +174,7 @@
         var box = document.createElement("div"); box.style.margin = "8px 0 14px";
         var a = document.createElement("a"); a.href = f.url; a.textContent = f.name;
         box.appendChild(a);
+        if (f.content !== null && f.name.toLowerCase().slice(-4) === ".csv") box.appendChild(csvTable(f.content));
         if (f.content !== null) {
           var ta = document.createElement("textarea"); ta.className = "small file-edit"; ta.value = f.content; ta.dataset.path = f.path; ta.dataset.orig = f.content; ta.style.marginTop = "6px"; ta.style.fontFamily = "ui-monospace, Menlo, monospace"; ta.style.fontSize = "13px";
           box.appendChild(ta);
