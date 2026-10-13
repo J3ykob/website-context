@@ -16,13 +16,20 @@ const D1_BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/
 type QueryFn = (sql: string, params?: any[]) => Promise<any[]>;
 const realQuery: QueryFn = async (sql, params = []) => {
   const { getCfToken } = await import("./cf-auth.js"); // lazy: avoid R2 boot-throw in tests
-  const resp = await fetch(D1_BASE, {
+  const send = () => fetch(D1_BASE, {
     // A stalled Cloudflare API call must not hang the request that made it.
     signal: AbortSignal.timeout(Number(process.env.D1_TIMEOUT_MS) || 15000),
     method: "POST",
     headers: { Authorization: `Bearer ${getCfToken()}`, "Content-Type": "application/json" },
     body: JSON.stringify({ sql, params }),
   });
+  let resp = await send();
+  // The Cloudflare API sometimes answers a valid token with 401, or rate-limits (429); the query did not
+  // run, so one retry is safe (other errors are not retried: a write may have been applied).
+  if (resp.status === 401 || resp.status === 429) {
+    await new Promise((ok) => setTimeout(ok, 800));
+    resp = await send();
+  }
   if (!resp.ok) throw new Error(`D1 query failed (${resp.status}): ${(await resp.text()).slice(0, 200)}`);
   const data = (await resp.json()) as any;
   return data.result?.[0]?.results || [];

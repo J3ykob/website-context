@@ -322,7 +322,11 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
     await import("./conversation.js").then((m) => m.onRunFinished(id)).catch((e) => console.warn(`[project-agent] ${id} after-run: ${e?.message || e}`));
     return done;
   };
-  if (ok || state.attempt > 1) return finished();
+  // Requests to other businesses went out: gaps are expected until they answer, and the run that follows
+  // their answers is verified again - no repair pass now.
+  const { REQUESTS_FILE } = await import("./network.js");
+  const asking = result.state === "succeeded" && result.files.some((f) => f.path === REQUESTS_FILE) && !(await getProject(id))?.memory.networkAsked;
+  if (ok || asking || state.attempt > 1) return finished();
   // One more attempt, started before this run is marked finished (so nobody delivers the failure in
   // between): a run that failed goes to the fallback model; a run whose outputs did not verify gets a
   // repair pass on the same model, told exactly what to fix (its files are in the repository now).
@@ -343,7 +347,9 @@ async function repairNotes(id: string, r: RunResult, missing: string[]): Promise
   if (r.unknownPlaceholders.length) notes.push(`- Użyto znaczników, które nie istnieją: ${r.unknownPlaceholders.join(", ")}. Usuń je (nie podpisuj wiadomości, nie wstawiaj danych, których nie ma).`);
   if (r.alteredPlaceholders.length) notes.push(`- Zmienione znaczniki: ${r.alteredPlaceholders.join(", ")}. Przepisz je dokładnie, z nawiasami.`);
   for (const q of await listRequirements(id)) {
-    if (q.status === "failed" && q.id !== "sys-agent-files" && q.id !== "sys-agent-pii" && q.id !== "sys-agent-run") notes.push(`- Niespełnione: ${q.text} (${q.evidence})`);
+    // Only this agent's own checks (other project steps, e.g. a quick estimate, add their own requirements).
+    const own = (q.id.startsWith("sys-agent") || q.id.startsWith("spec-")) && !["sys-agent-files", "sys-agent-pii", "sys-agent-run"].includes(q.id);
+    if (q.status === "failed" && own) notes.push(`- Niespełnione: ${q.text} (${q.evidence})`);
   }
   return notes;
 }

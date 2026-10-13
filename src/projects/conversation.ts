@@ -227,6 +227,8 @@ export async function businessQuestions(projectId: string, run?: AgentRunState):
 /** The owner reviews first when the business chose so, or whenever the agent has questions for it. */
 async function ownerFirst(projectId: string, tenantId: string, run: AgentRunState): Promise<boolean> {
   if (reviewMode(tenantId) === "approve" || run.needsOwner) return true;
+  // A result that failed a check (but exists) is the owner's call, not a dead end for the customer.
+  if (run.status === "failed" && !run.runId.startsWith("failed-") && ((await readFile(projectId, "odpowiedz.txt").catch(() => null)) || "").trim()) return true;
   // Once the owner has stepped in (answered questions, asked for changes), new versions come back to them.
   const p = await getProject(projectId);
   if (p?.memory.ownerLoop) return true;
@@ -249,7 +251,9 @@ export async function onRunFinished(projectId: string): Promise<void> {
   const files = (s.files || []).filter((f) => f.startsWith(`${CUSTOMER_DIR}/`));
   const draft = s.status === "done" ? ((await readFile(projectId, "odpowiedz.txt")) || "").trim() : "";
   if (await ownerFirst(projectId, p.initiatorTenantId, s)) {
-    if (!(await reviewForRun(projectId, s.runId))) await openReview(projectId, p.initiatorTenantId, s.runId, draft, files);
+    // The owner sees whatever the agent wrote, also when a check failed (the page shows which).
+    const forOwner = draft || (s.runId.startsWith("failed-") ? "" : ((await readFile(projectId, "odpowiedz.txt").catch(() => null)) || "").trim());
+    if (!(await reviewForRun(projectId, s.runId))) await openReview(projectId, p.initiatorTenantId, s.runId, forOwner, files);
     return;
   }
   // A business answering another business's request without review: the answer goes straight back.
@@ -283,7 +287,8 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   // goes out once the owner decides.
   const tenantId = p?.initiatorTenantId || "";
   if (tenantId && (await ownerFirst(projectId, tenantId, s))) {
-    const rv = (await reviewForRun(projectId, s.runId)) || (await openReview(projectId, tenantId, s.runId, draft, files));
+    const forOwner = draft || (s.runId.startsWith("failed-") ? "" : ((await readFile(projectId, "odpowiedz.txt").catch(() => null)) || "").trim());
+    const rv = (await reviewForRun(projectId, s.runId)) || (await openReview(projectId, tenantId, s.runId, forOwner, files));
     if (rv.status === "pending" || rv.status === "changes_requested") {
       const lang = await replyLanguage(projectId);
       const text = REVIEWING[lang] || REVIEWING.en;
@@ -293,7 +298,7 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
       }
       return { status: "review", message: text, projectId };
     }
-    if (rv.status === "approved") message = (rv.final || draft).trim();
+    if (rv.status === "approved") message = (rv.final || rv.draft || draft).trim();
     else { message = rv.final.trim(); files = []; }
   }
   if (!message) message = COULD_NOT[await replyLanguage(projectId)] || COULD_NOT.en;
@@ -302,7 +307,9 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
     await onDeliver(message).catch(() => {});
     await addEvent(projectId, { kind: "delivered", actor: "chat", data: { runId: s.runId, status: s.status, files } }).catch(() => {});
   }
-  return { status: s.status === "done" || message !== draft ? "done" : "failed", message, files, projectId };
+  // Done when the customer gets real content: the agent's reply, or the owner's approved / own text.
+  const ownerText = message !== draft && message !== (COULD_NOT[await replyLanguage(projectId)] || COULD_NOT.en);
+  return { status: (s.status === "done" && !!draft) || ownerText ? "done" : "failed", message, files, projectId };
 }
 
 async function replyLanguage(projectId: string): Promise<string> {

@@ -16,6 +16,7 @@ export type Audience = "customer" | "business" | "internal";
 export interface Output { path: string; format: "txt" | "md" | "csv" | "json"; audience: Audience; description: string }
 export interface Spec {
   version: number;
+  request: string; // the requester's latest message, verbatim (set by code, never by the model)
   goal: string;
   language: string;
   facts: string[];
@@ -65,11 +66,16 @@ Rules:
 - The text for the requester is always odpowiedz.txt (audience customer for a customer, business for a business).
 - Files for the customer go to ${CUSTOMER_DIR}/ (csv for tables, md for documents).
 - Inputs: only files listed in the inventory.
-- Facts: only what was stated; if something essential is missing, the agent will use a stated, reasonable assumption - do not invent values here.
-- Acceptance: concrete and checkable (e.g. "every requested item appears in the table with a value or status do_wyceny", "the total equals the sum of the priced lines").`;
+- Facts: only what was stated, copied in the requester's own words and language (quote them); never translate,
+  paraphrase or rename products or terms - a wrong rewording changes the request. If something essential is
+  missing, the agent will use a stated, reasonable assumption - do not invent values here.
+- Goal: describe the request without naming products in other words than the requester used.
+- Acceptance: must be achievable with the data that exists - a part the data does not price or settle is
+  marked as to be quoted / unknown, and the criteria must accept that (e.g. "each line has a value or the
+  status do_wyceny", never "each line has a price"). Concrete and checkable (e.g. "every requested item appears in the table with a value or status do_wyceny", "the total equals the sum of the priced lines").`;
 
 /** Validates the planner's JSON against the inventory; repairs what code can, reports the rest. */
-export function validateSpec(raw: any, kind: ProjectKind, paths: Set<string>): { spec: Omit<Spec, "version">; problems: string[] } {
+export function validateSpec(raw: any, kind: ProjectKind, paths: Set<string>): { spec: Omit<Spec, "version" | "request">; problems: string[] } {
   const problems: string[] = [];
   const str = (v: any, max: number) => String(v ?? "").trim().slice(0, max);
   const safe = (p: string) => p.split("/").filter((s) => s && s !== "." && s !== "..").join("/");
@@ -107,9 +113,9 @@ function parseJson(t: string): any {
 async function llm(system: string, user: string): Promise<string> {
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    signal: AbortSignal.timeout(Number(process.env.OPENROUTER_TIMEOUT_MS) || 60_000),
+    signal: AbortSignal.timeout(Number(process.env.PLANNER_TIMEOUT_MS) || 90_000),
     headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: process.env.PLANNER_MODEL || "qwen/qwen3-235b-a22b-2507", temperature: 0, max_tokens: 1800, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
+    body: JSON.stringify({ model: process.env.PLANNER_MODEL || "qwen/qwen3-235b-a22b-2507", temperature: 0, max_tokens: 1500, response_format: { type: "json_object" }, provider: { sort: "throughput" }, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
   });
   if (!r.ok) throw new Error(`planner ${r.status}: ${(await r.text()).slice(0, 200)}`);
   return ((await r.json()) as any).choices?.[0]?.message?.content || "";
@@ -142,7 +148,8 @@ export async function plan(projectId: string, brief: string, kind: ProjectKind, 
     v = validateSpec(raw, kind, inv.paths);
   }
   if (!v.spec.goal) v.spec.goal = brief.slice(0, 300);
-  const spec: Spec = { version: (prev?.version || 0) + 1, ...v.spec, ...(change ? { basis: change.slice(0, 1000) } : {}) };
+  const request = ((await readFile(projectId, "request.txt").catch(() => null)) || "").trim().slice(0, 3000);
+  const spec: Spec = { version: (prev?.version || 0) + 1, request, ...v.spec, ...(change ? { basis: change.slice(0, 1000) } : {}) };
   const body = JSON.stringify(spec, null, 1);
   await writeFile(projectId, "plan.json", body, "json", "planner");
   await writeFile(projectId, `plan/v${spec.version}.json`, body, "json", "planner");
@@ -156,7 +163,7 @@ export function renderSpec(s: Spec): string {
   const out = s.outputs.map((o) => `- ${o.path} [${o.format}, dla: ${o.audience === "customer" ? "klienta" : o.audience === "business" ? "firmy pytającej" : "wewnętrzny"}] - ${o.description}`).join("\n");
   return `
 ## Specyfikacja zadania (v${s.version}) - wykonaj dokładnie
-Cel: ${s.goal}
+${s.request ? `Prośba zlecającego (dosłownie - rozstrzyga w razie rozbieżności z poniższym streszczeniem; nazwy produktów rozumiej tak, jak je napisał):\n"""\n${s.request}\n"""\n` : ""}Cel: ${s.goal}
 Język tekstu dla odbiorcy: ${s.language}
 ${s.facts.length ? `Wymagania podane przez zlecającego:\n${s.facts.map((f) => `- ${f}`).join("\n")}\n` : ""}${s.inputs.length ? `Dane wejściowe:\n${s.inputs.map((i) => `- ${i.path}: ${i.use}`).join("\n")}\n` : ""}Wyniki (dokładnie te pliki):
 ${out}
@@ -173,11 +180,23 @@ export async function planAndRun(projectId: string, brief: string, actor: string
   const p = await getProject(projectId);
   if (!p) return { error: "Project not found." };
   await prepareInputs(projectId);
-  try {
-    await plan(projectId, brief, p.type === BUSINESS_REQUEST ? "business_request" : "customer", change);
-  } catch (e) {
-    return { error: `planning failed: ${(e as Error).message}` };
+  // Planning must not cost the customer the result: one retry (transient model / D1 errors), then the
+  // agent runs on the brief alone (the previous spec, if any, is dropped so it cannot mislead).
+  const kind = p.type === BUSINESS_REQUEST ? "business_request" : "customer";
+  let planned = false;
+  for (let attempt = 1; attempt <= 2 && !planned; attempt++) {
+    try {
+      await plan(projectId, brief, kind, change);
+      planned = true;
+    } catch (e) {
+      console.warn(`[plan] ${projectId}: attempt ${attempt} failed: ${(e as Error).message}`);
+      if (attempt === 1) await new Promise((ok) => setTimeout(ok, 3000));
+    }
   }
-  const r = await startAgentRun(projectId, "", actor);
+  if (!planned) {
+    await setMemory(projectId, { plan: null }).catch(() => {});
+    await addEvent(projectId, { kind: "plan_failed", actor: "planner", data: {} }).catch(() => {});
+  }
+  const r = await startAgentRun(projectId, planned ? "" : [brief, change].filter(Boolean).join("\n\n"), actor);
   return "error" in r ? r : { runId: r.runId };
 }
