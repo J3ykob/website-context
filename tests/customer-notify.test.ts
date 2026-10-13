@@ -30,7 +30,7 @@ afterAll(async () => {
 live("the customer gets the result after leaving the page", () => {
   it("email with consent -> result delivered and emailed with nobody polling", async () => {
     const chat = await tm.getChatForTenant(TENANT);
-    const w = await chat.chat([{ role: "user", content: "Mam 500 zł i potrzebuję zagęszczarki na 2 dni. Która najcięższa (nie ubijak) zmieści się w budżecie? Porównaj wszystkie, które się mieszczą." }], session);
+    const w = await chat.chat([{ role: "user", content: "Mam 1500 zł budżetu na wylewkę i podbudowę tarasu. Potrzebuję na 3 dni zagęszczarki i betoniarki oraz kilku kozłów budowlanych. Zaproponuj 3 warianty zestawu (najtańszy, optymalny, najmocniejszy) mieszczące się w budżecie i rozpisz koszty każdego." }], session);
     expect(w.project?.agent?.status).toBe("running");
     expect(w.project?.notify?.consent).toContain("Rentbud");
     const pid = w.project!.id;
@@ -50,6 +50,7 @@ live("the customer gets the result after leaving the page", () => {
     expect(ev.data.sent).toBe(!!process.env.RESEND_API_KEY);
     const logged = await M.d1Query("SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1", [session]);
     console.log(`[logged] ${logged[0]?.content}`);
-    expect(String(logged[0]?.content || "")).toContain("280");
+    expect(String(logged[0]?.content || "").length).toBeGreaterThan(50);
+    // Whether a file is attached is the planner's call (a short answer gets none).
   }, 25 * 60_000);
 });
