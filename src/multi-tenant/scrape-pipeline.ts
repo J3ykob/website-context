@@ -288,6 +288,12 @@ export async function scrapeTenant(
       const llm = async (system: string, user: string, maxTokens = 3000) => (await or.chat([{ role: "system", content: system }, { role: "user", content: user }], { maxTokens })).content;
       const idx = await offerIndexer.finish(llm);
       const prev = await loadOffer(tenantId);
+      // Offer pages found but nothing extracted (e.g. the model provider failing): keep the previous index
+      // rather than wiping it.
+      if (!idx.items.length && idx.stats.offerPages > 0 && prev.items.some((i) => i.source === "website")) {
+        console.warn(`[scrape-pipeline] Offer index: 0 items from ${idx.stats.offerPages} offer pages - previous index (${prev.items.length} items) kept`);
+        throw new Error("empty extraction");
+      }
       // Items found on a previous scrape but not now are dropped unless the owner touched them.
       const kept = prev.items.filter((i) => i.source !== "website" || i.owner_set.length > 0);
       await saveOffer(tenantId, mergeItems(kept, idx.items), idx.businessTypes.length ? idx.businessTypes : prev.businessTypes);
