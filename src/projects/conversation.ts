@@ -7,8 +7,8 @@
  * then arrives in the same chat when the agent is done (the widget polls /api/chat/agent).
  */
 import { createProject, findOpenProject, addEvent, getProject, setMemory } from "./store.js";
-import { writeFile, readFile, listFiles } from "./repo.js";
-import { agentEnabled, startAgentRun, agentStatus, type AgentRunState } from "./agent.js";
+import { writeFile, readFile } from "./repo.js";
+import { agentEnabled, agentStatus, type AgentRunState } from "./agent.js";
 import { jevAsk } from "../llm/jev.js";
 import { reviewMode, reviewForRun, openReview } from "./review.js";
 import { BUSINESS_QUESTIONS } from "./agent.js";
@@ -94,7 +94,7 @@ Pytania do firmy - tylko w ${BUSINESS_QUESTIONS}, nigdy w odpowiedzi dla klienta
  * Starts the agent on the conversation's latest message. `knowledge` = passages from the business's
  * own site that retrieval found for the message (public data, given to the agent unmasked).
  */
-export async function startConversationAgent(projectId: string, transcript: { role: string; content: string }[], knowledge: string[]): Promise<AgentRunState | { error: string }> {
+export async function startConversationAgent(projectId: string, transcript: { role: string; content: string }[], knowledge: string[]): Promise<{ runId: string } | { error: string }> {
   const last = [...transcript].reverse().find((m) => m.role === "user")?.content || "";
   const lines = transcript.slice(-20).map((m) => `**${m.role === "user" ? "Klient" : "Asystent"}:** ${m.content}`);
   await writeFile(projectId, "rozmowa.md", `# Rozmowa\n\n${lines.join("\n\n")}\n`, "md", "chat");
@@ -106,7 +106,8 @@ export async function startConversationAgent(projectId: string, transcript: { ro
   await writeFile(projectId, BUSINESS_QUESTIONS, "", "md", "system");
   if (knowledge.length) await writeFile(projectId, `${KNOWLEDGE_DIR}/strona.md`, `# Informacje z witryny firmy (do tej wiadomości)\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system");
   await setMemory(projectId, { baseInstruction: INSTRUCTION, networkAsked: false, networkContinued: false, subRequests: [] });
-  return startAgentRun(projectId, INSTRUCTION, "chat");
+  const { planAndRun } = await import("./plan.js");
+  return planAndRun(projectId, INSTRUCTION, "chat");
 }
 
 // What the visitor sees while the agent works, and when it could not finish (by language).
@@ -177,9 +178,9 @@ export async function reworkWithGuidance(projectId: string, note: string): Promi
   if (previous) await writeFile(projectId, `historia/odpowiedz-${at}.txt`, previous, "txt", "system");
   await writeFile(projectId, "odpowiedz.txt", "", "txt", "system");
   await writeFile(projectId, BUSINESS_QUESTIONS, "", "md", "system");
+  const { planAndRun } = await import("./plan.js");
   const base = String((await getProject(projectId))?.memory.baseInstruction || INSTRUCTION);
-  const instruction = `${base}\n\nFirma przejrzała poprzednią wersję i prosi o zmiany: uwzględnij uwagi z uwagi_firmy.md (tam też poprzednia wersja odpowiedzi). Uwagi firmy mają pierwszeństwo.`;
-  void startAgentRun(projectId, instruction, "business").then(async (r) => {
+  void planAndRun(projectId, base, "business", `Firma przejrzała poprzednią wersję (uwagi_firmy.md) i prosi o zmiany - mają pierwszeństwo:\n${note}`).then(async (r) => {
     if ("error" in r) await setMemory(projectId, { agentRun: { runId: `failed-${at}`, status: "failed", error: r.error, startedAt: new Date(at).toISOString(), attempt: 1, model: "", instruction: "" } });
   }).catch(() => {});
 }

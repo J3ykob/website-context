@@ -21,7 +21,7 @@
 import type { Express, RequestHandler } from "express";
 import { projectsForTenant, projectDetail } from "./store.js";
 import { listFiles, listRequirements, readFile, readFileBuffer, writeFile } from "./repo.js";
-import { agentEnabled, agentStatus, startAgentRun } from "./agent.js";
+import { agentEnabled, agentStatus } from "./agent.js";
 import { agentDelivery, reworkWithGuidance, businessQuestions, CUSTOMER_DIR } from "./conversation.js";
 import { reviewByToken, decide, reviewMode, timeline } from "./review.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
@@ -67,7 +67,8 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     if (!agentEnabled()) { res.status(503).json({ error: "The project agent is not available." }); return; }
     const instruction = String(req.body?.instruction || "").trim();
     if (!instruction || instruction.length > 4000) { res.status(400).json({ error: "Describe the task (up to 4000 characters)." }); return; }
-    const r = await startAgentRun(d.project.id, instruction, tid(req)).catch((e: any) => ({ error: String(e?.message || e) }));
+    const { planAndRun } = await import("./plan.js");
+    const r = await planAndRun(d.project.id, instruction, tid(req)).catch((e: any) => ({ error: String(e?.message || e) }));
     if ("error" in r) { res.status(409).json(r); return; }
     res.status(202).json(r);
   });
@@ -159,11 +160,13 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     }
     res.json({
       brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "",
-      status: rv.status, draft: rv.draft, final: rv.final, note: rv.note, createdAt: rv.createdAt,
+      status: rv.status, draft: ((proj?.memory.ownerDraft as any)?.runId === rv.runId ? (proj?.memory.ownerDraft as any).text : rv.draft), final: rv.final, note: rv.note, createdAt: rv.createdAt,
+      chat: ((proj?.memory.ownerChat as any[]) || []).filter((t) => Date.parse(t.at) >= Date.parse(rv.createdAt)),
       request: request || "", history,
       questions, businesses,
       files: forCustomer.map((f, k) => ({ path: f.path, name: f.path.split("/").pop(), size: f.size, content: contents[k] === null ? null : (contents[k] as string).startsWith("\uFEFF") ? (contents[k] as string).slice(1) : contents[k], url: `/api/review/${encodeURIComponent(rv.token)}/file?path=${encodeURIComponent(f.path)}` })),
-      checks: requirements.filter((q) => q.id.startsWith("sys-agent")).map((q) => ({ text: q.text, status: q.status, evidence: q.evidence })),
+      plan: (await getProject(rv.projectId))?.memory.plan || null,
+      checks: requirements.filter((q) => q.id.startsWith("sys-agent") || q.id.startsWith("spec-")).map((q) => ({ text: q.text, status: q.status, evidence: q.evidence })),
     });
   });
 
@@ -217,5 +220,22 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
       if (proj?.type === BUSINESS_REQUEST) await settle(rv.projectId, (rv.final || rv.draft).trim(), (rv.final || rv.draft).trim() ? "answered" : "no_answer");
     }
     res.json({ ok: true, status: rv.status });
+  });
+
+  // The owner's chat with the assistant about the result (src/projects/owner-chat.ts).
+  app.post("/api/review/:token/chat", async (req, res) => {
+    const rv = await reviewByToken(String(req.params.token)).catch(() => null);
+    const message = String(req.body?.message || "").trim();
+    if (!rv) { res.status(404).json({ error: "This link has expired or does not exist." }); return; }
+    if (rv.status !== "pending") { res.status(409).json({ error: "This result was already decided." }); return; }
+    if (!message || message.length > 4000) { res.status(400).json({ error: "Empty or too long message." }); return; }
+    try {
+      const { ownerChat } = await import("./owner-chat.js");
+      const r = await ownerChat(rv, message);
+      res.json({ reply: r.reply, draft: r.draft, rework: !!r.rework });
+    } catch (e: any) {
+      console.warn(`[owner-chat] ${rv.projectId}: ${e?.message || e}`);
+      res.status(502).json({ error: "The assistant is not available right now - try again." });
+    }
   });
 }

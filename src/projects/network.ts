@@ -13,7 +13,6 @@
  */
 import { createProject, getProject, setMemory, addEvent, addParticipant } from "./store.js";
 import { readFile, writeFile } from "./repo.js";
-import { startAgentRun } from "./agent.js";
 import { getTenant } from "../multi-tenant/d1-registry.js";
 
 export const REQUESTS_FILE = "zapytania_do_firm.json";
@@ -82,7 +81,8 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
     const knowledge = knowledgeProvider ? await knowledgeProvider(tenantId, question).catch(() => []) : [];
     if (knowledge.length) await writeFile(sub.id, "wiedza/strona.md", `# Informacje z witryny firmy\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system");
     await setMemory(sub.id, { baseInstruction: SUB_INSTRUCTION });
-    const started = await startAgentRun(sub.id, SUB_INSTRUCTION, `business:${parent.initiatorTenantId}`);
+    const { planAndRun } = await import("./plan.js");
+    const started = await planAndRun(sub.id, SUB_INSTRUCTION, `business:${parent.initiatorTenantId}`);
     subs.push({ id: sub.id, tenantId, label: businessLabel(tenantId), question, status: "waiting", at: new Date().toISOString() });
     await addEvent(parentId, { kind: "business_asked", actor: "agent", data: { to: tenantId, project: sub.id, question: question.slice(0, 1000), started: !("error" in started) } });
     if ("error" in started) await settle(sub.id, "", "no_answer");
@@ -121,8 +121,8 @@ async function continueParent(parentId: string): Promise<void> {
   if (!p || p.memory.networkContinued) return;
   await setMemory(parentId, { networkContinued: true, agentPending: Date.now() });
   const base = String(p.memory.baseInstruction || "");
-  const instruction = `${base}\n\nFirmy z sieci odpowiedziały na Twoje zapytania - odpowiedzi są w ${ANSWERS_DIR}/. Dokończ wynik dla klienta z ich uwzględnieniem: ceny i warunki podane przez firmy traktuj jak dane z cennika (z nazwą firmy). Części, na które firma nie odpowiedziała albo nie podała ceny, oznacz jako do wyceny. Nie wysyłaj nowych zapytań do firm.`;
-  const r = await startAgentRun(parentId, instruction, "system");
+  const { planAndRun } = await import("./plan.js");
+  const r = await planAndRun(parentId, base, "system", `Firmy z sieci odpowiedziały na zapytania - odpowiedzi są w ${ANSWERS_DIR}/ (dodaj je do danych wejściowych). Wynik dla klienta ma je uwzględnić: ceny i warunki podane przez firmy traktować jak dane z cennika (z nazwą firmy); części bez odpowiedzi lub bez ceny - do wyceny. Bez nowych zapytań do firm (bez pliku ${REQUESTS_FILE}).`);
   if ("error" in r) console.warn(`[network] ${parentId}: could not continue: ${r.error}`);
 }
 

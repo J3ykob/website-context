@@ -175,6 +175,28 @@ function fileSlug(s: string): string {
 }
 
 /** Starts the agent on a project. Returns the run state, or an error message when it cannot start. */
+/**
+ * Puts the businesses' data in the repository (public, sent unmasked): offers as price lists and the
+ * network directory. A business answering a request sees only its own; the customer's project the whole
+ * network of the business the customer talks to. Reused for 10 minutes (planner and run share it).
+ */
+export async function prepareInputs(projectId: string): Promise<{ allow: string[]; catalog: string[] }> {
+  const project = await getProject(projectId);
+  if (!project) return { allow: [], catalog: [] };
+  const cached = project.memory.inputs as { at: number; allow: string[]; catalog: string[] } | undefined;
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached;
+  const { networkMembers, BUSINESS_REQUEST } = await import("./network.js");
+  const tenantIds = project.type === BUSINESS_REQUEST ? [project.initiatorTenantId]
+    : [...new Set([project.initiatorTenantId, ...(await listParticipants(projectId)).map((p) => p.tenantId), ...(await networkMembers(project.initiatorTenantId).catch(() => [])).map((m) => m.tenantId)])];
+  const offers = await priceLists(project, tenantIds);
+  for (const [name, body] of Object.entries(offers.files)) await writeFile(projectId, `${PRICE_DIR}/${name}`, body, "csv", "system");
+  if (Object.keys(offers.files).length) await writeFile(projectId, `${PRICE_DIR}/README.md`, PRICE_README, "md", "system");
+  if (!offers.files["firmy.md"]) await writeFile(projectId, `${PRICE_DIR}/firmy.md`, "", "md", "system");
+  const inputs = { at: Date.now(), allow: offers.allow, catalog: offers.catalog.slice(0, 1500) };
+  await setMemory(projectId, { businessSlugs: offers.slugs, inputs });
+  return inputs;
+}
+
 export async function startAgentRun(projectId: string, instruction: string, actor: string, attempt = 1, model = primaryModel(), retryOf?: string): Promise<AgentRunState | { error: string }> {
   if (!agentEnabled()) return { error: "The project agent is not configured." };
   const project = await getProject(projectId);
@@ -185,16 +207,7 @@ export async function startAgentRun(projectId: string, instruction: string, acto
 
   // The businesses' current offers become part of the repository (what the agent priced from), sent
   // unmasked: they are public data. Everything else may hold customer data and is masked by the runner.
-  // Which businesses' data the agent sees: a business answering a request - only its own; the
-  // customer's project - the whole network of the business the customer talks to.
-  const { networkMembers, BUSINESS_REQUEST, REQUESTS_FILE } = await import("./network.js");
-  const tenantIds = project.type === BUSINESS_REQUEST ? [project.initiatorTenantId]
-    : [...new Set([project.initiatorTenantId, ...(await listParticipants(projectId)).map((p) => p.tenantId), ...(await networkMembers(project.initiatorTenantId).catch(() => [])).map((m) => m.tenantId)])];
-  const offers = await priceLists(project, tenantIds);
-  await setMemory(projectId, { businessSlugs: offers.slugs });
-  for (const [name, body] of Object.entries(offers.files)) await writeFile(projectId, `${PRICE_DIR}/${name}`, body, "csv", "system");
-  if (Object.keys(offers.files).length) await writeFile(projectId, `${PRICE_DIR}/README.md`, PRICE_README, "md", "system");
-  if (!offers.files["firmy.md"]) await writeFile(projectId, `${PRICE_DIR}/firmy.md`, "", "md", "system");
+  const offers = await prepareInputs(projectId);
   const files: Record<string, string> = {};
   const publicFiles: Record<string, string> = {};
   for (const f of await listFiles(projectId)) {
@@ -205,11 +218,15 @@ export async function startAgentRun(projectId: string, instruction: string, acto
     if (f.path.startsWith(`${PRICE_DIR}/`) || f.path.startsWith("wiedza/")) publicFiles[f.path] = withoutBom(body);
     else files[f.path] = withoutBom(body);
   }
-  const prompt = `Zadanie projektu "${project.title || project.type}":\n${instruction}\n\nZasady pracy są w AGENTS.md.`;
+  // A planned project: the frozen spec is part of the harness's system prompt; the prompt only points to it.
+  const spec = project.memory.plan as import("./plan.js").Spec | undefined;
+  const { renderSpec } = await import("./plan.js");
+  const rules = spec ? RULES + renderSpec(spec) : RULES;
+  const prompt = spec ? `Wykonaj specyfikację z AGENTS.md (v${spec.version}).${instruction ? `\n\n${instruction}` : ""}` : `Zadanie projektu "${project.title || project.type}":\n${instruction}\n\nZasady pracy są w AGENTS.md.`;
 
   const r = await runner(`/projects/${encodeURIComponent(projectId)}/run`, {
     method: "POST",
-    body: JSON.stringify({ prompt, rules: RULES, files, publicFiles, keepMasked: [REQUESTS_FILE], model, maxSteps: 60, timeoutSec: 900, maxCostUsd: 0.5, allow: offers.allow, catalog: offers.catalog }),
+    body: JSON.stringify({ prompt, rules, files, publicFiles, keepMasked: [(await import("./network.js")).REQUESTS_FILE], model, maxSteps: 60, timeoutSec: 900, maxCostUsd: 0.5, allow: offers.allow, catalog: offers.catalog }),
   }).catch((e) => ({ ok: false, status: 0, text: async () => String(e?.message || e) }) as unknown as Response);
   if (r.status === 409) return { error: "The agent is already working on this project." };
   if (!r.ok) return { error: `The agent could not start (${r.status}): ${(await r.text()).slice(0, 200)}` };
@@ -437,7 +454,8 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
 
   // A requested file counts when the agent wrote it or it exists (non-empty) in the repository (an
   // instruction also names its input files).
-  const wanted = requestedFiles(instruction).filter((p) => p !== BUSINESS_QUESTIONS);
+  const spec = (await getProject(id))?.memory.plan as import("./plan.js").Spec | undefined;
+  const wanted = (spec ? spec.outputs.map((o) => o.path) : requestedFiles(instruction)).filter((p) => p !== BUSINESS_QUESTIONS);
   const missing: string[] = [];
   for (const p of wanted) {
     if (r.files.some((f) => f.path === p && f.size > 0)) continue;
@@ -514,6 +532,18 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
       await req("sys-agent-reply-total", "The text for the customer states the total of the produced tables.", "code");
       const has = numbersIn(reply).some((n) => totals.some((t) => Math.abs(n - t) < 0.005));
       results.push({ reqId: "sys-agent-reply-total", status: has ? "met" : "failed", evidence: `totals ${totals.join(", ")} ${has ? "stated" : "not stated"}` });
+    }
+  }
+  // The spec's acceptance criteria, judged by Jev against the outputs (trimmed).
+  if (spec?.acceptance.length) {
+    const outputsText = r.files.filter((f) => f.encoding === "utf-8" && wanted.includes(f.path)).map((f) => `### ${f.path}\n${f.content.slice(0, 4000)}`).join("\n\n").slice(0, 14000);
+    const qs: Record<string, { type: "noul"; instructions: string }> = {};
+    spec.acceptance.forEach((a, k) => { qs[`a${k}`] = { type: "noul", instructions: `Do \`outputs\` meet this criterion: "${a}"?` }; });
+    const ans = outputsText ? await jevAsk({ outputs: outputsText }, qs, 10000) : null;
+    for (const [k, a] of spec.acceptance.entries()) {
+      const pa = (ans as any)?.[`a${k}`]?.noul as number | undefined;
+      await req(`spec-${k + 1}`, a, "jev");
+      results.push({ reqId: `spec-${k + 1}`, status: pa === undefined ? "open" : pa >= 0.5 ? "met" : "failed", evidence: `P = ${pa?.toFixed(2) ?? "n/a"} (spec v${spec.version})` });
     }
   }
   const customerOnlyFailed = results.some((x) => x.reqId === "sys-agent-customer-only" && x.status === "failed");

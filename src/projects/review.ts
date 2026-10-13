@@ -69,6 +69,12 @@ export async function timeline(projectId: string): Promise<TimelineEntry[]> {
     if (e.data.user) out.push({ at: e.at, who: "customer", kind: "message", text: String(e.data.user) });
     if (e.data.assistant) out.push({ at: e.at, who: "assistant", kind: "reply", text: String(e.data.assistant) });
   }
+  // The owner's chat with the assistant on the review page.
+  for (const e of d?.events || []) {
+    if (e.kind !== "owner_chat") continue;
+    out.push({ at: e.at, who: "owner", kind: "chat", text: String(e.data.owner) });
+    out.push({ at: e.at, who: "assistant", kind: "chat", text: String(e.data.assistant) });
+  }
   // Exchanges with other businesses of the network (asked by the assistant, their answers).
   const { businessLabel } = await import("./network.js");
   for (const e of d?.events || []) {

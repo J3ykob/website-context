@@ -9,7 +9,11 @@
   :root { --page:#0a0e1a; --surface:#111827; --card:rgba(255,255,255,0.03); --border:rgba(255,255,255,0.08); --accent:#3b82f6; --accent-h:#2563eb; --text:#f1f5f9; --muted:#94a3b8; --dim:#64748b; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--page); color:var(--text); font:15px/1.55 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width:820px; margin:0 auto; padding:32px 16px 64px; }
+  main { max-width:1240px; margin:0 auto; padding:32px 16px 64px; }
+  .layout { display:grid; grid-template-columns:minmax(0,1fr) 400px; gap:20px; align-items:start; }
+  .chat-col { position:sticky; top:16px; }
+  @media (max-width:960px) { .layout { grid-template-columns:minmax(0,1fr); } .chat-col { position:static; } }
+  deep-chat { display:block; }
   h1 { font-family: Georgia, "Times New Roman", serif; font-weight:500; font-size:28px; margin:0 0 4px; }
   .sub { color:var(--muted); margin:0 0 24px; }
   .label { text-transform:uppercase; letter-spacing:.08em; font-size:11px; color:var(--dim); margin:0 0 8px; }
@@ -51,7 +55,7 @@
   <p class="sub" id="sub">Ładowanie…</p>
   <div id="error" class="msg err hidden"></div>
 
-  <div id="content" class="hidden">
+  <div id="content" class="hidden"><div class="layout"><div>
     <div class="card">
       <p class="label">Prośba klienta</p>
       <div class="pre" id="request"></div>
@@ -61,13 +65,6 @@
     <div class="card hidden" id="biz-card">
       <p class="label">Firmy w tym wyniku</p>
       <div id="biz"></div>
-    </div>
-
-    <div class="card hidden" id="questions-card" style="border-color:rgba(245,158,11,.35)">
-      <p class="label">Pytania asystenta do Ciebie (klient ich nie widzi)</p>
-      <p style="margin:0 0 10px;color:var(--muted);font-size:14px">Asystent przygotował odpowiedź na założeniach. Odpowiedz, a przygotuje poprawioną wersję do Twojej akceptacji.</p>
-      <div id="questions"></div>
-      <div class="row"><button class="primary" id="send-answers">Odpowiedz asystentowi</button></div>
     </div>
 
     <div class="card">
@@ -80,13 +77,7 @@
     <div id="actions">
       <div class="row">
         <button class="primary" id="approve">Wyślij klientowi</button>
-        <button id="show-changes">Poproś asystenta o zmiany</button>
         <button id="show-decline">Odpowiem po swojemu</button>
-      </div>
-      <div class="card hidden" id="changes-box" style="margin-top:16px">
-        <p class="label">Co zmienić?</p>
-        <textarea class="small" id="note" placeholder="np. dolicz transport 150 zł, zaproponuj model 130 kg zamiast 280 kg"></textarea>
-        <div class="row"><button class="primary" id="send-changes">Przekaż asystentowi</button></div>
       </div>
       <div class="card hidden" id="decline-box" style="margin-top:16px">
         <p class="label">Twoja wiadomość do klienta (zamiast tej odpowiedzi)</p>
@@ -96,7 +87,16 @@
     </div>
     <div id="done" class="msg hidden"></div>
   </div>
+  <div class="chat-col">
+    <div class="card" style="padding:14px">
+      <p class="label">Rozmowa z asystentem</p>
+      <p style="margin:0 0 10px;color:var(--muted);font-size:13px">Zapytaj o wynik, poproś o poprawki albo odpowiedz na pytania asystenta. Klient nie widzi tej rozmowy.</p>
+      <deep-chat id="chat"></deep-chat>
+    </div>
+  </div>
+  </div></div>
 </main>
+<script type="module" src="https://cdn.jsdelivr.net/npm/deep-chat@2.5.1/dist/deepChat.bundle.js"></script>
 <script>
 (function () {
   var token = location.pathname.split("/").filter(Boolean).pop();
@@ -182,14 +182,7 @@
         $("files").appendChild(box);
       });
     }
-    if (d.questions && d.questions.length && d.status === "pending") {
-      d.questions.forEach(function (q, k) {
-        var p = document.createElement("p"); p.style.margin = "10px 0 4px"; p.textContent = (k + 1) + ". " + q;
-        var ta = document.createElement("textarea"); ta.className = "small q-answer"; ta.dataset.q = q; ta.style.minHeight = "56px";
-        $("questions").appendChild(p); $("questions").appendChild(ta);
-      });
-      show("questions-card", true);
-    }
+    setupChat(d);
     if (d.checks.length) {
       $("checks").innerHTML = '<details><summary>Automatyczne kontrole (' + d.checks.filter(function (c) { return c.status === "met"; }).length + "/" + d.checks.length + ")</summary></details>";
       var det = $("checks").querySelector("details");
@@ -204,13 +197,53 @@
     if (d.status !== "pending") { $("draft").disabled = true; show("actions", false); $("done").textContent = STATUS[d.status] || ""; show("done", true); }
   }).catch(function () { fail("Nie udało się wczytać."); });
 
+  // The owner's chat (deep-chat, MIT): replies come from /chat; the assistant can change the text for the
+  // customer (the draft box updates) or pass changes to the agent (a new version will come for approval).
+  var chatEl = $("chat");
+  function lockChat() { if (!customElements.get("deep-chat")) return customElements.whenDefined("deep-chat").then(lockChat); chatEl.textInput = { disabled: true, placeholder: { text: "Rozmowa zakończona dla tej wersji." } }; }
+  // Properties set before the deep-chat script defines the element would shadow its setters: wait for it.
+  function setupChat(d) { customElements.whenDefined("deep-chat").then(function () { configureChat(d); }); }
+  function configureChat(d) {
+    var qs = (d.questions || []);
+    var intro = qs.length
+      ? "Asystent ma pytania (klient ich nie widzi):\n" + qs.map(function (q, k) { return (k + 1) + ". " + q; }).join("\n") + "\n\nOdpowiedz tutaj - asystent przygotuje poprawioną wersję."
+      : "Zapytaj o wynik albo poproś o zmiany, np. \"dolicz transport 150 zł\" albo \"skróć tekst\".";
+    chatEl.demo = false;
+    chatEl.introMessage = { text: intro };
+    chatEl.history = (d.chat || []).map(function (t) { return { role: t.role === "owner" ? "user" : "ai", text: t.text }; });
+    chatEl.chatStyle = { width: "100%", height: "460px", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px", backgroundColor: "#0b1120", fontFamily: "Inter, system-ui, sans-serif", fontSize: "14px" };
+    chatEl.messageStyles = { default: {
+      shared: { bubble: { maxWidth: "85%", padding: "8px 12px", borderRadius: "12px", lineHeight: "1.45" } },
+      user: { bubble: { backgroundColor: "#3b82f6", color: "#fff" } },
+      ai: { bubble: { backgroundColor: "rgba(255,255,255,0.06)", color: "#f1f5f9" } } },
+      intro: { bubble: { backgroundColor: "rgba(245,158,11,0.10)", color: "#f1f5f9", border: "1px solid rgba(245,158,11,0.35)", maxWidth: "92%" } } };
+    chatEl.textInput = { placeholder: { text: "Napisz do asystenta…", style: { color: "#64748b" } }, styles: { container: { backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", color: "#f1f5f9" } } };
+    chatEl.submitButtonStyles = { submit: { container: { default: { backgroundColor: "transparent" } }, svg: { styles: { default: { filter: "invert(58%) sepia(80%) saturate(2000%) hue-rotate(200deg)" } } } } };
+    chatEl.connect = { handler: function (body, signals) {
+      var msgs = body.messages || [], text = msgs.length ? msgs[msgs.length - 1].text : "";
+      fetch(api + "/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, x: x }; }); })
+        .then(function (res) {
+          if (!res.ok) { signals.onResponse({ error: res.x.error || "Nie udało się." }); return; }
+          if (typeof res.x.draft === "string") { $("draft").value = res.x.draft; $("draft").style.boxShadow = "0 0 0 2px rgba(59,130,246,.5)"; setTimeout(function () { $("draft").style.boxShadow = ""; }, 1500); }
+          signals.onResponse({ text: res.x.reply });
+          if (res.x.rework) {
+            show("actions", false); $("draft").disabled = true; lockChat();
+            $("done").textContent = STATUS.changes_requested; show("done", true);
+          }
+        })
+        .catch(function () { signals.onResponse({ error: "Nie udało się - spróbuj ponownie." }); });
+    } };
+    if (d.status !== "pending") lockChat();
+  }
+
   function send(body, btn) {
     btn.disabled = true;
     fetch(api, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (x) {
         if (!x.ok) { btn.disabled = false; fail(x.d.error || "Nie udało się."); return; }
-        show("actions", false); show("questions-card", false); $("draft").disabled = true;
+        show("actions", false); $("draft").disabled = true; lockChat();
         document.querySelectorAll(".file-edit").forEach(function (t) { t.disabled = true; });
         $("done").textContent = STATUS[x.d.status] || "Zapisano."; show("done", true); show("error", false);
       }).catch(function () { btn.disabled = false; fail("Nie udało się - spróbuj ponownie."); });
@@ -221,14 +254,7 @@
     return out;
   }
   $("approve").onclick = function () { send({ action: "approve", message: $("draft").value, files: editedFiles() }, this); };
-  $("send-answers").onclick = function () {
-    var answers = [];
-    document.querySelectorAll(".q-answer").forEach(function (t) { answers.push({ q: t.dataset.q, a: t.value }); });
-    send({ action: "answer", answers: answers }, this);
-  };
-  $("show-changes").onclick = function () { show("changes-box", true); show("decline-box", false); $("note").focus(); };
-  $("show-decline").onclick = function () { show("decline-box", true); show("changes-box", false); $("own").focus(); };
-  $("send-changes").onclick = function () { send({ action: "changes", note: $("note").value }, this); };
+  $("show-decline").onclick = function () { show("decline-box", true); $("own").focus(); };
   $("send-own").onclick = function () { send({ action: "decline", message: $("own").value }, this); };
 })();
 </script>
