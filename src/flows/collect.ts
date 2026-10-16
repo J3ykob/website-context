@@ -133,6 +133,34 @@ type OfferVerdict = { status: "ok" } | { status: "several" | "not_offered"; opti
  * login), the customer's words are accepted as they are. Suggested names must
  * appear in the knowledge text itself, so nothing is invented.
  */
+/** Today's date in Warsaw, for turning "tomorrow" into a date. */
+function todayLine(): string {
+  const d = new Date();
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  const weekday = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", weekday: "long" }).format(d);
+  return `${weekday}, ${date}`;
+}
+
+/**
+ * When the customer clearly means one specific offer, its exact name as the business writes it (so the
+ * summary and the owner's email name the real item). Accepted only if it appears word for word in the
+ * business's own information; otherwise null and the customer's words stay.
+ */
+async function exactOfferName(value: string, passages: string[], llm: Llm): Promise<string | null> {
+  const j = parseJsonObject(await llm(
+    "You match a customer's request to a business's own offer and output only JSON.",
+    `The business's own information (excerpts):
+${passages.map((p, k) => `[${k + 1}] ${p}`).join("\n")}
+
+The customer asked for: """${value}"""
+Output {"name": "..."}: the name of the ONE specific product or service from the excerpts the customer clearly means, copied exactly as written there; "" if several could fit or none is clearly meant.`,
+    120,
+  ));
+  const name = typeof j?.name === "string" ? j.name.trim() : "";
+  if (!name || name.length > 120 || name.toLowerCase() === value.toLowerCase()) return null;
+  return passages.some((p) => p.includes(name)) ? name : null;
+}
+
 async function checkOffer(value: string, field: FlowInput, knowledge: (q: string) => string[] | Promise<string[]>, llm: Llm): Promise<OfferVerdict> {
   const passages = (await knowledge(value)).slice(0, 6);
   if (!passages.length) return { status: "ok" };
@@ -197,6 +225,7 @@ export async function collectTurn(flow: FlowDefinition, s: CollectSession, messa
     `Fields (key | label | hint):
 ${fields.map((f) => `${f.name} | ${f.label} | ${f.description || ""}`).join("\n")}
 
+Today is ${todayLine()}.
 Values collected so far: ${JSON.stringify(s.values)}
 ${s.stage === "confirming" ? "The customer was just shown a summary of these values and asked to confirm it." : ""}
 Earlier conversation:
@@ -208,7 +237,7 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
 - "language": the language the customer writes their sentences in, named in English (e.g. "Polish", "English", "Ukrainian"). Ignore names of places, streets, people and products (a Polish street name in an English sentence is still English).${s.language ? `
 - "switched": true only if in this message the customer clearly writes whole sentences in a language other than ${s.language}, the language of the conversation so far; otherwise false.` : ""}
 - "intent": "confirm" (they confirm the summary / say it is correct), "cancel" (they want to stop the whole order or inquiry), "change" (they correct something already given), or "answer" (anything else: giving details, asking something).
-- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. A question the customer asks (price, availability...) goes into "notes". Empty object if the message gives no values.`,
+- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. A question the customer asks (price, availability...) goes into "notes". Dates and relative days ("jutro", "next Friday", "w sobotę") as a concrete calendar date with its weekday, in the customer's language (e.g. "piątek, 17.10.2026"), counted from today. Empty object if the message gives no values.`,
     500,
   ));
   if (!read) throw new Error("collect: unparseable model reply");
@@ -240,7 +269,13 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
       // We already suggested alternatives for this field once: take their answer.
       if (s.offerChecked[`${f.name}:suggested`] === "1") { s.offerChecked[`${f.name}:suggested`] = ""; continue; }
       const verdict = await checkOffer(v, f, knowledge, llm).catch(() => ({ status: "ok" }) as OfferVerdict);
-      if (verdict.status === "ok") continue;
+      if (verdict.status === "ok") {
+        // Offered: name the exact item (the customer confirms it in the summary).
+        const passages = (await knowledge(v)).slice(0, 6);
+        const exact = passages.length ? await exactOfferName(v, passages, llm).catch(() => null) : null;
+        if (exact) { s.values[f.name] = exact; s.offerChecked[f.name] = exact; }
+        continue;
+      }
       if (verdict.status === "not_seen") {
         offerNote = `Say briefly that you can't see ${verdict.missing.length ? verdict.missing.join(", ") : v} in the offer, so the team will confirm whether they can provide it.`;
         continue;

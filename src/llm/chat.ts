@@ -787,7 +787,7 @@ export class WebsiteChat {
 
     const plainOutputCheck = validateOutput(this.guardReplyLinks(responseText), this.getInstructionsOnly(systemPrompt), this.getAllowedDomain());
 
-    return { message: plainOutputCheck.sanitized + await netTail(), sources, grounded: true, unknownQuestion: await this.resolveGap(gapC, lastUserMessage, gapPlain.question) };
+    return { message: plainOutputCheck.sanitized + await netTail(), sources: factCheckC === "no_evidence" ? [] : sources, grounded: true, unknownQuestion: await this.resolveGap(gapC, lastUserMessage, gapPlain.question) };
   }
 
   // Parallel retrieval shared by chat() and chatStream(). Each Vectorize query is ~2s,
@@ -1008,7 +1008,8 @@ export class WebsiteChat {
     // our own hand-off links, not the business's site).
     const viaNet = netS ? await this.networkReply(netS) : null;
     if (viaNet) return { ...viaNet, message: outputCheck.sanitized + "\n\n" + viaNet.message };
-    return { message: outputCheck.sanitized, sources, grounded: true, unknownQuestion: await this.resolveGap(gapS, inputValidation.sanitized, gapStream.question) };
+    // An answer that found no support in the site shows no "sources" (they would be unrelated pages).
+    return { message: outputCheck.sanitized, sources: factCheckS === "no_evidence" ? [] : sources, grounded: true, unknownQuestion: await this.resolveGap(gapS, inputValidation.sanitized, gapStream.question) };
   }
 
   // Route tiny classification through the small fast model when available.

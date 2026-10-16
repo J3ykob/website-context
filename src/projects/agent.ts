@@ -454,6 +454,59 @@ export function numbersIn(text: string): number[] {
   return out;
 }
 
+/**
+ * Calculations written out in a text ("12 zł/m2 × 150 m2 × 3 tygodnie = 5400 zł", "330 + 80 = 410 zł")
+ * recomputed by code. A character scanner: numbers (a digit run glued to a letter, as in "m2", belongs to
+ * the word), the operators × x * + and "=", any words between them (units) ignored. Returns the wrong ones.
+ */
+export function wrongCalculations(text: string): { expr: string; stated: number; actual: number }[] {
+  type Tok = { k: "num"; v: number; at: number } | { k: "op"; v: string } | { k: "eq" } | { k: "break" };
+  const toks: Tok[] = [];
+  const chars = [...text];
+  const isDigit = (c?: string) => !!c && c >= "0" && c <= "9";
+  const isLetter = (c?: string) => !!c && c.toLowerCase() !== c.toUpperCase();
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i];
+    if (isDigit(c) && !isLetter(chars[i - 1])) {
+      let j = i, raw = "";
+      while (j < chars.length) {
+        const d = chars[j];
+        if (isDigit(d)) { raw += d; j++; continue; }
+        if ((d === " " || d === "\u00a0") && isDigit(chars[j + 1]) && isDigit(chars[j + 2]) && isDigit(chars[j + 3]) && !isDigit(chars[j + 4]) && raw.length <= 3 && !raw.includes(".")) { j++; continue; }
+        if ((d === "," || d === ".") && isDigit(chars[j + 1]) && !raw.includes(".")) { raw += "."; j++; continue; }
+        break;
+      }
+      if (isLetter(chars[j])) { i = j; continue; } // part of a word such as "2x" or a product code
+      toks.push({ k: "num", v: Number(raw), at: i });
+      i = j - 1;
+    } else if (c === "×" || c === "*" || ((c === "x" || c === "X") && !isLetter(chars[i - 1]) && !isLetter(chars[i + 1]))) toks.push({ k: "op", v: "*" });
+    else if (c === "+") toks.push({ k: "op", v: "+" });
+    else if (c === "=") toks.push({ k: "eq" });
+    else if (c === "\n" || c === ";" || c === "(" || c === ")") toks.push({ k: "break" });
+  }
+  const out: { expr: string; stated: number; actual: number }[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    // An expression: num (op num)+ eq num, with no break in between.
+    if (toks[i].k !== "num") continue;
+    const terms: number[] = [(toks[i] as any).v];
+    const ops: string[] = [];
+    let j = i + 1;
+    while (j + 1 < toks.length && toks[j].k === "op" && toks[j + 1].k === "num") { ops.push((toks[j] as any).v); terms.push((toks[j + 1] as any).v); j += 2; }
+    if (!ops.length || toks[j]?.k !== "eq" || toks[j + 1]?.k !== "num") continue;
+    // × before +
+    let sum = 0, prod = terms[0];
+    for (let k = 0; k < ops.length; k++) {
+      if (ops[k] === "*") prod *= terms[k + 1];
+      else { sum += prod; prod = terms[k + 1]; }
+    }
+    const actual = Math.round((sum + prod) * 100) / 100;
+    const stated = (toks[j + 1] as any).v as number;
+    if (Math.abs(actual - stated) > 0.011) out.push({ expr: `${terms.map((t, k) => (k ? ` ${ops[k - 1] === "*" ? "×" : "+"} ` : "") + t).join("")} = ${stated}`, stated, actual });
+    i = j;
+  }
+  return out;
+}
+
 function csvRows(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [], cell = "", quoted = false;
@@ -537,7 +590,9 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
 
   const reply = text("odpowiedz.txt");
   if (reply) {
-    const sources = r.files.filter((f) => f.encoding === "utf-8" && f.path !== "odpowiedz.txt").map((f) => f.content);
+    // Calculation outputs and data count as sources of numbers; the agent's own scripts do not (a number
+    // typed into a script as text is not a calculation).
+    const sources = r.files.filter((f) => f.encoding === "utf-8" && f.path !== "odpowiedz.txt" && !f.path.endsWith(".py") && !f.path.endsWith(".js") && !f.path.endsWith(".sh")).map((f) => f.content);
     const inputs = await inputTexts(id);
     const customer = inputs.request || "";
     // Language: the customer's, checked by Jev.
@@ -553,6 +608,10 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
     const { strayScripts } = await import("../flows/collect.js");
     const stray = strayScripts(customer + "\n" + inputs.all, reply);
     results.push({ reqId: "sys-agent-script", status: stray.length ? "failed" : "met", evidence: stray.length ? `foreign scripts: ${stray.join(", ")}` : "ok" });
+    // Calculations written out for the customer are recomputed (the agent once wrote "12 × 150 × 3 = 6300").
+    await req("sys-agent-arithmetic", "Every calculation written out in the reply is correct.", "code");
+    const wrong = wrongCalculations(reply);
+    results.push({ reqId: "sys-agent-arithmetic", status: wrong.length ? "failed" : "met", evidence: wrong.length ? wrong.map((w) => `${w.expr} (should be ${w.actual})`).join("; ") : "ok" });
     // Numbers: every number in the reply appears in the project's data or the agent's files.
     await req("sys-agent-numbers", "Every number in the reply comes from the project's data or calculations.", "code");
     const known = new Set<number>();
