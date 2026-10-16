@@ -102,11 +102,14 @@ Zasady:
    o tym nie ma (np. klient chce koszt z dowozem, a cennik nie podaje ceny dowozu). Nie pytaj o sprawy, których klient
    nie poruszył (dostępność terminów, dowóz, kaucja itp.) ani o rzeczy, które wynikają z danych. Wynik przygotuj
    na najrozsądniejszym założeniu (zapisanym w zalozenia.md); firma odpowie, zanim klient go dostanie.
-9. Inne firmy z sieci (cenniki/firmy.md, jeśli jest): gdy część zadania należy do innej firmy z tej listy, a jej
+9. Inne firmy z sieci (cenniki/firmy.md, jeśli jest): tylko dla części, o które prosi zlecający (nie dodawaj
+   rzeczy, o które nie prosił): gdy taka część należy do innej firmy z tej listy, a jej
    cennik nie podaje potrzebnej ceny lub informacji (albo firma nie ma cennika), zapytaj ją: zapisz
    zapytania_do_firm.json - lista [{"firma": "<identyfikator z firmy.md>", "pytanie": "konkretne pytanie z ilościami
    i warunkami"}]. W pytaniach nie podawaj danych osobowych klienta. Wynik przygotuj tak, jakby ta część była do
    wyceny; gdy firmy odpowiedzą, dostaniesz zadanie dokończenia. Nie pytaj firmy prowadzącej projekt.
+   W tekście dla klienta nie pisz o zapytaniach do innych firm ani o tym, co zrobisz później - o tym informuje
+   klienta system; opisz tylko to, co jest teraz (części bez ceny: "do wyceny").
 `;
 
 // cenniki/README.md: how the offer files are laid out (general, for any business type).
@@ -133,8 +136,9 @@ async function priceLists(project: Project, tenantIds: string[]): Promise<{ file
   const allow: string[] = [];
   const catalog = new Set<string>();
   const used = new Set<string>();
-  for (const tenantId of tenantIds) {
-    const offer = await loadOffer(tenantId).catch(() => null);
+  const loaded = await Promise.all(tenantIds.map((id) => loadOffer(id).catch(() => null)));
+  for (const [k, tenantId] of tenantIds.entries()) {
+    const offer = loaded[k];
     const t = getTenant(tenantId);
     const label = t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId;
     allow.push(label, t?.domain || "", t?.siteUrl || "");
@@ -189,15 +193,33 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
   const tenantIds = project.type === BUSINESS_REQUEST ? [project.initiatorTenantId]
     : [...new Set([project.initiatorTenantId, ...(await listParticipants(projectId)).map((p) => p.tenantId), ...(await networkMembers(project.initiatorTenantId).catch(() => [])).map((m) => m.tenantId)])];
   const offers = await priceLists(project, tenantIds);
-  for (const [name, body] of Object.entries(offers.files)) await writeFile(projectId, `${PRICE_DIR}/${name}`, body, "csv", "system");
-  if (Object.keys(offers.files).length) await writeFile(projectId, `${PRICE_DIR}/README.md`, PRICE_README, "md", "system");
-  if (!offers.files["firmy.md"]) await writeFile(projectId, `${PRICE_DIR}/firmy.md`, "", "md", "system");
+  const out: Record<string, string> = {};
+  for (const [name, body] of Object.entries(offers.files)) out[`${PRICE_DIR}/${name}`] = body;
+  if (Object.keys(offers.files).length) out[`${PRICE_DIR}/README.md`] = PRICE_README;
+  if (!offers.files["firmy.md"]) out[`${PRICE_DIR}/firmy.md`] = "";
+  // Only what changed is written (offers rarely change between two requests), all at once.
+  const { createHash } = await import("crypto");
+  const hash = (t: string) => createHash("sha1").update(t).digest("hex");
+  const prev = (project.memory.inputHashes as Record<string, string>) || {};
+  const hashes: Record<string, string> = {};
+  await Promise.all(Object.entries(out).map(async ([path, body]) => {
+    hashes[path] = hash(body);
+    if (prev[path] !== hashes[path]) await writeFile(projectId, path, body, path.endsWith(".csv") ? "csv" : "md", "system");
+  }));
   const inputs = { at: Date.now(), allow: offers.allow, catalog: offers.catalog.slice(0, 1500) };
-  await setMemory(projectId, { businessSlugs: offers.slugs, inputs });
+  await setMemory(projectId, { businessSlugs: offers.slugs, inputs, inputHashes: hashes });
   return inputs;
 }
 
-export async function startAgentRun(projectId: string, instruction: string, actor: string, attempt = 1, model = primaryModel(), retryOf?: string): Promise<AgentRunState | { error: string }> {
+/** Wakes the project's sandbox and the masker while the request is still being prepared and planned. */
+export function warmRunner(projectId: string): void {
+  if (!agentEnabled()) return;
+  void runner(`/projects/${encodeURIComponent(projectId)}/warm`, { method: "POST" }, 120_000)
+    .catch((e) => console.warn(`[project-agent] ${projectId}: warm-up failed: ${e?.message || e}`));
+}
+
+export async function startAgentRun(projectId: string, instruction: string, actor: string, attempt = 1, model = primaryModel(), retryOf?: string, timing: Record<string, number> = {}): Promise<AgentRunState | { error: string }> {
+  const t0 = Date.now();
   if (!agentEnabled()) return { error: "The project agent is not configured." };
   const project = await getProject(projectId);
   if (!project) return { error: "Project not found." };
@@ -210,30 +232,36 @@ export async function startAgentRun(projectId: string, instruction: string, acto
   const offers = await prepareInputs(projectId);
   const files: Record<string, string> = {};
   const publicFiles: Record<string, string> = {};
-  for (const f of await listFiles(projectId)) {
-    if (f.size > MAX_INPUT_FILE || f.kind === "bin") continue;
-    const body = await readFile(projectId, f.path);
-    if (body === null) continue;
+  // Not sent: the runner's reports, old spec versions and replaced replies (the spec is in AGENTS.md).
+  const listed = (await listFiles(projectId)).filter((f) => f.size <= MAX_INPUT_FILE && f.kind !== "bin" && !f.path.startsWith("agent/") && !f.path.startsWith("plan/") && !f.path.startsWith("historia/") && f.path !== "plan.json");
+  const bodies = await Promise.all(listed.map((f) => readFile(projectId, f.path).catch(() => null)));
+  listed.forEach((f, k) => {
+    const body = bodies[k];
+    if (body === null) return;
     // Business data (offers, the business's own site content) is public: not masked.
     if (f.path.startsWith(`${PRICE_DIR}/`) || f.path.startsWith("wiedza/")) publicFiles[f.path] = withoutBom(body);
     else files[f.path] = withoutBom(body);
-  }
+  });
   // A planned project: the frozen spec is part of the harness's system prompt; the prompt only points to it.
   const spec = project.memory.plan as import("./plan.js").Spec | undefined;
   const { renderSpec } = await import("./plan.js");
   const rules = spec ? RULES + renderSpec(spec) : RULES;
   const prompt = spec ? `Wykonaj specyfikację z AGENTS.md (v${spec.version}).${instruction ? `\n\n${instruction}` : ""}` : `Zadanie projektu "${project.title || project.type}":\n${instruction}\n\nZasady pracy są w AGENTS.md.`;
 
+  timing.readFilesMs = Date.now() - t0;
+  const tRunner = Date.now();
   const r = await runner(`/projects/${encodeURIComponent(projectId)}/run`, {
     method: "POST",
     body: JSON.stringify({ prompt, rules, files, publicFiles, keepMasked: [(await import("./network.js")).REQUESTS_FILE], model, maxSteps: 60, timeoutSec: 900, maxCostUsd: 0.5, allow: offers.allow, catalog: offers.catalog }),
   }).catch((e) => ({ ok: false, status: 0, text: async () => String(e?.message || e) }) as unknown as Response);
   if (r.status === 409) return { error: "The agent is already working on this project." };
   if (!r.ok) return { error: `The agent could not start (${r.status}): ${(await r.text()).slice(0, 200)}` };
-  const { runId } = (await r.json()) as { runId: string };
+  const { runId, timing: runnerTiming } = (await r.json()) as { runId: string; timing?: Record<string, number> };
+  timing.runnerMs = Date.now() - tRunner;
+  Object.assign(timing, runnerTiming || {});
   const state: AgentRunState = { runId, model: model.id, instruction: instruction.slice(0, 2000), status: "running", startedAt: new Date().toISOString(), attempt };
   await setMemory(projectId, { agentRun: state });
-  await addEvent(projectId, { kind: "agent_started", actor, data: { runId, model: model.id, attempt, files: Object.keys(files), priceLists: Object.keys(publicFiles) } });
+  await addEvent(projectId, { kind: "agent_started", actor, data: { runId, model: model.id, attempt, timing, files: Object.keys(files), priceLists: Object.keys(publicFiles) } });
   void poll(projectId, runId);
   return state;
 }
@@ -300,7 +328,7 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
   }
   await writeFile(id, "agent/raport.md", report(state, result), "md", "system").catch(() => {});
   await addUsage(id, { llmCalls: result.usage.steps, costUsd: result.usage.costUsd }).catch(() => {});
-  await addEvent(id, { kind: "agent_finished", actor: author, data: { runId: result.runId, state: result.state, stopReason: result.stopReason, files: written, usage: result.usage, piiMasked: result.piiMasked } });
+  await addEvent(id, { kind: "agent_finished", actor: author, data: { runId: result.runId, state: result.state, stopReason: result.stopReason, files: written, usage: result.usage, piiMasked: result.piiMasked, timing: (result as any).timing } });
   // Release the runner's copy (result and mapping are gone afterwards).
   await runner(`/projects/${encodeURIComponent(id)}/run`, { method: "DELETE" }, 30_000).catch(() => {});
 
@@ -309,8 +337,10 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
     return null;
   });
   // A reply that may speak to the business is not a failed run: the owner sees it first (needsOwner).
-  const hard = (verification?.failed || 0) - (verification?.customerOnlyFailed ? 1 : 0);
-  const ok = result.state === "succeeded" && result.unknownPlaceholders.length === 0 && result.alteredPlaceholders.length === 0 && hard === 0;
+  const hard = (verification?.failed || 0) - (verification?.customerOnlyFailed ? 1 : 0) - (verification?.specFailed || 0);
+  const clean = result.state === "succeeded" && result.unknownPlaceholders.length === 0 && result.alteredPlaceholders.length === 0 && hard === 0;
+  // First attempt: any failed criterion earns a repair pass. After it, only hard checks decide.
+  const ok = clean && (state.attempt > 1 || !(verification?.specFailed));
   const done: AgentRunState = {
     ...state, status: ok ? "done" : "failed", stopReason: result.stopReason, error: result.error?.slice(0, 500),
     files: written, verification: verification ? { met: verification.met, failed: verification.failed } : undefined,
@@ -446,7 +476,7 @@ const num = (s: string | undefined) => {
   return n.length === 1 ? n[0] : null;
 };
 
-async function verifyOutputs(id: string, r: RunResult, instruction: string): Promise<{ met: number; failed: number; missing: string[]; customerOnlyFailed: boolean }> {
+async function verifyOutputs(id: string, r: RunResult, instruction: string): Promise<{ met: number; failed: number; missing: string[]; customerOnlyFailed: boolean; specFailed: number }> {
   const text = (p: string) => r.files.find((f) => f.path === p && f.encoding === "utf-8")?.content;
   const results: { reqId: string; status: ReqStatus; evidence: string }[] = [];
   const req = async (reqId: string, textReq: string, check: string) => addRequirement(id, { id: reqId, text: textReq, source: "system", check });
@@ -553,7 +583,10 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
     }
   }
   const customerOnlyFailed = results.some((x) => x.reqId === "sys-agent-customer-only" && x.status === "failed");
-  return { ...(await recordVerification(id, results, "system", "agent/verification.json")), missing, customerOnlyFailed };
+  // The spec's criteria are judged by a model: soft - they trigger a repair pass, but do not hold back a
+  // result that passes every hard check.
+  const specFailed = results.filter((x) => x.reqId.startsWith("spec-") && x.status === "failed").length;
+  return { ...(await recordVerification(id, results, "system", "agent/verification.json")), missing, customerOnlyFailed, specFailed };
 }
 
 async function inputTexts(id: string): Promise<{ request: string | null; all: string }> {

@@ -23,7 +23,7 @@ beforeAll(async () => {
   await reg.hydrateRegistry();
   tm = new tmm.TenantManager();
   process.env.AGENT_REVIEW_FORCE = `${OSTAP},${ROOF}`; // this process only, never the businesses' settings
-  process.env.NETWORK_ANSWER_DEADLINE_MS = String(4 * 60_000);
+  process.env.NETWORK_ANSWER_DEADLINE_MS = String(8 * 60_000);
 }, 60_000);
 
 afterAll(async () => {
@@ -98,6 +98,9 @@ live("a project across businesses of one network", () => {
       expect(req).not.toContain("604 555 321");
     }
     // The customer only got the "working" message and the final result - nothing from the businesses' side.
-    expect(delivered[delivered.length - 1]).toBe(d.message);
+    // The final result is delivered by the server (logged into the conversation), not by this poll.
+    const logged = await M.d1Query("SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1", [session]);
+    expect(String(logged[0]?.content || "").trim()).toBe(d.message.trim());
+    void delivered;
   }, 60 * 60_000);
 });

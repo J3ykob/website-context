@@ -67,6 +67,21 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
     if (!tenantId || tenantId === parent.initiatorTenantId || q.length < 5) continue;
     byTenant.set(tenantId, [...(byTenant.get(tenantId) || []), q.slice(0, 2000)]);
   }
+  // Only parts the customer asked for (the agent tends to add extras: materials nobody mentioned, etc.).
+  if (byTenant.size) {
+    const { jevAsk } = await import("../llm/jev.js");
+    const conversation = ((await readFile(parentId, "rozmowa.md").catch(() => null)) || (await readFile(parentId, "request.txt").catch(() => null)) || "").slice(-3000);
+    const entries = [...byTenant.entries()].flatMap(([t, qs]) => qs.map((q) => ({ t, q })));
+    const qs: Record<string, { type: "noul"; instructions: string }> = {};
+    entries.forEach((e, k) => { qs[`r${k}`] = { type: "noul", instructions: `A request to another business: "${e.q.slice(0, 600)}". Did the customer, in \`conversation\`, ask for the specific product, service or part this request is about? Only if the customer brought it up - an addition the customer never mentioned does not count.` }; });
+    const a = await jevAsk({ conversation }, qs, 10_000);
+    if (a) {
+      byTenant.clear();
+      entries.forEach((e, k) => { if ((((a as any)[`r${k}`]?.noul as number) ?? 1) >= 0.5) byTenant.set(e.t, [...(byTenant.get(e.t) || []), e.q]); });
+      const dropped = entries.length - [...byTenant.values()].flat().length;
+      if (dropped) await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped } });
+    }
+  }
   if (!byTenant.size) return false;
   const from = businessLabel(parent.initiatorTenantId);
   const subs: SubRequest[] = [];

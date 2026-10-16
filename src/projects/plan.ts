@@ -34,18 +34,15 @@ const MAX_FACTS = 15, MAX_INPUTS = 20, MAX_OUTPUTS = 8, MAX_ACCEPT = 8;
 async function inventory(projectId: string): Promise<{ text: string; paths: Set<string> }> {
   const files = await listFiles(projectId);
   const paths = new Set(files.map((f) => f.path));
-  const lines: string[] = [];
-  for (const f of files) {
-    if (f.path.startsWith("agent/") || f.path.startsWith("historia/") || f.path === "plan.json" || f.path.startsWith("plan/")) continue;
-    let note = "";
-    if (f.kind === "csv") {
-      const t = (await readFile(projectId, f.path).catch(() => null)) || "";
-      const rows = t.split("\n").filter((l) => l.trim());
-      note = ` - ${Math.max(0, rows.length - 1)} wierszy, kolumny: ${(rows[0] || "").replace("﻿", "").slice(0, 200)}`;
-    }
-    lines.push(`- ${f.path} (${f.size} B)${note}`);
-  }
-  return { text: lines.join("\n"), paths };
+  const shown = files.filter((f) => !f.path.startsWith("agent/") && !f.path.startsWith("historia/") && f.path !== "plan.json" && !f.path.startsWith("plan/"));
+  // CSV headers and row counts, read in parallel.
+  const notes = await Promise.all(shown.map(async (f) => {
+    if (f.kind !== "csv") return "";
+    const t = (await readFile(projectId, f.path).catch(() => null)) || "";
+    const rows = t.split("\n").filter((l) => l.trim());
+    return ` - ${Math.max(0, rows.length - 1)} wierszy, kolumny: ${(rows[0] || "").replace("\uFEFF", "").slice(0, 200)}`;
+  }));
+  return { text: shown.map((f, k) => `- ${f.path} (${f.size} B)${notes[k]}`).join("\n"), paths };
 }
 
 const SYSTEM = `You plan work for an autonomous agent that will run in a sandbox with a shell, python and the project's files.
@@ -73,6 +70,9 @@ Rules:
   paraphrase or rename products or terms - a wrong rewording changes the request. If something essential is
   missing, the agent will use a stated, reasonable assumption - do not invent values here.
 - Goal: describe the request without naming products in other words than the requester used.
+- Acceptance: one checkable fact about the CONTENT per criterion (what the result must contain or satisfy),
+  e.g. "the reply names the heaviest compactor that fits the 500 PLN budget". Never criteria about language,
+  tone, format, headers or file names - those are checked separately.
 - Acceptance: must be achievable with the data that exists - a part the data does not price or settle is
   marked as to be quoted / unknown, and the criteria must accept that (e.g. "each line has a value or the
   status do_wyceny", never "each line has a price"). Concrete and checkable (e.g. "every requested item appears in the table with a value or status do_wyceny", "the total equals the sum of the priced lines").`;
@@ -102,7 +102,7 @@ export function validateSpec(raw: any, kind: ProjectKind, paths: Set<string>): {
   const goal = str(raw?.goal, 300);
   if (!goal) problems.push("goal is empty");
   return {
-    spec: { goal, language: str(raw?.language, 10) || "pl", facts, inputs, outputs: outputs.slice(0, MAX_OUTPUTS), acceptance, instructions: str(raw?.instructions, 1200) },
+    spec: { goal, language: str(raw?.language, 10), facts, inputs, outputs: outputs.slice(0, MAX_OUTPUTS), acceptance, instructions: str(raw?.instructions, 1200) },
     problems,
   };
 }
@@ -118,14 +118,17 @@ async function llm(system: string, user: string): Promise<string> {
     method: "POST",
     signal: AbortSignal.timeout(Number(process.env.PLANNER_TIMEOUT_MS) || 90_000),
     headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: process.env.PLANNER_MODEL || "deepseek/deepseek-v4.1-flash", temperature: 0, max_tokens: 1500, response_format: { type: "json_object" }, provider: { sort: "throughput" },
+    body: JSON.stringify({ model: process.env.PLANNER_MODEL || "deepseek/deepseek-v4.1-flash", temperature: 0, max_tokens: 4000, response_format: { type: "json_object" }, provider: { sort: "throughput" },
       // No hidden reasoning: it multiplies latency and can eat the token budget before any JSON is written.
       // Benchmark 2026-10-13 (4 real requests): deepseek-v4.1-flash without reasoning 10-20 s and faithful to the
       // requester's words; qwen3-235b 22-39 s and mistranslated product names.
       reasoning: JSON.parse(process.env.PLANNER_REASONING || '{"enabled":false}'), messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
   });
   if (!r.ok) throw new Error(`planner ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  return ((await r.json()) as any).choices?.[0]?.message?.content || "";
+  const j = (await r.json()) as any;
+  const content = j.choices?.[0]?.message?.content || "";
+  if (!parseJson(content)) console.warn(`[plan] unusable planner reply: provider=${j.provider} finish=${j.choices?.[0]?.finish_reason} len=${content.length} out=${j.usage?.completion_tokens}`);
+  return content;
 }
 
 /**
@@ -137,9 +140,14 @@ export async function plan(projectId: string, brief: string, kind: ProjectKind, 
   const project = await getProject(projectId);
   if (!project) throw new Error("project not found");
   const prev = project.memory.plan as Spec | undefined;
-  const inv = await inventory(projectId);
-  const conversation = ((await readFile(projectId, "rozmowa.md").catch(() => null)) || (await readFile(projectId, "request.txt").catch(() => null)) || "").slice(-4000);
-  const firms = ((await readFile(projectId, "cenniki/firmy.md").catch(() => null)) || "").split("\n").filter((l) => l.startsWith("## ")).join("\n");
+  const [inv, convo, req0, firmsRaw] = await Promise.all([
+    inventory(projectId),
+    readFile(projectId, "rozmowa.md").catch(() => null),
+    readFile(projectId, "request.txt").catch(() => null),
+    readFile(projectId, "cenniki/firmy.md").catch(() => null),
+  ]);
+  const conversation = (convo || req0 || "").slice(-4000);
+  const firms = (firmsRaw || "").split("\n").filter((l) => l.startsWith("## ")).join("\n");
   const user = [
     `KIND: ${kind === "business_request" ? "a request from another business of the network (the requester is that business)" : "a customer's request in a chat with the business"}`,
     `BRIEF: ${brief}`,
@@ -154,13 +162,17 @@ export async function plan(projectId: string, brief: string, kind: ProjectKind, 
     raw = parseJson(await llm(SYSTEM, `${user}\n\nYOUR PREVIOUS ANSWER HAD PROBLEMS - fix them:\n${v.problems.join("\n") || "not valid JSON"}`)) || raw;
     v = validateSpec(raw, kind, inv.paths);
   }
-  if (!v.spec.goal) v.spec.goal = brief.slice(0, 300);
-  const request = ((await readFile(projectId, "request.txt").catch(() => null)) || "").trim().slice(0, 3000);
+  // An empty or unparseable spec is a planning failure (the caller retries, then runs on the plain
+  // request) - never a vacuous spec with defaults the agent would follow.
+  if (!raw || !v.spec.goal) throw new Error(`no usable spec (${v.problems.join("; ") || "not valid JSON"})`);
+  const request = (req0 || "").trim().slice(0, 3000);
   const spec: Spec = { version: (prev?.version || 0) + 1, request, ...v.spec, ...(change ? { basis: change.slice(0, 1000) } : {}) };
   const body = JSON.stringify(spec, null, 1);
-  await writeFile(projectId, "plan.json", body, "json", "planner");
-  await writeFile(projectId, `plan/v${spec.version}.json`, body, "json", "planner");
-  await setMemory(projectId, { plan: spec });
+  await Promise.all([
+    writeFile(projectId, "plan.json", body, "json", "planner"),
+    writeFile(projectId, `plan/v${spec.version}.json`, body, "json", "planner"),
+    setMemory(projectId, { plan: spec }),
+  ]);
   await addEvent(projectId, { kind: "planned", actor: "planner", data: { version: spec.version, goal: spec.goal, outputs: spec.outputs.map((o) => o.path), acceptance: spec.acceptance.length, change: change?.slice(0, 300) } });
   return spec;
 }
@@ -171,7 +183,7 @@ export function renderSpec(s: Spec): string {
   return `
 ## Specyfikacja zadania (v${s.version}) - wykonaj dokładnie
 ${s.request ? `Prośba zlecającego (dosłownie - rozstrzyga w razie rozbieżności z poniższym streszczeniem; nazwy produktów rozumiej tak, jak je napisał):\n"""\n${s.request}\n"""\n` : ""}Cel: ${s.goal}
-Język tekstu dla odbiorcy: ${s.language}
+Język tekstu dla odbiorcy: ${s.language || "język zlecającego (jak w jego prośbie)"}
 ${s.facts.length ? `Wymagania podane przez zlecającego:\n${s.facts.map((f) => `- ${f}`).join("\n")}\n` : ""}${s.inputs.length ? `Dane wejściowe:\n${s.inputs.map((i) => `- ${i.path}: ${i.use}`).join("\n")}\n` : ""}Wyniki (dokładnie te pliki):
 ${out}
 ${s.acceptance.length ? `Kryteria akceptacji (sprawdzane po Twojej pracy):\n${s.acceptance.map((a) => `- ${a}`).join("\n")}\n` : ""}${s.instructions ? `Wskazówki:\n${s.instructions}\n` : ""}${s.basis ? `Ta wersja uwzględnia: ${s.basis}\n` : ""}`;
@@ -182,11 +194,15 @@ ${s.acceptance.length ? `Kryteria akceptacji (sprawdzane po Twojej pracy):\n${s.
  * the spec (a new version when `change` is given), and the agent executes it.
  */
 export async function planAndRun(projectId: string, brief: string, actor: string, change?: string): Promise<{ runId: string } | { error: string }> {
-  const { prepareInputs, startAgentRun } = await import("./agent.js");
+  const { prepareInputs, startAgentRun, warmRunner } = await import("./agent.js");
+  // Containers start now, in parallel with preparing and planning (~10-25 s of cold start hidden).
+  warmRunner(projectId);
   const { BUSINESS_REQUEST } = await import("./network.js");
   const p = await getProject(projectId);
   if (!p) return { error: "Project not found." };
+  const t0 = Date.now();
   await prepareInputs(projectId);
+  const prepareMs = Date.now() - t0;
   // Planning must not cost the customer the result: one retry (transient model / D1 errors), then the
   // agent runs on the brief alone (the previous spec, if any, is dropped so it cannot mislead).
   const kind = p.type === BUSINESS_REQUEST ? "business_request" : "customer";
@@ -204,6 +220,7 @@ export async function planAndRun(projectId: string, brief: string, actor: string
     await setMemory(projectId, { plan: null }).catch(() => {});
     await addEvent(projectId, { kind: "plan_failed", actor: "planner", data: {} }).catch(() => {});
   }
-  const r = await startAgentRun(projectId, planned ? "" : [brief, change].filter(Boolean).join("\n\n"), actor);
+  const planMs = Date.now() - t0 - prepareMs;
+  const r = await startAgentRun(projectId, planned ? "" : [brief, change].filter(Boolean).join("\n\n"), actor, 1, undefined, undefined, { prepareMs, planMs });
   return "error" in r ? r : { runId: r.runId };
 }

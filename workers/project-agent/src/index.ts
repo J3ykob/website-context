@@ -23,13 +23,17 @@ export default {
     if (!authorized(request, env.RUNNER_SECRET)) return new Response("Unauthorized", { status: 401 });
 
     const parts = url.pathname.split("/").filter(Boolean);
-    if (parts.length !== 3 || parts[0] !== "projects" || parts[2] !== "run") return new Response("Not found", { status: 404 });
+    if (parts.length !== 3 || parts[0] !== "projects" || (parts[2] !== "run" && parts[2] !== "warm")) return new Response("Not found", { status: 404 });
     const projectId = decodeURIComponent(parts[1]);
     if (!projectId || projectId.length > 120) return new Response("Bad project id", { status: 400 });
     const name = await sandboxName(projectId);
     const agent = env.AGENT.getByName(name);
 
     try {
+      if (parts[2] === "warm" && request.method === "POST") {
+        await agent.warm(name);
+        return Response.json({ ok: true });
+      }
       if (request.method === "POST") {
         const body = (await request.json().catch(() => null)) as Partial<RunRequest> | null;
         const problem = validate(body);

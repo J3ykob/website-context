@@ -94,10 +94,20 @@ export async function addEvent(id: string, e: { kind: string; actor: string; dat
 }
 
 /** Shallow-merges keys into the project's memory. */
+/**
+ * Sets top-level memory keys atomically in the database (json_set per key), so concurrent updates of
+ * different keys - the poller, a business's answer, the owner's decision - never overwrite each other.
+ * Each key's value is replaced as a whole.
+ */
 export async function setMemory(id: string, patch: Record<string, unknown>): Promise<void> {
-  const p = await getProject(id);
-  if (!p) throw new Error(`no project ${id}`);
-  await d1Query("UPDATE projects SET memory = ?, updated_at = ? WHERE id = ?", [json({ ...p.memory, ...patch }).slice(0, 200000), now(), id]);
+  await ensureSchema();
+  const keys = Object.keys(patch).filter((k) => /^[A-Za-z0-9_]+$/.test(k));
+  if (!keys.length) return;
+  const sets = keys.map(() => "?, json(?)").join(", ");
+  const params: unknown[] = [];
+  for (const k of keys) params.push(`$.${k}`, JSON.stringify(patch[k] === undefined ? null : patch[k]));
+  const rows = await d1Query(`UPDATE projects SET memory = json_set(COALESCE(NULLIF(memory, ''), '{}'), ${sets}), updated_at = ? WHERE id = ? RETURNING id`, [...params, now(), id]);
+  if (!rows.length) throw new Error(`no project ${id}`);
 }
 
 export async function setStatus(id: string, status: ProjectStatus, actor: string): Promise<void> {

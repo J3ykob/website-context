@@ -104,6 +104,7 @@ export interface RunResult {
   model: string;
   startedAt: string;
   finishedAt: string;
+  timing?: Record<string, number>;
 }
 export type RunStatus =
   | { state: "none" }
@@ -138,9 +139,12 @@ export class ProjectAgent extends DurableObject<Env> {
   #starting = false;
   #finishing: Promise<void> | null = null;
 
-  async start(name: string, req: RunRequest): Promise<{ state: "started"; runId: string } | { state: "busy" }> {
+  async start(name: string, req: RunRequest): Promise<{ state: "started"; runId: string; timing: Record<string, number> } | { state: "busy" }> {
     if (this.#starting || this.#finishing) return { state: "busy" };
     this.#starting = true;
+    const timing: Record<string, number> = {};
+    let t = Date.now();
+    const lap = (k: string) => { const n = Date.now(); timing[k] = n - t; t = n; };
     try {
       const meta = this.#meta();
       if (meta && !this.#hasResult() && this.#container.running && (await this.#exitCode()) === undefined) return { state: "busy" };
@@ -149,7 +153,10 @@ export class ProjectAgent extends DurableObject<Env> {
       // 1. Mask. Fails closed: no masker, no run.
       const texts: Record<string, string> = { "\u0000prompt": req.prompt };
       for (const [p, t] of Object.entries(req.files)) texts[`f:${safePath(p)}`] = t;
+      // The sandbox starts while the masker works (it gets files only after masking).
+      const sandbox = this.#ensureContainer(name).then(() => { timing.containerReadyMs = Date.now() - t; });
       const masked = await this.env.MASKER.getByName("pii").mask({ texts, allow: req.allow ?? [], catalog: req.catalog ?? [] });
+      lap("maskMs");
       const runId = crypto.randomUUID();
       const m: Meta = {
         runId, projectId: req.projectId, model: req.model.id, startedAt: new Date().toISOString(),
@@ -159,7 +166,8 @@ export class ProjectAgent extends DurableObject<Env> {
       this.ctx.storage.kv.put("meta", JSON.stringify(m));
 
       // 2. Sandbox with the masked files.
-      await this.#ensureContainer(name);
+      await sandbox;
+      lap("containerMs");
       await this.#sh(`rm -rf ${PROJECT_DIR} ${TASK_DIR} && mkdir -p ${PROJECT_DIR} ${TASK_DIR}/home`);
       for (const [key, text] of Object.entries(masked.texts)) {
         if (!key.startsWith("f:")) continue;
@@ -177,6 +185,7 @@ export class ProjectAgent extends DurableObject<Env> {
       await this.#files.writeFile(`${PROJECT_DIR}/opencode.json`, JSON.stringify(opencodeConfig(req.model, m.maxSteps), null, 1));
       await this.#sh(`find . -type f -printf '%P\\0' | sort -z | xargs -0 -r sha1sum > ${BEFORE_PATH}`, [], PROJECT_DIR);
 
+      lap("filesMs");
       // 3. The agent, in the background, bounded by time.
       const prompt = masked.texts["\u0000prompt"];
       const timeoutSec = Math.min(Math.max(req.timeoutSec ?? 900, 60), 3600);
@@ -187,7 +196,9 @@ export class ProjectAgent extends DurableObject<Env> {
       );
       await this.#files.writeFile(PID_PATH, String(task.pid));
       await this.ctx.storage.setAlarm(Date.now() + CHECK_INTERVAL_MS);
-      return { state: "started", runId };
+      lap("launchMs");
+      this.ctx.storage.kv.put("timing", JSON.stringify(timing));
+      return { state: "started", runId, timing };
     } catch (e) {
       // A half-started run must not leave the mapping behind.
       this.#clear();
@@ -227,6 +238,12 @@ export class ProjectAgent extends DurableObject<Env> {
       await this.#sh("pkill -TERM -f '[o]pencode run' || true");
     }
     await this.ctx.storage.setAlarm(Date.now() + CHECK_INTERVAL_MS);
+  }
+
+  // Wakes the sandbox and the masker ahead of a run (called while the request is being planned).
+  async warm(name: string): Promise<void> {
+    if (this.#starting || this.#finishing) return;
+    await Promise.all([this.#ensureContainer(name), this.env.MASKER.getByName("pii").warm()]);
   }
 
   // Stops a run (if any) and forgets everything: mapping, result, sandbox.
@@ -287,6 +304,7 @@ export class ProjectAgent extends DurableObject<Env> {
           files, skippedFiles: skipped,
           unknownPlaceholders: un.unknown, alteredPlaceholders: un.altered,
           piiMasked: meta.piiMasked, usage: ev.usage, model: meta.model, startedAt: meta.startedAt, finishedAt,
+          timing: { ...JSON.parse(this.ctx.storage.kv.get<string>("timing") ?? "{}"), firstStepMs: ev.firstStepAt ? ev.firstStepAt - Date.parse(meta.startedAt) : -1 },
         };
       }
       this.#saveResult(result);
@@ -336,7 +354,8 @@ export class ProjectAgent extends DurableObject<Env> {
     if (this.#container.running) return;
     this.#container.start({
       image: this.#container.images.sandbox,
-      instance: "standard-1",
+      // 1 vCPU: the agent's own startup on half a core was 11-15 s before its first step.
+      instance: "standard-2",
       enableInternet: false,
       labels: { app: "whisp-project-agent", sandbox: name },
     });
@@ -435,15 +454,17 @@ function emptyUsage(): RunUsage {
 
 // opencode --format json: one event per line. step_finish carries tokens and cost; the last text part
 // is the agent's final message; error events explain a failure.
-function usageFrom(events: string): { usage: RunUsage; finalText: string; error?: string } {
+function usageFrom(events: string): { usage: RunUsage; finalText: string; error?: string; firstStepAt?: number } {
   const usage = emptyUsage();
   let finalText = "";
   let error: string | undefined;
+  let firstStepAt: number | undefined;
   for (const line of events.split("\n")) {
     if (!line.trim()) continue;
     let e: any;
     try { e = JSON.parse(line); } catch { continue; }
     const part = e?.part ?? {};
+    if (e.type === "step_start" && firstStepAt === undefined && Number(e.timestamp)) firstStepAt = Number(e.timestamp);
     if (e.type === "step_finish") {
       usage.steps++;
       usage.costUsd += Number(part.cost) || 0;
@@ -461,7 +482,7 @@ function usageFrom(events: string): { usage: RunUsage; finalText: string; error?
     }
   }
   usage.costUsd = Math.round(usage.costUsd * 1e6) / 1e6;
-  return { usage, finalText, error };
+  return { usage, finalText, error, firstStepAt };
 }
 
 // Relative path inside the project, no "..", no leading "/".

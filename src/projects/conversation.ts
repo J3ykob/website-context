@@ -97,15 +97,18 @@ Pytania do firmy - tylko w ${BUSINESS_QUESTIONS}, nigdy w odpowiedzi dla klienta
 export async function startConversationAgent(projectId: string, transcript: { role: string; content: string }[], knowledge: string[]): Promise<{ runId: string } | { error: string }> {
   const last = [...transcript].reverse().find((m) => m.role === "user")?.content || "";
   const lines = transcript.slice(-20).map((m) => `**${m.role === "user" ? "Klient" : "Asystent"}:** ${m.content}`);
-  await writeFile(projectId, "rozmowa.md", `# Rozmowa\n\n${lines.join("\n\n")}\n`, "md", "chat");
-  await writeFile(projectId, "request.txt", last, "txt", "customer");
   // The previous reply moves to the history, so a run that writes none cannot re-deliver it.
   const prev = await readFile(projectId, "odpowiedz.txt").catch(() => null);
-  if (prev && prev.trim()) await writeFile(projectId, `historia/odpowiedz-${Date.now()}.txt`, prev, "txt", "system");
-  await writeFile(projectId, "odpowiedz.txt", "", "txt", "system");
-  await writeFile(projectId, BUSINESS_QUESTIONS, "", "md", "system");
-  if (knowledge.length) await writeFile(projectId, `${KNOWLEDGE_DIR}/strona.md`, `# Informacje z witryny firmy (do tej wiadomości)\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system");
-  await setMemory(projectId, { baseInstruction: INSTRUCTION, networkAsked: false, networkContinued: false, subRequests: [] });
+  // Independent writes, all at once (each is a storage + database call).
+  await Promise.all([
+    writeFile(projectId, "rozmowa.md", `# Rozmowa\n\n${lines.join("\n\n")}\n`, "md", "chat"),
+    writeFile(projectId, "request.txt", last, "txt", "customer"),
+    prev && prev.trim() ? writeFile(projectId, `historia/odpowiedz-${Date.now()}.txt`, prev, "txt", "system") : null,
+    writeFile(projectId, "odpowiedz.txt", "", "txt", "system"),
+    writeFile(projectId, BUSINESS_QUESTIONS, "", "md", "system"),
+    knowledge.length ? writeFile(projectId, `${KNOWLEDGE_DIR}/strona.md`, `# Informacje z witryny firmy (do tej wiadomości)\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system") : null,
+    setMemory(projectId, { baseInstruction: INSTRUCTION, networkAsked: false, networkContinued: false, subRequests: [] }),
+  ]);
   const { planAndRun } = await import("./plan.js");
   return planAndRun(projectId, INSTRUCTION, "chat");
 }
@@ -215,7 +218,13 @@ export async function deliverNow(projectId: string): Promise<void> {
   }, async (message, files, status) => {
     const contact = p.memory.customerContact as { email: string; lang: string } | undefined;
     if (!contact?.email || status === "review") return;
-    const { sendResultEmail } = await import("../multi-tenant/email.js");
+    // Any failure is recorded (a missing email key used to fail silently).
+    let sendResultEmail: typeof import("../multi-tenant/email.js").sendResultEmail;
+    try { ({ sendResultEmail } = await import("../multi-tenant/email.js")); }
+    catch (e) {
+      await addEvent(projectId, { kind: "result_emailed", actor: "system", data: { sent: false, error: String((e as Error).message).slice(0, 200) } }).catch(() => {});
+      return;
+    }
     const { getTenant } = await import("../multi-tenant/d1-registry.js");
     const t = getTenant(p.initiatorTenantId);
     // The customer's files, attached (CSV with a BOM so Excel opens Polish characters correctly).

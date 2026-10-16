@@ -28,6 +28,12 @@ export class PiiMasker extends DurableObject<Env> {
     if (c.running) c.setInactivityTimeout(INACTIVITY_TIMEOUT_MS).catch(() => {});
   }
 
+  async warm(): Promise<void> {
+    if (!this.#container.running) this.#ready = null;
+    this.#ready ||= this.#ensureRunning().catch((e) => { this.#ready = null; throw e; });
+    await this.#ready;
+  }
+
   mask(req: MaskRequest): Promise<MaskResult> {
     return this.#call("/mask", req) as Promise<MaskResult>;
   }
