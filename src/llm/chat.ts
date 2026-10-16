@@ -92,7 +92,7 @@ export interface ChatResponse {
   // caller driving it (e.g. another business's bot in an ecosystem referral).
   collect?: { flowId: string; stage: "collecting" | "confirming" | "sent" | "cancelled" | "failed"; missing: string[] };
   // The project this reply belongs to (multi-business work, src/projects).
-  project?: { id: string; type: string; agent?: { status: "running" }; notify?: { lang: string; prompt: string; consent: string; button: string } };
+  project?: { id: string; type: string; agent?: { status: "running" }; notify?: { lang: string; prompt: string; consent: string; button: string; link?: string; linkText?: string } };
   flowSession?: {
     active: boolean;
     status: FlowSession["status"];
@@ -1054,7 +1054,11 @@ export class WebsiteChat {
     const l = ((lang?.lang as any)?.choice as string) || "en";
     console.log(`[conversation] ${this.context.tenantId}: ${projectId} agent ${begun}`);
     const n = NOTIFY[l] || NOTIFY.en;
-    const notify = { lang: NOTIFY[l] ? l : "en", prompt: n.prompt, consent: n.consent.split("{brand}").join((await import("../projects/network.js")).businessLabel(this.context.tenantId) || this.brandName || ""), button: n.button };
+    const { customerLink, LINK_TEXT } = await import("../projects/conversation.js");
+    const token = await customerLink(projectId).catch(() => "");
+    const lk = NOTIFY[l] ? l : "en";
+    const notify = { lang: lk, prompt: n.prompt, consent: n.consent.split("{brand}").join((await import("../projects/network.js")).businessLabel(this.context.tenantId) || this.brandName || ""), button: n.button,
+      ...(token ? { link: `${process.env.BASE_URL || "https://whisp.so"}/p/${token}`, linkText: LINK_TEXT[lk] } : {}) };
     return { message: (begun === "busy" ? BUSY : WORKING)[l] || (begun === "busy" ? BUSY : WORKING).en, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" }, ...(begun === "busy" ? {} : { notify }) } };
   }
 

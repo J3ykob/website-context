@@ -189,6 +189,34 @@ export async function reworkWithGuidance(projectId: string, note: string): Promi
 }
 
 // The customer can leave their email to get the result when it is ready (with consent, per project).
+// The customer's own page for a request: whisp.so/p/<token> shows its status and, when ready, the
+// result (only what the customer may see). Unguessable, one per project.
+export async function customerLink(projectId: string): Promise<string> {
+  const { d1Query } = await import("../storage/conversation-store.js");
+  await d1Query("CREATE TABLE IF NOT EXISTS customer_links (token TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)");
+  const found = (await d1Query("SELECT token FROM customer_links WHERE project_id = ?", [projectId]))[0];
+  if (found) return found.token as string;
+  const { randomBytes } = await import("crypto");
+  const token = randomBytes(18).toString("base64url");
+  await d1Query("INSERT OR IGNORE INTO customer_links (token, project_id, created_at) VALUES (?, ?, ?)", [token, projectId, new Date().toISOString()]);
+  return ((await d1Query("SELECT token FROM customer_links WHERE project_id = ?", [projectId]))[0]?.token as string) || token;
+}
+
+export async function projectByLink(token: string): Promise<string | null> {
+  if (!token || token.length > 64) return null;
+  const { d1Query } = await import("../storage/conversation-store.js");
+  const r = (await d1Query("SELECT project_id FROM customer_links WHERE token = ?", [token]).catch(() => []))[0];
+  return r ? (r.project_id as string) : null;
+}
+
+export const LINK_TEXT: Record<string, string> = {
+  pl: "Nie musisz czekać na tej stronie - wynik pojawi się też tutaj:",
+  en: "You don't have to wait on this page - the result will also appear here:",
+  uk: "Не потрібно чекати на цій сторінці - результат з'явиться також тут:",
+  fr: "Inutile d'attendre sur cette page - le résultat s'affichera aussi ici :",
+  de: "Sie müssen nicht auf dieser Seite warten - das Ergebnis erscheint auch hier:",
+};
+
 export const NOTIFY: Record<string, { prompt: string; consent: string; button: string; saved: string; invalid: string }> = {
   pl: { prompt: "Nie musisz czekać - wyślę wynik na e-mail:", consent: "Zgadzam się, aby {brand} wysłał mi wynik tego zapytania na podany e-mail.", button: "Wyślij mi wynik", saved: "Dziękuję - wynik wyślę na {email}.", invalid: "Sprawdź adres e-mail." },
   en: { prompt: "No need to wait - I can email you the result:", consent: "I agree that {brand} emails me the result of this request.", button: "Email me the result", saved: "Thanks - I'll send the result to {email}.", invalid: "Please check the email address." },

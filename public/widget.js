@@ -1091,6 +1091,14 @@
     var box = document.createElement("form");
     box.className = "wctx-msg wctx-msg-assistant wctx-notify";
     box.style.cssText = "display:flex;flex-direction:column;gap:8px;font-size:13px";
+    // The customer's own whisp.so page for this request: no need to keep this site open.
+    if (n.link) {
+      var lk = document.createElement("div");
+      lk.appendChild(document.createTextNode(n.linkText + " "));
+      var a = document.createElement("a"); a.href = n.link; a.target = "_blank"; a.rel = "noopener"; a.textContent = n.link.replace("https://", "");
+      a.style.cssText = "color:#3b82f6;word-break:break-all";
+      lk.appendChild(a); box.appendChild(lk);
+    }
     var t = document.createElement("div"); t.textContent = n.prompt; box.appendChild(t);
     var input = document.createElement("input"); input.type = "email"; input.required = true; input.placeholder = "e-mail"; input.autocomplete = "email";
     input.style.cssText = "padding:8px 10px;border-radius:10px;border:1px solid rgba(127,127,127,.35);background:transparent;color:inherit;font:inherit";

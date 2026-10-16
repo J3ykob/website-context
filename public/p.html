@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Twoje zapytanie - Whisp</title>
+<style>
+  :root { --page:#0a0e1a; --card:rgba(255,255,255,0.03); --border:rgba(255,255,255,0.08); --accent:#3b82f6; --accent-h:#2563eb; --text:#f1f5f9; --muted:#94a3b8; --dim:#64748b; --ok:#10b981; --warn:#f59e0b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); color:var(--text); font:15px/1.6 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:32px 16px 64px; }
+  .brand { color:var(--muted); font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin:0 0 6px; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-weight:500; font-size:28px; margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:18px 20px; margin:0 0 16px; }
+  .label { text-transform:uppercase; letter-spacing:.08em; font-size:11px; color:var(--dim); margin:0 0 8px; }
+  .pre { white-space:pre-wrap; word-break:break-word; }
+  .status { display:flex; gap:12px; align-items:center; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--warn); flex:none; animation: pulse 1.6s ease-in-out infinite; }
+  .dot.ok { background:var(--ok); animation:none; }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.35 } }
+  a { color:#93c5fd; }
+  .files a { display:inline-block; margin:4px 14px 0 0; }
+  input[type=email] { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--text); font:inherit; }
+  input[type=email]:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(59,130,246,.35); }
+  label.consent { display:flex; gap:8px; align-items:flex-start; font-size:13px; color:var(--muted); margin:10px 0; cursor:pointer; }
+  button { font:inherit; border-radius:10px; padding:10px 16px; cursor:pointer; border:0; background:var(--accent); color:#fff; }
+  @media (hover:hover) { button:hover { background:var(--accent-h); } }
+  button:disabled { opacity:.5; cursor:default; }
+  .foot { color:var(--dim); font-size:12px; margin-top:28px; text-align:center; }
+  .hidden { display:none; }
+  .err { color:#ef4444; font-size:13px; margin-top:6px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="brand" id="brand"></p>
+  <h1 id="title">…</h1>
+
+  <div class="card">
+    <div class="status"><span class="dot" id="dot"></span><span id="status"></span></div>
+  </div>
+
+  <div class="card hidden" id="result-card">
+    <p class="label" id="l-result"></p>
+    <div class="pre" id="result"></div>
+    <div class="files" id="files"></div>
+  </div>
+
+  <div class="card">
+    <p class="label" id="l-request"></p>
+    <div class="pre" id="request" style="color:var(--muted)"></div>
+  </div>
+
+  <div class="card hidden" id="notify-card">
+    <p class="label" id="l-notify"></p>
+    <form id="notify">
+      <input type="email" id="email" required placeholder="e-mail" autocomplete="email">
+      <label class="consent"><input type="checkbox" id="consent" required> <span id="consent-text"></span></label>
+      <button type="submit" id="notify-btn"></button>
+      <div class="err hidden" id="notify-err"></div>
+    </form>
+    <div class="hidden" id="notify-ok"></div>
+  </div>
+
+  <p class="foot"><span id="keep"></span> · <a href="https://whisp.so" target="_blank" rel="noopener">Whisp</a></p>
+</main>
+<script>
+(function () {
+  var token = location.pathname.split("/").filter(Boolean).pop();
+  var api = "/api/p/" + encodeURIComponent(token);
+  function $(id) { return document.getElementById(id); }
+  var T = {
+    pl: { title: "Twoje zapytanie", running: "Przygotowujemy odpowiedź - zwykle trwa to kilka minut.", partners: "Czekamy na odpowiedzi współpracujących firm - pozostałe części są gotowe.", review: "Odpowiedź jest gotowa - firma ją sprawdza, zanim ją zobaczysz.", done: "Odpowiedź jest gotowa.", failed: "Nie udało się przygotować odpowiedzi - firma odpowie bezpośrednio.", result: "Odpowiedź", request: "Twoje zapytanie", notify: "Powiadom mnie e-mailem, gdy będzie gotowe", button: "Powiadom mnie", keep: "Zapisz ten link - wynik zawsze będzie tutaj", none: "Ten link wygasł albo nie istnieje." },
+    en: { title: "Your request", running: "We're preparing the answer - this usually takes a few minutes.", partners: "Waiting for answers from partner businesses - the other parts are ready.", review: "The answer is ready - the business is checking it before you see it.", done: "The answer is ready.", failed: "We couldn't prepare the answer - the business will reply directly.", result: "Answer", request: "Your request", notify: "Email me when it's ready", button: "Notify me", keep: "Save this link - the result will always be here", none: "This link has expired or does not exist." },
+    uk: { title: "Ваш запит", running: "Готуємо відповідь - зазвичай це займає кілька хвилин.", partners: "Чекаємо на відповіді партнерських компаній - інші частини готові.", review: "Відповідь готова - компанія перевіряє її, перш ніж ви її побачите.", done: "Відповідь готова.", failed: "Не вдалося підготувати відповідь - компанія відповість безпосередньо.", result: "Відповідь", request: "Ваш запит", notify: "Повідомте мене e-mailом, коли буде готово", button: "Повідомити мене", keep: "Збережіть це посилання - результат завжди буде тут", none: "Посилання недійсне." },
+    fr: { title: "Votre demande", running: "Nous préparons la réponse - cela prend généralement quelques minutes.", partners: "En attente des réponses des entreprises partenaires - le reste est prêt.", review: "La réponse est prête - l'entreprise la vérifie avant de vous l'envoyer.", done: "La réponse est prête.", failed: "Nous n'avons pas pu préparer la réponse - l'entreprise vous répondra directement.", result: "Réponse", request: "Votre demande", notify: "Prévenez-moi par e-mail quand c'est prêt", button: "Me prévenir", keep: "Gardez ce lien - le résultat sera toujours ici", none: "Ce lien a expiré ou n'existe pas." },
+    de: { title: "Ihre Anfrage", running: "Wir bereiten die Antwort vor - das dauert meist einige Minuten.", partners: "Wir warten auf Antworten von Partnerunternehmen - der Rest ist fertig.", review: "Die Antwort ist fertig - das Unternehmen prüft sie, bevor Sie sie sehen.", done: "Die Antwort ist fertig.", failed: "Die Antwort konnte nicht erstellt werden - das Unternehmen antwortet direkt.", result: "Antwort", request: "Ihre Anfrage", notify: "Benachrichtigen Sie mich per E-Mail", button: "Benachrichtigen", keep: "Speichern Sie diesen Link - das Ergebnis ist immer hier", none: "Dieser Link ist abgelaufen oder existiert nicht." },
+  };
+  var t = T.pl, lang = "pl", timer = null;
+
+  function render(d) {
+    lang = T[d.lang] ? d.lang : "pl"; t = T[lang];
+    document.documentElement.lang = lang;
+    document.title = t.title + (d.brand ? " - " + d.brand : "");
+    $("brand").textContent = d.brand || "";
+    $("title").textContent = t.title;
+    $("status").textContent = t[d.status] || t.running;
+    $("dot").className = "dot" + (d.status === "done" ? " ok" : "");
+    $("l-result").textContent = t.result; $("l-request").textContent = t.request; $("l-notify").textContent = t.notify;
+    $("notify-btn").textContent = t.button; $("keep").textContent = t.keep;
+    $("request").textContent = d.request;
+    $("consent-text").textContent = d.consent;
+    if (d.message) {
+      $("result").textContent = d.message; $("result-card").classList.remove("hidden");
+      $("files").innerHTML = "";
+      (d.files || []).forEach(function (f) { var a = document.createElement("a"); a.href = f.url; a.textContent = f.name; $("files").appendChild(a); });
+    }
+    var finished = d.status === "done" || d.status === "failed";
+    $("notify-card").classList.toggle("hidden", finished || d.notified);
+    if (!finished) { clearTimeout(timer); timer = setTimeout(load, 10000); }
+  }
+
+  function load() {
+    fetch(api).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }).then(render).catch(function (code) {
+      if (code === 404) { $("title").textContent = t.none; $("status").textContent = ""; $("dot").className = "hidden"; return; }
+      clearTimeout(timer); timer = setTimeout(load, 20000);
+    });
+  }
+
+  $("notify").addEventListener("submit", function (e) {
+    e.preventDefault();
+    $("notify-btn").disabled = true;
+    fetch(api + "/notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: $("email").value, consent: $("consent").checked, lang: lang }) })
+      .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, x: x }; }); })
+      .then(function (res) {
+        if (!res.ok) { $("notify-btn").disabled = false; $("notify-err").textContent = res.x.error || ""; $("notify-err").classList.remove("hidden"); return; }
+        $("notify").classList.add("hidden"); $("notify-ok").textContent = res.x.message; $("notify-ok").classList.remove("hidden");
+      }).catch(function () { $("notify-btn").disabled = false; });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

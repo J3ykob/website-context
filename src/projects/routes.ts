@@ -22,7 +22,7 @@ import type { Express, RequestHandler } from "express";
 import { projectsForTenant, projectDetail } from "./store.js";
 import { listFiles, listRequirements, readFile, readFileBuffer, writeFile } from "./repo.js";
 import { agentEnabled, agentStatus } from "./agent.js";
-import { agentDelivery, reworkWithGuidance, businessQuestions, deliverNow, setCustomerContact, NOTIFY, CUSTOMER_DIR } from "./conversation.js";
+import { agentDelivery, reworkWithGuidance, businessQuestions, deliverNow, setCustomerContact, projectByLink, NOTIFY, CUSTOMER_DIR } from "./conversation.js";
 import { reviewByToken, decide, reviewMode, timeline } from "./review.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
 import { resolve } from "path";
@@ -255,6 +255,69 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     const brand = getTenant(p.initiatorTenantId)?.settings?.siteCard?.brand || getTenant(p.initiatorTenantId)?.brandName || getTenant(p.initiatorTenantId)?.domain || "";
     await setCustomerContact(p.id, p.initiatorTenantId, email, lang, NOTIFY[lang].consent.split("{brand}").join(brand));
     // Already finished while the customer was typing: send it now.
+    await deliverNow(p.id).catch(() => {});
+    res.json({ ok: true, message: NOTIFY[lang].saved.split("{email}").join(email) });
+  });
+
+  // The customer's page on whisp.so (link from the chat): status, then the result and its files.
+  const linkProject = async (token: string) => {
+    const id = await projectByLink(token);
+    return id ? getProject(id) : null;
+  };
+
+  app.get("/p/:token", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Robots-Tag", "noindex");
+    res.sendFile(resolve("public/p.html"));
+  });
+
+  app.get("/api/p/:token", async (req, res) => {
+    const p = await linkProject(String(req.params.token)).catch(() => null);
+    if (!p) { res.status(404).json({ error: "not_found" }); return; }
+    const t = getTenant(p.initiatorTenantId);
+    const lang = ((p.memory.customerContact as any)?.lang) || ((p.memory.plan as any)?.language) || "pl";
+    try {
+      const d = await agentDelivery(p.id, (message) => logMessage(p.initiatorTenantId, p.customerSession, "assistant", message, { flowInvoked: "project-agent" }));
+      const waitingBusinesses = ((p.memory.subRequests as any[]) || []).some((s) => s.status === "waiting");
+      const tok = encodeURIComponent(String(req.params.token));
+      res.json({
+        brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "", site: t?.siteUrl || "",
+        lang: NOTIFY[lang] ? lang : "pl",
+        request: ((await readFile(p.id, "request.txt").catch(() => null)) || "").slice(0, 2000),
+        status: d.status === "running" && waitingBusinesses ? "partners" : d.status,
+        message: d.status === "done" || d.status === "failed" ? d.message : "",
+        files: d.status === "done" ? (d.files || []).map((path) => ({ name: path.split("/").pop(), url: `/api/p/${tok}/file?path=${encodeURIComponent(path)}` })) : [],
+        notified: !!(p.memory.customerContact as any)?.email,
+        consent: NOTIFY[NOTIFY[lang] ? lang : "pl"].consent.split("{brand}").join(t?.settings?.siteCard?.brand || t?.brandName || t?.domain || ""),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: "unavailable" });
+    }
+  });
+
+  app.get("/api/p/:token/file", async (req, res) => {
+    const p = await linkProject(String(req.params.token)).catch(() => null);
+    const path = String(req.query.path || "");
+    const run = p?.memory.agentRun as any;
+    if (!p || !path.startsWith(`${CUSTOMER_DIR}/`) || !(run?.files || []).includes(path) || (p.memory.delivered as string) !== run?.runId) { res.status(404).json({ error: "Not found" }); return; }
+    const f = (await listFiles(p.id)).find((x) => x.path === path);
+    const body = !f ? null : f.kind === "bin" ? await readFileBuffer(p.id, path) : await readFile(p.id, path);
+    if (!f || body === null) { res.status(404).json({ error: "Not found" }); return; }
+    res.setHeader("Content-Type", f.kind === "csv" ? "text/csv; charset=utf-8" : f.kind === "bin" ? "application/octet-stream" : "text/plain; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${(path.split("/").pop() || "file").split('"').join("")}"`);
+    res.send(f.kind === "csv" && typeof body === "string" && !body.startsWith("\uFEFF") ? "\uFEFF" + body : body);
+  });
+
+  app.post("/api/p/:token/notify", async (req, res) => {
+    const p = await linkProject(String(req.params.token)).catch(() => null);
+    if (!p) { res.status(404).json({ error: "Not found" }); return; }
+    const lang = NOTIFY[String(req.body?.lang)] ? String(req.body.lang) : "pl";
+    const email = String(req.body?.email || "").trim().slice(0, 200);
+    const at = email.indexOf("@");
+    if (at < 1 || email.indexOf(".", at) < at + 2 || email.endsWith(".") || email.includes(" ") || req.body?.consent !== true) { res.status(400).json({ error: NOTIFY[lang].invalid }); return; }
+    const brand = getTenant(p.initiatorTenantId)?.settings?.siteCard?.brand || getTenant(p.initiatorTenantId)?.brandName || getTenant(p.initiatorTenantId)?.domain || "";
+    await setCustomerContact(p.id, p.initiatorTenantId, email, lang, NOTIFY[lang].consent.split("{brand}").join(brand));
     await deliverNow(p.id).catch(() => {});
     res.json({ ok: true, message: NOTIFY[lang].saved.split("{email}").join(email) });
   });
