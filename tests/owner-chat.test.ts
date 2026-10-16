@@ -22,7 +22,7 @@ afterAll(async () => {
   const { deleteFromR2 } = await import("../src/storage/r2.js");
   for (const r of await M.d1Query("SELECT id FROM projects WHERE customer_session = ?", [session])) {
     for (const f of await M.repo.listFiles(r.id)) await deleteFromR2(`projects/${r.id}/${f.path}`).catch(() => {});
-    for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements", "project_reviews"]) await M.d1Query(`DELETE FROM ${t} WHERE project_id = ?`, [r.id]);
+    for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements", "project_reviews", "customer_links"]) await M.d1Query(`DELETE FROM ${t} WHERE project_id = ?`, [r.id]);
     await M.d1Query("DELETE FROM projects WHERE id = ?", [r.id]);
   }
 }, 120_000);

@@ -27,7 +27,7 @@ afterAll(async () => {
   const { deleteFromR2 } = await import("../src/storage/r2.js");
   for (const id of ids) {
     for (const f of await listFiles(id).catch(() => [])) await deleteFromR2(`projects/${id}/${f.path}`).catch(() => {});
-    for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements"]) await d1Query(`DELETE FROM ${t} WHERE project_id = ?`, [id]);
+    for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements", "project_reviews", "customer_links"]) await d1Query(`DELETE FROM ${t} WHERE project_id = ?`, [id]);
     await d1Query("DELETE FROM projects WHERE id = ?", [id]);
   }
 }, 120_000);

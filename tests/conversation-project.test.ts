@@ -36,7 +36,7 @@ afterAll(async () => {
   for (const s of sessions) {
     for (const p of await d1Query("SELECT id FROM projects WHERE customer_session = ?", [s])) {
       for (const f of await listFiles(p.id).catch(() => [])) await deleteFromR2(`projects/${p.id}/${f.path}`).catch(() => {});
-      for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements"]) await d1Query(`DELETE FROM ${t} WHERE project_id = ?`, [p.id]);
+      for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements", "project_reviews", "customer_links"]) await d1Query(`DELETE FROM ${t} WHERE project_id = ?`, [p.id]);
       await d1Query("DELETE FROM projects WHERE id = ?", [p.id]);
     }
   }
