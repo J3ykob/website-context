@@ -490,20 +490,6 @@ export class WebsiteChat {
       this.collectSessions.delete(effectiveSessionKey);
     }
 
-    // "What would this list / job cost?" -> a compare_offers project.
-    // The turn's kind: pricing a given list (fast estimate), work on data (the project agent:
-    // calculate, compare, choose, plan, build a list or document), or an ordinary answer.
-    const kind = await this.kindOf(inputValidation.sanitized, sanitizedMessages);
-    const estimate = kind === "estimate" ? await this.estimateProject(inputValidation.sanitized, effectiveSessionKey) : null;
-    // Lines the offers do not price: other businesses of the network may - the agent asks them.
-    const unpriced = estimate ? this.lastEstimateTbd.get(effectiveSessionKey) || 0 : 0;
-    const escalate = kind === "estimate" && (!estimate || unpriced > 0) && agentEnabled() && (await this.hasNetwork());
-    if (estimate && !escalate) return estimate;
-    if (kind === "work" || escalate) {
-      const viaAgent = await this.agentTurn(sanitizedMessages, inputValidation.sanitized, effectiveSessionKey);
-      if (viaAgent) return viaAgent;
-    }
-
     // If there's an active flow session collecting remaining inputs
     if (this.hasActiveFlowSession(effectiveSessionKey)) {
       const session = this.flowSessions.get(effectiveSessionKey)!;
@@ -548,9 +534,15 @@ export class WebsiteChat {
     // Flow triggering is an LLM DECISION, not a keyword matcher: the model sees
     // the active flows (name + description) and picks which the visitor wants to
     // start, none, or several (ambiguous). Robust across languages/phrasings.
+    // The business's own flows (orders, bookings...) come first: a booking is never "work" for the agent.
+    // The turn's kind is decided at the same time, for when no flow is wanted.
     const activeFlows = this.context.flows.filter((f) => f.status === "active");
+    const [pickedFlows, kind] = await Promise.all([
+      activeFlows.length > 0 ? this.classifyFlowIntent(inputValidation.sanitized, activeFlows) : Promise.resolve([] as FlowDefinition[]),
+      this.kindOf(inputValidation.sanitized, sanitizedMessages),
+    ]);
     if (activeFlows.length > 0) {
-      const picked = await this.classifyFlowIntent(inputValidation.sanitized, activeFlows);
+      const picked = pickedFlows;
       if (picked.length === 1 && picked[0].executionMode === "agent") return this.startAgentFlow(picked[0], inputValidation.sanitized);
       if (picked.length === 1 && picked[0].executionMode === "collect") return this.startCollect(picked[0], effectiveSessionKey, inputValidation.sanitized);
       if (picked.length === 1) {
@@ -567,6 +559,19 @@ export class WebsiteChat {
         return { message: `I can help with a couple of things here — did you want ${names}? Just tell me which.`, sources: [] };
       }
       // picked.length === 0 -> not a flow request; fall through to normal chat.
+    }
+
+    // "What would this list / job cost?" -> a compare_offers project.
+    // The turn's kind: pricing a given list (fast estimate), work on data (the project agent:
+    // calculate, compare, choose, plan, build a list or document), or an ordinary answer.
+    const estimate = kind === "estimate" ? await this.estimateProject(inputValidation.sanitized, effectiveSessionKey) : null;
+    // Lines the offers do not price: other businesses of the network may - the agent asks them.
+    const unpriced = estimate ? this.lastEstimateTbd.get(effectiveSessionKey) || 0 : 0;
+    const escalate = kind === "estimate" && (!estimate || unpriced > 0) && agentEnabled() && (await this.hasNetwork());
+    if (estimate && !escalate) return estimate;
+    if (kind === "work" || escalate) {
+      const viaAgent = await this.agentTurn(sanitizedMessages, inputValidation.sanitized, effectiveSessionKey);
+      if (viaAgent) return viaAgent;
     }
 
     const retrievedChunks = await this.retrieveContext(lastUserMessage);
