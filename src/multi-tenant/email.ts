@@ -167,6 +167,25 @@ Whisp`,
   }
 }
 
+// A business that has not joined the network (src/projects/invite.ts, which also holds the text).
+// New template: until the user approves it (NETWORK_INVITE_EMAIL_APPROVED=1) it goes only to the Whisp
+// owner's own address - never to a business.
+export async function sendNetworkInviteEmail(email: string, mail: { subject: string; text: string }): Promise<boolean> {
+  if (process.env.NETWORK_INVITE_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
+    console.log(`[email] network invite to ${email} not sent - template awaiting approval`);
+    return false;
+  }
+  try {
+    const { error } = await resend.emails.send({ from: FROM, to: email, replyTo: "jakub@whisp.so", subject: mail.subject, text: mail.text });
+    if (error) { console.error(`[email] network invite to ${email} failed:`, error.message); return false; }
+    console.log(`[email] Network invite sent to ${email}`);
+    return true;
+  } catch (e: any) {
+    console.error(`[email] network invite to ${email} failed:`, e.message);
+    return false;
+  }
+}
+
 // The result of a customer's request, sent when the customer asked for it in the chat (with consent).
 // New template: until the user approves it (CUSTOMER_RESULT_EMAIL_APPROVED=1), it goes only to the Whisp
 // owner's own address.

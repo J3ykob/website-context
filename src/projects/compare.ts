@@ -91,6 +91,8 @@ ${catalogSample.length ? `The business's catalog names items like this: ${catalo
   }).filter((l: Line) => l.need);
 }
 
+const HOURS: Record<string, number> = { godzina: 1, doba: 24, tydzien: 168, miesiac: 720 };
+
 /** Price of one offer item for one line - from the item's fields only. */
 export function priceLine(it: OfferItem, line: Line, b: Business): Quote {
   const f = it.fields;
@@ -104,10 +106,26 @@ export function priceLine(it: OfferItem, line: Line, b: Business): Quote {
   if (it.components.length) {
     const alts = it.components.filter((c) => c.combine === "alternative");
     if (alts.length === it.components.length) {
-      // Alternative rates: the one in the customer's unit, else show the lowest.
-      const match = alts.find((c) => c.unit === line.unit && c.price_value !== null);
-      const pick = match || [...alts].filter((c) => c.price_value !== null).sort((a, b) => a.price_value! - b.price_value!)[0];
-      if (!pick) return { ...base, priceNote: "na zapytanie", tbd: [it.name] };
+      const priced = alts.filter((c) => c.price_value !== null);
+      if (!priced.length) return { ...base, priceNote: "na zapytanie", tbd: [it.name] };
+      // Two options in the same unit are variants of the product (disc only / disc with blades), not ways
+      // of paying: which one the customer means is not a calculation - left to be priced (the agent reads it).
+      const units = priced.map((c) => c.unit);
+      if (new Set(units).size < units.length) {
+        const low = [...priced].sort((a, b) => a.price_value! - b.price_value!)[0];
+        return { ...base, unitPrice: low.price_value, unit: low.unit, priceNote: "warianty", tbd: [`${it.name} (wariant: ${priced.map((c) => c.label).join(" / ")})`] };
+      }
+      // Rates for time (hour, day, week, month): the requested time costed in each rate - whole units of it,
+      // a day is 24 h - and the cheapest for the customer is taken.
+      const hours = line.quantity !== null ? HOURS[line.unit] : undefined;
+      if (hours !== undefined && priced.every((c) => HOURS[c.unit] !== undefined)) {
+        const need = line.quantity! * hours;
+        const best = priced.map((c) => { const n = Math.ceil(need / HOURS[c.unit] - 1e-9); return { c, n, total: r2(c.price_value! * n) }; }).sort((a, b) => a.total - b.total)[0];
+        return { ...base, unitPrice: best.c.price_value, unit: best.c.unit, total: best.total, priceNote: `${best.c.label} × ${best.n}` };
+      }
+      // Otherwise the rate in the customer's unit, else the lowest shown (no total).
+      const match = priced.find((c) => c.unit === line.unit);
+      const pick = match || [...priced].sort((a, b) => a.price_value! - b.price_value!)[0];
       const q = match ? line.quantity : null;
       return { ...base, unitPrice: pick.price_value, unit: pick.unit, total: q !== null ? r2(pick.price_value! * q) : null, priceNote: pick.label };
     }

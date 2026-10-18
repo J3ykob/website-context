@@ -161,19 +161,29 @@ Output {"name": "..."}: the name of the ONE specific product or service from the
   return passages.some((p) => p.includes(name)) ? name : null;
 }
 
-async function checkOffer(value: string, field: FlowInput, knowledge: (q: string) => string[] | Promise<string[]>, llm: Llm): Promise<OfferVerdict> {
-  const passages = (await knowledge(value)).slice(0, 6);
-  if (!passages.length) return { status: "ok" };
-  // Whether it is offered is a classification: Jev (stable across runs; the
-  // answer model flip-flopped). Acted on only when clear; otherwise accepted.
-  const a = await jevAsk({ business_information: passages, customer_request: value }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` part of the business's offer?", criteria: {
+/**
+ * Whether what the customer asks for is part of this business's own offer, judging only by its own
+ * information: "not_offered" / "several" when clear, "ok" otherwise, null when it could not be judged.
+ * Whether it is offered is a classification: Jev (stable across runs; the answer model flip-flopped).
+ */
+export async function offeredHere(request: string, passages: string[]): Promise<"ok" | "several" | "not_offered" | null> {
+  if (!passages.length) return "ok";
+  const a = await jevAsk({ business_information: passages, customer_request: request }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` part of the business's offer?", criteria: {
     offered: "Yes: the excerpts show the business offers exactly this, or clearly this.",
     several: "The excerpts show several different offers that could be what the customer means, and it is unclear which one.",
     not_offered: "No: the excerpts show what the business offers in this area, and what was asked is not among it (a different kind of product or service).",
     unknown: "The excerpts do not say whether the business offers this.",
   } } }, 6000);
-  const probs = ((a?.status as any)?.probabilities || {}) as Record<string, number>;
-  const status = (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : (probs.several ?? 0) >= 0.5 ? "several" : a ? "ok" : "fallback";
+  if (!a) return null;
+  const probs = ((a.status as any)?.probabilities || {}) as Record<string, number>;
+  return (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : (probs.several ?? 0) >= 0.5 ? "several" : "ok";
+}
+
+async function checkOffer(value: string, field: FlowInput, knowledge: (q: string) => string[] | Promise<string[]>, llm: Llm): Promise<OfferVerdict> {
+  const passages = (await knowledge(value)).slice(0, 6);
+  if (!passages.length) return { status: "ok" };
+  // Acted on only when clear; otherwise accepted.
+  const status = (await offeredHere(value, passages)) ?? "fallback";
   if (status === "ok") return { status: "ok" };
   // The concrete alternatives (or, without Jev, the whole judgment) by the model.
   const j = parseJsonObject(await llm(

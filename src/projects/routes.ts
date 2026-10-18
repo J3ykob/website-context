@@ -164,6 +164,8 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
       chat: ((proj?.memory.ownerChat as any[]) || []).filter((t) => Date.parse(t.at) >= Date.parse(rv.createdAt)),
       request: request || "", history,
       questions, businesses,
+      // A business that has not joined, invited to confirm or correct what its public data answered.
+      listed: proj?.memory.listed ? { from: businessLabel(String(proj.memory.fromTenant || "")), confirmed: !!proj.memory.confirmedAt } : null,
       files: forCustomer.map((f, k) => ({ path: f.path, name: f.path.split("/").pop(), size: f.size, content: contents[k] === null ? null : (contents[k] as string).startsWith("\uFEFF") ? (contents[k] as string).slice(1) : contents[k], url: `/api/review/${encodeURIComponent(rv.token)}/file?path=${encodeURIComponent(f.path)}` })),
       plan: (await getProject(rv.projectId))?.memory.plan || null,
       checks: requirements.filter((q) => q.id.startsWith("sys-agent") || q.id.startsWith("spec-")).map((q) => ({ text: q.text, status: q.status, evidence: q.evidence })),

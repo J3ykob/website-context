@@ -34,12 +34,18 @@ function words(t: string): string[] {
 
 /** The items the message is about, best first (at most `limit`). [] when none / Jev down. */
 export async function findOfferItems(question: string, items: OfferItem[], limit = 8, minScore = ITEM_MIN): Promise<OfferItem[]> {
+  return (await matchOfferItems(question, items, limit, minScore)) ?? [];
+}
+
+/** Like findOfferItems, but null when the items could not be judged (Jev down), [] when none match. */
+export async function matchOfferItems(question: string, items: OfferItem[], limit = 8, minScore = ITEM_MIN): Promise<OfferItem[] | null> {
   if (!items.length || !question.trim()) return [];
+  const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}`;
   let pool = items;
   if (items.length > DIRECT_MAX) {
     const cats = [...new Set(items.map((i) => i.category).filter(Boolean))].slice(0, 150);
     const cs = await judge(question, cats, "categories");
-    if (!cs) return [];
+    if (!cs) return null;
     const picked = new Set(cats.filter((_, k) => cs[k] >= 0.4));
     // Plus items sharing a word with the question (5-letter stems, so Polish
     // inflection matches: "ubijaka" ~ "Ubijak"), in case the category missed it.
@@ -53,9 +59,8 @@ export async function findOfferItems(question: string, items: OfferItem[], limit
     pool = [...new Set([...lexical, ...items.filter((i) => picked.has(i.category))])].slice(0, DIRECT_MAX);
     if (!pool.length) return [];
   }
-  const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}`;
   const scores = await judge(question, pool.map(label), "items");
-  if (!scores) return [];
+  if (!scores) return null;
   return pool
     .map((it, k) => ({ it, s: scores[k] }))
     .filter((r) => r.s >= minScore)

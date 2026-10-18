@@ -30,7 +30,7 @@ import { runCompare, type Business } from "../projects/compare.js";
 import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, turnKind, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
-import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
+import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -542,8 +542,14 @@ export class WebsiteChat {
       this.kindOf(inputValidation.sanitized, sanitizedMessages),
     ]);
     if (activeFlows.length > 0) {
-      const picked = pickedFlows;
+      let picked = pickedFlows;
       if (picked.length === 1 && picked[0].executionMode === "agent") return this.startAgentFlow(picked[0], inputValidation.sanitized);
+      // A form for something this business does not offer at all (when other businesses may have it):
+      // the network gets it - an order form for trestles a rental shop does not have helps nobody.
+      const elsewhere = picked.length === 1 && picked[0].executionMode === "collect" && this.offerItems.length > 0 && agentEnabled() && (await this.hasNetwork())
+        ? await this.notOfferedHere(inputValidation.sanitized).catch(() => false)
+        : false;
+      if (elsewhere) { console.log(`[flows] ${this.context.tenantId}: "${picked[0].name}" skipped - not in the own offer, the network may have it`); picked = []; }
       if (picked.length === 1 && picked[0].executionMode === "collect") return this.startCollect(picked[0], effectiveSessionKey, inputValidation.sanitized);
       if (picked.length === 1) {
         const started = this.beginFlowSession(effectiveSessionKey, picked[0]);
@@ -1109,6 +1115,31 @@ export class WebsiteChat {
     this.sessionVia.set(sessionKey, { via, at: now });
   }
 
+  /** The business's own information an order form checks requests against (offer items, site snippets). */
+  private collectKnowledge(): ((q: string) => Promise<string[]>) | undefined {
+    const cat = this.knowledgeCatalog;
+    const offerItems = this.offerItems;
+    return cat || offerItems.length
+      ? async (q: string) => [
+          ...(offerItems.length ? (await findOfferItems(q, offerItems, 5).catch(() => [] as OfferItem[])).map(renderItem) : []),
+          ...(cat ? lexicalSnippets(q, cat, 5) : []),
+        ]
+      : undefined;
+  }
+
+  /**
+   * Nothing of the request is in this business's own offer: no offer item matches it, or its own
+   * information shows it offers something else (the same judgement the order form makes).
+   */
+  private async notOfferedHere(message: string): Promise<boolean> {
+    const { offerMatches } = await import("../projects/network.js");
+    const own = await offerMatches(this.context.tenantId, this.offerItems, message);
+    if (own !== null && own.length === 0) return true;
+    const knowledge = this.collectKnowledge();
+    const passages = knowledge ? (await knowledge(message)).slice(0, 6) : [];
+    return (await offeredHere(message, passages)) === "not_offered";
+  }
+
   private startCollect(flow: FlowDefinition, sessionKey: string, message: string, via?: CollectVia): Promise<ChatResponse> {
     const remembered = this.sessionVia.get(sessionKey);
     const s = startSession(flow, via || (remembered && Date.now() - remembered.at < 30 * 60 * 1000 ? remembered.via : undefined));
@@ -1120,15 +1151,7 @@ export class WebsiteChat {
     const llm = (system: string, user: string, maxTokens = 700) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
     const status = (stage: NonNullable<ChatResponse["collect"]>["stage"]) => ({ flowId: flow.id, stage, missing: stage === "collecting" || stage === "confirming" ? missingLabels(flow, s) : [] });
     try {
-      const cat = this.knowledgeCatalog;
-      const offerItems = this.offerItems;
-      const knowledge = cat || offerItems.length
-        ? async (q: string) => [
-            ...(offerItems.length ? (await findOfferItems(q, offerItems, 5).catch(() => [] as OfferItem[])).map(renderItem) : []),
-            ...(cat ? lexicalSnippets(q, cat, 5) : []),
-          ]
-        : undefined;
-      const r = await collectTurn(flow, s, message, this.brandName, llm, knowledge);
+      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge());
       if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [], collect: status("cancelled") }; }
       if ("inquiry" in r) {
         this.collectSessions.delete(sessionKey);

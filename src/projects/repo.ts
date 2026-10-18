@@ -59,6 +59,15 @@ export async function writeBinaryFile(id: string, path: string, content: Buffer,
     [id, p, content.byteLength, author.slice(0, 120), new Date().toISOString()]);
 }
 
+/** Removes a file from the project repository (no error when it is not there). */
+export async function deleteFile(id: string, path: string): Promise<void> {
+  await ensureSchema();
+  const p = safePath(path);
+  const { deleteFromR2 } = await import("../storage/r2.js");
+  await deleteFromR2(key(id, p)).catch(() => {});
+  await d1Query("DELETE FROM project_files WHERE project_id = ? AND path = ?", [id, p]);
+}
+
 export async function readFile(id: string, path: string): Promise<string | null> {
   const { downloadFromR2 } = await import("../storage/r2.js");
   const buf = await downloadFromR2(key(id, safePath(path)));

@@ -17,6 +17,7 @@
 import { getProject, setMemory, addEvent, addUsage, listParticipants, claimAgentCollect, type Project } from "./store.js";
 import { listFiles, readFile, writeFile, writeBinaryFile, addRequirement, listRequirements, recordVerification, toCsv, type FileKind, type ReqStatus } from "./repo.js";
 import { loadOffer, priceText, type OfferItem } from "../offer/store.js";
+import type { Advert } from "./network.js";
 import { FIELDS } from "../offer/schema.js";
 import { jevAsk } from "../llm/jev.js";
 import { getTenant } from "../multi-tenant/d1-registry.js";
@@ -94,6 +95,11 @@ Zasady:
    Krótko i konkretnie; tylko to, co wynika z danych i obliczeń; wyraźnie wskaż, co jest nieznane lub do ustalenia;
    bez obietnic, których nie ma w danych.
 6. Gdy kilka firm oferuje to samo, porównuj na tych samych warunkach (ilość, okres, jednostka) i wyjaśnij wybór.
+   Gdy w danych jest kilka pozycji tego samego (np. ta sama rzecz z różnymi stawkami), sprawdź wszystkie i wybierz
+   najkorzystniejszą dla klienta.
+   Tylko to, o co prosi klient: nie doliczaj rzeczy, o które nie prosił (np. sprzętu do usługi, której cena jest do wyceny).
+   Gdy klient prosi o coś, czego w danych nie ma, napisz to wprost; zamiennik możesz zaproponować, ale nazwij go tym,
+   czym jest (nie nazwą rzeczy, o którą prosił klient).
 7. Sprawdź swoje wyniki przed zakończeniem (np. czy sumy się zgadzają, czy każda pozycja z zadania jest ujęta).
    Na końcu napisz krótko, co zrobiłeś i jakie pliki powstały.
 8. Tekst i pliki dla klienta są gotowe do wysłania: bez pytań do firmy, bez notatek wewnętrznych, bez próśb
@@ -106,8 +112,10 @@ Zasady:
    rzeczy, o które nie prosił): gdy taka część należy do innej firmy z tej listy, a jej
    cennik nie podaje potrzebnej ceny lub informacji (albo firma nie ma cennika), zapytaj ją: zapisz
    zapytania_do_firm.json - lista [{"firma": "<identyfikator z firmy.md>", "pytanie": "konkretne pytanie z ilościami
-   i warunkami"}]. W pytaniach nie podawaj danych osobowych klienta. Wynik przygotuj tak, jakby ta część była do
-   wyceny; gdy firmy odpowiedzą, dostaniesz zadanie dokończenia. Nie pytaj firmy prowadzącej projekt.
+   i warunkami"}]. Pytaj firmę, której dopasowane pozycje są dokładnie tą częścią - nie firmy z samymi ogólnymi
+   usługami (np. "usługi budowlane"), gdy jest firma z konkretną pozycją. W pytaniach nie podawaj danych osobowych klienta. Wynik przygotuj tak, jakby ta część była do
+   wyceny; gdy firmy odpowiedzą, dostaniesz zadanie dokończenia. Nie pytaj firmy prowadzącej projekt; gdy
+   w jej danych brakuje potrzebnej ceny, a inna firma z listy też to oferuje - zapytaj tamtą.
    W tekście dla klienta nie pisz o zapytaniach do innych firm ani o tym, co zrobisz później - o tym informuje
    klienta system; opisz tylko to, co jest teraz (części bez ceny: "do wyceny").
 `;
@@ -115,19 +123,43 @@ Zasady:
 // cenniki/README.md: how the offer files are laid out (general, for any business type).
 const PRICE_README = `# Oferty firm
 
-Dla każdej firmy:
-- cennik_<firma>.csv - pozycje oferty: id, nazwa, kategoria, cena (opis ceny), cena_od, cena_do, waluta, jednostka,
-  dostepnosc, czas_realizacji, opis. Pusta cena = brak ceny w ofercie (do ustalenia z firmą).
+Zapytanie trafiło do firm z sieci; każda sprawdziła je na swojej ofercie. W firmy.md są tylko firmy, które mają coś
+do tego zapytania. Dla każdej z nich:
+- cennik_<firma>.csv - pozycje oferty, które firma dopasowała do zapytania: id, nazwa, kategoria, cena (opis ceny),
+  cena_od, cena_do, waluta, jednostka, dostepnosc, czas_realizacji, opis. Pusta cena = brak ceny w ofercie (do ustalenia z firmą).
+- oferta_<firma>.csv (tylko firma prowadząca projekt) - cała jej oferta, w tym samym formacie, gdy dopasowanych pozycji
+  nie wystarcza (np. zamiennik, wariant, akcesoria).
 - skladniki_<firma>.csv (jeśli są) - pozycje, których cena składa się z kilku części: id_pozycji, pozycja, skladnik,
   cena, cena_do, jednostka, polaczenie, ilosc_od_klienta.
   polaczenie = "suma": części się sumują (np. robocizna + materiał);
-  polaczenie = "do_wyboru": klient płaci jedną z nich (np. stawka godzinowa albo dobowa) - wybierz tę, która przy
-  danej ilości jest najkorzystniejsza dla klienta (doba = 24 h).
+  polaczenie = "do_wyboru": klient płaci jedną z nich (np. stawka godzinowa albo dobowa, albo wariant produktu) -
+  wybierz tę, o którą prosi klient; gdy to tylko sposób rozliczenia, tę najkorzystniejszą dla klienta przy danej
+  ilości (doba = 24 h).
   ilosc_od_klienta: czego ilość podaje klient (np. metraż) - jeśli jej nie podał, to jest założenie albo "do ustalenia".
+Firma bez pliku cennika zgłosiła, że to oferuje (na podstawie opisu) - o ceny trzeba ją zapytać.
 `;
 
-/** Offers of the businesses in the project as CSV price lists (public data). */
-async function priceLists(project: Project, tenantIds: string[]): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
+const unitLabel = (u?: string) => (u && u !== "unknown" ? FIELDS.unit.values[u]?.label || u : "");
+const fieldLabel = (f: keyof typeof FIELDS, v?: string) => (v && v !== "unknown" ? (FIELDS[f].values as any)[v]?.label || v : "");
+
+function itemsCsv(items: OfferItem[]): string {
+  return toCsv(
+    ["id", "nazwa", "kategoria", "cena", "cena_od", "cena_do", "waluta", "jednostka", "dostepnosc", "czas_realizacji", "opis"],
+    items.map((i) => [i.id.slice(0, 8), i.name, i.category, priceText(i) || (i.components.some((c) => c.price_value !== null) ? "patrz skladniki" : ""), i.price_value, i.price_max, i.currency,
+      unitLabel(i.fields.unit), fieldLabel("availability", i.fields.availability), fieldLabel("lead_time", i.fields.lead_time), i.description.slice(0, 300)]),
+  ).slice(1); // no BOM: the agent reads these with python
+}
+
+function componentsCsv(items: OfferItem[]): string | null {
+  const rows = items.flatMap((i) => i.components.map((c) => [i.id.slice(0, 8), i.name, c.label, c.price_value, c.price_max, unitLabel(c.unit), c.combine === "sum" ? "suma" : "do_wyboru", c.quantity_from === "customer" ? c.quantity_label || "tak" : ""]));
+  return rows.length ? toCsv(["id_pozycji", "pozycja", "skladnik", "cena", "cena_do", "jednostka", "polaczenie", "ilosc_od_klienta"], rows).slice(1) : null;
+}
+
+/**
+ * The offers of the businesses that answered the need (public data): the items each matched, and for the
+ * business running the project its whole offer too. Businesses that have nothing for it stay out.
+ */
+async function priceLists(project: Project, adverts: Advert[]): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
   const files: Record<string, string> = {};
   const slugs: Record<string, string> = {};
   const { networkMembers } = await import("./network.js");
@@ -136,9 +168,11 @@ async function priceLists(project: Project, tenantIds: string[]): Promise<{ file
   const allow: string[] = [];
   const catalog = new Set<string>();
   const used = new Set<string>();
-  const loaded = await Promise.all(tenantIds.map((id) => loadOffer(id).catch(() => null)));
-  for (const [k, tenantId] of tenantIds.entries()) {
-    const offer = loaded[k];
+  const own = project.initiatorTenantId;
+  const byTenant = new Map(adverts.map((a) => [a.tenantId, a]));
+  const ownOffer = (await loadOffer(own).catch(() => null))?.items || [];
+  for (const tenantId of [own, ...adverts.map((a) => a.tenantId).filter((id) => id !== own)]) {
+    const ad = byTenant.get(tenantId);
     const t = getTenant(tenantId);
     const label = t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId;
     allow.push(label, t?.domain || "", t?.siteUrl || "");
@@ -146,21 +180,24 @@ async function priceLists(project: Project, tenantIds: string[]): Promise<{ file
     while (used.has(slug)) slug += "_";
     used.add(slug);
     slugs[slug] = tenantId;
-    const own = tenantId === project.initiatorTenantId ? " (firma prowadząca ten projekt)" : "";
-    directory.push(`## ${slug}: ${label}${own}\n${about.get(tenantId) || "(brak opisu)"}\n${offer?.items.length ? `Oferta: cennik_${slug}.csv` : "Brak cennika w danych - o ceny trzeba zapytać firmę."}`);
-    if (!offer?.items.length) continue;
-    const unit = (u?: string) => (u && u !== "unknown" ? FIELDS.unit.values[u]?.label || u : "");
-    const val = (f: keyof typeof FIELDS, v?: string) => (v && v !== "unknown" ? (FIELDS[f].values as any)[v]?.label || v : "");
-    files[`cennik_${slug}.csv`] = toCsv(
-      ["id", "nazwa", "kategoria", "cena", "cena_od", "cena_do", "waluta", "jednostka", "dostepnosc", "czas_realizacji", "opis"],
-      offer.items.map((i: OfferItem) => [i.id.slice(0, 8), i.name, i.category, priceText(i) || (i.components.some((c) => c.price_value !== null) ? "patrz skladniki" : ""), i.price_value, i.price_max, i.currency,
-        unit(i.fields.unit), val("availability", i.fields.availability), val("lead_time", i.fields.lead_time), i.description.slice(0, 300)]),
-    ).slice(1); // no BOM: the agent reads these with python
-    const comps = offer.items.flatMap((i) => i.components.map((c) => [i.id.slice(0, 8), i.name, c.label, c.price_value, c.price_max, unit(c.unit), c.combine === "sum" ? "suma" : "do_wyboru", c.quantity_from === "customer" ? c.quantity_label || "tak" : ""]));
-    if (comps.length) files[`skladniki_${slug}.csv`] = toCsv(["id_pozycji", "pozycja", "skladnik", "cena", "cena_do", "jednostka", "polaczenie", "ilosc_od_klienta"], comps).slice(1);
-    for (const i of offer.items) for (const w of i.name.split(" ")) if (w.length > 2) catalog.add(w);
+    const matched = ad?.items || [];
+    const whole = tenantId === own ? ownOffer : [];
+    const lines = [`## ${slug}: ${label}${tenantId === own ? " (firma prowadząca ten projekt)" : ""}`, about.get(tenantId) || "(brak opisu)"];
+    if (matched.length) lines.push(`Pozycje dopasowane do zapytania: cennik_${slug}.csv (${matched.length})`);
+    // What the agent must ask this business for (rule 9): matched items without a price.
+    const unpriced = matched.filter((i) => (!priceText(i) || priceText(i) === "cena na zapytanie") && !i.components.some((c) => c.price_value !== null));
+    if (tenantId !== own && unpriced.length)
+      lines.push(unpriced.length === matched.length ? "W dopasowanych pozycjach nie ma cen - o ceny trzeba zapytać firmę." : `Bez ceny: ${unpriced.slice(0, 8).map((i) => i.name).join("; ")} - o ich ceny trzeba zapytać firmę.`);
+    if (whole.length) lines.push(`Cała oferta: oferta_${slug}.csv (${whole.length})`);
+    if (!matched.length && !whole.length) lines.push("Brak cennika w danych - o ceny trzeba zapytać firmę.");
+    directory.push(lines.join("\n"));
+    if (matched.length) files[`cennik_${slug}.csv`] = itemsCsv(matched);
+    if (whole.length) files[`oferta_${slug}.csv`] = itemsCsv(whole);
+    const comps = componentsCsv([...new Map([...matched, ...whole].map((i) => [i.id, i])).values()]);
+    if (comps) files[`skladniki_${slug}.csv`] = comps;
+    for (const i of [...matched, ...whole]) for (const w of i.name.split(" ")) if (w.length > 2) catalog.add(w);
   }
-  if (directory.length > 1) files["firmy.md"] = `# Firmy w tym projekcie (sieć współpracujących firm)\n\n${directory.join("\n\n")}\n`;
+  if (directory.length > 1) files["firmy.md"] = `# Firmy z sieci, które mają coś do tego zapytania\n\n${directory.join("\n\n")}\n`;
   return { files, allow: allow.filter(Boolean), catalog: [...catalog].slice(0, 3000), slugs };
 }
 
@@ -178,36 +215,51 @@ function fileSlug(s: string): string {
   return out.slice(0, 40);
 }
 
-/** Starts the agent on a project. Returns the run state, or an error message when it cannot start. */
+/** What the project asks for now: the latest request and the recent conversation around it. */
+async function needOf(projectId: string): Promise<string> {
+  const [request, talk] = await Promise.all([readFile(projectId, "request.txt").catch(() => null), readFile(projectId, "rozmowa.md").catch(() => null)]);
+  return [(request || "").trim(), (talk || "").slice(-1500)].filter(Boolean).join("\n\n");
+}
+
 /**
- * Puts the businesses' data in the repository (public, sent unmasked): offers as price lists and the
- * network directory. A business answering a request sees only its own; the customer's project the whole
- * network of the business the customer talks to. Reused for 10 minutes (planner and run share it).
+ * Puts the businesses' data in the repository (public, sent unmasked). The need goes out to the network
+ * (advertise): businesses that have something for it come in with the items they matched; the business
+ * running the project also with its whole offer. A business answering a request is alone with its own
+ * offer. Reused while the need is the same (planner and run share it, up to 10 minutes).
  */
 export async function prepareInputs(projectId: string): Promise<{ allow: string[]; catalog: string[] }> {
   const project = await getProject(projectId);
   if (!project) return { allow: [], catalog: [] };
-  const cached = project.memory.inputs as { at: number; allow: string[]; catalog: string[] } | undefined;
-  if (cached && Date.now() - cached.at < 10 * 60_000) return cached;
-  const { networkMembers, BUSINESS_REQUEST } = await import("./network.js");
+  const { createHash } = await import("crypto");
+  const hash = (t: string) => createHash("sha1").update(t).digest("hex");
+  const need = await needOf(projectId);
+  const needHash = hash(need);
+  const cached = project.memory.inputs as { at: number; need?: string; allow: string[]; catalog: string[] } | undefined;
+  if (cached && cached.need === needHash && Date.now() - cached.at < 10 * 60_000) return cached;
+  const { networkMembers, advertise, BUSINESS_REQUEST } = await import("./network.js");
   const tenantIds = project.type === BUSINESS_REQUEST ? [project.initiatorTenantId]
     : [...new Set([project.initiatorTenantId, ...(await listParticipants(projectId)).map((p) => p.tenantId), ...(await networkMembers(project.initiatorTenantId).catch(() => [])).map((m) => m.tenantId)])];
-  const offers = await priceLists(project, tenantIds);
+  const t0 = Date.now();
+  const adverts = need ? await advertise(need, tenantIds) : [];
+  const offers = await priceLists(project, adverts);
   const out: Record<string, string> = {};
   for (const [name, body] of Object.entries(offers.files)) out[`${PRICE_DIR}/${name}`] = body;
   if (Object.keys(offers.files).length) out[`${PRICE_DIR}/README.md`] = PRICE_README;
   if (!offers.files["firmy.md"]) out[`${PRICE_DIR}/firmy.md`] = "";
-  // Only what changed is written (offers rarely change between two requests), all at once.
-  const { createHash } = await import("crypto");
-  const hash = (t: string) => createHash("sha1").update(t).digest("hex");
+  // Only what changed is written, all at once; offer files of businesses no longer in it are removed.
   const prev = (project.memory.inputHashes as Record<string, string>) || {};
   const hashes: Record<string, string> = {};
-  await Promise.all(Object.entries(out).map(async ([path, body]) => {
-    hashes[path] = hash(body);
-    if (prev[path] !== hashes[path]) await writeFile(projectId, path, body, path.endsWith(".csv") ? "csv" : "md", "system");
-  }));
-  const inputs = { at: Date.now(), allow: offers.allow, catalog: offers.catalog.slice(0, 1500) };
+  const { deleteFile } = await import("./repo.js");
+  await Promise.all([
+    ...Object.entries(out).map(async ([path, body]) => {
+      hashes[path] = hash(body);
+      if (prev[path] !== hashes[path]) await writeFile(projectId, path, body, path.endsWith(".csv") ? "csv" : "md", "system");
+    }),
+    ...(await listFiles(projectId)).filter((f) => f.path.startsWith(`${PRICE_DIR}/`) && !(f.path in out)).map((f) => deleteFile(projectId, f.path)),
+  ]);
+  const inputs = { at: Date.now(), need: needHash, allow: offers.allow, catalog: offers.catalog.slice(0, 1500) };
   await setMemory(projectId, { businessSlugs: offers.slugs, inputs, inputHashes: hashes });
+  await addEvent(projectId, { kind: "network_matched", actor: "system", data: { ms: Date.now() - t0, businesses: adverts.map((a) => ({ tenantId: a.tenantId, items: a.items.length, ...(a.byDescription ? { byDescription: true } : {}), ...(a.unjudged ? { unjudged: true } : {}) })) } }).catch(() => {});
   return inputs;
 }
 

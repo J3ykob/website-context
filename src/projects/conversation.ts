@@ -310,11 +310,13 @@ export async function businessQuestions(projectId: string, run?: AgentRunState):
 
 /** The owner reviews first when the business chose so, or whenever the agent has questions for it. */
 async function ownerFirst(projectId: string, tenantId: string, run: AgentRunState): Promise<boolean> {
+  const p = await getProject(projectId);
+  // A business that has not joined has no owner to wait for - until it steps in on its invite page.
+  if (p?.memory.listed && !p.memory.ownerLoop) return false;
   if (reviewMode(tenantId) === "approve" || run.needsOwner) return true;
   // A result that failed a check (but exists) is the owner's call, not a dead end for the customer.
   if (run.status === "failed" && !run.runId.startsWith("failed-") && ((await readFile(projectId, "odpowiedz.txt").catch(() => null)) || "").trim()) return true;
   // Once the owner has stepped in (answered questions, asked for changes), new versions come back to them.
-  const p = await getProject(projectId);
   if (p?.memory.ownerLoop) return true;
   return (await businessQuestions(projectId, run)).length > 0;
 }

@@ -44,7 +44,7 @@ async function waitDone(id: string, ms = 15 * 60 * 1000): Promise<AgentRunState>
 
 // Not only quotes: projects are open-ended. Each case: the customer's (or owner's) message, the task,
 // and an exact check of the result computed from the real offers.
-const OTHER: { name: string; request: string; instruction: string; check: (read: (p: string) => Promise<string | null>) => Promise<void> }[] = [
+const OTHER: { name: string; tenant?: string; request: string; instruction: string; check: (read: (p: string) => Promise<string | null>) => Promise<void> }[] = [
   {
     name: "budget choice",
     request: "Mam 500 zł budżetu i potrzebuję zagęszczarkę na 2 dni. Jaką najcięższą zagęszczarkę (nie ubijak) mogę wziąć, żeby się zmieścić? Pozdrawiam, Piotr Nowak",
@@ -61,11 +61,14 @@ const OTHER: { name: string; request: string; instruction: string; check: (read:
     instruction: "Odpowiedz klientowi (odpowiedz.txt) i zapisz wynik.json {\"od_ilu_dni_zakup_tanszy\": liczba całkowita}.",
     check: async (read) => {
       const j = JSON.parse((await read("wynik.json")) || "{}");
-      expect(Number(j.od_ilu_dni_zakup_tanszy)).toBe(3);
+      // Rentbud has two hoists (Wciągarka Pluma 110 zł/doba, Wciągarka 200 zł/doba) and nothing in the data
+      // tells which is like Ostap's (519 zł): 5 days against the cheaper, 3 against the other - both sound.
+      expect([3, 5]).toContain(Number(j.od_ilu_dni_zakup_tanszy));
     },
   },
   {
     name: "owner data task",
+    tenant: "www_ostap_pl", // the owner's own project: its whole offer is its data
     request: "(wiadomość od właściciela firmy Ostap) Przygotuj mi listę pozycji z mojej oferty, które nie mają żadnej ceny, żebym mógł je uzupełnić.",
     instruction: "Zapisz do_uzupelnienia.csv (kolumny: id;nazwa) - wszystkie pozycje oferty Ostap, które nie mają żadnej ceny - ani w cenniku, ani w żadnym ze składników ceny. Bez tekstu dla klienta.",
     check: async (read) => {
@@ -110,9 +113,10 @@ live("project agent: sandboxed run with masked personal data", () => {
 live("project agent: other kinds of projects", () => {
   for (const c of OTHER) {
     it(c.name, async () => {
-      const p = await createProject("compare_offers@1", { customerSession: `test-agent-${Date.now()}`, initiatorTenantId: "www_rentbud_pl", title: `agent test ${c.name}` });
+      const tenant = c.tenant || "www_rentbud_pl";
+      const p = await createProject("compare_offers@1", { customerSession: `test-agent-${Date.now()}`, initiatorTenantId: tenant, title: `agent test ${c.name}` });
       ids.push(p.id);
-      await addParticipant(p.id, "www_ostap_pl", "quoting");
+      if (tenant !== "www_ostap_pl") await addParticipant(p.id, "www_ostap_pl", "quoting");
       await writeFile(p.id, "request.txt", c.request, "txt", "customer");
       const started = await startAgentRun(p.id, c.instruction, "test");
       expect("error" in started ? started.error : "").toBe("");

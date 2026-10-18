@@ -72,7 +72,8 @@ live("a project across businesses of one network", () => {
       // because the agent had a question for it, or because a business answered through its owner.
       const prun = (await M.store.getProject(pid))?.memory.agentRun;
       const prv = prun && d.status === "review" ? await M.review.reviewForRun(pid, prun.runId) : null;
-      if (prv?.status === "pending") await M.review.decide(prv.token, "approved", {});
+      // As the page's approve button does: decide, then deliver (logged into the conversation).
+      if (prv?.status === "pending") { await M.review.decide(prv.token, "approved", {}); await M.conv.deliverNow(pid); }
       if (Date.now() > end) throw new Error("no result");
       await new Promise((ok) => setTimeout(ok, 15_000));
     }

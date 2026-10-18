@@ -2842,6 +2842,29 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
   res.json({ ok: true, tenantId: tenant.id });
 });
 
+// Admin: a business's place in the network (src/projects/network.ts isListed, src/projects/invite.ts).
+// body: { tenantIds: [...], network?: "listed" | "member", inviteEmail?: string, networkOptOut?: boolean }
+// "listed" = in the network from its public data, nobody runs it; "member" (default) = it has joined.
+app.post("/api/admin/network-status", (req, res) => {
+  if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
+  const ids: string[] = Array.isArray(req.body?.tenantIds) ? req.body.tenantIds.map(String).slice(0, 1000) : [];
+  const network = req.body?.network;
+  if (network !== undefined && network !== "listed" && network !== "member") return res.status(400).json({ error: "network must be listed or member" });
+  const updated: string[] = [], missing: string[] = [];
+  for (const id of ids) {
+    const t = getTenant(id);
+    if (!t) { missing.push(id); continue; }
+    const settings = { ...(t.settings || {}) };
+    if (network === "listed") settings.network = "listed"; else if (network === "member") delete settings.network;
+    if (typeof req.body?.inviteEmail === "string") { const e = req.body.inviteEmail.trim(); if (e) settings.inviteEmail = e.slice(0, 200); else delete settings.inviteEmail; }
+    if (typeof req.body?.networkOptOut === "boolean") { if (req.body.networkOptOut) settings.networkOptOut = true; else delete settings.networkOptOut; }
+    updateTenant(id, { settings });
+    tenantManager.evictTenant(id);
+    updated.push(id);
+  }
+  res.json({ ok: true, updated, missing });
+});
+
 // Admin: put tenants into an ecosystem (settings.ecosystem). Within an ecosystem,
 // a question one bot can't answer is broadcast to the others (src/ecosystem/ask.ts).
 // body: { ecosystem: "warszawa-budowlanka", tenantIds: [...] } - ecosystem "" removes them.

@@ -79,6 +79,7 @@ export async function timeline(projectId: string): Promise<TimelineEntry[]> {
   const { businessLabel } = await import("./network.js");
   for (const e of d?.events || []) {
     if (e.kind === "business_asked") out.push({ at: e.at, who: "assistant", kind: "business_asked", tenantId: String(e.data.to), text: `Zapytanie do firmy ${businessLabel(String(e.data.to))}:\n\n${e.data.question}` });
+    if (e.kind === "business_confirmed") out.push({ at: e.at, who: "business", kind: "confirmed", tenantId: e.actor, text: `${businessLabel(e.actor)} (potwierdzenie po wysłaniu wyniku klientowi):\n\n${e.data.answer}` });
     if (e.kind === "business_answered") out.push({ at: e.at, who: "business", kind: String(e.data.status), tenantId: e.actor, text: `${businessLabel(e.actor)}${e.data.status === "answered" ? "" : " (brak odpowiedzi w terminie)"}:\n\n${e.data.answer}` });
   }
   // A project started outside the chat has no turns: its request stands for the customer.
@@ -108,7 +109,7 @@ export async function reviewByToken(token: string): Promise<Review | null> {
 }
 
 /** A result to review: recorded once per run, and the owner is told (email with the review link). */
-export async function openReview(projectId: string, tenantId: string, runId: string, draft: string, files: string[]): Promise<Review> {
+export async function openReview(projectId: string, tenantId: string, runId: string, draft: string, files: string[], notify = true): Promise<Review> {
   await ensureSchema();
   const token = randomBytes(24).toString("base64url");
   const at = new Date().toISOString();
@@ -118,7 +119,7 @@ export async function openReview(projectId: string, tenantId: string, runId: str
   const t = getTenant(tenantId);
   const project = await getProject(projectId);
   // The email never blocks the review itself (the link also works from a later email or the log).
-  if (t?.email) try {
+  if (notify && t?.email) try {
     const { sendReviewEmail } = await import("../multi-tenant/email.js");
     const { readFile } = await import("./repo.js");
     const base = process.env.BASE_URL || "https://whisp.so";

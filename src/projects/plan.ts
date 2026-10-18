@@ -9,6 +9,7 @@
  * Token budget: the planner reads a compact inventory (file names, sizes, CSV headers, the network
  * directory's first lines, the recent conversation) - never whole files.
  */
+import { REQUESTS_FILE } from "./network.js";
 import { getProject, setMemory, addEvent } from "./store.js";
 import { listFiles, readFile, writeFile } from "./repo.js";
 
@@ -166,6 +167,13 @@ export async function plan(projectId: string, brief: string, kind: ProjectKind, 
   // request) - never a vacuous spec with defaults the agent would follow.
   if (!raw || !v.spec.goal) throw new Error(`no usable spec (${v.problems.join("; ") || "not valid JSON"})`);
   const request = (req0 || "").trim().slice(0, 3000);
+  // Businesses that came in for this request without prices for it (cenniki/firmy.md): writing the
+  // requests to them is part of the result, not left to the agent's discretion (an empty list when the
+  // customer did not ask for their part). Only in the first round - after the answers, nobody is asked again.
+  const mustAsk = kind === "customer" && !project.memory.networkAsked && (firmsRaw || "").includes("trzeba zapytać firmę");
+  if (mustAsk && !v.spec.outputs.some((o) => o.path === REQUESTS_FILE)) {
+    v.spec.outputs.push({ path: REQUESTS_FILE, format: "json", audience: "internal", description: `Zapytania do firm z sieci (zasada 9): [{"firma": "<identyfikator z cenniki/firmy.md>", "pytanie": "..."}] - o części, o które prosi klient, a których ceny nie ma w danych; [] gdy takich części nie ma.` });
+  }
   const spec: Spec = { version: (prev?.version || 0) + 1, request, ...v.spec, ...(change ? { basis: change.slice(0, 1000) } : {}) };
   const body = JSON.stringify(spec, null, 1);
   await Promise.all([

@@ -1,7 +1,8 @@
 /**
- * Businesses working together inside one project. The customer talks to one business; the agent sees
- * the whole network (same settings.ecosystem): the offers it has as price lists, and a description of
- * every member. When part of the work belongs to another business and the data does not settle it
+ * Businesses working together inside one project. The customer talks to one business; the need goes out
+ * to the whole network (same settings.ecosystem) and every member checks it against its own offer
+ * (advertise): only businesses that have something for it come into the project, each with the items it
+ * matched (or its description, when it has no item list). When part of the work belongs to another business and the data does not settle it
  * (an unpriced item, a service quoted individually), the agent writes a request for that business
  * (zapytania_do_firm.json, kept with placeholders - no customer personal data leaves the project).
  *
@@ -14,6 +15,7 @@
 import { createProject, getProject, setMemory, addEvent, addParticipant } from "./store.js";
 import { readFile, writeFile } from "./repo.js";
 import { getTenant } from "../multi-tenant/d1-registry.js";
+import type { OfferItem } from "../offer/store.js";
 
 export const REQUESTS_FILE = "zapytania_do_firm.json";
 export const ANSWERS_DIR = "odpowiedzi_firm";
@@ -28,6 +30,17 @@ export interface SubRequest { id: string; tenantId: string; label: string; quest
 let knowledgeProvider: ((tenantId: string, query: string) => Promise<string[]>) | null = null;
 export function setKnowledgeProvider(fn: (tenantId: string, query: string) => Promise<string[]>): void {
   knowledgeProvider = fn;
+}
+
+/**
+ * A business that has not joined: it is in the network from its public data (site, offer) and nobody runs
+ * it. Its requests are answered from that data straight away - no owner to wait for - marked as not
+ * confirmed, and the business is then invited to confirm, correct, or join (src/projects/invite.ts).
+ * NETWORK_LISTED_FORCE: tenant ids treated as listed (live tests only).
+ */
+export function isListed(tenantId: string): boolean {
+  if ((process.env.NETWORK_LISTED_FORCE || "").split(",").includes(tenantId)) return true;
+  return getTenant(tenantId)?.settings?.network === "listed";
 }
 
 export function businessLabel(tenantId: string): string {
@@ -45,6 +58,55 @@ export async function networkMembers(tenantId: string): Promise<NetworkMember[]>
     const card = t.settings?.siteCard || {};
     const sections = Array.isArray(card.sections) ? card.sections.map((s: any) => `${s.label}: ${String(s.text || "").split("\n").join(" ")}`).join(" | ") : "";
     return { tenantId: t.id, label: businessLabel(t.id), about: [card.tagline, card.eyebrow, sections].filter(Boolean).join(" - ").slice(0, 700) };
+  });
+}
+
+/** A business that has something for the need: the items it matched (none = by its description only). */
+export interface Advert { tenantId: string; items: OfferItem[]; byDescription: boolean; unjudged?: boolean }
+
+const ADVERT_ITEMS = 15;
+const NEAREST = 30; // candidates per business for Jev (it judges short lists well, long ones poorly)
+
+/**
+ * The items of one business's offer that a need is about: the nearest by meaning (any language), judged
+ * by Jev as a short list. [] = nothing of it; null = could not be judged (Jev down).
+ */
+export async function offerMatches(tenantId: string, items: OfferItem[], need: string): Promise<OfferItem[] | null> {
+  if (!items.length) return [];
+  const { matchOfferItems } = await import("../offer/search.js");
+  const { nearestItems } = await import("../offer/vectors.js");
+  const pool = items.length > NEAREST ? (await nearestItems(tenantId, items, need, NEAREST)) ?? items : items;
+  return matchOfferItems(need, pool, ADVERT_ITEMS, 0.4);
+}
+
+/**
+ * The need goes out to the network; each business decides on its own data whether it can help. Businesses
+ * with an item list take the items nearest to the need by meaning (item vectors, cached per offer) and Jev
+ * judges those (one call each, all at once); every member's
+ * description is judged in one more call (services that have no item list, or not all of them listed).
+ * A business whose items could not be judged (Jev down) is kept with its whole offer - never dropped silently.
+ */
+export async function advertise(need: string, tenantIds: string[]): Promise<Advert[]> {
+  const { loadOffer } = await import("../offer/store.js");
+  const { jevAsk } = await import("../llm/jev.js");
+  const members = new Map((await networkMembers(tenantIds[0]).catch(() => [])).map((m) => [m.tenantId, m]));
+  const described = tenantIds.filter((id) => members.get(id)?.about);
+  const [matched, byAbout] = await Promise.all([
+    Promise.all(tenantIds.map(async (id) => {
+      const items = (await loadOffer(id).catch(() => null))?.items || [];
+      const m = await offerMatches(id, items, need);
+      return m === null ? { items, unjudged: true } : { items: m, unjudged: false };
+    })),
+    described.length
+      ? jevAsk({ need: need.slice(0, 3000), businesses: described.map((id) => `${members.get(id)!.label}: ${members.get(id)!.about}`) },
+        Object.fromEntries(described.map((_, k) => [`b${k}`, { type: "noul" as const, instructions: `Does the business \`businesses[${k}]\` offer a product or service that \`need\` asks for (any part of it, in any language)? Only what it offers itself, not something merely related.` }])), 10_000)
+      : Promise.resolve(null),
+  ]);
+  const aboutYes = new Set(described.filter((_, k) => (((byAbout as any)?.[`b${k}`]?.noul as number) ?? 0) >= 0.5));
+  return tenantIds.flatMap((id, k): Advert[] => {
+    const r = matched[k];
+    if (r.items.length) return [{ tenantId: id, items: r.items, byDescription: false, ...(r.unjudged ? { unjudged: true } : {}) }];
+    return aboutYes.has(id) ? [{ tenantId: id, items: [], byDescription: true }] : [];
   });
 }
 
@@ -87,7 +149,8 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
   const subs: SubRequest[] = [];
   for (const [tenantId, qs] of [...byTenant].slice(0, MAX_REQUESTS)) {
     const question = qs.join("\n");
-    const sub = await createProject(BUSINESS_REQUEST, { customerSession: `project:${parentId}`, initiatorTenantId: tenantId, title: `Zapytanie od ${from}`.slice(0, 120), memory: { parentId, fromTenant: parent.initiatorTenantId }, ttlHours: 30 * 24 });
+    const listed = isListed(tenantId);
+    const sub = await createProject(BUSINESS_REQUEST, { customerSession: `project:${parentId}`, initiatorTenantId: tenantId, title: `Zapytanie od ${from}`.slice(0, 120), memory: { parentId, fromTenant: parent.initiatorTenantId, ...(listed ? { listed: true } : {}) }, ttlHours: 30 * 24 });
     await addParticipant(sub.id, parent.initiatorTenantId, "initiator").catch(() => {});
     await addParticipant(parentId, tenantId, "quoting").catch(() => {});
     const request = `Firma ${from} (z tej samej sieci firm) przygotowuje dla swojego klienta wycenę / projekt i pyta Twoją firmę:\n\n${question}\n`;
@@ -95,9 +158,10 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
     await writeFile(sub.id, "rozmowa.md", `# Zapytanie od ${from}\n\n**${from}:** ${question}\n`, "md", "system");
     const knowledge = knowledgeProvider ? await knowledgeProvider(tenantId, question).catch(() => []) : [];
     if (knowledge.length) await writeFile(sub.id, "wiedza/strona.md", `# Informacje z witryny firmy\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system");
-    await setMemory(sub.id, { baseInstruction: SUB_INSTRUCTION });
+    const instruction = listed ? `${SUB_INSTRUCTION}\n${LISTED_NOTE}` : SUB_INSTRUCTION;
+    await setMemory(sub.id, { baseInstruction: instruction });
     const { planAndRun } = await import("./plan.js");
-    const started = await planAndRun(sub.id, SUB_INSTRUCTION, `business:${parent.initiatorTenantId}`);
+    const started = await planAndRun(sub.id, instruction, `business:${parent.initiatorTenantId}`);
     subs.push({ id: sub.id, tenantId, label: businessLabel(tenantId), question, status: "waiting", at: new Date().toISOString() });
     await addEvent(parentId, { kind: "business_asked", actor: "agent", data: { to: tenantId, project: sub.id, question: question.slice(0, 1000), started: !("error" in started) } });
     if ("error" in started) await settle(sub.id, "", "no_answer");
@@ -111,23 +175,48 @@ która należy do Twojej firmy. Odpowiedz na podstawie danych Twojej firmy: ofer
 z witryny w wiedza/. Odpowiedź dla firmy pytającej zapisz w odpowiedz.txt - konkretnie: ceny i warunki z danych;
 czego nie ma w danych, napisz wprost, że wymaga indywidualnej wyceny. Nie wymyślaj cen ani terminów.`;
 
+// A business that has not joined: nobody from it answers - its public data does, and says so.
+export const LISTED_NOTE = `Ta firma nie dołączyła jeszcze do sieci: nikt z firmy nie odpowiada - odpowiedź przygotowujesz
+wyłącznie z jej publicznych danych (oferta, strona). Pisz o firmie w trzeciej osobie ("w cenniku firmy ... "), nie obiecuj
+niczego w jej imieniu (terminów, dostępności, rabatów) i zaznacz, że ceny pochodzą z publicznych danych firmy i nie zostały
+przez nią potwierdzone. Nie zapisuj pytań do firmy - nie ma komu odpowiedzieć.`;
+const LISTED_HEADER = "(Firma nie dołączyła do sieci - odpowiedź przygotowana z jej publicznych danych; ceny niepotwierdzone przez firmę.)";
+
 /** A business's answer (or its absence) goes back into the customer's project. */
 export async function settle(subId: string, answer: string, status: "answered" | "no_answer"): Promise<void> {
   const sub = await getProject(subId);
   const parentId = sub?.memory.parentId as string | undefined;
-  if (!sub || !parentId || sub.memory.settled) return;
+  if (!sub || !parentId) return;
+  // A listed business confirming or correcting after the customer got its part: recorded in the
+  // customer's project for the business running it (who can pass it on).
+  if (sub.memory.settled) {
+    if (sub.memory.listed && status === "answered" && answer.trim()) await lateConfirmation(sub.id, parentId, sub.initiatorTenantId, answer.trim());
+    return;
+  }
   await setMemory(subId, { settled: status });
   const parent = await getProject(parentId);
   if (!parent) return;
   const subs = ((parent.memory.subRequests as SubRequest[]) || []).map((s) => (s.id === subId ? { ...s, status } : s));
   const s = subs.find((x) => x.id === subId);
   const text = status === "answered" && answer.trim()
-    ? answer.trim()
+    ? `${sub.memory.listed ? `${LISTED_HEADER}\n\n` : ""}${answer.trim()}`
     : "(firma nie odpowiedziała w wyznaczonym czasie - tę część trzeba oznaczyć jako do wyceny)";
   await writeFile(parentId, `${ANSWERS_DIR}/${slugOf(s?.label || sub.initiatorTenantId)}.md`, `# Odpowiedź firmy ${s?.label || sub.initiatorTenantId}\n\n## Pytanie\n\n${s?.question || ""}\n\n## Odpowiedź\n\n${text}\n`, "md", `business:${sub.initiatorTenantId}`);
   await setMemory(parentId, { subRequests: subs });
-  await addEvent(parentId, { kind: "business_answered", actor: sub.initiatorTenantId, data: { project: subId, status, answer: text.slice(0, 2000) } });
+  await addEvent(parentId, { kind: "business_answered", actor: sub.initiatorTenantId, data: { project: subId, status, answer: text.slice(0, 2000), ...(sub.memory.listed ? { listed: true } : {}) } });
   if (subs.every((x) => x.status !== "waiting")) await continueParent(parentId);
+  // The customer's result does not wait for it; the business hears about the request afterwards.
+  if (sub.memory.listed && status === "answered") {
+    const { inviteListed } = await import("./invite.js");
+    void inviteListed(subId).catch((e) => console.warn(`[invite] ${subId}: ${(e as Error).message}`));
+  }
+}
+
+async function lateConfirmation(subId: string, parentId: string, tenantId: string, answer: string): Promise<void> {
+  const label = businessLabel(tenantId);
+  await writeFile(parentId, `${ANSWERS_DIR}/${slugOf(label)}-potwierdzenie.md`, `# ${label} - potwierdzenie po wysłaniu wyniku klientowi\n\n${answer}\n`, "md", `business:${tenantId}`);
+  await addEvent(parentId, { kind: "business_confirmed", actor: tenantId, data: { project: subId, answer: answer.slice(0, 2000) } });
+  await setMemory(subId, { confirmedAt: new Date().toISOString() });
 }
 
 /** Every business answered (or timed out): the customer's agent finishes the result with the answers. */
@@ -136,8 +225,10 @@ async function continueParent(parentId: string): Promise<void> {
   if (!p || p.memory.networkContinued) return;
   await setMemory(parentId, { networkContinued: true, agentPending: Date.now() });
   const base = String(p.memory.baseInstruction || "");
+  // Businesses that have not joined: their parts come from public data, and the customer is told so.
+  const listed = ((p.memory.subRequests as SubRequest[]) || []).filter((x) => x.status === "answered" && isListed(x.tenantId)).map((x) => x.label);
   const { planAndRun } = await import("./plan.js");
-  const r = await planAndRun(parentId, base, "system", `Firmy z sieci odpowiedziały na zapytania - odpowiedzi są w ${ANSWERS_DIR}/ (dodaj je do danych wejściowych). Wynik dla klienta ma je uwzględnić: ceny i warunki podane przez firmy traktować jak dane z cennika (z nazwą firmy); części bez odpowiedzi lub bez ceny - do wyceny. Bez nowych zapytań do firm (bez pliku ${REQUESTS_FILE}).`);
+  const r = await planAndRun(parentId, base, "system", `Firmy z sieci odpowiedziały na zapytania - odpowiedzi są w ${ANSWERS_DIR}/ (dodaj je do danych wejściowych). Wynik dla klienta ma je uwzględnić: ceny i warunki podane przez firmy traktować jak dane z cennika (z nazwą firmy); części bez odpowiedzi lub bez ceny - do wyceny.${listed.length ? ` Odpowiedzi firm ${listed.join(", ")} przygotowano z ich publicznych danych: tylko przy ich pozycjach napisz klientowi, że ceny pochodzą z publicznego cennika firmy i nie zostały przez nią potwierdzone (odpowiedzi innych firm są od firm).` : ""} Bez nowych zapytań do firm (bez pliku ${REQUESTS_FILE}).`);
   if ("error" in r) console.warn(`[network] ${parentId}: could not continue: ${r.error}`);
 }
 

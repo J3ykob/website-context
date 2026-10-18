@@ -86,6 +86,10 @@
       </div>
     </div>
     <div id="done" class="msg hidden"></div>
+    <div class="card hidden" id="join" style="margin-top:16px">
+      <p class="label">Sieć Whisp</p>
+      <p style="margin:0">Dołączenie jest bezpłatne - po dołączeniu takie zapytania trafiają najpierw do Was, a asystent przygotowuje odpowiedzi do Waszej akceptacji. Napiszcie: jakub@whisp.so</p>
+    </div>
   </div>
   <div class="chat-col">
     <div class="card" style="padding:14px">
@@ -111,6 +115,16 @@
     if (!x.ok) { $("sub").textContent = ""; fail(x.d.error || "Nie udało się wczytać."); return; }
     var d = x.d;
     $("sub").textContent = (d.brand ? d.brand + " - " : "") + "asystent przygotował tę odpowiedź. Klient dostanie ją dopiero po Twojej decyzji.";
+    if (d.listed) {
+      // A business that has not joined: the customer already has this answer, marked as not confirmed.
+      document.querySelector("h1").textContent = "Zapytanie klienta o Waszą ofertę";
+      $("sub").textContent = "Klient firmy " + d.listed.from + " już dostał tę odpowiedź, przygotowaną z Waszych publicznych danych, z dopiskiem, że ceny nie są przez Was potwierdzone. Potwierdźcie ją albo poprawcie - trafi do firmy " + d.listed.from + ".";
+      $("approve").textContent = "Potwierdzam (z poprawkami, jeśli są)";
+      $("show-decline").textContent = "Napiszę własną odpowiedź";
+      STATUS.approved = "Dziękujemy - odpowiedź trafiła do firmy " + d.listed.from + ".";
+      STATUS.declined = STATUS.approved;
+      $("join").classList.remove("hidden");
+    }
     $("request").textContent = d.request;
     // One colour per business: the parts each business answered are marked with it everywhere.
     var PALETTE = ["#3b82f6", "#10b981", "#f59e0b", "#a855f7", "#ec4899", "#14b8a6", "#f97316", "#84cc16"];
