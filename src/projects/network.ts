@@ -36,10 +36,11 @@ export function setKnowledgeProvider(fn: (tenantId: string, query: string) => Pr
  * A business that has not joined: it is in the network from its public data (site, offer) and nobody runs
  * it. Its requests are answered from that data straight away - no owner to wait for - marked as not
  * confirmed, and the business is then invited to confirm, correct, or join (src/projects/invite.ts).
- * NETWORK_LISTED_FORCE: tenant ids treated as listed (live tests only).
+ * NETWORK_LISTED_FORCE / NETWORK_MEMBER_FORCE: tenant ids treated as listed / as members (live tests only).
  */
 export function isListed(tenantId: string): boolean {
   if ((process.env.NETWORK_LISTED_FORCE || "").split(",").includes(tenantId)) return true;
+  if ((process.env.NETWORK_MEMBER_FORCE || "").split(",").includes(tenantId)) return false;
   return getTenant(tenantId)?.settings?.network === "listed";
 }
 
@@ -65,7 +66,8 @@ export async function networkMembers(tenantId: string): Promise<NetworkMember[]>
 export interface Advert { tenantId: string; items: OfferItem[]; byDescription: boolean; unjudged?: boolean }
 
 const ADVERT_ITEMS = 15;
-const NEAREST = 30; // candidates per business for Jev (it judges short lists well, long ones poorly)
+const NEAREST = 30; // candidates per business by meaning
+const JUDGE_BATCH = 15; // items per Jev call (it judges short lists well, long ones poorly)
 
 /**
  * The items of one business's offer that a need is about: the nearest by meaning (any language), judged
@@ -75,8 +77,28 @@ export async function offerMatches(tenantId: string, items: OfferItem[], need: s
   if (!items.length) return [];
   const { matchOfferItems } = await import("../offer/search.js");
   const { nearestItems } = await import("../offer/vectors.js");
-  const pool = items.length > NEAREST ? (await nearestItems(tenantId, items, need, NEAREST)) ?? items : items;
-  return matchOfferItems(need, pool, ADVERT_ITEMS, 0.4);
+  if (items.length <= NEAREST) return matchOfferItems(need, items, ADVERT_ITEMS, 0.4);
+  const near = (await nearestItems(tenantId, items, need, NEAREST)) ?? items.slice(0, NEAREST * 2);
+  // A need with several parts: the nearest by meaning go to the main one, so items sharing a word with
+  // the need are added too (5-letter stems, so Polish inflection matches: "gruntu" ~ "grunt").
+  const { words } = await import("../offer/search.js");
+  // A shared word counts by how rare it is in this offer ("grunt" in one item beats "podłoga" in fifty).
+  const stems = new Set(words(need).map((w) => w.slice(0, 5)));
+  const itemStems = items.map((i) => new Set(words(i.name).map((w) => w.slice(0, 5))));
+  const df = new Map<string, number>();
+  for (const set of itemStems) for (const st of set) if (stems.has(st)) df.set(st, (df.get(st) || 0) + 1);
+  const lexical = items.map((i, k) => ({ i, n: [...itemStems[k]].reduce((sum, st) => sum + (df.has(st) ? 1 / df.get(st)! : 0), 0) }))
+    .filter((x) => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 10).map((x) => x.i);
+  // Jev judges short lists reliably and long ones poorly: batches of 15, all at once.
+  const pool = [...new Set([...near, ...lexical])];
+  const batches: OfferItem[][] = [];
+  for (let k = 0; k < pool.length; k += JUDGE_BATCH) batches.push(pool.slice(k, k + JUDGE_BATCH));
+  const judged = await Promise.all(batches.map((b) => matchOfferItems(need, b, b.length, 0.4)));
+  if (judged.some((x) => x === null)) return null;
+  const matched = judged.flatMap((x) => x!);
+  // The same product in many sizes would fill the list: at most two of one name.
+  const seen = new Map<string, number>();
+  return matched.filter((i) => { const key = i.name.toLowerCase().slice(0, 40); const n = (seen.get(key) || 0) + 1; seen.set(key, n); return n <= 2; }).slice(0, ADVERT_ITEMS);
 }
 
 /**

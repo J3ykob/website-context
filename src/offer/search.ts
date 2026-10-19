@@ -22,7 +22,7 @@ async function judge(question: string, labels: string[], what: string): Promise<
 }
 
 /** Lower-case words of 3+ letters (split on anything that is not a letter or digit). */
-function words(t: string): string[] {
+export function words(t: string): string[] {
   const out: string[] = [];
   let cur = "";
   for (const ch of t.toLowerCase() + " ") {

@@ -71,6 +71,9 @@ Rules:
   paraphrase or rename products or terms - a wrong rewording changes the request. If something essential is
   missing, the agent will use a stated, reasonable assumption - do not invent values here.
 - Goal: describe the request without naming products in other words than the requester used.
+- The request is the requester's LATEST message (it is quoted to the agent as the request). Earlier messages
+  of the conversation are context only (names, sizes, constraints it refers to): what was already answered is
+  not redone, compared again or repeated - unless the latest message asks for it.
 - Acceptance: one checkable fact about the CONTENT per criterion (what the result must contain or satisfy),
   e.g. "the reply names the heaviest compactor that fits the 500 PLN budget". Never criteria about language,
   tone, format, headers or file names - those are checked separately.
@@ -190,7 +193,7 @@ export function renderSpec(s: Spec): string {
   const out = s.outputs.map((o) => `- ${o.path} [${o.format}, dla: ${o.audience === "customer" ? "klienta" : o.audience === "business" ? "firmy pytającej" : "wewnętrzny"}] - ${o.description}`).join("\n");
   return `
 ## Specyfikacja zadania (v${s.version}) - wykonaj dokładnie
-${s.request ? `Prośba zlecającego (dosłownie - rozstrzyga w razie rozbieżności z poniższym streszczeniem; nazwy produktów rozumiej tak, jak je napisał):\n"""\n${s.request}\n"""\n` : ""}Cel: ${s.goal}
+${s.request ? `Prośba zlecającego (dosłownie - rozstrzyga w razie rozbieżności z poniższym streszczeniem; nazwy produktów rozumiej tak, jak je napisał; wcześniejsza rozmowa to tylko kontekst - nie powtarzaj tego, na co już odpowiedziano):\n"""\n${s.request}\n"""\n` : ""}Cel: ${s.goal}
 Język tekstu dla odbiorcy: ${s.language || "język zlecającego (jak w jego prośbie)"}
 ${s.facts.length ? `Wymagania podane przez zlecającego:\n${s.facts.map((f) => `- ${f}`).join("\n")}\n` : ""}${s.inputs.length ? `Dane wejściowe:\n${s.inputs.map((i) => `- ${i.path}: ${i.use}`).join("\n")}\n` : ""}Wyniki (dokładnie te pliki):
 ${out}

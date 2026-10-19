@@ -40,7 +40,10 @@ export interface Inquiry {
 export type CollectResult =
   | { reply: string }
   | { reply: string; cancelled: true }
-  | { reply: string; inquiry: Inquiry };
+  | { reply: string; inquiry: Inquiry }
+  // First message, and what the customer wants is not in this business's offer: someone else should
+  // answer it (the network), not this order form.
+  | { reply: string; handover: string[] };
 
 // Free-form questions the customer asks along the way are kept here for the team.
 const NOTES: FlowInput = { name: "notes", label: "Uwagi / pytania klienta", type: "text", required: false, description: "Anything else the customer wants the team to know or answer." };
@@ -164,10 +167,11 @@ Output {"name": "..."}: the name of the ONE specific product or service from the
 /**
  * Whether what the customer asks for is part of this business's own offer, judging only by its own
  * information: "not_offered" / "several" when clear, "ok" otherwise, null when it could not be judged.
+ * strict: "ok" only when it clearly is offered ("unclear" otherwise).
  * Whether it is offered is a classification: Jev (stable across runs; the answer model flip-flopped).
  */
-export async function offeredHere(request: string, passages: string[]): Promise<"ok" | "several" | "not_offered" | null> {
-  if (!passages.length) return "ok";
+export async function offeredHere(request: string, passages: string[], strict = false): Promise<"ok" | "several" | "not_offered" | "unclear" | null> {
+  if (!passages.length) return strict ? "unclear" : "ok";
   const a = await jevAsk({ business_information: passages, customer_request: request }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` part of the business's offer?", criteria: {
     offered: "Yes: the excerpts show the business offers exactly this, or clearly this.",
     several: "The excerpts show several different offers that could be what the customer means, and it is unclear which one.",
@@ -176,6 +180,8 @@ export async function offeredHere(request: string, passages: string[]): Promise<
   } } }, 6000);
   if (!a) return null;
   const probs = ((a.status as any)?.probabilities || {}) as Record<string, number>;
+  // strict: "ok" only when the business clearly offers it (for starting an order form at all).
+  if (strict) return (probs.offered ?? 0) >= 0.5 ? "ok" : (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : "unclear";
   return (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : (probs.several ?? 0) >= 0.5 ? "several" : "ok";
 }
 
@@ -224,7 +230,7 @@ Output {"status": "...", "missing": [...], "options": [...]}:
  * An existing value changes only on an explicit correction; a confirmation
  * never touches the values.
  */
-export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>): Promise<CollectResult> {
+export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, handOver = false): Promise<CollectResult> {
   s.at = Date.now();
   const fields = fieldsOf(flow);
   const prior = s.transcript.slice(-12).join("\n");
@@ -286,6 +292,8 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
         if (exact) { s.values[f.name] = exact; s.offerChecked[f.name] = exact; }
         continue;
       }
+      // The opening message asks for something this business does not have: hand it over.
+      if (handOver && s.transcript.length <= 1 && (verdict.status === "not_seen" || verdict.status === "not_offered")) return { reply: "", handover: verdict.missing.length ? verdict.missing : [v] };
       if (verdict.status === "not_seen") {
         offerNote = `Say briefly that you can't see ${verdict.missing.length ? verdict.missing.join(", ") : v} in the offer, so the team will confirm whether they can provide it.`;
         continue;

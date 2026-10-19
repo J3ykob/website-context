@@ -23,11 +23,13 @@ beforeAll(async () => {
   await reg.hydrateRegistry();
   tm = new tmm.TenantManager();
   process.env.AGENT_REVIEW_FORCE = `${OSTAP},${ROOF}`; // this process only, never the businesses' settings
+  process.env.NETWORK_MEMBER_FORCE = `${OSTAP},${ROOF},${CONCRETE}`; // members with owners here (listed: network-listed.test.ts)
   process.env.NETWORK_ANSWER_DEADLINE_MS = String(8 * 60_000);
 }, 60_000);
 
 afterAll(async () => {
   delete process.env.AGENT_REVIEW_FORCE;
+  delete process.env.NETWORK_MEMBER_FORCE;
   if (process.env.KEEP_PROJECTS || !M) return;
   const { deleteFromR2 } = await import("../src/storage/r2.js");
   const ids = (await M.d1Query("SELECT id FROM projects WHERE customer_session = ?", [session])).map((r: any) => r.id);

@@ -537,9 +537,11 @@ export class WebsiteChat {
     // The business's own flows (orders, bookings...) come first: a booking is never "work" for the agent.
     // The turn's kind is decided at the same time, for when no flow is wanted.
     const activeFlows = this.context.flows.filter((f) => f.status === "active");
-    const [pickedFlows, kind] = await Promise.all([
+    const [pickedFlows, kind, orderNow] = await Promise.all([
       activeFlows.length > 0 ? this.classifyFlowIntent(inputValidation.sanitized, activeFlows) : Promise.resolve([] as FlowDefinition[]),
       this.kindOf(inputValidation.sanitized, sanitizedMessages),
+      // A form is for placing an order / booking; "choose and price it for me" is work, even about our items.
+      activeFlows.length > 0 ? jevAsk({ message: inputValidation.sanitized }, { order: { type: "noul", instructions: "Does the customer in `message` want to place an order or a booking now (e.g. 'book it', 'I'll take it', 'reserve for tomorrow'), rather than ask for a price, a recommendation, a comparison or a calculation?" } }, 4000).then((a) => ((a?.order as any)?.noul as number) ?? 1).catch(() => 1) : Promise.resolve(1),
     ]);
     if (activeFlows.length > 0) {
       let picked = pickedFlows;
@@ -550,6 +552,10 @@ export class WebsiteChat {
         ? await this.notOfferedHere(inputValidation.sanitized).catch(() => false)
         : false;
       if (elsewhere) { console.log(`[flows] ${this.context.tenantId}: "${picked[0].name}" skipped - not in the own offer, the network may have it`); picked = []; }
+      else if (picked.length === 1 && picked[0].executionMode === "collect" && (kind === "work" || kind === "estimate") && orderNow < 0.5 && agentEnabled()) {
+        console.log(`[flows] ${this.context.tenantId}: "${picked[0].name}" skipped - a price / calculation, not an order (${orderNow.toFixed(2)})`);
+        picked = [];
+      }
       if (picked.length === 1 && picked[0].executionMode === "collect") return this.startCollect(picked[0], effectiveSessionKey, inputValidation.sanitized);
       if (picked.length === 1) {
         const started = this.beginFlowSession(effectiveSessionKey, picked[0]);
@@ -570,6 +576,12 @@ export class WebsiteChat {
     // "What would this list / job cost?" -> a compare_offers project.
     // The turn's kind: pricing a given list (fast estimate), work on data (the project agent:
     // calculate, compare, choose, plan, build a list or document), or an ordinary answer.
+    // A price question goes to the agent like other work: the quick estimate (one quantity in one unit)
+    // got counts, scenarios and variants wrong on real requests; it stays for when the agent is off.
+    if (kind === "estimate" && agentEnabled()) {
+      const viaAgent = await this.agentTurn(sanitizedMessages, inputValidation.sanitized, effectiveSessionKey);
+      if (viaAgent) return viaAgent;
+    }
     const estimate = kind === "estimate" ? await this.estimateProject(inputValidation.sanitized, effectiveSessionKey) : null;
     // Lines the offers do not price: other businesses of the network may - the agent asks them.
     const unpriced = estimate ? this.lastEstimateTbd.get(effectiveSessionKey) || 0 : 0;
@@ -1129,7 +1141,8 @@ export class WebsiteChat {
 
   /**
    * Nothing of the request is in this business's own offer: no offer item matches it, or its own
-   * information shows it offers something else (the same judgement the order form makes).
+   * information shows it offers something else. (Finer: the form itself hands over on its first turn
+   * when the product it read is not in the offer.)
    */
   private async notOfferedHere(message: string): Promise<boolean> {
     const { offerMatches } = await import("../projects/network.js");
@@ -1151,7 +1164,19 @@ export class WebsiteChat {
     const llm = (system: string, user: string, maxTokens = 700) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
     const status = (stage: NonNullable<ChatResponse["collect"]>["stage"]) => ({ flowId: flow.id, stage, missing: stage === "collecting" || stage === "confirming" ? missingLabels(flow, s) : [] });
     try {
-      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge());
+      const handOver = !!this.offerItems.length && agentEnabled() && (await this.hasNetwork().catch(() => false));
+      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge(), handOver);
+      if ("handover" in r) {
+        // Not ours to take as an order: the agent (this business's offer and the network) answers it.
+        this.collectSessions.delete(sessionKey);
+        console.log(`[flows] ${this.context.tenantId}: "${flow.name}" handed over - not in the offer: ${r.handover.join(", ")}`);
+        const viaAgent = await this.agentTurn([{ role: "user", content: message } as ChatMessage], message, sessionKey);
+        if (viaAgent) return viaAgent;
+        const s2 = startSession(flow, s.via);
+        this.collectSessions.set(sessionKey, s2);
+        const again = await collectTurn(flow, s2, message, this.brandName, llm, this.collectKnowledge(), false);
+        return { message: again.reply, sources: [], collect: status(s2.stage) };
+      }
       if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [], collect: status("cancelled") }; }
       if ("inquiry" in r) {
         this.collectSessions.delete(sessionKey);

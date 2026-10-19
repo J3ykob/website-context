@@ -50,11 +50,14 @@ async function turn(session: string, history: ChatMessage[], text: string) {
   return r;
 }
 
-async function waitDelivery(projectId: string) {
+// afterRun: the previous run - a later question waits for a run after it (the old one stays "done" until
+// the next run is recorded as started).
+async function waitDelivery(projectId: string, afterRun?: string) {
   const end = Date.now() + 15 * 60 * 1000;
   for (;;) {
     const d = await M.agentDelivery(projectId, async () => {});
-    if (d.status !== "running") return d;
+    const runId = ((await M.projectDetail(projectId))?.project.memory.agentRun as any)?.runId;
+    if (d.status !== "running" && (afterRun === undefined || (runId && runId !== afterRun))) return d;
     if (Date.now() > end) throw new Error("agent did not finish");
     await new Promise((ok) => setTimeout(ok, 10_000));
   }
@@ -68,7 +71,7 @@ const WORK: { lang: string; text: string }[] = [
 ];
 
 live("every conversation is a project; the system routes each turn", () => {
-  it("knowledge turn, then work for the agent, then an estimate - one project", async () => {
+  it("knowledge turn, then work for the agent, then a price question (agent too) - one project", async () => {
     const session = `test-conv-${run}-pl`;
     sessions.push(session);
     const history: ChatMessage[] = [];
@@ -84,15 +87,23 @@ live("every conversation is a project; the system routes each turn", () => {
     expect(d.status).toBe("done");
     expect(d.message).toContain("280");
 
+    // A price question is work for the agent too (same project).
+    const firstRun = ((await M.projectDetail(projectId))!.project.memory.agentRun as any).runId;
     const e = await turn(session, history, "A ile wyjdzie zagęszczarka 90 kg na 3 dni i betoniarka 150 litrów na 5 godzin?");
     expect(e.project?.id).toBe(projectId);
-    expect(M.numbersIn(e.message).some((n) => Math.abs(n - 410) < 0.005)).toBe(true);
+    console.log(`[Polish estimate turn] ${JSON.stringify({ message: e.message, project: e.project })}`);
+    const de = await waitDelivery(projectId, firstRun);
+    console.log(`[Polish estimate] ${de.status}\n${de.message}`);
+    // 90 kg x 3 days = 330 zł, mixer 5 h = 80 zł: the total or both prices.
+    const nums = M.numbersIn(de.message);
+    const has = (v: number) => nums.some((n: number) => Math.abs(n - v) < 0.005);
+    expect(has(410) || (has(330) && has(80))).toBe(true);
 
     await new Promise((ok) => setTimeout(ok, 3000)); // turn records are fire-and-forget
     const open = await M.findOpenProject(session, M.CONVERSATION);
     expect(open?.id).toBe(projectId);
     const routes = (await M.projectDetail(projectId))!.events.filter((x) => x.kind === "turn").map((x) => x.data.route);
-    expect(routes).toEqual(["knowledge", "agent", "estimate"]);
+    expect(routes).toEqual(["knowledge", "agent", "agent"]);
   }, 20 * 60 * 1000);
 
   for (const c of WORK.slice(1)) {

@@ -115,7 +115,8 @@ Zasady:
    i warunkami"}]. Pytaj firmę, której dopasowane pozycje są dokładnie tą częścią - nie firmy z samymi ogólnymi
    usługami (np. "usługi budowlane"), gdy jest firma z konkretną pozycją. W pytaniach nie podawaj danych osobowych klienta. Wynik przygotuj tak, jakby ta część była do
    wyceny; gdy firmy odpowiedzą, dostaniesz zadanie dokończenia. Nie pytaj firmy prowadzącej projekt; gdy
-   w jej danych brakuje potrzebnej ceny, a inna firma z listy też to oferuje - zapytaj tamtą.
+   w jej danych brakuje ceny produktu lub usługi, który inna firma z listy też oferuje (ten sam produkt lub usługa) -
+   zapytaj tamtą. Usługa dodatkowa do rzeczy firmy prowadzącej (np. dowóz jej sprzętu) to sprawa tej firmy, nie innych.
    W tekście dla klienta nie pisz o zapytaniach do innych firm ani o tym, co zrobisz później - o tym informuje
    klienta system; opisz tylko to, co jest teraz (części bez ceny: "do wyceny").
 `;
