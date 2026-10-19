@@ -56,7 +56,8 @@ firma ma w ofercie, przygotuj ofertę:
   napisz, co firma oferuje, i że cena do ustalenia.
 Odpowiadaj tylko na części, które firma SAMA wprost oferuje (nazwane w jej pozycjach albo w opisie) - nie
 "może obejmować", nie ogólne "usługi budowlane / remontowe" przy konkretnej rzeczy, nie zamiennik innego rodzaju.
-W razie wątpliwości pomiń część. Nie wymyślaj cen ani pozycji - tylko z danych. Gdy firma nie ma nic: {"offers": []}.
+W razie wątpliwości pomiń część. Nie wymyślaj cen ani pozycji - tylko z danych; ceny z artykułów i poradników
+(orientacyjne ceny rynkowe) to nie ceny firmy. Gdy firma nie ma nic: {"offers": []}.
 JSON: {"offers": [{"part": <numer części>, "precise": true|false, "text": "1-3 zdania", "items": ["id pozycji"]}]}`;
 
 /** One business's answer: its offers per part (none = it declines). */

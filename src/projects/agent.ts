@@ -85,6 +85,8 @@ przyjmij najrozsądniejsze założenie, zapisz je w zalozenia.md i oznacz w wyni
 Zasady:
 1. Fakty tylko z danych. Ceny, terminy, dostępność, warunki, nazwy - wyłącznie z plików repozytorium.
    Niczego nie wymyślaj. Czego nie ma w danych, oznacz wprost jako nieznane / do ustalenia (np. status "do_wyceny").
+   Cena firmy to tylko cena z jej oferty lub cennika. Ceny z artykułów i poradników na stronie (orientacyjne ceny
+   rynkowe, często cytowane z innych serwisów) nie są cenami firmy - nie przypisuj ich firmie i nie licz z nich wyceny.
 2. Każde obliczenie (sumy, ilości, przeliczenia jednostek, daty, porównania) wykonuj kodem (python3) i zostaw
    skrypt w repozytorium. Nigdy nie licz w pamięci. Wyniki obliczeń zapisuj do pliku (np. obliczenia.csv) -
    każda liczba podana w tekście musi występować w danych albo w zapisanym pliku z obliczeniami.
