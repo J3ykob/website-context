@@ -18,6 +18,7 @@ import { getProject, setMemory, addEvent, addUsage, listParticipants, claimAgent
 import { listFiles, readFile, writeFile, writeBinaryFile, addRequirement, listRequirements, recordVerification, toCsv, type FileKind, type ReqStatus } from "./repo.js";
 import { loadOffer, priceText, type OfferItem } from "../offer/store.js";
 import type { Advert } from "./network.js";
+import type { NetworkOffer } from "./broadcast.js";
 import { FIELDS } from "../offer/schema.js";
 import { jevAsk } from "../llm/jev.js";
 import { getTenant } from "../multi-tenant/d1-registry.js";
@@ -138,6 +139,8 @@ do tego zapytania. Dla każdej z nich:
   ilości (doba = 24 h).
   ilosc_od_klienta: czego ilość podaje klient (np. metraż) - jeśli jej nie podał, to jest założenie albo "do ustalenia".
 Firma bez pliku cennika zgłosiła, że to oferuje (na podstawie opisu) - o ceny trzeba ją zapytać.
+oferty_sieci.md (jeśli jest) - oferty firm z sieci dla każdej części prośby, najlepsze najpierw: punkt wyjścia do wyboru
+firm; ceny sprawdź w cennikach i przelicz sam.
 `;
 
 const unitLabel = (u?: string) => (u && u !== "unknown" ? FIELDS.unit.values[u]?.label || u : "");
@@ -160,7 +163,7 @@ function componentsCsv(items: OfferItem[]): string | null {
  * The offers of the businesses that answered the need (public data): the items each matched, and for the
  * business running the project its whole offer too. Businesses that have nothing for it stay out.
  */
-async function priceLists(project: Project, adverts: Advert[]): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
+async function priceLists(project: Project, adverts: Advert[], mustAsk: string[] | null): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
   const files: Record<string, string> = {};
   const slugs: Record<string, string> = {};
   const { networkMembers } = await import("./network.js");
@@ -185,10 +188,14 @@ async function priceLists(project: Project, adverts: Advert[]): Promise<{ files:
     const whole = tenantId === own ? ownOffer : [];
     const lines = [`## ${slug}: ${label}${tenantId === own ? " (firma prowadząca ten projekt)" : ""}`, about.get(tenantId) || "(brak opisu)"];
     if (matched.length) lines.push(`Pozycje dopasowane do zapytania: cennik_${slug}.csv (${matched.length})`);
-    // What the agent must ask this business for (rule 9): matched items without a price.
-    const unpriced = matched.filter((i) => (!priceText(i) || priceText(i) === "cena na zapytanie") && !i.components.some((c) => c.price_value !== null));
-    if (tenantId !== own && unpriced.length)
-      lines.push(unpriced.length === matched.length ? "W dopasowanych pozycjach nie ma cen - o ceny trzeba zapytać firmę." : `Bez ceny: ${unpriced.slice(0, 8).map((i) => i.name).join("; ")} - o ich ceny trzeba zapytać firmę.`);
+    // Which businesses must be asked (rule 9) was decided before the run (mustAskBusinesses); without
+    // that decision (Jev down), matched items without a price decide.
+    if (tenantId !== own && mustAsk) {
+      if (mustAsk.includes(tenantId)) lines.push("Ma to, o co prosi klient, a ceny w danych nie ma - trzeba zapytać firmę (zapytania_do_firm.json).");
+    } else if (tenantId !== own) {
+      const unpriced = matched.filter((i) => (!priceText(i) || priceText(i) === "cena na zapytanie") && !i.components.some((c) => c.price_value !== null));
+      if (unpriced.length) lines.push(unpriced.length === matched.length ? "W dopasowanych pozycjach nie ma cen - o ceny trzeba zapytać firmę." : `Bez ceny: ${unpriced.slice(0, 8).map((i) => i.name).join("; ")} - o ich ceny trzeba zapytać firmę.`);
+    }
     if (whole.length) lines.push(`Cała oferta: oferta_${slug}.csv (${whole.length})`);
     if (!matched.length && !whole.length) lines.push("Brak cennika w danych - o ceny trzeba zapytać firmę.");
     directory.push(lines.join("\n"));
@@ -216,6 +223,19 @@ function fileSlug(s: string): string {
   return out.slice(0, 40);
 }
 
+/** cenniki/oferty_sieci.md: the offers the network gave per part, best first (picked by Jev). */
+function networkOffersText(parts: string[], offers: NetworkOffer[], own: string, businessLabel: (id: string) => string, isListed: (id: string) => boolean): string {
+  const out = ["# Oferty firm z sieci (wybrane najlepsze dla każdej części; ceny przelicz sam - nie przepisuj wyników)", ""];
+  parts.forEach((p, k) => {
+    out.push(`## Część ${k + 1}: ${p}`);
+    const mine = offers.filter((o) => o.part === k);
+    if (!mine.length) out.push("Żadna firma z sieci nie złożyła oferty.");
+    mine.forEach((o, n) => out.push(`${n + 1}. ${businessLabel(o.tenantId)}${o.tenantId === own ? " (firma prowadząca)" : ""}${isListed(o.tenantId) ? " (z publicznych danych firmy, niepotwierdzone)" : ""} - ${o.precise ? "cena z cennika" : "cena do ustalenia"}: ${o.text}${o.items.length ? ` [pozycje: ${o.items.map((i) => i.name).join("; ")}]` : ""}`));
+    out.push("");
+  });
+  return out.join("\n");
+}
+
 /** What the project asks for now: the latest request and the recent conversation around it. */
 async function needOf(projectId: string): Promise<string> {
   const [request, talk] = await Promise.all([readFile(projectId, "request.txt").catch(() => null), readFile(projectId, "rozmowa.md").catch(() => null)]);
@@ -241,8 +261,48 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
   const tenantIds = project.type === BUSINESS_REQUEST ? [project.initiatorTenantId]
     : [...new Set([project.initiatorTenantId, ...(await listParticipants(projectId)).map((p) => p.tenantId), ...(await networkMembers(project.initiatorTenantId).catch(() => [])).map((m) => m.tenantId)])];
   const t0 = Date.now();
-  const adverts = need ? await advertise(need, tenantIds) : [];
-  const offers = await priceLists(project, adverts);
+  // A business answering a request: alone with its own offer. The customer's project: the request is
+  // broadcast to the network, every business answers or declines, Jev picks the best offers per part
+  // (src/projects/broadcast.ts) - once per request; the later rounds of the same request reuse them.
+  let adverts: Advert[] = [];
+  let mustAsk: string[] | null = [];
+  let networkOffers: NetworkOffer[] = [];
+  let parts: string[] = [];
+  if (project.type === BUSINESS_REQUEST) adverts = need ? await advertise(need, tenantIds) : [];
+  else if (need) {
+    const prevB = project.memory.broadcast as { need: string; parts: string[]; picked: { tenantId: string; part: number; precise: boolean; text: string; items: string[] }[] } | undefined;
+    const { loadOffer } = await import("../offer/store.js");
+    if (prevB?.need === needHash) {
+      const offersOf = new Map(await Promise.all([...new Set(prevB.picked.map((o) => o.tenantId))].map(async (id) => [id, (await loadOffer(id).catch(() => null))?.items || []] as const)));
+      networkOffers = prevB.picked.map((o) => ({ ...o, items: (offersOf.get(o.tenantId) || []).filter((i) => o.items.includes(i.id)) }));
+      parts = prevB.parts;
+    } else {
+      const { broadcastNeed } = await import("./broadcast.js");
+      const b = await broadcastNeed(need, tenantIds);
+      networkOffers = b.picked; parts = b.parts;
+      await setMemory(projectId, { broadcast: { need: needHash, parts: b.parts, picked: b.picked.map((o) => ({ ...o, items: o.items.map((i) => i.id) })) } });
+      await addEvent(projectId, { kind: "network_offers", actor: "system", data: { ms: b.ms, parts: b.parts, answered: b.answered, declined: b.declined, picked: b.picked.map((o) => ({ tenantId: o.tenantId, part: o.part, precise: o.precise, text: o.text.slice(0, 300) })) } }).catch(() => {});
+    }
+    // The businesses whose offers were picked come in with the items behind them; the business running
+    // the project with its whole offer. A picked offer without a price: that business must be asked.
+    const byTenant = new Map<string, OfferItem[]>();
+    for (const o of networkOffers) byTenant.set(o.tenantId, [...new Map([...(byTenant.get(o.tenantId) || []), ...o.items].map((i) => [i.id, i])).values()]);
+    adverts = [...byTenant].map(([tenantId, items]) => ({ tenantId, items, byDescription: !items.length }));
+    // Per part, the best offer without a price is asked for one - when the part has no priced offer, or
+    // when that offer was picked first (Jev found it better than the priced ones).
+    const ask: string[] = [];
+    for (let k = 0; k < parts.length; k++) {
+      const mine = networkOffers.filter((o) => o.part === k);
+      const vague = mine.find((o) => !o.precise && o.tenantId !== project.initiatorTenantId);
+      if (vague && (!mine.some((o) => o.precise) || mine[0] === vague)) ask.push(vague.tenantId);
+    }
+    mustAsk = project.memory.networkAsked ? [] : [...new Set(ask)].slice(0, 4);
+  }
+  const offers = await priceLists(project, adverts, mustAsk);
+  if (networkOffers.length) {
+    const net = await import("./network.js");
+    offers.files["oferty_sieci.md"] = networkOffersText(parts, networkOffers, project.initiatorTenantId, net.businessLabel, net.isListed);
+  }
   const out: Record<string, string> = {};
   for (const [name, body] of Object.entries(offers.files)) out[`${PRICE_DIR}/${name}`] = body;
   if (Object.keys(offers.files).length) out[`${PRICE_DIR}/README.md`] = PRICE_README;
@@ -259,8 +319,8 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
     ...(await listFiles(projectId)).filter((f) => f.path.startsWith(`${PRICE_DIR}/`) && !(f.path in out)).map((f) => deleteFile(projectId, f.path)),
   ]);
   const inputs = { at: Date.now(), need: needHash, allow: offers.allow, catalog: offers.catalog.slice(0, 1500) };
-  await setMemory(projectId, { businessSlugs: offers.slugs, inputs, inputHashes: hashes });
-  await addEvent(projectId, { kind: "network_matched", actor: "system", data: { ms: Date.now() - t0, businesses: adverts.map((a) => ({ tenantId: a.tenantId, items: a.items.length, ...(a.byDescription ? { byDescription: true } : {}), ...(a.unjudged ? { unjudged: true } : {}) })) } }).catch(() => {});
+  await setMemory(projectId, { businessSlugs: offers.slugs, inputs, inputHashes: hashes, mustAsk: mustAsk || [] });
+  await addEvent(projectId, { kind: "network_matched", actor: "system", data: { ms: Date.now() - t0, mustAsk: mustAsk ?? [], businesses: adverts.map((a) => ({ tenantId: a.tenantId, items: a.items.length, ...(a.byDescription ? { byDescription: true } : {}), ...(a.unjudged ? { unjudged: true } : {}) })) } }).catch(() => {});
   return inputs;
 }
 
@@ -607,6 +667,22 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
   if (wanted.length) {
     await req("sys-agent-files", `The files the task asks for exist: ${wanted.join(", ")}.`, "code");
     results.push({ reqId: "sys-agent-files", status: missing.length ? "failed" : "met", evidence: missing.length ? `missing: ${missing.join(", ")}` : "all present" });
+  }
+
+  // The businesses that must be asked (decided before the run) are in the requests to the network.
+  const proj = await getProject(id);
+  const mustAsk = ((proj?.memory.mustAsk as string[]) || []).filter(Boolean);
+  if (mustAsk.length && !proj?.memory.networkAsked) {
+    let asked: string[] = [];
+    try {
+      const raw = JSON.parse((await readFile(id, "zapytania_do_firm.json").catch(() => null)) || "[]");
+      const slugs = (proj?.memory.businessSlugs as Record<string, string>) || {};
+      asked = (Array.isArray(raw) ? raw : []).map((x: any) => slugs[String(x?.firma || "").trim()]).filter(Boolean);
+    } catch { asked = []; }
+    const notAsked = mustAsk.filter((t) => !asked.includes(t));
+    const { businessLabel } = await import("./network.js");
+    await req("sys-agent-network", `The businesses that must be asked for prices are asked: ${mustAsk.map(businessLabel).join(", ")}.`, "code");
+    results.push({ reqId: "sys-agent-network", status: notAsked.length ? "failed" : "met", evidence: notAsked.length ? `not asked: ${notAsked.map(businessLabel).join(", ")} (zapytania_do_firm.json)` : "all asked" });
   }
 
   // Tables with a total row (first cell RAZEM / SUMA / TOTAL...): every number in that row must equal

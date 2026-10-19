@@ -67,7 +67,8 @@ export interface Advert { tenantId: string; items: OfferItem[]; byDescription: b
 
 const ADVERT_ITEMS = 15;
 const NEAREST = 30; // candidates per business by meaning
-const JUDGE_BATCH = 15; // items per Jev call (it judges short lists well, long ones poorly)
+const JUDGE_BATCH = 15;
+const MUST_ASK_MAX = 4; // businesses one customer request may ask // items per Jev call (it judges short lists well, long ones poorly)
 
 /**
  * The items of one business's offer that a need is about: the nearest by meaning (any language), judged

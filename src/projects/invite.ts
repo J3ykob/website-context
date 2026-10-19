@@ -20,23 +20,21 @@ export interface NetworkInvite { business: string; from: string; domain: string;
 
 export function networkInviteText(m: NetworkInvite): { subject: string; text: string } {
   return {
-    subject: `Zapytanie klienta o Waszą ofertę (${m.business})`,
+    subject: "Nowe zapytanie klienta o Waszą ofertę",
     text: `Dzień dobry,
 
-klient firmy ${m.from} zapytał o coś, co jest w Waszej ofercie:
+klient firmy ${m.from} szukał:
 ${m.request}
 
-Asystent Whisp przygotował odpowiedź na podstawie Waszych publicznych danych${m.domain ? ` (${m.domain})` : ""}:
-${m.answer || "(brak cen w publicznych danych - część oznaczona do wyceny)"}
+To jest w Waszej ofercie, więc asystent Whisp przygotował odpowiedź na podstawie Waszego cennika${m.domain ? ` (${m.domain})` : ""} i przekazał ją klientowi:
+${m.answer || "(w cenniku nie ma ceny - klient wie, że wycenę podacie Wy)"}
 
-Klient ją dostał z dopiskiem, że ceny nie zostały potwierdzone przez Waszą firmę.
-
-Tutaj możecie ją potwierdzić albo poprawić (bez zakładania konta):
+Potwierdźcie ją albo poprawcie tutaj - to zajmie minutę, bez zakładania konta:
 ${m.link}
 
-Dołączenie do sieci Whisp jest bezpłatne - po dołączeniu takie zapytania trafiają najpierw do Was.
+Whisp łączy lokalne firmy: gdy klient jednej z nich potrzebuje czegoś z Waszej oferty, zapytanie trafia do Was. Dołączenie jest bezpłatne - wtedy takie zapytania przychodzą najpierw do Was, a asystent przygotowuje odpowiedzi do Waszej akceptacji.
 
-Jeśli nie chcecie takich wiadomości, odpiszcie "nie" - nie napiszemy ponownie.
+Nie chcecie takich zapytań? Wystarczy odpisać.
 
 Whisp - whisp.so`,
   };
