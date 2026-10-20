@@ -2843,7 +2843,7 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
 });
 
 // Admin: a business's place in the network (src/projects/network.ts isListed, src/projects/invite.ts).
-// body: { tenantIds: [...], network?: "listed" | "member", inviteEmail?: string, networkOptOut?: boolean }
+// body: { tenantIds: [...], network?: "listed" | "member", inviteEmail?: string, networkOptOut?: boolean, clearBilling?: true }
 // "listed" = in the network from its public data, nobody runs it; "member" (default) = it has joined.
 app.post("/api/admin/network-status", (req, res) => {
   if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
@@ -2858,6 +2858,7 @@ app.post("/api/admin/network-status", (req, res) => {
     if (network === "listed") settings.network = "listed"; else if (network === "member") delete settings.network;
     if (typeof req.body?.inviteEmail === "string") { const e = req.body.inviteEmail.trim(); if (e) settings.inviteEmail = e.slice(0, 200); else delete settings.inviteEmail; }
     if (typeof req.body?.networkOptOut === "boolean") { if (req.body.networkOptOut) settings.networkOptOut = true; else delete settings.networkOptOut; }
+    if (req.body?.clearBilling === true) { delete settings.stripeCustomer; delete settings.stripeSubscription; }
     updateTenant(id, { settings });
     tenantManager.evictTenant(id);
     updated.push(id);
