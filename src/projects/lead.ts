@@ -65,6 +65,7 @@ export interface LeadView {
   hiddenChars: number;     // how much is hidden (the page draws that much blurred filler)
   request?: string; answer?: string; // only when unlocked
   expiresAt: string; pricePln: number; payments: boolean; phone: string;
+  manage: boolean; // has a subscription it can manage or cancel
 }
 
 /** The part of a request shown before paying: its first sentence or so - enough to see what it is. */
@@ -94,6 +95,7 @@ export async function leadView(token: string): Promise<LeadView | null> {
     ...(unlocked ? { request: question, answer: ((await readFile(sub.id, "odpowiedz.txt").catch(() => null)) || "").trim() } : {}),
     expiresAt: new Date(expires).toISOString(), pricePln: PRICE_PLN(), payments: !!stripeKey(),
     phone: (process.env.NETWORK_INVITE_PHONE || "").trim(),
+    manage: !!getTenant(inv.tenant_id)?.settings?.stripeCustomer && !!stripeKey(),
   };
 }
 
@@ -107,10 +109,14 @@ export async function startCheckout(token: string, base: string): Promise<string
   const s = await stripe("/checkout/sessions", { method: "POST", form: {
     mode: "subscription", locale: "pl",
     "line_items[0][quantity]": "1",
-    "line_items[0][price_data][currency]": "pln",
-    "line_items[0][price_data][unit_amount]": String(Math.round(PRICE_PLN() * 100)),
-    "line_items[0][price_data][recurring][interval]": "month",
-    "line_items[0][price_data][product_data][name]": "Whisp - zapytania klientów z sieci firm",
+    // The plan created in Stripe (STRIPE_PRICE_ID); without it the same price inline.
+    ...(process.env.STRIPE_PRICE_ID ? { "line_items[0][price]": String(process.env.STRIPE_PRICE_ID) } : {
+      "line_items[0][price_data][currency]": "pln",
+      "line_items[0][price_data][unit_amount]": String(Math.round(PRICE_PLN() * 100)),
+      "line_items[0][price_data][recurring][interval]": "month",
+      "line_items[0][price_data][product_data][name]": "Whisp - zapytania klientów z sieci firm",
+    }),
+    allow_promotion_codes: "true",
     success_url: `${back}?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: back,
     client_reference_id: inv.tenant_id,
@@ -139,6 +145,15 @@ export async function confirmCheckout(token: string, sessionId: string): Promise
   return true;
 }
 
+/** Stripe's customer portal (manage or cancel the subscription), back to the lead page. */
+export async function portalUrl(token: string, base: string): Promise<string> {
+  const inv = await inviteByToken(token);
+  const customer = inv ? String(getTenant(inv.tenant_id)?.settings?.stripeCustomer || "") : "";
+  if (!inv || !customer || !stripeKey()) throw new Error("no subscription");
+  const s = await stripe("/billing_portal/sessions", { method: "POST", form: { customer, return_url: `${base}/lead/${encodeURIComponent(token)}`, locale: "pl" } });
+  return String(s.url);
+}
+
 /**
  * The business's own offer for the request: back into the customer's project (the business running it
  * sees it; the customer gets it on their page and in the chat).
@@ -161,6 +176,23 @@ export async function replyToLead(token: string, offer: string): Promise<boolean
     await setMemory(parentId, { businessOffers: offers });
     const { logMessage } = await import("../storage/conversation-store.js");
     await logMessage(parent.initiatorTenantId, parent.customerSession, "assistant", `Oferta od firmy ${businessLabel(inv.tenant_id)}:\n\n${offer.slice(0, 4000)}`, { flowInvoked: "network-offer" }).catch(() => {});
+    // The customer asked for the result by email: the offer goes there too, with their page (all answers).
+    const contact = parent.memory.customerContact as { email?: string; lang?: string } | undefined;
+    if (contact?.email) {
+      try {
+        const { customerLink } = await import("./conversation.js");
+        const { sendCustomerOfferEmail } = await import("../multi-tenant/email.js");
+        const t = getTenant(parent.initiatorTenantId);
+        let base = (process.env.BASE_URL || "").trim();
+        if (!base.startsWith("http")) base = "https://whisp.so";
+        while (base.endsWith("/")) base = base.slice(0, -1);
+        const sent = await sendCustomerOfferEmail(contact.email, {
+          lang: contact.lang || "pl", brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "",
+          business: businessLabel(inv.tenant_id), offer: offer.slice(0, 4000), link: `${base}/p/${await customerLink(parentId)}`, replyTo: t?.email || "",
+        });
+        await addEvent(parentId, { kind: "offer_emailed", actor: "system", data: { business: inv.tenant_id, sent } });
+      } catch (e) { await addEvent(parentId, { kind: "offer_emailed", actor: "system", data: { business: inv.tenant_id, sent: false, error: String((e as Error).message).slice(0, 200) } }).catch(() => {}); }
+    }
   }
   await d1Query("UPDATE network_invites SET replied_at = ? WHERE token = ?", [new Date().toISOString(), token]);
   return true;

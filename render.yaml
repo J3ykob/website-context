@@ -59,8 +59,10 @@ services:
       # Result email to the customer (with consent from the chat) - approved 2026-10-13.
       - key: CUSTOMER_RESULT_EMAIL_APPROVED
         value: "1"
-      # Network invite + lead page (src/projects/invite.ts, lead.ts). The invite email is sent only once
-      # NETWORK_INVITE_EMAIL_APPROVED is "1" (template awaiting the user's approval).
+      # Network invite + lead page (src/projects/invite.ts, lead.ts).
+      # Invite email to listed businesses - template approved 2026-10-20 (templates/emails/network-invite.txt).
+      - key: NETWORK_INVITE_EMAIL_APPROVED
+        value: "1"
       - key: NETWORK_INVITE_PHONE
         value: "+48 729 086 795"
       - key: NETWORK_PLAN_PRICE_PLN
@@ -69,6 +71,8 @@ services:
         value: "24"
       # Stripe (test mode first): set in the dashboard, never in this file.
       - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PRICE_ID
         sync: false
       - key: EMBED_MODEL
         value: bge-m3

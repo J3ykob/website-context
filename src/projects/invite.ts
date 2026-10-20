@@ -12,6 +12,7 @@ import { getProject, addEvent } from "./store.js";
 import { readFile } from "./repo.js";
 import { d1Query } from "../storage/conversation-store.js";
 import { getTenant } from "../multi-tenant/d1-registry.js";
+import { renderTemplate } from "../multi-tenant/templates.js";
 
 const PER_DAY = 24 * 3600_000;
 
@@ -23,24 +24,13 @@ const PHONE = () => (process.env.NETWORK_INVITE_PHONE || "").trim();
 const HOURS = () => Number(process.env.LEAD_EXCLUSIVE_HOURS) || 24;
 
 export function networkInviteText(m: NetworkInvite): { subject: string; text: string } {
-  const phone = PHONE();
-  return {
-    subject: "Zapytanie klienta dotyczące Państwa oferty",
-    text: `Dzień dobry,
-
-pojawiło się zapytanie klienta firmy ${m.from}, a my wytypowaliśmy Państwa jako potencjalnego dostawcę:
-${m.request}
-
-Asystent przygotował dla klienta wstępną odpowiedź na podstawie Państwa cennika${m.domain ? ` (${m.domain})` : ""}:
-${m.answer || "W cenniku nie ma ceny - cena do ustalenia."}
-
-Whisp to asystent, który obsługuje klientów na stronach lokalnych firm i szuka u firm z okolicy tego, czego dana firma nie ma w ofercie.
-
-Prosimy o ${phone ? `telefon pod numer ${phone} lub ` : ""}odblokowanie zapytania na stronie ${m.link}, jeśli chcą Państwo je otrzymać - zapytanie jest zarezerwowane dla Państwa przez ${HOURS()} godziny.
-
-Z poważaniem
-Whisp - whisp.so`,
-  };
+  // The text lives in templates/emails/network-invite.txt (edit it there).
+  const r = renderTemplate("network-invite", {
+    from: m.from, request: m.request, answer: m.answer || "W cenniku nie ma ceny - cena do ustalenia.",
+    price_source: m.domain ? `Państwa cennika (${m.domain})` : "Państwa cennika", link: m.link, phone: PHONE() || "-", hours: String(HOURS()),
+  });
+  if (!r) throw new Error("templates/emails/network-invite.txt is missing");
+  return r;
 }
 
 let ready: Promise<void> | null = null;

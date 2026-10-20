@@ -1,0 +1,12 @@
+# See customer-offer.pl.txt
+Subject: Une nouvelle offre pour votre demande - {{brand}}
+
+Bonjour,
+
+voici une nouvelle offre pour votre demande, envoyée par {{business}} :
+
+{{offer}}
+
+Toutes les réponses à cette demande sont ici : {{link}}
+
+{{brand}}

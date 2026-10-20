@@ -84,6 +84,7 @@
       <div class="err hidden" id="send-err"></div>
     </div>
     <div class="card hidden" id="sent"><p class="ok" style="margin:0">Oferta wysłana do klienta.</p></div>
+    <p class="small hidden" id="manage-row" style="text-align:center"><a href="#" id="manage">Zarządzaj subskrypcją</a> (zmiana karty, faktury, rezygnacja)</p>
   </div>
 
   <p class="foot">Whisp - asystent obsługi klienta dla lokalnych firm · <a href="https://whisp.so" target="_blank" rel="noopener">whisp.so</a></p>
@@ -130,6 +131,7 @@
       show("answer-card", !!d.answer);
       if (!$("offer").value) $("offer").value = d.answer || "";
       show("reply-card", d.status !== "replied"); show("sent", d.status === "replied");
+      show("manage-row", !!d.manage);
       show("unlocked", true);
     }
   }
@@ -158,6 +160,10 @@
         if (res.ok) { show("reply-card", false); show("sent", true); return; }
         $("send").disabled = false; $("send-err").textContent = res.x.error || ""; show("send-err", true);
       }).catch(function () { $("send").disabled = false; });
+  });
+  $("manage").addEventListener("click", function (e) {
+    e.preventDefault();
+    fetch(api + "/portal", { method: "POST" }).then(function (r) { return r.json(); }).then(function (x) { if (x.url) location.href = x.url; });
   });
   load();
 })();

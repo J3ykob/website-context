@@ -1,0 +1,14 @@
+# To the customer (who asked for the result by email) when a business of the network sends its offer.
+# {{brand}} the business the customer talked to · {{business}} the business that sent the offer
+# {{offer}} its offer · {{link}} the customer's page with all answers
+Temat: Nowa oferta do Twojego zapytania - {{brand}}
+
+Dzień dobry,
+
+zobacz nową ofertę do Twojego zapytania - przesłała ją firma {{business}}:
+
+{{offer}}
+
+Wszystkie odpowiedzi do tego zapytania znajdziesz tutaj: {{link}}
+
+{{brand}}

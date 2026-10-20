@@ -186,6 +186,31 @@ export async function sendNetworkInviteEmail(email: string, mail: { subject: str
   }
 }
 
+// A business of the network sent its offer for the customer's request (src/projects/lead.ts); the
+// customer asked for the result by email. Text: templates/emails/customer-offer.<lang>.txt.
+// New template: until the user approves it (CUSTOMER_OFFER_EMAIL_APPROVED=1), only to the Whisp owner.
+export async function sendCustomerOfferEmail(
+  email: string,
+  r: { lang: string; brand: string; business: string; offer: string; link: string; replyTo: string },
+): Promise<boolean> {
+  if (process.env.CUSTOMER_OFFER_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
+    console.log(`[email] offer email to ${email} not sent - template awaiting approval`);
+    return false;
+  }
+  const { renderTemplate } = await import("./templates.js");
+  const t = renderTemplate("customer-offer", { brand: r.brand, business: r.business, offer: r.offer, link: r.link }, r.lang);
+  if (!t) { console.error("[email] templates/emails/customer-offer is missing"); return false; }
+  try {
+    const { error } = await resend.emails.send({ from: FROM, to: email, replyTo: r.replyTo || "jakub@whisp.so", subject: t.subject, text: t.text });
+    if (error) { console.error(`[email] offer email to ${email} failed:`, error.message); return false; }
+    console.log(`[email] Offer email sent to ${email}`);
+    return true;
+  } catch (e: any) {
+    console.error(`[email] offer email to ${email} failed:`, e.message);
+    return false;
+  }
+}
+
 // The result of a customer's request, sent when the customer asked for it in the chat (with consent).
 // New template: until the user approves it (CUSTOMER_RESULT_EMAIL_APPROVED=1), it goes only to the Whisp
 // owner's own address.

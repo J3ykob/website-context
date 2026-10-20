@@ -298,6 +298,14 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
       res.status(502).json({ error: "Płatność jest chwilowo niedostępna - spróbuj za moment." });
     }
   });
+  app.post("/api/lead/:token/portal", async (req, res) => {
+    const lead = await import("./lead.js");
+    let base = (process.env.BASE_URL || "").trim();
+    if (!base.startsWith("http")) base = "https://whisp.so";
+    while (base.endsWith("/")) base = base.slice(0, -1);
+    try { res.json({ url: await lead.portalUrl(String(req.params.token), base) }); }
+    catch (e: any) { console.warn(`[lead] portal: ${e?.message || e}`); res.status(409).json({ error: "Brak subskrypcji do zarządzania." }); }
+  });
   app.post("/api/lead/:token/reply", async (req, res) => {
     const lead = await import("./lead.js");
     const offer = String(req.body?.offer || "").trim();
