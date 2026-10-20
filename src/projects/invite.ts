@@ -18,24 +18,27 @@ const PER_DAY = 24 * 3600_000;
 // The email: strictly the inquiry and the link; joining is one line. Plain text.
 export interface NetworkInvite { business: string; from: string; domain: string; request: string; answer: string; link: string }
 
+// Contact for taking over the request (set on Render): the owner's phone; the link is the lead page.
+const PHONE = () => (process.env.NETWORK_INVITE_PHONE || "").trim();
+const HOURS = () => Number(process.env.LEAD_EXCLUSIVE_HOURS) || 24;
+
 export function networkInviteText(m: NetworkInvite): { subject: string; text: string } {
+  const phone = PHONE();
   return {
-    subject: "Nowe zapytanie klienta o Waszą ofertę",
+    subject: "Zapytanie klienta dotyczące Państwa oferty",
     text: `Dzień dobry,
 
-klient firmy ${m.from} szukał:
+pojawiło się zapytanie klienta firmy ${m.from}, a my wytypowaliśmy Państwa jako potencjalnego dostawcę:
 ${m.request}
 
-To jest w Waszej ofercie, więc asystent Whisp przygotował odpowiedź na podstawie Waszego cennika${m.domain ? ` (${m.domain})` : ""} i przekazał ją klientowi:
-${m.answer || "(w cenniku nie ma ceny - klient wie, że wycenę podacie Wy)"}
+Asystent przygotował dla klienta wstępną odpowiedź na podstawie Państwa cennika${m.domain ? ` (${m.domain})` : ""}:
+${m.answer || "W cenniku nie ma ceny - cena do ustalenia."}
 
-Potwierdźcie ją albo poprawcie tutaj - to zajmie minutę, bez zakładania konta:
-${m.link}
+Whisp to asystent, który obsługuje klientów na stronach lokalnych firm i szuka u firm z okolicy tego, czego dana firma nie ma w ofercie.
 
-Whisp łączy lokalne firmy: gdy klient jednej z nich potrzebuje czegoś z Waszej oferty, zapytanie trafia do Was. Dołączenie jest bezpłatne - wtedy takie zapytania przychodzą najpierw do Was, a asystent przygotowuje odpowiedzi do Waszej akceptacji.
+Prosimy o ${phone ? `telefon pod numer ${phone} lub ` : ""}odblokowanie zapytania na stronie ${m.link}, jeśli chcą Państwo je otrzymać - zapytanie jest zarezerwowane dla Państwa przez ${HOURS()} godziny.
 
-Nie chcecie takich zapytań? Wystarczy odpisać.
-
+Z poważaniem
 Whisp - whisp.so`,
   };
 }
@@ -73,7 +76,7 @@ export async function inviteListed(subId: string): Promise<void> {
     domain: t?.domain || "",
     request: request.slice(0, 800),
     answer: answer.slice(0, 1500),
-    link: `${base}/review/${rv.token}`,
+    link: `${base}/lead/${rv.token}`,
   };
   const text = networkInviteText(mail);
   let emailed = false;

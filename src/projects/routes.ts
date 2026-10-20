@@ -267,6 +267,49 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     return id ? getProject(id) : null;
   };
 
+  // A customer's request offered to a business that has not joined (src/projects/lead.ts).
+  app.get("/lead/:token", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Robots-Tag", "noindex");
+    res.sendFile(resolve("public/lead.html"));
+  });
+  app.get("/api/lead/:token", async (req, res) => {
+    const lead = await import("./lead.js");
+    const token = String(req.params.token);
+    try {
+      if (req.query.session_id) await lead.confirmCheckout(token, String(req.query.session_id)).catch((e) => console.warn(`[lead] confirm: ${e?.message || e}`));
+      const v = await lead.leadView(token);
+      if (!v) { res.status(404).json({ error: "not_found" }); return; }
+      res.json(v);
+    } catch { res.status(500).json({ error: "unavailable" }); }
+  });
+  app.post("/api/lead/:token/checkout", async (req, res) => {
+    const lead = await import("./lead.js");
+    let base = (process.env.BASE_URL || "").trim();
+    if (!base.startsWith("http")) base = "https://whisp.so";
+    while (base.endsWith("/")) base = base.slice(0, -1);
+    try {
+      const v = await lead.leadView(String(req.params.token));
+      if (!v || v.status !== "open") { res.status(409).json({ error: "Ta oferta nie jest już dostępna." }); return; }
+      res.json({ url: await lead.startCheckout(String(req.params.token), base) });
+    } catch (e: any) {
+      console.warn(`[lead] checkout: ${e?.message || e}`);
+      res.status(502).json({ error: "Płatność jest chwilowo niedostępna - spróbuj za moment." });
+    }
+  });
+  app.post("/api/lead/:token/reply", async (req, res) => {
+    const lead = await import("./lead.js");
+    const offer = String(req.body?.offer || "").trim();
+    if (offer.length < 5 || offer.length > 4000) { res.status(400).json({ error: "Napisz ofertę (do 4000 znaków)." }); return; }
+    const ok = await lead.replyToLead(String(req.params.token), offer).catch(() => false);
+    if (!ok) { res.status(409).json({ error: "Najpierw odblokuj zapytanie." }); return; }
+    res.json({ ok: true });
+  });
+  // Reservations that ended unpaid: the request goes to the next business picked for the same part.
+  const sweep = setInterval(() => { void import("./lead.js").then((l) => l.passExpiredLeads()).catch((e) => console.warn(`[lead] sweep: ${e?.message || e}`)); }, 10 * 60_000);
+  sweep.unref?.();
+
   app.get("/p/:token", (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -291,6 +334,8 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
         message: d.status === "done" || d.status === "failed" ? d.message : "",
         files: d.status === "done" ? (d.files || []).map((path) => ({ name: path.split("/").pop(), url: `/api/p/${tok}/file?path=${encodeURIComponent(path)}` })) : [],
         notified: !!(p.memory.customerContact as any)?.email,
+        // Offers businesses of the network sent afterwards (src/projects/lead.ts).
+        offers: ((p.memory.businessOffers as any[]) || []).map((o) => ({ business: String(o.label || ""), text: String(o.text || ""), at: o.at })),
         consent: NOTIFY[NOTIFY[lang] ? lang : "pl"].consent.split("{brand}").join(t?.settings?.siteCard?.brand || t?.brandName || t?.domain || ""),
       });
     } catch (e: any) {

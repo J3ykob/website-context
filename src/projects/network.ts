@@ -168,29 +168,36 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
     }
   }
   if (!byTenant.size) return false;
-  const from = businessLabel(parent.initiatorTenantId);
   const subs: SubRequest[] = [];
   for (const [tenantId, qs] of [...byTenant].slice(0, MAX_REQUESTS)) {
-    const question = qs.join("\n");
-    const listed = isListed(tenantId);
-    const sub = await createProject(BUSINESS_REQUEST, { customerSession: `project:${parentId}`, initiatorTenantId: tenantId, title: `Zapytanie od ${from}`.slice(0, 120), memory: { parentId, fromTenant: parent.initiatorTenantId, ...(listed ? { listed: true } : {}) }, ttlHours: 30 * 24 });
-    await addParticipant(sub.id, parent.initiatorTenantId, "initiator").catch(() => {});
-    await addParticipant(parentId, tenantId, "quoting").catch(() => {});
-    const request = `Firma ${from} (z tej samej sieci firm) przygotowuje dla swojego klienta wycenę / projekt i pyta Twoją firmę:\n\n${question}\n`;
-    await writeFile(sub.id, "request.txt", request, "txt", `business:${parent.initiatorTenantId}`);
-    await writeFile(sub.id, "rozmowa.md", `# Zapytanie od ${from}\n\n**${from}:** ${question}\n`, "md", "system");
-    const knowledge = knowledgeProvider ? await knowledgeProvider(tenantId, question).catch(() => []) : [];
-    if (knowledge.length) await writeFile(sub.id, "wiedza/strona.md", `# Informacje z witryny firmy\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system");
-    const instruction = listed ? `${SUB_INSTRUCTION}\n${LISTED_NOTE}` : SUB_INSTRUCTION;
-    await setMemory(sub.id, { baseInstruction: instruction });
-    const { planAndRun } = await import("./plan.js");
-    const started = await planAndRun(sub.id, instruction, `business:${parent.initiatorTenantId}`);
-    subs.push({ id: sub.id, tenantId, label: businessLabel(tenantId), question, status: "waiting", at: new Date().toISOString() });
-    await addEvent(parentId, { kind: "business_asked", actor: "agent", data: { to: tenantId, project: sub.id, question: question.slice(0, 1000), started: !("error" in started) } });
-    if ("error" in started) await settle(sub.id, "", "no_answer");
+    const sub = await askOne(parentId, tenantId, qs.join("\n"));
+    if (sub) subs.push(sub);
   }
   await setMemory(parentId, { networkAsked: true, subRequests: subs });
   return true;
+}
+
+/** One request to one business: its own project (business_request@1), answered under its own settings. */
+export async function askOne(parentId: string, tenantId: string, question: string): Promise<SubRequest | null> {
+  const parent = await getProject(parentId);
+  if (!parent) return null;
+  const from = businessLabel(parent.initiatorTenantId);
+  const listed = isListed(tenantId);
+  const sub = await createProject(BUSINESS_REQUEST, { customerSession: `project:${parentId}`, initiatorTenantId: tenantId, title: `Zapytanie od ${from}`.slice(0, 120), memory: { parentId, fromTenant: parent.initiatorTenantId, ...(listed ? { listed: true } : {}) }, ttlHours: 30 * 24 });
+  await addParticipant(sub.id, parent.initiatorTenantId, "initiator").catch(() => {});
+  await addParticipant(parentId, tenantId, "quoting").catch(() => {});
+  const request = `Firma ${from} (z tej samej sieci firm) przygotowuje dla swojego klienta wycenę / projekt i pyta Twoją firmę:\n\n${question}\n`;
+  await writeFile(sub.id, "request.txt", request, "txt", `business:${parent.initiatorTenantId}`);
+  await writeFile(sub.id, "rozmowa.md", `# Zapytanie od ${from}\n\n**${from}:** ${question}\n`, "md", "system");
+  const knowledge = knowledgeProvider ? await knowledgeProvider(tenantId, question).catch(() => []) : [];
+  if (knowledge.length) await writeFile(sub.id, "wiedza/strona.md", `# Informacje z witryny firmy\n\n${knowledge.join("\n\n---\n\n")}\n`, "md", "system");
+  const instruction = listed ? `${SUB_INSTRUCTION}\n${LISTED_NOTE}` : SUB_INSTRUCTION;
+  await setMemory(sub.id, { baseInstruction: instruction, question: question.slice(0, 2000) });
+  const { planAndRun } = await import("./plan.js");
+  const started = await planAndRun(sub.id, instruction, `business:${parent.initiatorTenantId}`);
+  await addEvent(parentId, { kind: "business_asked", actor: "agent", data: { to: tenantId, project: sub.id, question: question.slice(0, 1000), started: !("error" in started) } });
+  if ("error" in started) await settle(sub.id, "", "no_answer");
+  return { id: sub.id, tenantId, label: businessLabel(tenantId), question, status: "waiting", at: new Date().toISOString() };
 }
 
 export const SUB_INSTRUCTION = `Inna firma z Twojej sieci (opis w request.txt) przygotowuje projekt dla swojego klienta i pyta o część,

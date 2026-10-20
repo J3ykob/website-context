@@ -59,6 +59,17 @@ services:
       # Result email to the customer (with consent from the chat) - approved 2026-10-13.
       - key: CUSTOMER_RESULT_EMAIL_APPROVED
         value: "1"
+      # Network invite + lead page (src/projects/invite.ts, lead.ts). The invite email is sent only once
+      # NETWORK_INVITE_EMAIL_APPROVED is "1" (template awaiting the user's approval).
+      - key: NETWORK_INVITE_PHONE
+        value: "+48 729 086 795"
+      - key: NETWORK_PLAN_PRICE_PLN
+        value: "149"
+      - key: LEAD_EXCLUSIVE_HOURS
+        value: "24"
+      # Stripe (test mode first): set in the dashboard, never in this file.
+      - key: STRIPE_SECRET_KEY
+        sync: false
       - key: EMBED_MODEL
         value: bge-m3
       - key: VECTORIZE_INDEX

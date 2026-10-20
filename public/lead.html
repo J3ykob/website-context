@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Zapytanie klienta - Whisp</title>
+<style>
+  :root { --page:#0a0e1a; --card:rgba(255,255,255,0.03); --border:rgba(255,255,255,0.08); --accent:#3b82f6; --accent-h:#2563eb; --text:#f1f5f9; --muted:#94a3b8; --dim:#64748b; --ok:#10b981; --warn:#f59e0b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); color:var(--text); font:15px/1.6 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:32px 16px 64px; }
+  .brand { color:var(--muted); font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin:0 0 6px; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-weight:500; font-size:28px; margin:0 0 20px; text-wrap:balance; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:18px 20px; margin:0 0 16px; }
+  .label { text-transform:uppercase; letter-spacing:.08em; font-size:11px; color:var(--dim); margin:0 0 8px; }
+  .pre { white-space:pre-wrap; word-break:break-word; }
+  .locked { position:relative; }
+  .blur { filter:blur(6px); user-select:none; pointer-events:none; color:var(--muted); white-space:pre-wrap; margin-top:4px; }
+  .fade { position:absolute; left:0; right:0; bottom:0; height:70%; background:linear-gradient(to bottom, rgba(10,14,26,0), var(--page)); pointer-events:none; }
+  .wall { text-align:center; padding:24px 20px; border-color:rgba(59,130,246,.35); }
+  .timer { font-variant-numeric:tabular-nums; font-size:30px; font-weight:600; letter-spacing:.02em; margin:4px 0 2px; }
+  .timer.late { color:var(--warn); }
+  .small { color:var(--muted); font-size:13px; margin:8px 0 0; }
+  button { font:inherit; border-radius:12px; padding:13px 22px; cursor:pointer; border:0; background:var(--accent); color:#fff; font-weight:600; font-size:16px; }
+  @media (hover:hover) { button:hover { background:var(--accent-h); } }
+  button:disabled { opacity:.5; cursor:default; }
+  button:focus-visible, textarea:focus-visible { outline:2px solid #93c5fd; outline-offset:2px; }
+  textarea { width:100%; min-height:180px; padding:12px; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--text); font:inherit; resize:vertical; }
+  a { color:#93c5fd; }
+  .hidden { display:none; }
+  .err { color:#ef4444; font-size:13px; margin-top:8px; }
+  .ok { color:var(--ok); }
+  .foot { color:var(--dim); font-size:12px; margin-top:28px; text-align:center; }
+</style>
+</head>
+<body>
+<main>
+  <p class="brand">Whisp</p>
+  <h1 id="title">Zapytanie klienta</h1>
+  <div id="error" class="card hidden"></div>
+
+  <!-- Before paying: part of the request, the rest blurred (filler - the text itself stays on the server). -->
+  <div id="open" class="hidden">
+    <div class="card locked">
+      <p class="label" id="from"></p>
+      <div class="pre" id="teaser"></div>
+      <div class="blur" id="filler" aria-hidden="true"></div>
+      <p class="label" style="margin-top:18px">Odpowiedź przygotowana na podstawie Państwa cennika</p>
+      <div class="blur" id="filler2" aria-hidden="true"></div>
+      <div class="fade"></div>
+    </div>
+    <div class="card wall">
+      <p class="label">Zapytanie zarezerwowane dla Państwa jeszcze</p>
+      <div class="timer" id="timer" role="timer" aria-live="off">--:--:--</div>
+      <p class="small" id="after">Po tym czasie trafi do kolejnej firmy.</p>
+      <div style="margin-top:18px"><button id="unlock" type="button">Odblokuj zapytanie</button></div>
+      <p class="small" id="price"></p>
+      <p class="small" id="phone"></p>
+      <div class="err hidden" id="pay-err"></div>
+    </div>
+  </div>
+
+  <!-- Reservation over, unpaid. -->
+  <div id="passed" class="card hidden">
+    <p style="margin:0">Rezerwacja minęła - zapytanie trafiło do kolejnej firmy.</p>
+    <p class="small" id="phone2"></p>
+  </div>
+
+  <!-- Paid: the whole request, the prepared answer, and the business's own offer to the customer. -->
+  <div id="unlocked" class="hidden">
+    <div class="card">
+      <p class="label" id="from2"></p>
+      <div class="pre" id="request"></div>
+    </div>
+    <div class="card" id="answer-card">
+      <p class="label">Odpowiedź przygotowana na podstawie Państwa cennika</p>
+      <div class="pre" id="answer" style="color:var(--muted)"></div>
+    </div>
+    <div class="card" id="reply-card">
+      <p class="label">Państwa oferta dla klienta (trafi do niego przez Whisp)</p>
+      <textarea id="offer"></textarea>
+      <div style="margin-top:12px"><button id="send" type="button">Wyślij ofertę klientowi</button></div>
+      <div class="err hidden" id="send-err"></div>
+    </div>
+    <div class="card hidden" id="sent"><p class="ok" style="margin:0">Oferta wysłana do klienta.</p></div>
+  </div>
+
+  <p class="foot">Whisp - asystent obsługi klienta dla lokalnych firm · <a href="https://whisp.so" target="_blank" rel="noopener">whisp.so</a></p>
+</main>
+<script>
+(function () {
+  var token = location.pathname.split("/").filter(Boolean).pop();
+  var api = "/api/lead/" + encodeURIComponent(token);
+  var q = new URLSearchParams(location.search);
+  function $(id) { return document.getElementById(id); }
+  function show(id, on) { $(id).classList.toggle("hidden", !on); }
+  var WORDS = "oferta wynajem montaż cena termin dostawa zakres prac materiał ilość dni metrów sztuk usługa transport realizacja klient budowa".split(" ");
+  function filler(n) { var out = "", k = 0; while (out.length < n) { out += WORDS[(k * 7 + 3) % WORDS.length] + (k % 11 === 10 ? ".\n" : " "); k++; } return out; }
+  var timer = null;
+  function tick(until) {
+    var left = Math.max(0, Date.parse(until) - Date.now());
+    var h = Math.floor(left / 3600000), m = Math.floor(left / 60000) % 60, s = Math.floor(left / 1000) % 60;
+    $("timer").textContent = [h, m, s].map(function (x) { return x < 10 ? "0" + x : "" + x; }).join(":");
+    $("timer").classList.toggle("late", left < 3600000);
+    if (left === 0) { clearInterval(timer); load(); }
+  }
+
+  function render(d) {
+    $("title").textContent = "Zapytanie klienta dla firmy " + d.business;
+    var phone = d.phone ? "Albo prosimy o telefon: " + d.phone : "";
+    ["open", "passed", "unlocked"].forEach(function (id) { show(id, false); });
+    if (d.status === "open") {
+      $("from").textContent = "Klient firmy " + d.from + " szuka";
+      $("teaser").textContent = d.teaser + "…";
+      $("filler").textContent = filler(Math.max(120, d.hiddenChars));
+      $("filler2").textContent = filler(260);
+      $("price").textContent = d.payments ? "Subskrypcja " + d.pricePln + " zł miesięcznie: to i wszystkie kolejne zapytania z sieci trafiają od razu do Państwa." : "Płatności online wkrótce.";
+      $("phone").textContent = phone;
+      $("unlock").disabled = !d.payments;
+      clearInterval(timer); tick(d.expiresAt); timer = setInterval(function () { tick(d.expiresAt); }, 1000);
+      show("open", true);
+    } else if (d.status === "passed") {
+      $("phone2").textContent = d.phone ? "Chcą Państwo dostawać takie zapytania? Prosimy o telefon: " + d.phone : "";
+      show("passed", true);
+    } else {
+      $("from2").textContent = "Klient firmy " + d.from + " szuka";
+      $("request").textContent = d.request || "";
+      $("answer").textContent = d.answer || "";
+      show("answer-card", !!d.answer);
+      if (!$("offer").value) $("offer").value = d.answer || "";
+      show("reply-card", d.status !== "replied"); show("sent", d.status === "replied");
+      show("unlocked", true);
+    }
+  }
+
+  function load() {
+    var url = api + (q.get("session_id") ? "?session_id=" + encodeURIComponent(q.get("session_id")) : "");
+    fetch(url).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, x: x }; }); }).then(function (res) {
+      if (!res.ok) { $("error").textContent = "Ten link wygasł albo nie istnieje."; show("error", true); return; }
+      if (q.get("session_id")) history.replaceState(null, "", location.pathname);
+      q = new URLSearchParams("");
+      render(res.x);
+    }).catch(function () { $("error").textContent = "Nie udało się wczytać - spróbuj za moment."; show("error", true); });
+  }
+
+  $("unlock").addEventListener("click", function () {
+    $("unlock").disabled = true; show("pay-err", false);
+    fetch(api + "/checkout", { method: "POST" }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, x: x }; }); }).then(function (res) {
+      if (res.ok && res.x.url) { location.href = res.x.url; return; }
+      $("unlock").disabled = false; $("pay-err").textContent = res.x.error || "Płatność niedostępna."; show("pay-err", true);
+    }).catch(function () { $("unlock").disabled = false; });
+  });
+  $("send").addEventListener("click", function () {
+    $("send").disabled = true; show("send-err", false);
+    fetch(api + "/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ offer: $("offer").value }) })
+      .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, x: x }; }); }).then(function (res) {
+        if (res.ok) { show("reply-card", false); show("sent", true); return; }
+        $("send").disabled = false; $("send-err").textContent = res.x.error || ""; show("send-err", true);
+      }).catch(function () { $("send").disabled = false; });
+  });
+  load();
+})();
+</script>
+</body>
+</html>

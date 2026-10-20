@@ -47,6 +47,11 @@
     <div class="files" id="files"></div>
   </div>
 
+  <div class="card hidden" id="offers-card">
+    <p class="label" id="l-offers"></p>
+    <div id="offers"></div>
+  </div>
+
   <div class="card">
     <p class="label" id="l-request"></p>
     <div class="pre" id="request" style="color:var(--muted)"></div>
@@ -71,11 +76,11 @@
   var api = "/api/p/" + encodeURIComponent(token);
   function $(id) { return document.getElementById(id); }
   var T = {
-    pl: { title: "Twoje zapytanie", running: "Przygotowujemy odpowiedź - zwykle trwa to kilka minut.", partners: "Czekamy na odpowiedzi współpracujących firm - pozostałe części są gotowe.", review: "Odpowiedź jest gotowa - firma ją sprawdza, zanim ją zobaczysz.", done: "Odpowiedź jest gotowa.", failed: "Nie udało się przygotować odpowiedzi - firma odpowie bezpośrednio.", result: "Odpowiedź", request: "Twoje zapytanie", notify: "Powiadom mnie e-mailem, gdy będzie gotowe", button: "Powiadom mnie", keep: "Zapisz ten link - wynik zawsze będzie tutaj", none: "Ten link wygasł albo nie istnieje." },
-    en: { title: "Your request", running: "We're preparing the answer - this usually takes a few minutes.", partners: "Waiting for answers from partner businesses - the other parts are ready.", review: "The answer is ready - the business is checking it before you see it.", done: "The answer is ready.", failed: "We couldn't prepare the answer - the business will reply directly.", result: "Answer", request: "Your request", notify: "Email me when it's ready", button: "Notify me", keep: "Save this link - the result will always be here", none: "This link has expired or does not exist." },
-    uk: { title: "Ваш запит", running: "Готуємо відповідь - зазвичай це займає кілька хвилин.", partners: "Чекаємо на відповіді партнерських компаній - інші частини готові.", review: "Відповідь готова - компанія перевіряє її, перш ніж ви її побачите.", done: "Відповідь готова.", failed: "Не вдалося підготувати відповідь - компанія відповість безпосередньо.", result: "Відповідь", request: "Ваш запит", notify: "Повідомте мене e-mailом, коли буде готово", button: "Повідомити мене", keep: "Збережіть це посилання - результат завжди буде тут", none: "Посилання недійсне." },
-    fr: { title: "Votre demande", running: "Nous préparons la réponse - cela prend généralement quelques minutes.", partners: "En attente des réponses des entreprises partenaires - le reste est prêt.", review: "La réponse est prête - l'entreprise la vérifie avant de vous l'envoyer.", done: "La réponse est prête.", failed: "Nous n'avons pas pu préparer la réponse - l'entreprise vous répondra directement.", result: "Réponse", request: "Votre demande", notify: "Prévenez-moi par e-mail quand c'est prêt", button: "Me prévenir", keep: "Gardez ce lien - le résultat sera toujours ici", none: "Ce lien a expiré ou n'existe pas." },
-    de: { title: "Ihre Anfrage", running: "Wir bereiten die Antwort vor - das dauert meist einige Minuten.", partners: "Wir warten auf Antworten von Partnerunternehmen - der Rest ist fertig.", review: "Die Antwort ist fertig - das Unternehmen prüft sie, bevor Sie sie sehen.", done: "Die Antwort ist fertig.", failed: "Die Antwort konnte nicht erstellt werden - das Unternehmen antwortet direkt.", result: "Antwort", request: "Ihre Anfrage", notify: "Benachrichtigen Sie mich per E-Mail", button: "Benachrichtigen", keep: "Speichern Sie diesen Link - das Ergebnis ist immer hier", none: "Dieser Link ist abgelaufen oder existiert nicht." },
+    pl: { offers: "Oferty firm", title: "Twoje zapytanie", running: "Przygotowujemy odpowiedź - zwykle trwa to kilka minut.", partners: "Czekamy na odpowiedzi współpracujących firm - pozostałe części są gotowe.", review: "Odpowiedź jest gotowa - firma ją sprawdza, zanim ją zobaczysz.", done: "Odpowiedź jest gotowa.", failed: "Nie udało się przygotować odpowiedzi - firma odpowie bezpośrednio.", result: "Odpowiedź", request: "Twoje zapytanie", notify: "Powiadom mnie e-mailem, gdy będzie gotowe", button: "Powiadom mnie", keep: "Zapisz ten link - wynik zawsze będzie tutaj", none: "Ten link wygasł albo nie istnieje." },
+    en: { offers: "Offers from businesses", title: "Your request", running: "We're preparing the answer - this usually takes a few minutes.", partners: "Waiting for answers from partner businesses - the other parts are ready.", review: "The answer is ready - the business is checking it before you see it.", done: "The answer is ready.", failed: "We couldn't prepare the answer - the business will reply directly.", result: "Answer", request: "Your request", notify: "Email me when it's ready", button: "Notify me", keep: "Save this link - the result will always be here", none: "This link has expired or does not exist." },
+    uk: { offers: "Пропозиції компаній", title: "Ваш запит", running: "Готуємо відповідь - зазвичай це займає кілька хвилин.", partners: "Чекаємо на відповіді партнерських компаній - інші частини готові.", review: "Відповідь готова - компанія перевіряє її, перш ніж ви її побачите.", done: "Відповідь готова.", failed: "Не вдалося підготувати відповідь - компанія відповість безпосередньо.", result: "Відповідь", request: "Ваш запит", notify: "Повідомте мене e-mailом, коли буде готово", button: "Повідомити мене", keep: "Збережіть це посилання - результат завжди буде тут", none: "Посилання недійсне." },
+    fr: { offers: "Offres des entreprises", title: "Votre demande", running: "Nous préparons la réponse - cela prend généralement quelques minutes.", partners: "En attente des réponses des entreprises partenaires - le reste est prêt.", review: "La réponse est prête - l'entreprise la vérifie avant de vous l'envoyer.", done: "La réponse est prête.", failed: "Nous n'avons pas pu préparer la réponse - l'entreprise vous répondra directement.", result: "Réponse", request: "Votre demande", notify: "Prévenez-moi par e-mail quand c'est prêt", button: "Me prévenir", keep: "Gardez ce lien - le résultat sera toujours ici", none: "Ce lien a expiré ou n'existe pas." },
+    de: { offers: "Angebote der Unternehmen", title: "Ihre Anfrage", running: "Wir bereiten die Antwort vor - das dauert meist einige Minuten.", partners: "Wir warten auf Antworten von Partnerunternehmen - der Rest ist fertig.", review: "Die Antwort ist fertig - das Unternehmen prüft sie, bevor Sie sie sehen.", done: "Die Antwort ist fertig.", failed: "Die Antwort konnte nicht erstellt werden - das Unternehmen antwortet direkt.", result: "Antwort", request: "Ihre Anfrage", notify: "Benachrichtigen Sie mich per E-Mail", button: "Benachrichtigen", keep: "Speichern Sie diesen Link - das Ergebnis ist immer hier", none: "Dieser Link ist abgelaufen oder existiert nicht." },
   };
   var t = T.pl, lang = "pl", timer = null;
 
@@ -96,6 +101,15 @@
       $("files").innerHTML = "";
       (d.files || []).forEach(function (f) { var a = document.createElement("a"); a.href = f.url; a.textContent = f.name; $("files").appendChild(a); });
     }
+    $("l-offers").textContent = t.offers;
+    $("offers").innerHTML = "";
+    (d.offers || []).forEach(function (o) {
+      var div = document.createElement("div"); div.style.margin = "0 0 12px";
+      var b = document.createElement("strong"); b.textContent = o.business; div.appendChild(b);
+      var p = document.createElement("div"); p.className = "pre"; p.textContent = o.text; div.appendChild(p);
+      $("offers").appendChild(div);
+    });
+    $("offers-card").classList.toggle("hidden", !(d.offers || []).length);
     var finished = d.status === "done" || d.status === "failed";
     $("notify-card").classList.toggle("hidden", finished || d.notified);
     if (!finished) { clearTimeout(timer); timer = setTimeout(load, 10000); }
