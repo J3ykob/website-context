@@ -22,6 +22,11 @@
   .timer { font-variant-numeric:tabular-nums; font-size:30px; font-weight:600; letter-spacing:.02em; margin:4px 0 2px; }
   .timer.late { color:var(--warn); }
   .small { color:var(--muted); font-size:13px; margin:8px 0 0; }
+  .sub-title { font-family: Georgia, "Times New Roman", serif; font-weight:500; font-size:20px; margin:24px 0 12px; text-wrap:balance; }
+  .perks { list-style:none; padding:0; margin:0 auto; max-width:520px; text-align:left; display:grid; gap:10px; }
+  .perks li { padding-left:26px; position:relative; color:var(--muted); }
+  .perks li::before { content:"✓"; position:absolute; left:0; color:var(--ok); font-weight:700; }
+  .perks b { color:var(--text); font-weight:600; }
   button { font:inherit; border-radius:12px; padding:13px 22px; cursor:pointer; border:0; background:var(--accent); color:#fff; font-weight:600; font-size:16px; }
   @media (hover:hover) { button:hover { background:var(--accent-h); } }
   button:disabled { opacity:.5; cursor:default; }
@@ -51,10 +56,17 @@
       <div class="fade"></div>
     </div>
     <div class="card wall">
-      <p class="label">Zapytanie zarezerwowane dla Państwa jeszcze</p>
+      <p class="label">To zapytanie jest zarezerwowane dla Państwa jeszcze</p>
       <div class="timer" id="timer" role="timer" aria-live="off">--:--:--</div>
       <p class="small" id="after">Po tym czasie trafi do kolejnej firmy.</p>
-      <div style="margin-top:18px"><button id="unlock" type="button">Odblokuj zapytanie</button></div>
+      <h2 class="sub-title">Subskrypcja Whisp - to zapytanie i wszystko, czego potrzebuje Państwa obsługa klienta</h2>
+      <ul class="perks">
+        <li><b>Zapytania klientów z sieci firm</b> - to od razu, kolejne, gdy tylko się pojawią</li>
+        <li><b>Asystent na Państwa stronie 24/7</b> - odpowiada klientom i przyjmuje zamówienia; jest już przygotowany: <a id="demo" href="#" target="_blank" rel="noopener">zobacz Państwa asystenta</a></li>
+        <li><b>Klienci innych firm z sieci</b> - gdy potrzebują tego, co Państwo oferują</li>
+        <li><b>Analityka</b> - o co pytają klienci i czego asystent jeszcze nie wiedział</li>
+      </ul>
+      <div style="margin-top:18px"><button id="unlock" type="button">Subskrybuj Whisp</button></div>
       <p class="small" id="price"></p>
       <p class="small" id="phone"></p>
       <div class="err hidden" id="pay-err"></div>
@@ -78,12 +90,16 @@
       <div class="pre" id="answer" style="color:var(--muted)"></div>
     </div>
     <div class="card" id="reply-card">
-      <p class="label">Państwa oferta dla klienta (trafi do niego przez Whisp)</p>
+      <p class="label">Państwa odpowiedź dla klienta (trafi do niego przez Whisp)</p>
       <textarea id="offer"></textarea>
-      <div style="margin-top:12px"><button id="send" type="button">Wyślij ofertę klientowi</button></div>
+      <div style="margin-top:12px"><button id="send" type="button">Wyślij odpowiedź klientowi</button></div>
       <div class="err hidden" id="send-err"></div>
     </div>
     <div class="card hidden" id="sent"><p class="ok" style="margin:0">Oferta wysłana do klienta.</p></div>
+    <div class="card hidden" id="panel-card" style="text-align:center">
+      <p style="margin:0 0 12px">Witamy w Whisp. W panelu: Państwa asystent, zapytania z sieci i analityka.</p>
+      <button id="panel" type="button">Otwórz panel Whisp</button>
+    </div>
     <p class="small hidden" id="manage-row" style="text-align:center"><a href="#" id="manage">Zarządzaj subskrypcją</a> (zmiana karty, faktury, rezygnacja)</p>
   </div>
 
@@ -116,7 +132,8 @@
       $("teaser").textContent = d.teaser + "…";
       $("filler").textContent = filler(Math.max(120, d.hiddenChars));
       $("filler2").textContent = filler(260);
-      $("price").textContent = d.payments ? "Subskrypcja " + d.pricePln + " zł miesięcznie: to i wszystkie kolejne zapytania z sieci trafiają od razu do Państwa." : "Płatności online wkrótce.";
+      $("price").textContent = d.payments ? d.pricePln + " zł miesięcznie, rezygnacja w każdej chwili." : "Płatności online wkrótce.";
+      $("demo").href = d.demoUrl || "https://whisp.so";
       $("phone").textContent = phone;
       $("unlock").disabled = !d.payments;
       clearInterval(timer); tick(d.expiresAt); timer = setInterval(function () { tick(d.expiresAt); }, 1000);
@@ -131,7 +148,7 @@
       show("answer-card", !!d.answer);
       if (!$("offer").value) $("offer").value = d.answer || "";
       show("reply-card", d.status !== "replied"); show("sent", d.status === "replied");
-      show("manage-row", !!d.manage);
+      show("manage-row", !!d.manage); show("panel-card", !!d.manage);
       show("unlocked", true);
     }
   }
@@ -160,6 +177,13 @@
         if (res.ok) { show("reply-card", false); show("sent", true); return; }
         $("send").disabled = false; $("send-err").textContent = res.x.error || ""; show("send-err", true);
       }).catch(function () { $("send").disabled = false; });
+  });
+  $("panel").addEventListener("click", function () {
+    fetch(api + "/dashboard", { method: "POST" }).then(function (r) { return r.json(); }).then(function (x) {
+      if (!x.token) return;
+      try { localStorage.setItem("wctx-dashboard-token", x.token); localStorage.setItem("wctx-tenant-id", x.tenantId); } catch (e) {}
+      location.href = "/dashboard";
+    });
   });
   $("manage").addEventListener("click", function (e) {
     e.preventDefault();

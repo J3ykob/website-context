@@ -13,7 +13,7 @@ Asystent przygotował dla klienta wstępną odpowiedź na podstawie {{price_sour
 
 Whisp to asystent, który obsługuje klientów na stronach lokalnych firm i szuka u firm z okolicy tego, czego dana firma nie ma w ofercie.
 
-Prosimy o telefon pod numer {{phone}} lub odblokowanie zapytania na stronie {{link}}, jeśli chcą Państwo je otrzymać - zapytanie jest zarezerwowane dla Państwa przez {{hours}} godziny.
+Prosimy o telefon pod numer {{phone}} lub subskrypcję Whisp na stronie {{link}}, jeśli chcą Państwo otrzymać to zapytanie - jest zarezerwowane dla Państwa przez {{hours}} godziny. W subskrypcji jest też asystent na Państwa stronie, już przygotowany, oraz kolejne zapytania klientów z sieci firm.
 
 Z poważaniem
 Whisp - whisp.so

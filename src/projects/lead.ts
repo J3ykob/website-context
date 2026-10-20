@@ -1,6 +1,8 @@
 /**
  * A customer's request offered to a business that has not joined the network (the link in its invite).
- * Before paying it sees part of the request; the rest stays on the server (the page shows filler, blurred).
+ * The offer is Whisp as a whole (its assistant - already prepared from its site -, requests from the
+ * network, its customers, analytics); this request is the first thing it gets. Before subscribing it
+ * sees part of the request; the rest stays on the server (the page shows filler, blurred).
  * The request is reserved for it for LEAD_EXCLUSIVE_HOURS (the timer is that real window): unpaid when it
  * ends, the request goes to the next business picked for that part. Paying = the network subscription
  * (Stripe Checkout, checked with Stripe on the way back): the business sees the whole request and the
@@ -66,6 +68,7 @@ export interface LeadView {
   request?: string; answer?: string; // only when unlocked
   expiresAt: string; pricePln: number; payments: boolean; phone: string;
   manage: boolean; // has a subscription it can manage or cancel
+  demoUrl: string; // its own assistant, already prepared from its site
 }
 
 /** The part of a request shown before paying: its first sentence or so - enough to see what it is. */
@@ -96,6 +99,7 @@ export async function leadView(token: string): Promise<LeadView | null> {
     expiresAt: new Date(expires).toISOString(), pricePln: PRICE_PLN(), payments: !!stripeKey(),
     phone: (process.env.NETWORK_INVITE_PHONE || "").trim(),
     manage: !!getTenant(inv.tenant_id)?.settings?.stripeCustomer && !!stripeKey(),
+    demoUrl: `/demo/${encodeURIComponent(inv.tenant_id)}`,
   };
 }
 
@@ -114,7 +118,7 @@ export async function startCheckout(token: string, base: string): Promise<string
       "line_items[0][price_data][currency]": "pln",
       "line_items[0][price_data][unit_amount]": String(Math.round(PRICE_PLN() * 100)),
       "line_items[0][price_data][recurring][interval]": "month",
-      "line_items[0][price_data][product_data][name]": "Whisp - zapytania klientów z sieci firm",
+      "line_items[0][price_data][product_data][name]": "Whisp - asystent i sieć firm",
     }),
     allow_promotion_codes: "true",
     success_url: `${back}?session_id={CHECKOUT_SESSION_ID}`,
@@ -137,12 +141,22 @@ export async function confirmCheckout(token: string, sessionId: string): Promise
   if (t) {
     const settings = { ...(t.settings || {}), stripeCustomer: String(s.customer || ""), stripeSubscription: String(s.subscription || "") };
     delete settings.network; // a member now: its requests come to it first, answered under its own settings
-    updateTenant(t.id, { settings });
+    // The business owns its account from now on: the address it paid with (logins, setup, its emails).
+    const payer = String(s.customer_details?.email || "").trim();
+    updateTenant(t.id, { settings, ...(payer.includes("@") ? { email: payer } : {}) });
   }
   subCache.delete(inv.tenant_id);
   await d1Query("UPDATE network_invites SET unlocked_at = COALESCE(unlocked_at, ?) WHERE token = ?", [new Date().toISOString(), token]);
   await addEvent(inv.project_id, { kind: "lead_unlocked", actor: inv.tenant_id, data: { session: sessionId, subscription: s.subscription || null } });
   return true;
+}
+
+/** A dashboard session for a subscribed business (the whole Whisp panel: assistant, requests, analytics). */
+export async function dashboardSession(token: string): Promise<{ token: string; tenantId: string } | null> {
+  const inv = await inviteByToken(token);
+  if (!inv || !inv.unlocked_at || !(await subscribed(inv.tenant_id))) return null;
+  const { createSession } = await import("../multi-tenant/d1-auth.js");
+  return { token: await createSession(inv.tenant_id), tenantId: inv.tenant_id };
 }
 
 /** Stripe's customer portal (manage or cancel the subscription), back to the lead page. */

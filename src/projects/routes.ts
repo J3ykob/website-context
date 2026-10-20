@@ -306,6 +306,12 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     try { res.json({ url: await lead.portalUrl(String(req.params.token), base) }); }
     catch (e: any) { console.warn(`[lead] portal: ${e?.message || e}`); res.status(409).json({ error: "Brak subskrypcji do zarządzania." }); }
   });
+  app.post("/api/lead/:token/dashboard", async (req, res) => {
+    const lead = await import("./lead.js");
+    const sess = await lead.dashboardSession(String(req.params.token)).catch(() => null);
+    if (!sess) { res.status(409).json({ error: "Panel jest dostępny po subskrypcji." }); return; }
+    res.json(sess);
+  });
   app.post("/api/lead/:token/reply", async (req, res) => {
     const lead = await import("./lead.js");
     const offer = String(req.body?.offer || "").trim();
