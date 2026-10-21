@@ -63,6 +63,9 @@ services:
       # Invite email to listed businesses - template approved 2026-10-20 (templates/emails/network-invite.txt).
       - key: NETWORK_INVITE_EMAIL_APPROVED
         value: "1"
+      # Customer email about a network business's offer - approved 2026-10-21 (templates/emails/customer-offer.*.txt).
+      - key: CUSTOMER_OFFER_EMAIL_APPROVED
+        value: "1"
       - key: NETWORK_INVITE_PHONE
         value: "+48 729 086 795"
       - key: NETWORK_PLAN_PRICE_PLN
