@@ -1,4 +1,17 @@
 import { countLlm } from "./turn-usage.js";
+
+// OpenRouter routes each call to one of a model's providers; a provider that
+// fails (404 "model not found", 429, 5xx) fails the call, though another would
+// answer. One retry lets OpenRouter route again. Not for request errors (400,
+// 401, 402 - those won't change).
+async function withProviderRetry(call: () => Promise<Response>): Promise<Response> {
+  const r = await call();
+  if (r.ok || ![404, 408, 429, 500, 502, 503, 504].includes(r.status)) return r;
+  console.warn(`[openrouter] provider error ${r.status}, retrying once`);
+  await r.text().catch(() => "");
+  await new Promise((s) => setTimeout(s, 400));
+  return call();
+}
 export interface OpenRouterConfig {
   apiKey?: string;
   model?: string;
@@ -33,7 +46,7 @@ export class OpenRouterProvider {
   async chat(messages: OpenRouterMessage[], overrides?: { model?: string; maxTokens?: number; temperature?: number }): Promise<{ content: string; usage: { prompt_tokens: number; completion_tokens: number } }> {
     // A stalled provider must not hang the caller (and the visitor's chat) forever:
     // abort after OPENROUTER_TIMEOUT_MS (default 60 s). Covers the whole response.
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await withProviderRetry(() => fetch("https://openrouter.ai/api/v1/chat/completions", {
       signal: AbortSignal.timeout(Number(process.env.OPENROUTER_TIMEOUT_MS) || 60000),
       method: "POST",
       headers: {
@@ -47,8 +60,10 @@ export class OpenRouterProvider {
         messages,
         max_tokens: overrides?.maxTokens ?? this.maxTokens,
         temperature: overrides?.temperature ?? this.temperature,
+        // The fastest of the model's providers (a visitor is waiting); OPENROUTER_PROVIDER_SORT=price to change.
+        provider: { sort: process.env.OPENROUTER_PROVIDER_SORT || "throughput" },
       }),
-    });
+    }));
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -70,7 +85,7 @@ export class OpenRouterProvider {
   // Streaming variant — calls onToken(delta) as tokens arrive, returns the full text.
   // Lets the chat surface a response token-by-token (first token ~1s vs ~3.5s full).
   async chatStream(messages: OpenRouterMessage[], onToken: (delta: string) => void): Promise<{ content: string }> {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await withProviderRetry(() => fetch("https://openrouter.ai/api/v1/chat/completions", {
       signal: AbortSignal.timeout(Number(process.env.OPENROUTER_STREAM_TIMEOUT_MS) || 120000),
       method: "POST",
       headers: {
@@ -85,8 +100,9 @@ export class OpenRouterProvider {
         max_tokens: this.maxTokens,
         temperature: this.temperature,
         stream: true,
+        provider: { sort: process.env.OPENROUTER_PROVIDER_SORT || "throughput" },
       }),
-    });
+    }));
 
     if (!response.ok || !response.body) {
       const errorText = await response.text().catch(() => "");

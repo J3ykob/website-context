@@ -6,8 +6,10 @@
  * with the customer's context, three rounds, each without the ones already picked. The picked offers are
  * the network's input to the customer's project (the compiling agent works from them).
  *
- * A business answers with its own offer shortlist and one model call; one that has nothing for the request
- * in its offer declines without a call. Arithmetic in the offers is not trusted - the agent recomputes.
+ * A business with a price list answers with its own offer shortlist and one model call; one that has
+ * nothing for the request in its offer declines without a call. A business without a price list is judged
+ * by Jev from its description - one call per part for all of them, no model call per business (that grew
+ * with the network: every member cost a call). Arithmetic in the offers is not trusted - the agent recomputes.
  */
 import type { OfferItem } from "../offer/store.js";
 
@@ -100,6 +102,25 @@ async function pickBest(need: string, part: string, answers: NetworkOffer[], lab
 }
 
 /**
+ * Businesses without a price list: Jev judges, per part, whether each one's own description shows it
+ * offers that (one call per part for all of them). Those that do get a vague offer from their own words
+ * - "it does this, price to agree" - with no model call.
+ */
+async function describedOffers(parts: string[], ids: string[], about: (id: string) => string, label: (id: string) => string): Promise<NetworkOffer[]> {
+  if (!ids.length) return [];
+  const { jevBusinessesOffer } = await import("../llm/jev.js");
+  const out: NetworkOffer[] = [];
+  await Promise.all(parts.map(async (part, k) => {
+    const scores = await jevBusinessesOffer(part, ids.map((id) => ({ name: label(id), passages: [about(id).slice(0, 900)] }))).catch(() => null);
+    if (!scores) return;
+    ids.forEach((id, i) => {
+      if (scores[i] >= 0.5) out.push({ tenantId: id, part: k, precise: false, text: `${label(id)}: ${about(id).replace(/\s+/g, " ").slice(0, 300)} (cena do ustalenia)`, items: [] });
+    });
+  }));
+  return out;
+}
+
+/**
  * The whole round: split, broadcast, pick. tenantIds: the network (the business running the project
  * included - its offer competes like any other). Never throws: a failure means no network offers.
  */
@@ -111,14 +132,19 @@ export async function broadcastNeed(need: string, tenantIds: string[]): Promise<
   const { offerMatches, networkMembers, businessLabel } = await import("./network.js");
   const members = new Map((await networkMembers(tenantIds[0]).catch(() => [])).map((m) => [m.tenantId, m]));
   const query = parts.join("\n");
-  const answers = (await Promise.all(tenantIds.map(async (id) => {
-    const all = (await loadOffer(id).catch(() => null))?.items || [];
-    // Its offer has nothing for the request: it declines without a model call.
-    const matched = all.length ? await offerMatches(id, all, query).catch(() => null) : [];
-    if (all.length && matched !== null && !matched.length) return [];
-    const items = matched ?? all.slice(0, 15);
-    return answerAs(id, parts, items, members.get(id)?.about || "", businessLabel(id)).catch(() => [] as NetworkOffer[]);
-  }))).flat();
+  const offers = new Map(await Promise.all(tenantIds.map(async (id) => [id, (await loadOffer(id).catch(() => null))?.items || []] as const)));
+  const withList = tenantIds.filter((id) => offers.get(id)!.length);
+  const withoutList = tenantIds.filter((id) => !offers.get(id)!.length && (members.get(id)?.about || "").trim());
+  const answers = [
+    ...(await Promise.all(withList.map(async (id) => {
+      const all = offers.get(id)!;
+      // Its offer has nothing for the request: it declines without a model call.
+      const matched = await offerMatches(id, all, query).catch(() => null);
+      if (matched !== null && !matched.length) return [];
+      return answerAs(id, parts, matched ?? all.slice(0, 15), members.get(id)?.about || "", businessLabel(id)).catch(() => [] as NetworkOffer[]);
+    }))).flat(),
+    ...(await describedOffers(parts, withoutList, (id) => members.get(id)?.about || "", businessLabel)),
+  ];
   const answeredBy = new Set(answers.map((a) => a.tenantId));
   // Per part: precise offers first, then the vague ones - so the 50 given to Jev keep the concrete ones.
   const picked = (await Promise.all(parts.map((p, k) => pickBest(need, p,

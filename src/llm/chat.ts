@@ -22,13 +22,16 @@ import {
 import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import type { EcosystemMatch } from "../ecosystem/ask.js";
-import { jevNetworkNeed, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
+import { route as routeMessage, type Route as TurnRoute } from "./router.js";
+import { isQuestionFlow } from "../flows/collect-store.js";
+import { setMemory as setProjectMemory } from "../projects/store.js";
+import { jevYesWhatNo, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
 import { runCompare, type Business } from "../projects/compare.js";
 import { agentEnabled } from "../projects/agent.js";
-import { conversationProject, recordTurn, turnKind, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
+import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 
@@ -67,6 +70,9 @@ export interface ChatConfig {
   // onStart fires only when there are other businesses to ask (the widget shows
   // "checking with businesses we work with" while they decide).
   askEcosystem?: (messages: ChatMessage[], onStart?: () => void) => Promise<EcosystemMatch[]>;
+  // The business's "question for the owner" form (an in-chat collect flow), created on
+  // first use: a question the assistant can't answer is passed on through it.
+  ensureQuestionFlow?: () => Promise<FlowDefinition | null>;
   // Hand-off links (src/ecosystem/handoff.ts): each business we recommend gets a
   // link that moves the customer to its bot with the conversation so far.
   // Returns tenantId -> URL.
@@ -284,6 +290,60 @@ function scriptOf(ch: string): string {
   return "Chinese";
 }
 
+// Fixed texts of the router's replies, by the visitor's language (no model writes them).
+const REFUSAL: Record<OfferLang, string> = {
+  pl: "Nie mam tej informacji w tym, co wiem o nas, więc nie chcę zgadywać.",
+  en: "I don't have that information in what I know about us, so I don't want to guess.",
+  uk: "У мене немає цієї інформації про нас, тому не хочу вгадувати.",
+  fr: "Je n'ai pas cette information dans ce que je sais de nous, je préfère ne pas deviner.",
+  de: "Diese Information habe ich über uns nicht, deshalb möchte ich nicht raten.",
+  other: "I don't have that information in what I know about us, so I don't want to guess.",
+};
+const HANDOFF_OFFER: Record<OfferLang, string> = {
+  pl: "Mogę przekazać to pytanie bezpośrednio naszemu zespołowi - odpowiemy najszybciej, jak to możliwe. Przekazać?",
+  en: "I can pass this question on to our team directly - we'll get back to you as soon as we can. Shall I?",
+  uk: "Можу передати це питання безпосередньо нашій команді - ми відповімо якнайшвидше. Передати?",
+  fr: "Je peux transmettre cette question directement à notre équipe - nous vous répondrons dès que possible. Je la transmets ?",
+  de: "Ich kann diese Frage direkt an unser Team weitergeben - wir melden uns so schnell wie möglich. Soll ich?",
+  other: "I can pass this question on to our team directly - we'll get back to you as soon as we can. Shall I?",
+};
+const QUOTE_OFFER: Record<OfferLang, string> = {
+  pl: "Mogę przekazać Twoją prośbę o wycenę naszemu zespołowi - przygotujemy ją i odezwiemy się. Przekazać?",
+  en: "I can pass your quote request on to our team - we'll prepare it and get back to you. Shall I?",
+  uk: "Можу передати ваш запит на розрахунок нашій команді - ми підготуємо його і зв'яжемося з вами. Передати?",
+  fr: "Je peux transmettre votre demande de devis à notre équipe - nous la préparerons et vous recontacterons. Je la transmets ?",
+  de: "Ich kann Ihre Angebotsanfrage an unser Team weitergeben - wir erstellen es und melden uns. Soll ich?",
+  other: "I can pass your quote request on to our team - we'll prepare it and get back to you. Shall I?",
+};
+const HANDOFF_EXPLAIN: Record<OfferLang, string> = {
+  pl: "Zapiszę Twoje pytanie razem z danymi kontaktowymi, które podasz, i przekażę je bezpośrednio naszemu zespołowi - odpowiemy Ci telefonicznie lub mailowo. Przekazać?",
+  en: "I'll note your question together with the contact details you give and pass it straight to our team - we'll reply by phone or email. Shall I?",
+  uk: "Я запишу ваше питання разом із вашими контактами і передам його безпосередньо нашій команді - ми відповімо телефоном або поштою. Передати?",
+  fr: "Je note votre question avec les coordonnées que vous me donnez et je la transmets directement à notre équipe - nous vous répondrons par téléphone ou par e-mail. Je la transmets ?",
+  de: "Ich notiere Ihre Frage mit Ihren Kontaktdaten und gebe sie direkt an unser Team weiter - wir antworten telefonisch oder per E-Mail. Soll ich?",
+  other: "I'll note your question together with the contact details you give and pass it straight to our team - we'll reply by phone or email. Shall I?",
+};
+const NO_PRICES: Record<OfferLang, string> = {
+  pl: "Nie mam tutaj cen tych pozycji, więc nie policzę tego rzetelnie.",
+  en: "I don't have prices for these items here, so I can't calculate this reliably.",
+  uk: "У мене тут немає цін на ці позиції, тож я не можу це надійно порахувати.",
+  fr: "Je n'ai pas les prix de ces articles ici, je ne peux donc pas faire ce calcul de façon fiable.",
+  de: "Ich habe hier keine Preise für diese Positionen und kann das daher nicht verlässlich berechnen.",
+  other: "I don't have prices for these items here, so I can't calculate this reliably.",
+};
+const WHICH_ACTION: Record<OfferLang, (names: string[]) => string> = {
+  pl: (n) => `Mogę pomóc w kilku sprawach - chodzi Ci o ${n.join(" czy ")}?`,
+  en: (n) => `I can help with a couple of things here - did you want ${n.join(" or ")}?`,
+  uk: (n) => `Можу допомогти з кількома речами - вам потрібно ${n.join(" чи ")}?`,
+  fr: (n) => `Je peux vous aider pour plusieurs choses - vous souhaitez ${n.join(" ou ")} ?`,
+  de: (n) => `Ich kann bei mehreren Dingen helfen - möchten Sie ${n.join(" oder ")}?`,
+  other: (n) => `I can help with a couple of things here - did you want ${n.join(" or ")}?`,
+};
+const BLOCKED = {
+  pl: "Jestem tu, żeby pomóc w sprawach naszej firmy. W czym mogę pomóc?",
+  en: "I'm here to help you with questions about this business. How can I help?",
+};
+
 // The line shown under our own reply while the network is being asked, by the
 // language Jev named; replaced by the final message when the search is done.
 const ECO_CHECKING: Record<OfferLang, string> = {
@@ -311,6 +371,12 @@ export class WebsiteChat {
   private systemPromptExtra: string;
   private knowledgeCatalog: KnowledgeCatalog | null;
   private askEcosystem: ChatConfig["askEcosystem"];
+  private ensureQuestionFlow: ChatConfig["ensureQuestionFlow"];
+  // Sessions where we offered to pass the visitor's question on to the business
+  // (no answer here, or no prices for a quote): waiting for their yes.
+  private handoffOffers: Map<string, { question: string; lang: OfferLang; kind: "question" | "quote"; at: number }> = new Map();
+  // The router's decision per message (the stream path decides, the full path reuses it).
+  private routeMemo: Map<string, { at: number; route: TurnRoute | null }> = new Map();
   private handoffLinks: ChatConfig["handoffLinks"];
   private contextNotes: { question: string; answer: string; addedAt: string }[] = [];
   private flowSessions: Map<string, FlowSession> = new Map();
@@ -345,6 +411,7 @@ export class WebsiteChat {
     this.networkOffers = config.networkOffers;
     this.onInquiry = config.onInquiry;
     this.askEcosystem = config.askEcosystem;
+    this.ensureQuestionFlow = config.ensureQuestionFlow;
     this.handoffLinks = config.handoffLinks;
 
     if (config.llmProvider === "claude-cli") {
@@ -468,10 +535,7 @@ export class WebsiteChat {
     // --- Input validation ---
     const inputValidation = validateInput(lastUserMessage);
     if (inputValidation.blocked) {
-      return {
-        message: "I'm here to help you with questions about this website. How can I assist you?",
-        sources: [],
-      };
+      return { message: this.isPolish(lastUserMessage) ? BLOCKED.pl : BLOCKED.en, sources: [] };
     }
 
     // Use sanitized message for processing (replaces the last user message in the array)
@@ -536,20 +600,25 @@ export class WebsiteChat {
       // else fall through to normal chat (they didn't pick either)
     }
 
-    // Flow triggering is an LLM DECISION, not a keyword matcher: the model sees
-    // the active flows (name + description) and picks which the visitor wants to
-    // start, none, or several (ambiguous). Robust across languages/phrasings.
-    // The business's own flows (orders, bookings...) come first: a booking is never "work" for the agent.
-    // The turn's kind is decided at the same time, for when no flow is wanted.
-    const activeFlows = this.context.flows.filter((f) => f.status === "active");
-    const [pickedFlows, kind, orderNow] = await Promise.all([
-      activeFlows.length > 0 ? this.classifyFlowIntent(inputValidation.sanitized, activeFlows) : Promise.resolve([] as FlowDefinition[]),
-      this.kindOf(inputValidation.sanitized, sanitizedMessages),
-      // A form is for placing an order / booking; "choose and price it for me" is work, even about our items.
-      activeFlows.length > 0 ? jevAsk({ message: inputValidation.sanitized }, { order: { type: "noul", instructions: "Does the customer in `message` want to place an order or a booking now (e.g. 'book it', 'I'll take it', 'reserve for tomorrow'), rather than ask for a price, a recommendation, a comparison or a calculation?" } }, 4000).then((a) => ((a?.order as any)?.noul as number) ?? 1).catch(() => 1) : Promise.resolve(1),
-    ]);
-    if (activeFlows.length > 0) {
-      let picked = pickedFlows;
+    // The visitor answers our offer to pass their question on to the business.
+    const handedOver = await this.handoffConsent(effectiveSessionKey, inputValidation.sanitized);
+    if (handedOver) return handedOver;
+
+    // ONE routing decision (src/llm/router.ts), in the owner's priority order: the
+    // business itself, its forms, a calculation when there is data, the network last.
+    const flows = this.routableFlows();
+    const rt = await this.routeTurn(sanitizedMessages, inputValidation.sanitized);
+    // Without Jev only the business's own actions are recognised (fallback model);
+    // no agent, no network.
+    let picked: FlowDefinition[] = [];
+    if (rt) {
+      if (rt.intent === "order" && rt.flow >= 0 && flows[rt.flow]) {
+        picked = rt.flowAmbiguous.length > 1 ? rt.flowAmbiguous.slice(0, 2).map((i) => flows[i]).filter(Boolean) : [flows[rt.flow]];
+      }
+    } else if (flows.length > 0) {
+      picked = await this.classifyFlowIntent(inputValidation.sanitized, flows);
+    }
+    if (picked.length) {
       if (picked.length === 1 && picked[0].executionMode === "agent") return this.startAgentFlow(picked[0], inputValidation.sanitized);
       // A form for something this business does not offer at all (when other businesses may have it):
       // the network gets it - an order form for trestles a rental shop does not have helps nobody.
@@ -557,44 +626,21 @@ export class WebsiteChat {
         ? await this.notOfferedHere(inputValidation.sanitized).catch(() => false)
         : false;
       if (elsewhere) { console.log(`[flows] ${this.context.tenantId}: "${picked[0].name}" skipped - not in the own offer, the network may have it`); picked = []; }
-      else if (picked.length === 1 && picked[0].executionMode === "collect" && (kind === "work" || kind === "estimate") && orderNow < 0.5 && agentEnabled()) {
-        console.log(`[flows] ${this.context.tenantId}: "${picked[0].name}" skipped - a price / calculation, not an order (${orderNow.toFixed(2)})`);
-        picked = [];
-      }
       if (picked.length === 1 && picked[0].executionMode === "collect") return this.startCollect(picked[0], effectiveSessionKey, inputValidation.sanitized);
       if (picked.length === 1) {
         const started = this.beginFlowSession(effectiveSessionKey, picked[0]);
-        return {
-          message: started.message,
-          sources: [],
-          flowSession: { active: true, status: "choosing", flowId: picked[0].id, complete: false },
-        };
+        return { message: started.message, sources: [], flowSession: { active: true, status: "choosing", flowId: picked[0].id, complete: false } };
       }
       if (picked.length > 1) {
         this.pendingDisambig.set(effectiveSessionKey, { flows: picked.slice(0, 3), at: Date.now() });
-        const names = picked.slice(0, 3).map((f) => `"${f.name}"`).join(" or ");
-        return { message: `I can help with a couple of things here — did you want ${names}? Just tell me which.`, sources: [] };
+        return { message: WHICH_ACTION[rt?.lang || "en"](picked.slice(0, 3).map((f) => `"${f.name}"`)), sources: [] };
       }
-      // picked.length === 0 -> not a flow request; fall through to normal chat.
     }
 
-    // "What would this list / job cost?" -> a compare_offers project.
-    // The turn's kind: pricing a given list (fast estimate), work on data (the project agent:
-    // calculate, compare, choose, plan, build a list or document), or an ordinary answer.
-    // A price question goes to the agent like other work: the quick estimate (one quantity in one unit)
-    // got counts, scenarios and variants wrong on real requests; it stays for when the agent is off.
-    if (kind === "estimate" && agentEnabled()) {
-      const viaAgent = await this.agentTurn(sanitizedMessages, inputValidation.sanitized, effectiveSessionKey);
-      if (viaAgent) return viaAgent;
-    }
-    const estimate = kind === "estimate" ? await this.estimateProject(inputValidation.sanitized, effectiveSessionKey) : null;
-    // Lines the offers do not price: other businesses of the network may - the agent asks them.
-    const unpriced = estimate ? this.lastEstimateTbd.get(effectiveSessionKey) || 0 : 0;
-    const escalate = kind === "estimate" && (!estimate || unpriced > 0) && agentEnabled() && (await this.hasNetwork());
-    if (estimate && !escalate) return estimate;
-    if (kind === "work" || escalate) {
-      const viaAgent = await this.agentTurn(sanitizedMessages, inputValidation.sanitized, effectiveSessionKey);
-      if (viaAgent) return viaAgent;
+    // A calculation: only with something to calculate with (see calculateTurn).
+    if (rt?.intent === "calculate" && agentEnabled()) {
+      const calc = await this.calculateTurn(rt, sanitizedMessages, inputValidation.sanitized, effectiveSessionKey);
+      if (calc) return calc;
     }
 
     const retrievedChunks = await this.retrieveContext(lastUserMessage);
@@ -603,16 +649,20 @@ export class WebsiteChat {
     // at all to reason over). Otherwise the small model's verdict becomes an
     // advisory the big model weighs (see buildSystemPrompt).
     if (usableChunksC.length === 0) {
-      const netC0 = await this.networkStart(lastUserMessage, sanitizedMessages, opts?.noPartners);
+      const netC0 = await this.networkStart(lastUserMessage, sanitizedMessages, rt, opts?.noPartners);
+      const own = this.refusal(lastUserMessage, rt?.lang) + this.handoffOffer(effectiveSessionKey, lastUserMessage, rt, "question");
       const viaNet = netC0 ? await this.networkReply(netC0) : null;
-      if (viaNet) return { ...viaNet, message: this.refusal(lastUserMessage) + "\n\n" + viaNet.message };
-      return { message: this.refusal(lastUserMessage), sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
+      if (viaNet) return { ...viaNet, message: own + "\n\n" + viaNet.message };
+      return { message: own, sources: [], grounded: false, unknownQuestion: await this.resolveGap(this.gapDecision(lastUserMessage, "no_evidence"), lastUserMessage, lastUserMessage.trim() || null) };
     }
     const factCheckC = await this.factCheck(lastUserMessage, usableChunksC);
     // We don't have it: for a real need the network is asked while we write our
     // own reply, and what it finds is added under that reply.
-    const netC = factCheckC === "no_evidence" ? await this.networkStart(lastUserMessage, sanitizedMessages, opts?.noPartners) : null;
-    const netTail = async () => { const r = netC ? await this.networkReply(netC) : null; return r ? "\n\n" + r.message : ""; };
+    const netC = factCheckC === "no_evidence" ? await this.networkStart(lastUserMessage, sanitizedMessages, rt, opts?.noPartners) : null;
+    // No answer here: the offer to pass the question to the business comes first,
+    // then what other businesses have.
+    const offerC = factCheckC === "no_evidence" ? this.handoffOffer(effectiveSessionKey, lastUserMessage, rt, "question") : "";
+    const netTail = async () => { const r = netC ? await this.networkReply(netC) : null; return offerC + (r ? "\n\n" + r.message : ""); };
     const gapC = this.gapDecision(lastUserMessage, factCheckC); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -931,7 +981,7 @@ export class WebsiteChat {
 
     const inputValidation = validateInput(lastUserMessage);
     if (inputValidation.blocked) {
-      const msg = "I'm here to help you with questions about this website. How can I assist you?";
+      const msg = this.isPolish(lastUserMessage) ? BLOCKED.pl : BLOCKED.en;
       onToken(msg);
       return { message: msg, sources: [] };
     }
@@ -942,12 +992,16 @@ export class WebsiteChat {
     // Flows / tool-calls don't stream cleanly — defer to the full path, emit whole.
     // Only when a flow is actually in play: a tenant merely HAVING flows used to
     // lose streaming for every ordinary question.
-    const activeFlowsS = this.context.flows.filter((f) => f.status === "active");
+    // An open form / flow, a pending question or offer goes to the full path at once;
+    // otherwise the router decides (the full path reuses its decision).
     const pendingS = this.pendingDisambig.get(effectiveSessionKey);
-    const kindS = await this.kindOf(inputValidation.sanitized, sanitizedMessages);
-    const flowInPlay = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey) || kindS !== "other"
-      || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000)
-      || (activeFlowsS.length > 0 && (await this.classifyFlowIntent(inputValidation.sanitized, activeFlowsS)).length > 0);
+    const busy = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey)
+      || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000) || this.handoffOffers.has(effectiveSessionKey);
+    const rtS = busy ? null : await this.routeTurn(sanitizedMessages, inputValidation.sanitized);
+    const flowsS = this.routableFlows();
+    const flowInPlay = busy
+      || (rtS ? (rtS.intent === "order" && rtS.flow >= 0) || (rtS.intent === "calculate" && agentEnabled())
+        : flowsS.length > 0 && (await this.classifyFlowIntent(inputValidation.sanitized, flowsS)).length > 0);
     if (flowInPlay) {
       const r = await this.chatInner(messages, sessionKey, formState);
       onToken(r.message);
@@ -962,8 +1016,8 @@ export class WebsiteChat {
     // directly answer the question → honest refusal + logged gap, no generation.
     const usableStream = this.filterContextChunks(retrievedChunks, inputValidation.sanitized);
     if (usableStream.length === 0) {
-      const msg = this.refusal(inputValidation.sanitized);
-      const netS0 = await this.networkStart(inputValidation.sanitized, sanitizedMessages);
+      const msg = this.refusal(inputValidation.sanitized, rtS?.lang) + this.handoffOffer(effectiveSessionKey, inputValidation.sanitized, rtS, "question");
+      const netS0 = await this.networkStart(inputValidation.sanitized, sanitizedMessages, rtS);
       if (netS0) {
         onToken(msg + "\n\n" + ECO_CHECKING[netS0.lang]);
         const viaNet = await this.networkReply(netS0);
@@ -975,7 +1029,8 @@ export class WebsiteChat {
     }
     const factCheckS = await this.factCheck(inputValidation.sanitized, usableStream);
     // A real need we can't meet: the network search runs while we write our reply.
-    const netS = factCheckS === "no_evidence" ? await this.networkStart(inputValidation.sanitized, sanitizedMessages) : null;
+    const netS = factCheckS === "no_evidence" ? await this.networkStart(inputValidation.sanitized, sanitizedMessages, rtS) : null;
+    const offerS = factCheckS === "no_evidence" ? this.handoffOffer(effectiveSessionKey, inputValidation.sanitized, rtS, "question") : "";
     const gapS = this.gapDecision(inputValidation.sanitized, factCheckS); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
@@ -995,7 +1050,7 @@ export class WebsiteChat {
       const g = this.extractGapMarker(draft);
       raw = g.text;
       // Our reply now, with a "checking…" line until the network has answered.
-      onToken(netS ? raw + "\n\n" + ECO_CHECKING[netS.lang] : raw);
+      onToken(raw + offerS + (netS ? "\n\n" + ECO_CHECKING[netS.lang] : ""));
       emitted = raw.length;
     } else await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
       raw += delta;
@@ -1035,9 +1090,9 @@ export class WebsiteChat {
     // What the network found goes under our reply (after validation: its links are
     // our own hand-off links, not the business's site).
     const viaNet = netS ? await this.networkReply(netS) : null;
-    if (viaNet) return { ...viaNet, message: outputCheck.sanitized + "\n\n" + viaNet.message };
+    if (viaNet) return { ...viaNet, message: outputCheck.sanitized + offerS + "\n\n" + viaNet.message };
     // An answer that found no support in the site shows no "sources" (they would be unrelated pages).
-    return { message: outputCheck.sanitized, sources: factCheckS === "no_evidence" ? [] : sources, grounded: true, unknownQuestion: await this.resolveGap(gapS, inputValidation.sanitized, gapStream.question) };
+    return { message: outputCheck.sanitized + offerS, sources: factCheckS === "no_evidence" ? [] : sources, grounded: true, unknownQuestion: await this.resolveGap(gapS, inputValidation.sanitized, gapStream.question) };
   }
 
   // Route tiny classification through the small fast model when available.
@@ -1061,10 +1116,87 @@ export class WebsiteChat {
   }
 
   // ── Projects: work on data by the project agent (sandbox, tools) ──
-  /** The turn's kind (estimate / work / other) - one Jev choice, memoized per message. */
-  private kindOf(message: string, messages: ChatMessage[]): Promise<"estimate" | "work" | "other"> {
-    const prev = [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
-    return turnKind(message, prev, !!this.networkOffers && jevEnabled()).catch(() => "other" as const);
+  /** The flows a visitor can start (orders, bookings, on-page tasks) - not the "question for the owner" form. */
+  private routableFlows(): FlowDefinition[] {
+    return this.context.flows.filter((f) => f.status === "active" && !isQuestionFlow(f));
+  }
+
+  /** The router's decision for this message (memoised: the stream path decides, the full path reuses it). */
+  private async routeTurn(messages: ChatMessage[], message: string): Promise<TurnRoute | null> {
+    const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
+    const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
+    const flows = this.routableFlows();
+    const key = `${flows.map((f) => f.id).join(",")}\n${prevReply.slice(-300)}\n${message}`;
+    const hit = this.routeMemo.get(key);
+    if (hit && Date.now() - hit.at < 60_000) return hit.route;
+    const r = await routeMessage(prevUser, prevReply, message, flows).catch(() => null);
+    if (this.routeMemo.size > 300) this.routeMemo.clear();
+    this.routeMemo.set(key, { at: Date.now(), route: r });
+    if (r) console.log(`[route] ${this.context.tenantId}: ${r.intent}${r.flow >= 0 ? ` flow=${flows[r.flow]?.name}` : ""} price=${r.price.toFixed(2)} specific=${r.specific.toFixed(2)} followup=${r.followup.toFixed(2)} ${r.lang}: "${message.slice(0, 60)}"`);
+    return r;
+  }
+
+  /**
+   * A calculation goes to the project agent only with something to calculate with:
+   * quantities alone (how much material for these sizes) - always; a price - only
+   * when prices exist (our offer, the network's offers, or our site). Without any,
+   * the visitor hears so at once and gets the offer to ask the business for a quote,
+   * instead of minutes of work that ends in "total: 0".
+   */
+  private async calculateTurn(rt: TurnRoute, messages: ChatMessage[], message: string, sessionKey: string): Promise<ChatResponse | null> {
+    if (rt.price < 0.5) return this.agentTurn(messages, message, sessionKey, { pureCalc: true });
+    if (await this.hasPricesFor(message)) {
+      return (await this.agentTurn(messages, message, sessionKey)) || (await this.estimateProject(message, sessionKey));
+    }
+    console.log(`[route] ${this.context.tenantId}: no prices for "${message.slice(0, 60)}" - quote request offered`);
+    return { message: NO_PRICES[rt.lang] + this.handoffOffer(sessionKey, message, rt, "quote"), sources: [], grounded: true };
+  }
+
+  /** Are there prices to work from: our priced offer items, the network's, or prices on our site? */
+  private async hasPricesFor(message: string): Promise<boolean> {
+    const priced = (items: OfferItem[]) => items.filter((i) => i.price_value != null);
+    if (priced(this.offerItems).length && (await findOfferItems(message, priced(this.offerItems), 3).catch(() => [])).length) return true;
+    if (this.networkOffers) {
+      const net = (await this.networkOffers().catch(() => [])).flatMap((b) => priced(b.items));
+      if (net.length && (await findOfferItems(message, net, 3).catch(() => [])).length) return true;
+    }
+    const chunks = this.filterContextChunks(await this.retrieveContext(message), message);
+    if (!chunks.length) return false;
+    const rel = await jevPassageRelevance(`${message}\n(Does this passage give a price for at least one of these items?)`, chunks.slice(0, 12).map((c) => (c.content || "").slice(0, 1500)));
+    return !!rel && Math.max(0, ...rel) >= 0.5;
+  }
+
+  /**
+   * When we have no answer (or no prices): the reply ends with a fixed offer, in the
+   * visitor's language, to pass the question on to the business; the next message
+   * answers it (handoffConsent). "" when there is nothing to offer it through.
+   */
+  private handoffOffer(sessionKey: string, question: string, rt: TurnRoute | null, kind: "question" | "quote"): string {
+    // A question about us, an order or a quote - not small talk, not "find it elsewhere" (the network's).
+    if (!rt || !this.ensureQuestionFlow || !["ask", "order", "calculate"].includes(rt.intent)) return "";
+    this.handoffOffers.set(sessionKey, { question, lang: rt.lang, kind, at: Date.now() });
+    if (this.handoffOffers.size > 2000) this.handoffOffers.delete(this.handoffOffers.keys().next().value!);
+    return "\n\n" + (kind === "quote" ? QUOTE_OFFER : HANDOFF_OFFER)[rt.lang];
+  }
+
+  /** The visitor's reply to that offer: yes -> the business's question form, with their question. */
+  private async handoffConsent(sessionKey: string, message: string): Promise<ChatResponse | null> {
+    const o = this.handoffOffers.get(sessionKey);
+    if (!o) return null;
+    this.handoffOffers.delete(sessionKey);
+    if (Date.now() - o.at > 30 * 60 * 1000) return null;
+    const answer = await jevYesWhatNo((o.kind === "quote" ? QUOTE_OFFER : HANDOFF_OFFER).en, message);
+    if (answer === "what") {
+      this.handoffOffers.set(sessionKey, { ...o, at: Date.now() });
+      return { message: HANDOFF_EXPLAIN[o.lang], sources: [] };
+    }
+    if (answer !== "yes") return null;
+    const flow = await this.ensureQuestionFlow?.().catch(() => null);
+    if (!flow) return null;
+    if (!this.context.flows.some((f) => f.id === flow.id)) this.context.flows.push(flow);
+    console.log(`[handoff] ${this.context.tenantId}: ${o.kind} passed to the business form`);
+    // The form starts from the visitor's own words: their question is the request.
+    return this.startCollect(flow, sessionKey, `${o.kind === "quote" ? "Prośba o wycenę" : "Pytanie"}: ${o.question}`, this.sessionVia.get(sessionKey)?.via);
   }
 
   /**
@@ -1072,9 +1204,11 @@ export class WebsiteChat {
    * reaches the visitor through the widget (GET /api/chat/agent). Null without a project record (D1
    * down): the turn falls back to the knowledge answer.
    */
-  private async agentTurn(messages: ChatMessage[], message: string, sessionKey: string): Promise<ChatResponse | null> {
+  private async agentTurn(messages: ChatMessage[], message: string, sessionKey: string, opts?: { pureCalc?: boolean }): Promise<ChatResponse | null> {
     const projectId = await conversationProject(this.context.tenantId, sessionKey, message);
     if (!projectId) return null;
+    // Quantities only (no prices, no commitments): delivered without the owner's approval.
+    await setProjectMemory(projectId, { pureCalc: !!opts?.pureCalc }).catch(() => {});
     const knowledge = await this.knowledgePassages(message);
     const [begun, lang] = await Promise.all([
       beginConversationAgent(projectId, messages, knowledge),
@@ -1239,22 +1373,21 @@ export class WebsiteChat {
   // the visitor explicitly asks to find it elsewhere, or asks for one specific
   // product or service - never a broad category or a follow-up. The search starts
   // now and runs while our own reply is written. null = nothing is asked.
-  private async networkStart(question: string, messages: ChatMessage[], noPartners?: boolean): Promise<NetworkAsk | null> {
-    if (noPartners || !this.askEcosystem) return null;
-    const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
-    const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
-    const g = await jevNetworkNeed(prevUser, prevReply, question);
-    if (!g || !g.ask) {
-      console.log(`[ecosystem] ${this.context.tenantId}: not asked (explicit ${g?.explicit.toFixed(2) ?? "?"}, specific ${g?.specific.toFixed(2) ?? "?"}, follow-up ${g?.followup.toFixed(2) ?? "?"}): "${question.slice(0, 60)}"`);
+  private async networkStart(question: string, messages: ChatMessage[], rt: TurnRoute | null, noPartners?: boolean): Promise<NetworkAsk | null> {
+    if (noPartners || !this.askEcosystem || !rt) return null;
+    const ask = rt.intent === "elsewhere" || (rt.intent !== "chitchat" && rt.specific >= 0.5 && rt.followup < 0.5);
+    if (!ask) {
+      console.log(`[ecosystem] ${this.context.tenantId}: not asked (${rt.intent}, specific ${rt.specific.toFixed(2)}, follow-up ${rt.followup.toFixed(2)}): "${question.slice(0, 60)}"`);
       return null;
     }
     // "Where else can I get it?" names nothing: the need is in the previous message.
-    const need = g.specific < 0.5 && prevUser ? `${prevUser}\n${question}` : question;
+    const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
+    const need = rt.specific < 0.5 && prevUser ? `${prevUser}\n${question}` : question;
     const matches = this.askEcosystem([{ role: "user", content: need }]).catch((e) => {
       console.warn(`[ecosystem] ${this.context.tenantId}: broadcast failed: ${(e as Error).message}`);
       return [] as EcosystemMatch[];
     });
-    return { need, lang: g.lang, matches };
+    return { need, lang: rt.lang, matches };
   }
 
   /** What the network found, as a reply to add under ours; null when nobody fits. */
@@ -1321,10 +1454,9 @@ export class WebsiteChat {
     return /[ąćęłńóśźż]/.test(q) || /\b(czy|jak|ile|gdzie|jaki|jaka|macie|kiedy|dlaczego|kto|co)\b/.test(q);
   }
 
-  private refusal(question: string): string {
-    return this.isPolish(question)
-      ? "Nie mam tej informacji w tym, co wiem o nas, więc nie chcę zgadywać. Najlepiej skontaktuj się z nami bezpośrednio - chętnie pomożemy."
-      : "I don't have that information in what I can see about us, so I don't want to guess. The best way to get a precise answer is to reach out to us directly and we'll help you out.";
+  private refusal(question: string, lang?: OfferLang): string {
+    const l = lang || (this.isPolish(question) ? "pl" : "en");
+    return REFUSAL[l] || REFUSAL.en;
   }
 
   // Hard anti-hallucination gate: a focused binary check that the retrieved
@@ -1526,7 +1658,7 @@ ${contextBlocks}
 
     // Last word of the prompt, where the model weighs it most.
     if (factCheck === "no_evidence") {
-      prompt += `\n\n## FINAL RULE FOR THIS REPLY (overrides everything above):\nOur knowledge base has NO information that answers this message. Say briefly, in the visitor's language, that you don't have this information here and how to reach us. Do NOT say or imply that we don't offer / don't do / don't have it. Do NOT answer from general knowledge. Do NOT recommend other companies or places. A pure greeting or thanks just gets a natural reply.`;
+      prompt += `\n\n## FINAL RULE FOR THIS REPLY (overrides everything above):\nOur knowledge base has NO information that answers this message. If the visitor asks for advice (what to choose, what to consider, how something works), you may give brief general professional advice - clearly as general advice, never as facts about us: no prices, stock, products or brands we carry, dates or terms that the context above does not state. Otherwise say briefly, in the visitor's language, that you don't have this information here. Do NOT say that we don't offer / don't do / don't have it. Do NOT recommend other companies or places. Do NOT add contact details or offer to pass the question on - a line about that is added after your reply. A pure greeting or thanks just gets a natural reply.`;
     }
 
     // The bot itself takes no action: it must never tell a customer an order or

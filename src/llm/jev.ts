@@ -169,11 +169,11 @@ export async function jevCheckNoEvidenceReply(question: string, reply: string): 
   const answers = await jevAsk({ question, reply }, {
     denies: {
       type: "noul",
-      instructions: "Does `reply` state or imply that the business does NOT offer, do, have, sell or provide something (for example \"we don't do X\", \"X is not in our offer\")?",
+      instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have the specific thing `question` asks about (for example \"we don't sell concrete\", \"X is not in our offer\")? Describing what the business does or focuses on, or saying it has no information about it here, is NOT such a statement.",
     },
     external: {
       type: "noul",
-      instructions: "Does `reply` answer `question` with general-knowledge facts that are not about the business itself, or recommend another company, hospital, shop, website or place?",
+      instructions: "Does `reply` recommend another company, hospital, shop, website or place, or state specific facts about this business (its prices, stock, products or brands it carries, dates, terms)? General professional advice (how to choose, what to consider) is fine and does NOT count.",
     },
   });
   const d = answers?.denies as JevNoulAnswer | undefined;
@@ -211,47 +211,25 @@ export async function jevBusinessesOffer(question: string, businesses: { name: s
   })));
 }
 
-/**
- * Ecosystem gate, one Jev call, asked only when the business itself has no answer.
- * The network is asked only for a real need: the visitor explicitly wants it
- * found elsewhere ("where else can I get it?", "can you recommend someone?"), or
- * asks for one specific, concrete product or service - not a broad category
- * ("building materials") and not a follow-up on the previous reply. Also names
- * the visitor's language (for the fixed "checking" line). null without Jev.
- */
+/** Languages with fixed texts (the router names the visitor's language). */
 export const OFFER_LANGS = ["pl", "en", "uk", "fr", "de", "other"] as const;
 export type OfferLang = (typeof OFFER_LANGS)[number];
-export async function jevNetworkNeed(previousUser: string, previousReply: string, message: string): Promise<{ ask: boolean; lang: OfferLang; explicit: number; specific: number; followup: number } | null> {
-  const answers = await jevAsk({ previous_visitor_message: previousUser.slice(0, 600), previous_reply: previousReply.slice(0, 900), message: message.slice(0, 600) }, {
-    explicit: {
-      type: "noul",
-      instructions: "Does `message` explicitly ask the assistant to find it somewhere else: to check with or recommend other businesses, suppliers or places (e.g. 'where else can I get it?', 'can you recommend someone who does it?', 'check with others')?",
-    },
-    specific: {
-      type: "noul",
-      instructions: "Does `message` (read with `previous_visitor_message` if it continues it) ask for one specific, concrete product or service, named precisely enough to ask a supplier for it - a specific kind, grade, model, size or parameter (e.g. 'waterproof concrete', 'facade scaffolding rental', 'an 18 m boom lift', '60x60 porcelain tiles')? Answer no for a broad category ('building materials', 'something for a renovation', 'what do you have'), a question about this business itself, or small talk.",
-    },
-    followup: {
-      type: "noul",
-      instructions: "Is `message` a follow-up on `previous_reply`: asking for more details, prices or specifics of the businesses, products or offers that `previous_reply` names, or pushing back on it without naming anything new? Naming a specific product or kind of product that `previous_reply` does not name is NOT a follow-up.",
-    },
-    lang: {
+
+/**
+ * The visitor's reply to an offer the assistant made (`offer`): "yes" (accepts),
+ * "what" (asks what it means), "no" (declines) or "other" (says something else).
+ * null when Jev is unavailable.
+ */
+export async function jevYesWhatNo(offer: string, message: string): Promise<"yes" | "what" | "no" | "other" | null> {
+  const answers = await jevAsk({ offer: offer.slice(0, 300), message: message.slice(0, 400) }, {
+    reply: {
       type: "choice",
-      instructions: "In which language is `message` written?",
-      criteria: { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German", other: "Any other language" },
+      instructions: "The assistant just asked the visitor `offer`. How does the visitor's `message` respond to it?",
+      criteria: { yes: "Accepts it: yes, please, go ahead, ok.", what: "Asks what it means or what would happen.", no: "Declines it.", other: "Says or asks something else." },
     },
   });
-  const num = (k: string) => { const a = answers?.[k] as JevNoulAnswer | undefined; return a && typeof a.noul === "number" ? a.noul : null; };
-  const explicit = num("explicit"), specific = num("specific"), f = num("followup");
-  if (explicit === null || specific === null) return null;
-  // A follow-up only counts when there was something to follow up on.
-  const followup = previousReply.trim() && f !== null ? f : 0;
-  const l = (answers?.lang as JevChoiceAnswer | undefined)?.choice as OfferLang | undefined;
-  return {
-    ask: explicit >= 0.5 || (specific >= 0.5 && followup < 0.5),
-    lang: l && (OFFER_LANGS as readonly string[]).includes(l) ? l : "en",
-    explicit, specific, followup,
-  };
+  const c = (answers?.reply as JevChoiceAnswer | undefined)?.choice;
+  return c === "yes" || c === "what" || c === "no" || c === "other" ? c : null;
 }
 
 /** Split a reply into checkable statements (sentences and list items). */

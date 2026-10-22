@@ -13,7 +13,7 @@ import { CloudflareVectorizeStore } from "../embeddings/vectorize-store.js";
 import { WebsiteChat } from "../llm/chat.js";
 import { askEcosystem, ecosystemOf } from "../ecosystem/ask.js";
 import { createHandoffs } from "../ecosystem/handoff.js";
-import { ensureCollectFlow } from "../flows/collect-store.js";
+import { ensureCollectFlow, ensureQuestionFlow } from "../flows/collect-store.js";
 import { getFlows } from "../flows/flow-store.js";
 import { getTenant } from "./tenant-registry.js";
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
@@ -174,6 +174,12 @@ export class TenantManager {
         ? (messages, onStart) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
             embed: (texts) => this.bgeProvider.embed(texts),
           }, onStart)
+        : undefined,
+      // A question the assistant can't answer goes to the owner through this form - only
+      // where someone owns the business on Whisp (an owner account, or an ecosystem member):
+      // never to an outreach demo's scraped address, which never asked for it.
+      ensureQuestionFlow: (getTenant(tenantId)?.ownerPasswordHash || ecosystemOf(getTenant(tenantId)))
+        ? () => ensureQuestionFlow(tenantId).catch(() => null)
         : undefined,
       // Hand-off links to the businesses it recommends (their own bots take over).
       handoffLinks: ecosystemOf(getTenant(tenantId)) ? async (targets, transcript, need) => {

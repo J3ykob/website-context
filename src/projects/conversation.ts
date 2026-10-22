@@ -88,7 +88,8 @@ const INSTRUCTION = `Klient w tej rozmowie (rozmowa.md; jego ostatnia wiadomoś�
 Wykonaj to na podstawie danych projektu: oferty firm w cenniki/, informacje z witryny firmy w ${KNOWLEDGE_DIR}/, wcześniejsze pliki projektu.
 Odpowiedź dla klienta zapisz w odpowiedz.txt - w języku klienta, jako wiadomość w czacie (bez nagłówków e-maila i podpisu).
 Plik dla klienta tylko wtedy, gdy wynik jest czymś do zachowania (zestawienie wielu pozycji, porównanie, plan) - zapisz go w ${CUSTOMER_DIR}/ (CSV, MD lub TXT) i wspomnij o nim w odpowiedzi; krótka odpowiedź nie potrzebuje pliku.
-Pytania do firmy - tylko w ${BUSINESS_QUESTIONS}, nigdy w odpowiedzi dla klienta.`;
+Pytania do firmy - tylko w ${BUSINESS_QUESTIONS}, nigdy w odpowiedzi dla klienta.
+Nie obiecuj klientowi niczego na później („uzupełnię, gdy…”, „firma się odezwie”) - napisz, czego brakuje i co klient może zrobić.`;
 
 /**
  * Starts the agent on the conversation's latest message. `knowledge` = passages from the business's
@@ -135,12 +136,13 @@ export const REVIEWING: Record<string, string> = {
   fr: "C'est prêt - l'entreprise le vérifie avant de vous l'envoyer. La réponse s'affichera ici dès qu'elle l'aura validée.",
   de: "Fertig - das Unternehmen prüft es noch, bevor Sie es erhalten. Die Antwort erscheint hier, sobald es freigegeben ist.",
 };
+// Nothing was recorded for the business here: say so, promise nothing.
 export const COULD_NOT: Record<string, string> = {
-  pl: "Niestety nie udało mi się tego teraz przygotować. Zapisałem Twoje zapytanie - firma odpowie na nie bezpośrednio.",
-  en: "Sorry, I couldn't prepare this right now. Your request is saved and the business will get back to you directly.",
-  uk: "На жаль, зараз не вдалося це підготувати. Ваш запит збережено - компанія відповість вам безпосередньо.",
-  fr: "Désolé, je n'ai pas pu préparer cela pour le moment. Votre demande est enregistrée et l'entreprise vous répondra directement.",
-  de: "Leider konnte ich das gerade nicht vorbereiten. Ihre Anfrage ist gespeichert - das Unternehmen meldet sich direkt bei Ihnen.",
+  pl: "Niestety nie udało mi się tego teraz przygotować. Spróbuj zapytać jeszcze raz albo skontaktuj się z firmą bezpośrednio.",
+  en: "Sorry, I couldn't prepare this right now. Please try asking again or contact the business directly.",
+  uk: "На жаль, зараз не вдалося це підготувати. Спробуйте запитати ще раз або зв'яжіться з компанією безпосередньо.",
+  fr: "Désolé, je n'ai pas pu préparer cela pour le moment. Réessayez ou contactez directement l'entreprise.",
+  de: "Leider konnte ich das gerade nicht vorbereiten. Bitte fragen Sie noch einmal oder wenden Sie sich direkt an das Unternehmen.",
 };
 
 /**
@@ -314,6 +316,9 @@ async function ownerFirst(projectId: string, tenantId: string, run: AgentRunStat
   // A business that has not joined has no owner to wait for - until it steps in on its invite page.
   if (p?.memory.listed && !p.memory.ownerLoop) return false;
   if (reviewMode(tenantId) === "approve" || run.needsOwner) return true;
+  // Quantities only (no prices, no commitments - the owner's decision 2026-10-22): delivered as is;
+  // questions for the business stay in the project for the owner, but don't hold the customer up.
+  if (p?.memory.pureCalc) return false;
   // A result that failed a check (but exists) is the owner's call, not a dead end for the customer.
   if (run.status === "failed" && !run.runId.startsWith("failed-") && ((await readFile(projectId, "odpowiedz.txt").catch(() => null)) || "").trim()) return true;
   // Once the owner has stepped in (answered questions, asked for changes), new versions come back to them.

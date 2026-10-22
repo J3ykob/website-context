@@ -9,6 +9,14 @@ import { getFlows, saveFlow } from "./flow-store.js";
 import { deriveFields } from "./collect.js";
 import { OpenRouterProvider } from "../llm/openrouter-provider.js";
 
+/** The "question for the owner" form: a question the assistant could not answer, passed on. */
+export const QUESTION_FORM = {
+  name: "Pytanie do firmy",
+  description: "Przekaż właścicielowi firmy pytanie klienta, na które asystent nie znał odpowiedzi (albo prośbę o wycenę): treść pytania, imię i nazwisko oraz telefon lub e-mail do odpowiedzi.",
+};
+const QUESTION_PREFIX = "collect_question_";
+export const isQuestionFlow = (f: FlowDefinition) => f.id.startsWith(QUESTION_PREFIX);
+
 export const DEFAULT_INQUIRY = {
   name: "Zapytanie / zamówienie",
   description: "Przyjmij zapytanie lub zamówienie klienta i przekaż je właścicielowi firmy: czego klient potrzebuje (produkt lub usługa, ilość albo zakres prac), termin, miejsce realizacji lub adres dostawy, imię i nazwisko oraz telefon.",
@@ -27,7 +35,7 @@ export async function collectFieldsFor(description: string) {
  */
 export async function ensureCollectFlow(tenantId: string, onChanged?: (tenantId: string) => void): Promise<FlowDefinition> {
   const flows = await getFlows(tenantId, { fresh: true });
-  const existing = flows.find((f) => f.executionMode === "collect" && f.status === "active");
+  const existing = flows.find((f) => f.executionMode === "collect" && f.status === "active" && !isQuestionFlow(f));
   if (existing) return existing;
   const now = new Date().toISOString();
   const flow: FlowDefinition = {
@@ -45,5 +53,32 @@ export async function ensureCollectFlow(tenantId: string, onChanged?: (tenantId:
   await saveFlow(tenantId, flow);
   onChanged?.(tenantId);
   console.log(`[flows] ${tenantId}: default inquiry flow created (${flow.requiredInputs.map((i) => i.name).join(", ")})`);
+  return flow;
+}
+
+/**
+ * The business's "question for the owner" form, created on first use. Not evicting
+ * the tenant's chat: the caller adds it to the running chat itself, so the visitor's
+ * form session survives.
+ */
+export async function ensureQuestionFlow(tenantId: string): Promise<FlowDefinition> {
+  const flows = await getFlows(tenantId, { fresh: true });
+  const existing = flows.find((f) => isQuestionFlow(f) && f.status === "active");
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  const flow: FlowDefinition = {
+    id: `${QUESTION_PREFIX}${Date.now().toString(36)}`,
+    name: QUESTION_FORM.name,
+    description: QUESTION_FORM.description,
+    triggerPhrases: [],
+    steps: [],
+    requiredInputs: await collectFieldsFor(QUESTION_FORM.description),
+    createdAt: now,
+    updatedAt: now,
+    status: "active",
+    executionMode: "collect",
+  };
+  await saveFlow(tenantId, flow);
+  console.log(`[flows] ${tenantId}: question form created (${flow.requiredInputs.map((i) => i.name).join(", ")})`);
   return flow;
 }

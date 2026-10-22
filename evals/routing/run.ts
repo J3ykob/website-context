@@ -70,22 +70,27 @@ async function streamTurn(tenant: string, session: string, messages: { role: str
 async function agentResult(tenant: string, session: string, projectId: string, limitMs: number, t0: number) {
   for (;;) {
     const r = await fetch(`${BASE}/api/chat/agent?tenantId=${tenant}&sessionId=${session}&projectId=${projectId}`).then((x) => x.json()).catch(() => null) as any;
-    if (r && r.status !== "running") return { status: r.status as string, message: String(r.message || ""), ms: Date.now() - t0 };
+    // "none" right after the start: the run is not registered yet.
+    const settled = r && r.status !== "running" && !(r.status === "none" && Date.now() - t0 < 45000);
+    if (settled) return { status: r.status as string, message: String(r.message || ""), ms: Date.now() - t0 };
     if (Date.now() - t0 > limitMs + 60000) return { status: "timeout", message: "", ms: Date.now() - t0 };
     await new Promise((s) => setTimeout(s, 8000));
   }
 }
 
-const CYR = /[а-яіїєґ]/i;
+const CYR = /[а-яіїєґ]/gi;
+// The reply's language: script and diacritics first (short replies have no stopwords), then stopwords.
 function langOf(t: string): string {
-  if ((t.match(CYR) || []).length > 10) return "uk";
+  const letters = (t.match(/\p{L}/gu) || []).length || 1;
+  if ((t.match(CYR) || []).length / letters > 0.3) return "uk";
   const n = (re: RegExp) => (t.match(re) || []).length;
   const s: Record<string, number> = {
-    pl: n(/\b(się|jest|nie|czy|oraz|możesz|nasz|nasza|nas|prosimy|jesteśmy|oferujemy|mamy|dla|lub|że)\b/gi),
-    en: n(/\b(the|we|and|you|our|is|are|for|with|please|can|your)\b/gi),
-    fr: n(/\b(le|la|les|nous|vous|est|pour|avec|des|une|notre|votre)\b/gi),
+    pl: n(/[ąćęłńóśźż]/gi) * 2 + n(/\b(się|jest|nie|czy|oraz|możesz|nasz|nasza|nas|prosimy|jesteśmy|oferujemy|mamy|dla|lub|że|jak|dzień)\b/gi),
+    en: n(/\b(the|we|and|you|our|is|are|for|with|please|can|your|i|it|to)\b/gi),
+    fr: n(/[àâçèêëîïôûùœ]/gi) * 2 + n(/\b(le|la|les|nous|vous|est|pour|avec|des|une|notre|votre|merci|commande)\b/gi),
   };
-  return Object.entries(s).sort((a, b) => b[1] - a[1])[0][1] > 0 ? Object.entries(s).sort((a, b) => b[1] - a[1])[0][0] : "?";
+  const top = Object.entries(s).sort((a, b) => b[1] - a[1])[0];
+  return top[1] > 0 ? top[0] : "?";
 }
 
 async function judge(c: Case, history: { role: string; content: string }[], t: Turn, reply: string): Promise<{ ok: boolean; note: string }> {
@@ -103,10 +108,11 @@ async function judge(c: Case, history: { role: string; content: string }[], t: T
 }
 
 const results: any[] = [];
-const sessions: string[] = [];
-for (const c of spec.cases.filter((x) => !ONLY || ONLY.includes(x.id))) {
-  const session = `${RUN}-${c.id}`; sessions.push(session);
+const CONCURRENCY = Number(arg("--parallel") || 4);
+async function runCase(c: Case): Promise<void> {
+  const session = `${RUN}-${c.id}`;
   const history: { role: string; content: string }[] = [];
+  const lines: string[] = [];
   for (const [i, t0] of c.turns.entries()) {
     const t: Turn = { ...D, ...t0, mustNot: [...(D.mustNot || []), ...(t0.mustNot || [])] } as Turn;
     history.push({ role: "user", content: t.user });
@@ -140,21 +146,28 @@ for (const c of spec.cases.filter((x) => !ONLY || ONLY.includes(x.id))) {
     if (!j.ok) fails.push(`judge: ${j.note}`);
     const row = { id: `${c.id}.${i + 1}`, tenant: c.tenant, user: t.user, route, partners, firstMs: s.first, totalMs: total, llm: trace.llmCalls, jev: trace.jevCalls, asyncStatus, pass: fails.length === 0, fails, judgeNote: j.note, reply: reply.slice(0, 1500) };
     results.push(row);
-    console.log(`${row.pass ? "PASS" : "FAIL"} ${row.id.padEnd(5)} ${route.padEnd(9)} first ${(s.first / 1000).toFixed(1)}s total ${(total / 1000).toFixed(1)}s llm ${trace.llmCalls ?? "?"} jev ${trace.jevCalls ?? "?"} | ${t.user.slice(0, 48)}${fails.length ? `\n      - ${fails.join("\n      - ")}` : ""}`);
-    await new Promise((r) => setTimeout(r, 3500)); // per-IP rate limit
+    lines.push(`${row.pass ? "PASS" : "FAIL"} ${row.id.padEnd(5)} ${route.padEnd(9)} first ${(s.first / 1000).toFixed(1)}s total ${(total / 1000).toFixed(1)}s llm ${trace.llmCalls ?? "?"} jev ${trace.jevCalls ?? "?"}${asyncStatus ? ` agent=${asyncStatus}` : ""} | ${t.user.slice(0, 48)}${fails.length ? `\n      - ${fails.join("\n      - ")}` : ""}`);
+    await new Promise((r) => setTimeout(r, 2500));
   }
+  console.log(lines.join("\n"));
 }
+const queue = spec.cases.filter((x) => !ONLY || ONLY.includes(x.id));
+let next = 0;
+await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+  while (next < queue.length) { const c = queue[next++]; await runCase(c).catch((e) => console.log(`ERROR ${c.id}: ${(e as Error).message}`)); }
+}));
+results.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 
 const pass = results.filter((r) => r.pass).length;
 const byRoute: Record<string, number[]> = {};
 for (const r of results) (byRoute[r.route] ||= []).push(r.totalMs);
 console.log(`\n${pass}/${results.length} turns passed; cases fully passed: ${new Set(results.map((r) => r.id.split(".")[0])).size - new Set(results.filter((r) => !r.pass).map((r) => r.id.split(".")[0])).size}/${new Set(results.map((r) => r.id.split(".")[0])).size}`);
 console.log("median total ms by route:", Object.fromEntries(Object.entries(byRoute).map(([k, v]) => [k, v.sort((a, b) => a - b)[Math.floor(v.length / 2)]])));
-writeFileSync(OUT, JSON.stringify({ run: RUN, base: BASE, at: new Date().toISOString(), pass, total: results.length, results }, null, 1));
-console.log(`report: ${OUT}`);
+try { writeFileSync(OUT, JSON.stringify({ run: RUN, base: BASE, at: new Date().toISOString(), pass, total: results.length, results }, null, 1));
+console.log(`report: ${OUT}`); } catch (e) { console.error(`could not write report: ${(e as Error).message}`); }
 
-// Clean up everything this run created.
-const like = `${RUN}-%`;
+// Clean up everything eval runs created (also leftovers of an aborted earlier run).
+const like = `reval-%`;
 const projIds = `SELECT id FROM projects WHERE customer_session LIKE ?`;
 for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements", "project_reviews"]) await d1(`DELETE FROM ${t} WHERE project_id IN (${projIds})`, [like]);
 await d1(`DELETE FROM projects WHERE customer_session LIKE ?`, [like]);
