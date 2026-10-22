@@ -8,15 +8,21 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number }
+export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[] }
 export const turnUsage = new AsyncLocalStorage<TurnUsage>();
-export const newTurnUsage = (): TurnUsage => ({ llmCalls: 0, llmIn: 0, llmOut: 0, jevCalls: 0, jevIn: 0 });
+export const newTurnUsage = (): Omit<TurnUsage, "at"> & { at: number } => ({ llmCalls: 0, llmIn: 0, llmOut: 0, jevCalls: 0, jevIn: 0, at: Date.now(), steps: [] });
 
-export function countLlm(inTok = 0, outTok = 0): void {
+const sec = (ms: number) => (ms / 1000).toFixed(1);
+/** One LLM call; `started` (Date.now() before the request) adds it to the turn's timeline. */
+export function countLlm(inTok = 0, outTok = 0, started?: number, detail = ""): void {
   const u = turnUsage.getStore();
-  if (u) { u.llmCalls++; u.llmIn += inTok; u.llmOut += outTok; }
+  if (!u) return;
+  u.llmCalls++; u.llmIn += inTok; u.llmOut += outTok;
+  if (started) u.steps.push(`llm @${sec(started - u.at)}s ${sec(Date.now() - started)}s${detail ? ` ${detail}` : ""}`);
 }
-export function countJev(inTok = 0): void {
+export function countJev(inTok = 0, started?: number): void {
   const u = turnUsage.getStore();
-  if (u) { u.jevCalls++; u.jevIn += inTok; }
+  if (!u) return;
+  u.jevCalls++; u.jevIn += inTok;
+  if (started) u.steps.push(`jev @${sec(started - u.at)}s ${sec(Date.now() - started)}s`);
 }

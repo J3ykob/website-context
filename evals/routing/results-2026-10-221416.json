@@ -1,0 +1,59 @@
+{
+ "run": "reval-mvjmjvly",
+ "base": "https://whisp.so",
+ "at": "2026-10-22T14:18:23.443Z",
+ "pass": 1,
+ "total": 3,
+ "results": [
+  {
+   "id": "C3.1",
+   "tenant": "marsan_pl",
+   "user": "Policz ile płyt GK 120x260 cm potrzebuję na ściankę 4 m długości i 2,6 m wysokości, obłożoną z obu stron.",
+   "route": "agent",
+   "partners": [],
+   "firstMs": 6777,
+   "totalMs": 93582,
+   "llm": 0,
+   "jev": 4,
+   "asyncStatus": "done",
+   "pass": false,
+   "fails": [
+    "judge: Arithmetic error: 20.8 / 3.12 = 6.67 rounds up to 7, but this is total płyty - should be 7 per side? No wait, rechecking: 6.67 is total for both sides, so should round to 7 total? No, that's wrong. Actually 4m/1.2m = 3.33 → 4 płyty w poziomie na jedną stronę, 4×2=8 płyt total. The assistant's method gives 6.67 which is wrong because it ignores that płyty can't be fractionally split across the 2.6m height (1 płyta = 2.6m exactly fits height). The correct answer is 8 płyt (4 per side), not 7. Also violates rule by making user wait 2-3 minutes unnecessarily for a simple calculation."
+   ],
+   "judgeNote": "Arithmetic error: 20.8 / 3.12 = 6.67 rounds up to 7, but this is total płyty - should be 7 per side? No wait, rechecking: 6.67 is total for both sides, so should round to 7 total? No, that's wrong. Actually 4m/1.2m = 3.33 → 4 płyty w poziomie na jedną stronę, 4×2=8 płyt total. The assistant's method gives 6.67 which is wrong because it ignores that płyty can't be fractionally split across the 2.6m height (1 płyta = 2.6m exactly fits height). The correct answer is 8 płyt (4 per side), not 7. Also violates rule by making user wait 2-3 minutes unnecessarily for a simple calculation.",
+   "reply": "Przygotowuję to dla Ciebie - to zajmie chwilę (zwykle do 2-3 minut). Wynik pojawi się tutaj.\n\nPotrzebujesz 7 płyt GK 120x260 cm.\n\nSposób liczenia: powierzchnia ścianki 4 m x 2,6 m = 10,4 m2, obłożenie z obu stron = 10,4 x 2 = 20,8 m2. Powierzchnia jednej płyty 1,2 m x 2,6 m = 3,12 m2. 20,8 / 3,12 = 6,67, po zaokrągleniu w górę daje 7 płyt.\n\nLiczba nie zawiera dodatkowego zapasu na docięcia i odpady - w dostępnych danych nie ma takich ustaleń."
+  },
+  {
+   "id": "K3.1",
+   "tenant": "kh_bud_pl",
+   "user": "What does your company do?",
+   "route": "knowledge",
+   "partners": [],
+   "firstMs": 3613,
+   "totalMs": 6538,
+   "llm": 1,
+   "jev": 13,
+   "pass": true,
+   "fails": [],
+   "judgeNote": "Accurately describes facade work (insulation, rendering/plastering, painting) in English without invented facts.",
+   "reply": "We specialize in comprehensive facade services across the Mazovia region, including Warsaw, Piaseczno, Pruszków, Legionowo, Wołomin, Otwock, and surrounding areas. Our work includes thermal insulation, rendering, moisture protection, facade repairs, and painting using high-quality, durable materials. We handle both new installations and renovations, ensuring energy efficiency, long-term durability, and aesthetic appeal tailored to each building’s architecture."
+  },
+  {
+   "id": "N1.1",
+   "tenant": "www_romax_waw_pl",
+   "user": "Czy przy salonie na Woli jest winda dla wózków?",
+   "route": "knowledge",
+   "partners": [],
+   "firstMs": 4424,
+   "totalMs": 22350,
+   "llm": 1,
+   "jev": 17,
+   "pass": false,
+   "fails": [
+    "total 22350ms > 15000"
+   ],
+   "judgeNote": "Reply correctly states no information about wheelchair lift availability, provides phone numbers for direct contact, and offers to pass the question to the team. No invented facts or false promises.",
+   "reply": "Nie mamy informacji na temat dostępności windy dla wózków przy salonie na Woli. Aby potwierdzić dostępność takich rozwiązań, prosimy o kontakt telefoniczny z naszym salonem pod numerem 512 170 455 (Płytki i Łazienki) lub 500 093 973 (Podłogi i Drzwi).\n\nMogę przekazać to pytanie bezpośrednio naszemu zespołowi, żeby mógł Ci odpowiedzieć. Przekazać?"
+  }
+ ]
+}

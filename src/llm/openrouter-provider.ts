@@ -66,6 +66,7 @@ export class OpenRouterProvider {
   async chat(messages: OpenRouterMessage[], overrides?: { model?: string; maxTokens?: number; temperature?: number }): Promise<{ content: string; usage: { prompt_tokens: number; completion_tokens: number } }> {
     // A stalled provider must not hang the caller (and the visitor's chat) forever:
     // abort after OPENROUTER_TIMEOUT_MS (default 60 s). Covers the whole response.
+    const t0 = Date.now();
     const response = await withProviderRetry((provider) => fetch("https://openrouter.ai/api/v1/chat/completions", {
       signal: AbortSignal.timeout(Number(process.env.OPENROUTER_TIMEOUT_MS) || 60000),
       method: "POST",
@@ -93,9 +94,10 @@ export class OpenRouterProvider {
     const data = await response.json() as {
       choices: { message: { content: string } }[];
       usage: { prompt_tokens: number; completion_tokens: number };
+      provider?: string;
     };
 
-    countLlm(data.usage?.prompt_tokens || 0, data.usage?.completion_tokens || 0);
+    countLlm(data.usage?.prompt_tokens || 0, data.usage?.completion_tokens || 0, t0, `${data.provider || "?"} out=${data.usage?.completion_tokens || 0}`);
     return {
       content: data.choices[0]?.message?.content || "",
       usage: data.usage || { prompt_tokens: 0, completion_tokens: 0 },
@@ -105,6 +107,9 @@ export class OpenRouterProvider {
   // Streaming variant — calls onToken(delta) as tokens arrive, returns the full text.
   // Lets the chat surface a response token-by-token (first token ~1s vs ~3.5s full).
   async chatStream(messages: OpenRouterMessage[], onToken: (delta: string) => void): Promise<{ content: string }> {
+    const t0 = Date.now();
+    let first = 0;
+    let servedBy = "?";
     const response = await withProviderRetry((provider) => fetch("https://openrouter.ai/api/v1/chat/completions", {
       signal: AbortSignal.timeout(Number(process.env.OPENROUTER_STREAM_TIMEOUT_MS) || 120000),
       method: "POST",
@@ -147,11 +152,12 @@ export class OpenRouterProvider {
         try {
           const json = JSON.parse(payload);
           const delta = json.choices?.[0]?.delta?.content;
-          if (delta) { content += delta; onToken(delta); }
+          if (json.provider) servedBy = json.provider;
+          if (delta) { if (!first) first = Date.now() - t0; content += delta; onToken(delta); }
         } catch { /* partial JSON across chunks — ignored, completes next read */ }
       }
     }
-    countLlm();
+    countLlm(0, 0, t0, `stream ${servedBy} first=${(first / 1000).toFixed(1)}s chars=${content.length}`);
     return { content };
   }
 }

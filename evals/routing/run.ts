@@ -151,7 +151,7 @@ async function runCase(c: Case): Promise<void> {
     if (s.done.error) fails.push(`error ${s.done.error}`);
     const j = await judge(c, history, t, reply);
     if (!j.ok) fails.push(`judge: ${j.note}`);
-    const row = { id: `${c.id}.${i + 1}`, tenant: c.tenant, user: t.user, route, partners, firstMs: s.first, totalMs: total, llm: trace.llmCalls, jev: trace.jevCalls, asyncStatus, pass: fails.length === 0, fails, judgeNote: j.note, reply: reply.slice(0, 1500) };
+    const row = { id: `${c.id}.${i + 1}`, tenant: c.tenant, user: t.user, route, partners, firstMs: s.first, totalMs: total, llm: trace.llmCalls, jev: trace.jevCalls, steps: trace.steps || [], asyncStatus, pass: fails.length === 0, fails, judgeNote: j.note, reply: reply.slice(0, 1500) };
     results.push(row);
     lines.push(`${row.pass ? "PASS" : "FAIL"} ${row.id.padEnd(5)} ${route.padEnd(9)} first ${(s.first / 1000).toFixed(1)}s total ${(total / 1000).toFixed(1)}s llm ${trace.llmCalls ?? "?"} jev ${trace.jevCalls ?? "?"}${asyncStatus ? ` agent=${asyncStatus}` : ""} | ${t.user.slice(0, 48)}${fails.length ? `\n      - ${fails.join("\n      - ")}` : ""}`);
     await new Promise((r) => setTimeout(r, 2500));
