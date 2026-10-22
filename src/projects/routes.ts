@@ -321,7 +321,11 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     res.json({ ok: true });
   });
   // Reservations that ended unpaid: the request goes to the next business picked for the same part.
-  const sweep = setInterval(() => { void import("./lead.js").then((l) => l.passExpiredLeads()).catch((e) => console.warn(`[lead] sweep: ${e?.message || e}`)); }, 10 * 60_000);
+  // Results left waiting for the owner: owner reminded once, the customer's conversation told.
+  const sweep = setInterval(() => {
+    void import("./lead.js").then((l) => l.passExpiredLeads()).catch((e) => console.warn(`[lead] sweep: ${e?.message || e}`));
+    void import("./review.js").then((r) => r.remindLateReviews()).then((n) => { if (n) console.log(`[review] ${n} late review(s): owner reminded, customer told`); }).catch((e) => console.warn(`[review] sweep: ${e?.message || e}`));
+  }, 10 * 60_000);
   sweep.unref?.();
 
   app.get("/p/:token", (_req, res) => {

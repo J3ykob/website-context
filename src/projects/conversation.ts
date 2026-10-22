@@ -136,6 +136,14 @@ export const REVIEWING: Record<string, string> = {
   fr: "C'est prêt - l'entreprise le vérifie avant de vous l'envoyer. La réponse s'affichera ici dès qu'elle l'aura validée.",
   de: "Fertig - das Unternehmen prüft es noch, bevor Sie es erhalten. Die Antwort erscheint hier, sobald es freigegeben ist.",
 };
+// A result left waiting for the owner (reviewLateMs): where it will appear; no promise of when.
+export const REVIEW_LATE: Record<string, string> = {
+  pl: "Firma jeszcze nie zatwierdziła tej odpowiedzi. Gdy to zrobi, pojawi się ona tutaj i pod tym linkiem: {link} (a jeśli zostawiłeś e-mail - wyślę ją też na niego). Nie musisz czekać na tej stronie.",
+  en: "The business hasn't approved this reply yet. Once it does, it will appear here and at this link: {link} (and by email, if you left one). You don't have to wait on this page.",
+  uk: "Компанія ще не затвердила цю відповідь. Щойно вона це зробить, відповідь з'явиться тут і за цим посиланням: {link} (а якщо ви залишили e-mail - надішлю її і туди). Не потрібно чекати на цій сторінці.",
+  fr: "L'entreprise n'a pas encore validé cette réponse. Dès qu'elle l'aura fait, elle s'affichera ici et à ce lien : {link} (et par e-mail, si vous en avez laissé un). Inutile d'attendre sur cette page.",
+  de: "Das Unternehmen hat diese Antwort noch nicht freigegeben. Sobald es das tut, erscheint sie hier und unter diesem Link: {link} (und per E-Mail, falls Sie eine angegeben haben). Sie müssen nicht auf dieser Seite warten.",
+};
 // Nothing was recorded for the business here: say so, promise nothing.
 export const COULD_NOT: Record<string, string> = {
   pl: "Niestety nie udało mi się tego teraz przygotować. Spróbuj zapytać jeszcze raz albo skontaktuj się z firmą bezpośrednio.",
@@ -388,6 +396,17 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
       if ((p?.memory.reviewNotified as string | undefined) !== s.runId) {
         await setMemory(projectId, { reviewNotified: s.runId });
         await onDeliver(text).catch(() => {});
+      }
+      // Waiting too long: the customer hears so once - where the result will appear, and that an email
+      // follows if they left one. Nothing is promised about when the owner decides.
+      const { reviewLateMs } = await import("./review.js");
+      if (rv.status === "pending" && Date.now() - Date.parse(rv.createdAt) > reviewLateMs()) {
+        const late = (REVIEW_LATE[lang] || REVIEW_LATE.en).replace("{link}", `${process.env.BASE_URL || "https://whisp.so"}/p/${await customerLink(projectId).catch(() => "")}`);
+        if ((p?.memory.reviewLate as string | undefined) !== s.runId) {
+          await setMemory(projectId, { reviewLate: s.runId });
+          await onDeliver(late).catch(() => {});
+        }
+        return { status: "review", message: late, projectId };
       }
       return { status: "review", message: text, projectId };
     }

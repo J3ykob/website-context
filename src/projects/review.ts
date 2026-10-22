@@ -25,6 +25,8 @@ function ensureSchema(): Promise<void> {
   ready ||= (async () => {
     await d1Query("CREATE TABLE IF NOT EXISTS project_reviews (token TEXT PRIMARY KEY, project_id TEXT NOT NULL, tenant_id TEXT NOT NULL, run_id TEXT NOT NULL, status TEXT NOT NULL, draft TEXT NOT NULL DEFAULT '', final TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, decided_at TEXT)");
     await d1Query("CREATE UNIQUE INDEX IF NOT EXISTS project_reviews_run ON project_reviews (project_id, run_id)");
+    // Added later: when the owner was reminded of a review left waiting (once).
+    await d1Query("ALTER TABLE project_reviews ADD COLUMN reminded_at TEXT").catch(() => {});
   })().catch((e) => { ready = null; throw e; });
   return ready;
 }
@@ -116,10 +118,17 @@ export async function openReview(projectId: string, tenantId: string, runId: str
   const inserted = await d1Query("INSERT OR IGNORE INTO project_reviews (token, project_id, tenant_id, run_id, status, draft, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?) RETURNING token", [token, projectId, tenantId, runId, draft, at]);
   if (!inserted.length) return (await reviewForRun(projectId, runId))!; // another poll opened it
   await addEvent(projectId, { kind: "review_requested", actor: "system", data: { runId, files } });
+  if (notify) await emailOwner(projectId, tenantId, runId, draft, files, token);
+  return { token, projectId, tenantId, runId, status: "pending", draft, final: "", note: "", createdAt: at, decidedAt: null };
+}
+
+// The owner is told about a result to review (email with the review link). Never blocks the review
+// (the link also works from a later email or the log).
+async function emailOwner(projectId: string, tenantId: string, runId: string, draft: string, files: string[], token: string): Promise<void> {
   const t = getTenant(tenantId);
+  if (!t?.email) return;
   const project = await getProject(projectId);
-  // The email never blocks the review itself (the link also works from a later email or the log).
-  if (notify && t?.email) try {
+  try {
     const { sendReviewEmail } = await import("../multi-tenant/email.js");
     const { readFile } = await import("./repo.js");
     const base = process.env.BASE_URL || "https://whisp.so";
@@ -131,7 +140,30 @@ export async function openReview(projectId: string, tenantId: string, runId: str
   } catch (e) {
     console.warn(`[review] ${projectId}: owner not emailed (${(e as Error).message})`);
   }
-  return { token, projectId, tenantId, runId, status: "pending", draft, final: "", note: "", createdAt: at, decidedAt: null };
+}
+
+/** How long a result may wait for the owner before the customer is told and the owner reminded. */
+export const reviewLateMs = () => (Number(process.env.AGENT_REVIEW_LATE_MIN) || 20) * 60_000;
+
+/**
+ * Results left waiting for the owner too long (the sweep, every 10 min): the owner gets the review
+ * email again (same email and link, once), and the customer's conversation is told - also when the
+ * customer has left the page (they see it when they come back; the result follows once decided).
+ */
+export async function remindLateReviews(): Promise<number> {
+  await ensureSchema();
+  const before = new Date(Date.now() - reviewLateMs()).toISOString();
+  const since = new Date(Date.now() - REVIEW_TTL_DAYS * 86_400_000).toISOString();
+  const late = (await d1Query("SELECT * FROM project_reviews WHERE status = 'pending' AND reminded_at IS NULL AND created_at < ? AND created_at > ? LIMIT 20", [before, since])).map(row);
+  for (const r of late) {
+    const claimed = await d1Query("UPDATE project_reviews SET reminded_at = ? WHERE token = ? AND reminded_at IS NULL RETURNING token", [new Date().toISOString(), r.token]);
+    if (!claimed.length) continue; // another instance took it
+    await addEvent(r.projectId, { kind: "review_late", actor: "system", data: { runId: r.runId, waitedMin: Math.round((Date.now() - Date.parse(r.createdAt)) / 60_000) } }).catch(() => {});
+    await emailOwner(r.projectId, r.tenantId, r.runId, r.draft, [], r.token);
+    const { deliverNow } = await import("./conversation.js");
+    await deliverNow(r.projectId).catch(() => {});
+  }
+  return late.length;
 }
 
 export async function decide(token: string, status: Exclude<ReviewStatus, "pending">, fields: { final?: string; note?: string }): Promise<Review | null> {
