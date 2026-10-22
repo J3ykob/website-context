@@ -101,7 +101,7 @@ async function judge(c: Case, history: { role: string; content: string }[], t: T
     `Conversation so far:\n${history.slice(0, -1).map((m) => `${m.role}: ${m.content.slice(0, 600)}`).join("\n") || "(start)"}\n` +
     `Visitor: ${t.user}\nAssistant reply:\n"""${reply.slice(0, 3000)}"""\n\n` +
     `A correct reply: ${t.judge}${t.handoff ? " It must offer to pass the question to the business (the owner/team)." : ""}\n` +
-    `General rules: no invented facts about the business (prices, stock, phone numbers), no promise that someone will follow up unless a request was actually recorded, no total computed from missing prices.\n` +
+    `General rules: no invented facts about the business (prices, stock, availability), no promise that someone will follow up unless a request was actually recorded, no total computed from missing prices. You do not know the business's real contact details: do not fail a reply for giving a phone number, email or address unless the expected reply above names the correct ones (those are checked separately against the site).\n` +
     `Answer JSON only: {"ok": true|false, "note": "short reason"}`;
   let text = "";
   for (let i = 0; i < 3; i++) {
