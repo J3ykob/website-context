@@ -177,9 +177,11 @@ console.log(`report: ${OUT}`); } catch (e) { console.error(`could not write repo
 // --keep leaves this run's data for debugging (the next run without it cleans it).
 if (process.argv.includes("--keep")) { console.log("kept run data (--keep)"); process.exit(0); }
 const like = `reval-%`;
-const projIds = `SELECT id FROM projects WHERE customer_session LIKE ?`;
+// Test projects and the requests they sent to other businesses (customer_session "project:<id>").
+const projIds = `SELECT id FROM projects WHERE customer_session LIKE ?1 OR customer_session IN (SELECT 'project:' || id FROM projects WHERE customer_session LIKE ?1)`;
 for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements", "project_reviews"]) await d1(`DELETE FROM ${t} WHERE project_id IN (${projIds})`, [like]);
-await d1(`DELETE FROM projects WHERE customer_session LIKE ?`, [like]);
+await d1(`DELETE FROM projects WHERE customer_session IN (SELECT 'project:' || id FROM projects WHERE customer_session LIKE ?1)`, [like]);
+await d1(`DELETE FROM projects WHERE customer_session LIKE ?1`, [like]);
 await d1(`DELETE FROM chat_messages WHERE session_id LIKE ?`, [like]);
 await d1(`DELETE FROM handoffs WHERE created_at >= ? AND need IN (${spec.cases.flatMap((c) => c.turns.map(() => "?")).join(",")})`, [RUN_START, ...spec.cases.flatMap((c) => c.turns.map((t) => t.user))]);
 console.log("cleaned up run data");
