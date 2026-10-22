@@ -1144,7 +1144,7 @@ export class WebsiteChat {
     const r = await routeMessage(prevUser, prevReply, message, flows).catch(() => null);
     if (this.routeMemo.size > 300) this.routeMemo.clear();
     this.routeMemo.set(key, { at: Date.now(), route: r });
-    if (r) console.log(`[route] ${this.context.tenantId}: ${r.intent}${r.flow >= 0 ? ` flow=${flows[r.flow]?.name}` : ""} price=${r.price.toFixed(2)} specific=${r.specific.toFixed(2)} followup=${r.followup.toFixed(2)} ${r.lang}: "${message.slice(0, 60)}"`);
+    if (r) console.log(`[route] ${this.context.tenantId}: ${r.intent}${r.flow >= 0 ? ` flow=${flows[r.flow]?.name}` : ""} price=${r.price.toFixed(2)} specific=${r.specific.toFixed(2)} need=${r.need.toFixed(2)} followup=${r.followup.toFixed(2)} ${r.lang}: "${message.slice(0, 60)}"`);
     return r;
   }
 
@@ -1387,9 +1387,9 @@ export class WebsiteChat {
   // now and runs while our own reply is written. null = nothing is asked.
   private async networkStart(question: string, messages: ChatMessage[], rt: TurnRoute | null, noPartners?: boolean): Promise<NetworkAsk | null> {
     if (noPartners || !this.askEcosystem || !rt) return null;
-    const ask = rt.intent === "elsewhere" || (rt.intent !== "chitchat" && rt.specific >= 0.5 && rt.followup < 0.5);
+    const ask = rt.intent === "elsewhere" || (rt.intent !== "chitchat" && rt.specific >= 0.5 && rt.need >= 0.5 && rt.followup < 0.5);
     if (!ask) {
-      console.log(`[ecosystem] ${this.context.tenantId}: not asked (${rt.intent}, specific ${rt.specific.toFixed(2)}, follow-up ${rt.followup.toFixed(2)}): "${question.slice(0, 60)}"`);
+      console.log(`[ecosystem] ${this.context.tenantId}: not asked (${rt.intent}, specific ${rt.specific.toFixed(2)}, need ${rt.need.toFixed(2)}, follow-up ${rt.followup.toFixed(2)}): "${question.slice(0, 60)}"`);
       return null;
     }
     // "Where else can I get it?" names nothing: the need is in the previous message.

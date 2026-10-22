@@ -22,6 +22,8 @@ export interface Route {
   price: number;
   /** A specific, concrete product or service (not a broad category). */
   specific: number;
+  /** Looking for a product or service another business could provide (not this business's own terms). */
+  need: number;
   /** A follow-up on the previous reply rather than a new request. */
   followup: number;
   lang: OfferLang;
@@ -44,6 +46,10 @@ export async function route(previousUser: string, previousReply: string, message
     specific: {
       type: "noul",
       instructions: "Does `message` (read with `previous_visitor_message` if it continues it) ask for one specific, concrete product or service, named precisely enough to ask a supplier for it - a specific kind, grade, model, size or parameter (e.g. 'waterproof concrete', 'facade scaffolding rental', 'an 18 m boom lift', '60x60 porcelain tiles')? Answer no for a broad category ('building materials', 'what do you have'), a question about this business itself, or small talk.",
+    },
+    need: {
+      type: "noul",
+      instructions: "Is the visitor looking for a product or service they want to get (buy, rent or have done) - something another business could also provide? Answer no when `message` asks about this business's own terms, guarantee, policies, facilities, location, people or way of working (e.g. 'do you give a 10-year guarantee?', 'is there parking?'), even if it names a service.",
     },
     followup: {
       type: "noul",
@@ -76,6 +82,7 @@ export async function route(previousUser: string, previousReply: string, message
     flow, flowAmbiguous,
     price: nl("price"),
     specific: nl("specific"),
+    need: nl("need"),
     followup: previousReply.trim() ? nl("followup") : 0,
     lang: lang && (OFFER_LANGS as readonly string[]).includes(lang) ? lang : "en",
     probabilities: it.probabilities || {},
