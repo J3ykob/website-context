@@ -26,7 +26,8 @@ const RUN = `reval-${Date.now().toString(36)}`;
 const RUN_START = new Date().toISOString();
 const ACCT = "98e447c9e14d384e1b7e6f4d42c39ad2";
 const D1 = "0dec9229-fea2-4343-bf87-d36ac3205979";
-const CF_TOKEN = execSync("npx wrangler auth token", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim().split("\n").pop()!;
+const cfToken = () => execSync("npx wrangler auth token", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim().split("\n").pop()!;
+let CF_TOKEN = cfToken();
 const JUDGE = "@cf/moonshotai/kimi-k2.6";
 
 interface Turn { user: string; route: string[]; network?: string[]; lang?: string; handoff?: boolean; must?: string[]; mustNot?: string[]; judge: string; maxFirstMs?: number; maxTotalMs?: number; maxLlm?: number; async?: boolean; noReview?: boolean }
@@ -40,6 +41,7 @@ async function cf(path: string, body: unknown, tries = 5): Promise<any> {
     const d: any = r ? await r.json().catch(() => null) : null;
     if (d?.success) return d;
     if (i >= tries - 1) return d;
+    if (r?.status === 401 || r?.status === 403) { try { CF_TOKEN = cfToken(); } catch {} }
     await new Promise((s) => setTimeout(s, 4000 * (i + 1)));
   }
 }
@@ -95,16 +97,21 @@ function langOf(t: string): string {
 
 async function judge(c: Case, history: { role: string; content: string }[], t: Turn, reply: string): Promise<{ ok: boolean; note: string }> {
   const prompt =
-    `You grade one reply of a business's website chat assistant (business id: ${c.tenant}).\n` +
+    `You grade one reply of a business's website chat assistant (business id: ${c.tenant}). Today is ${new Date().toISOString().slice(0, 10)} (${new Date().toLocaleDateString("en-GB", { weekday: "long" })}).\n` +
     `Conversation so far:\n${history.slice(0, -1).map((m) => `${m.role}: ${m.content.slice(0, 600)}`).join("\n") || "(start)"}\n` +
     `Visitor: ${t.user}\nAssistant reply:\n"""${reply.slice(0, 3000)}"""\n\n` +
     `A correct reply: ${t.judge}${t.handoff ? " It must offer to pass the question to the business (the owner/team)." : ""}\n` +
     `General rules: no invented facts about the business (prices, stock, phone numbers), no promise that someone will follow up unless a request was actually recorded, no total computed from missing prices.\n` +
     `Answer JSON only: {"ok": true|false, "note": "short reason"}`;
-  const d = await cf(`ai/run/${JUDGE}`, { messages: [{ role: "user", content: prompt }], max_tokens: 300, temperature: 0, chat_template_kwargs: { enable_thinking: false, thinking: false } });
-  const text = String(d?.result?.choices?.[0]?.message?.content ?? d?.result?.response ?? "");
-  const m = text.match(/\{[\s\S]*\}/);
-  try { const j = JSON.parse(m ? m[0] : ""); return { ok: !!j.ok, note: String(j.note || "") }; } catch { return { ok: false, note: `judge failed: ${text.slice(0, 120)}` }; }
+  let text = "";
+  for (let i = 0; i < 3; i++) {
+    const d = await cf(`ai/run/${JUDGE}`, { messages: [{ role: "user", content: prompt }], max_tokens: 400, temperature: 0, chat_template_kwargs: { enable_thinking: false, thinking: false } });
+    text = String(d?.result?.choices?.[0]?.message?.content ?? d?.result?.response ?? "");
+    const m = text.match(/\{[\s\S]*\}/);
+    try { const j = JSON.parse(m ? m[0] : ""); return { ok: !!j.ok, note: String(j.note || "") }; } catch {}
+    if (!text) try { CF_TOKEN = cfToken(); } catch {}
+  }
+  return { ok: false, note: `judge failed: ${text.slice(0, 120)}` };
 }
 
 const results: any[] = [];

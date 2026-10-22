@@ -3,24 +3,35 @@ import { countLlm } from "./turn-usage.js";
 // OpenRouter routes each call to one of a model's providers; a provider that
 // fails (404 "model not found", 429, 5xx, or a 400 the provider itself returned,
 // e.g. "model deprecated") fails the call, though another would answer. Up to two
-// retries, each routed away from every provider that failed so far (named in the
-// error) and without the speed preference that picked them. Request errors
+// retries, each routed away from every provider that failed recently (named in
+// the error) and without the speed preference that picked them. Request errors
 // (400 without a provider, 401, 402) are not retried - those won't change.
 type ProviderPrefs = { sort?: string; ignore?: string[] };
+// A provider that failed is skipped by every call for a while (Vertex kept
+// answering 404 for hours; each call paid a failed attempt first).
+const AVOID_MS = 10 * 60_000;
+const avoided = new Map<string, number>();
+function avoidList(): string[] {
+  const now = Date.now();
+  for (const [p, until] of avoided) if (until < now) avoided.delete(p);
+  return [...avoided.keys()];
+}
 async function withProviderRetry(call: (provider: ProviderPrefs) => Promise<Response>): Promise<Response> {
-  let r = await call({ sort: process.env.OPENROUTER_PROVIDER_SORT || "throughput" });
-  const failed: string[] = [];
+  const skip = avoidList();
+  let r = await call({ sort: process.env.OPENROUTER_PROVIDER_SORT || "throughput", ...(skip.length ? { ignore: skip } : {}) });
   for (let attempt = 0; attempt < 2 && !r.ok; attempt++) {
     const body = await r.clone().text().catch(() => "");
     let provider: string | undefined;
     try { provider = JSON.parse(body)?.error?.metadata?.provider_name; } catch {}
     if (![404, 408, 429, 500, 502, 503, 504].includes(r.status) && !(r.status === 400 && provider)) break;
-    if (provider && !failed.includes(provider)) failed.push(provider);
+    if (provider) avoided.set(provider, Date.now() + AVOID_MS);
     console.warn(`[openrouter] provider error ${r.status}${provider ? ` (${provider})` : ""}, retrying elsewhere`);
-    r = await call(failed.length ? { ignore: failed } : {});
+    const ignore = avoidList();
+    r = await call(ignore.length ? { ignore } : {});
   }
   return r;
 }
+
 export interface OpenRouterConfig {
   apiKey?: string;
   model?: string;

@@ -309,12 +309,12 @@ const REFUSAL: Record<OfferLang, string> = {
   other: "I don't have that information in what I know about us, so I don't want to guess.",
 };
 const HANDOFF_OFFER: Record<OfferLang, string> = {
-  pl: "Mogę przekazać to pytanie bezpośrednio naszemu zespołowi - odpowiemy najszybciej, jak to możliwe. Przekazać?",
-  en: "I can pass this question on to our team directly - we'll get back to you as soon as we can. Shall I?",
-  uk: "Можу передати це питання безпосередньо нашій команді - ми відповімо якнайшвидше. Передати?",
-  fr: "Je peux transmettre cette question directement à notre équipe - nous vous répondrons dès que possible. Je la transmets ?",
-  de: "Ich kann diese Frage direkt an unser Team weitergeben - wir melden uns so schnell wie möglich. Soll ich?",
-  other: "I can pass this question on to our team directly - we'll get back to you as soon as we can. Shall I?",
+  pl: "Mogę przekazać to pytanie bezpośrednio naszemu zespołowi, żeby mógł Ci odpowiedzieć. Przekazać?",
+  en: "I can pass this question on to our team directly so they can get back to you. Shall I?",
+  uk: "Можу передати це питання безпосередньо нашій команді, щоб вона могла вам відповісти. Передати?",
+  fr: "Je peux transmettre cette question directement à notre équipe pour qu'elle puisse vous répondre. Je la transmets ?",
+  de: "Ich kann diese Frage direkt an unser Team weitergeben, damit es Ihnen antworten kann. Soll ich?",
+  other: "I can pass this question on to our team directly so they can get back to you. Shall I?",
 };
 const QUOTE_OFFER: Record<OfferLang, string> = {
   pl: "Mogę przekazać Twoją prośbę o wycenę naszemu zespołowi - przygotujemy ją i odezwiemy się. Przekazać?",
