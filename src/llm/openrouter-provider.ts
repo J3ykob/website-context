@@ -1,3 +1,4 @@
+import { countLlm } from "./turn-usage.js";
 export interface OpenRouterConfig {
   apiKey?: string;
   model?: string;
@@ -59,6 +60,7 @@ export class OpenRouterProvider {
       usage: { prompt_tokens: number; completion_tokens: number };
     };
 
+    countLlm(data.usage?.prompt_tokens || 0, data.usage?.completion_tokens || 0);
     return {
       content: data.choices[0]?.message?.content || "",
       usage: data.usage || { prompt_tokens: 0, completion_tokens: 0 },
@@ -113,6 +115,7 @@ export class OpenRouterProvider {
         } catch { /* partial JSON across chunks — ignored, completes next read */ }
       }
     }
+    countLlm();
     return { content };
   }
 }

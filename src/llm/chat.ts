@@ -295,6 +295,12 @@ const ECO_CHECKING: Record<OfferLang, string> = {
 // A network search started alongside our own reply (see networkStart).
 interface NetworkAsk { need: string; lang: OfferLang; matches: Promise<EcosystemMatch[]> }
 
+/** How a reply was produced (recorded per turn, reported in admin traces). */
+export function routeOf(r: ChatResponse): Route {
+  return r.project?.agent ? "agent" : r.project ? "estimate" : r.collect ? "collect" : r.flowSession ? "flow"
+    : r.partners?.length ? "network" : r.grounded === false ? "refusal" : "knowledge";
+}
+
 export class WebsiteChat {
   private backend: LLMBackend;
   private maxTokens: number;
@@ -451,8 +457,7 @@ export class WebsiteChat {
 
   private recordConversationTurn(messages: ChatMessage[], sessionKey: string | undefined, r: ChatResponse): void {
     const user = messages.findLast((m) => m.role === "user")?.content || "";
-    const route: Route = r.project?.agent ? "agent" : r.project ? "estimate" : r.collect ? "collect" : r.flowSession ? "flow"
-      : r.partners?.length ? "network" : r.grounded === false ? "refusal" : "knowledge";
+    const route = routeOf(r);
     void conversationProject(this.context.tenantId, sessionKey || "default", user).then((pid) => recordTurn(pid, { user, assistant: r.message, route, data: r.project ? { project: r.project } : undefined }));
   }
 

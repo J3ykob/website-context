@@ -88,6 +88,8 @@ import { registerAgentRoutes } from "../src/agent/routes.js";
 import { registerOfferRoutes } from "../src/offer/routes.js";
 import { registerProjectRoutes } from "../src/projects/routes.js";
 import { getHandoff, markHandoffOpened } from "../src/ecosystem/handoff.js";
+import { turnUsage, newTurnUsage } from "../src/llm/turn-usage.js";
+import { routeOf } from "../src/llm/chat.js";
 import { ensureCollectFlow } from "../src/flows/collect-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1286,6 +1288,12 @@ app.post("/api/chat", async (req, res) => {
     };
 
     // Streaming (SSE) path — surface the answer token-by-token for low perceived latency.
+    // What answering this message took (LLM / Jev calls, time, route) - for admins
+    // only (routing evals): X-Admin-Secret header.
+    const usage = newTurnUsage();
+    const turnStart = Date.now();
+    const traceFor = (r: any) => adminOk(req) ? { trace: { route: routeOf(r), ms: Date.now() - turnStart, ...usage } } : {};
+
     if (req.body.stream) {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -1293,12 +1301,12 @@ app.post("/api/chat", async (req, res) => {
       res.setHeader("X-Accel-Buffering", "no"); // disable proxy buffering (Render)
       (res as any).flushHeaders?.();
       try {
-        const full = await chat.chatStream(messages, sessionKey, (delta) => {
+        const full = await turnUsage.run(usage, () => chat.chatStream(messages, sessionKey, (delta) => {
           res.write(`data: ${JSON.stringify({ delta })}\n\n`);
         }, formState && typeof formState === "object" ? formState : undefined, (status) => {
           res.write(`data: ${JSON.stringify({ status })}\n\n`);
-        });
-        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null, partners: full.partners || null, project: full.project || null })}\n\n`);
+        }));
+        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null, partners: full.partners || null, project: full.project || null, collect: full.collect || null, ...traceFor(full) })}\n\n`);
         res.end();
         logResponse(full);
       } catch (error: any) {
@@ -1314,9 +1322,9 @@ app.post("/api/chat", async (req, res) => {
     }
 
     {
-      const response = await chat.chat(messages, sessionKey, formState && typeof formState === "object" ? formState : undefined);
+      const response = await turnUsage.run(usage, () => chat.chat(messages, sessionKey, formState && typeof formState === "object" ? formState : undefined));
       logResponse(response);
-      res.json(response);
+      res.json({ ...response, ...traceFor(response) });
     }
   } catch (error: any) {
     const msg = String(error?.message || "");

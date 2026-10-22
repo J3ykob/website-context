@@ -12,6 +12,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { countJev } from "./turn-usage.js";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 
@@ -57,6 +58,7 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     if (!answers || typeof answers !== "object") throw new Error("no answers");
     const u = jevUsage.getStore();
     if (u) { u.inputTokens += Number(json?.usage?.input_tokens) || 0; u.calls++; }
+    countJev(Number(json?.usage?.input_tokens) || 0);
     return answers;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
