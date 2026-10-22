@@ -6,7 +6,7 @@
  * rules + an LLM judge (Workers AI), writes a report, and deletes everything the
  * run created (chat messages, projects, hand-off links).
  *
- *   ADMIN_SECRET=... npx tsx evals/routing/run.ts [--only K1,X2] [--base https://whisp.so] [--out file.json]
+ *   ADMIN_SECRET=... npx tsx evals/routing/run.ts [--only K1,X2] [--base https://whisp.so] [--out file.json] [--keep]
  *
  * Needs ADMIN_SECRET (trace) and a logged-in wrangler (judge + cleanup).
  */
@@ -174,6 +174,8 @@ try { writeFileSync(OUT, JSON.stringify({ run: RUN, base: BASE, at: new Date().t
 console.log(`report: ${OUT}`); } catch (e) { console.error(`could not write report: ${(e as Error).message}`); }
 
 // Clean up everything eval runs created (also leftovers of an aborted earlier run).
+// --keep leaves this run's data for debugging (the next run without it cleans it).
+if (process.argv.includes("--keep")) { console.log("kept run data (--keep)"); process.exit(0); }
 const like = `reval-%`;
 const projIds = `SELECT id FROM projects WHERE customer_session LIKE ?`;
 for (const t of ["project_events", "project_participants", "project_consents", "project_files", "project_requirements", "project_reviews"]) await d1(`DELETE FROM ${t} WHERE project_id IN (${projIds})`, [like]);

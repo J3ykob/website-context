@@ -271,7 +271,9 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
   let networkOffers: NetworkOffer[] = [];
   let parts: string[] = [];
   if (project.type === BUSINESS_REQUEST) adverts = need ? await advertise(need, tenantIds) : [];
-  else if (need) {
+  // Quantities only (how much material for these sizes): nothing to price, so nobody to ask - the
+  // network is not involved (it once had the agent ask a contractor to quote a wall for a board count).
+  else if (need && !project.memory.pureCalc) {
     const prevB = project.memory.broadcast as { need: string; parts: string[]; picked: { tenantId: string; part: number; precise: boolean; text: string; items: string[] }[] } | undefined;
     const { loadOffer } = await import("../offer/store.js");
     if (prevB?.need === needHash) {
@@ -360,7 +362,9 @@ export async function startAgentRun(projectId: string, instruction: string, acto
   // A planned project: the frozen spec is part of the harness's system prompt; the prompt only points to it.
   const spec = project.memory.plan as import("./plan.js").Spec | undefined;
   const { renderSpec } = await import("./plan.js");
-  const rules = spec ? RULES + renderSpec(spec) : RULES;
+  // Quantities only: a calculation from the customer's own figures - no prices, no other businesses.
+  const pureCalc = project.memory.pureCalc ? "\n\nTo czyste wyliczenie ilości z danych klienta: policz i odpowiedz. Bez cen i bez pytania innych firm (nie twórz zapytania_do_firm.json)." : "";
+  const rules = (spec ? RULES + renderSpec(spec) : RULES) + pureCalc;
   const prompt = spec ? `Wykonaj specyfikację z AGENTS.md (v${spec.version}).${instruction ? `\n\n${instruction}` : ""}` : `Zadanie projektu "${project.title || project.type}":\n${instruction}\n\nZasady pracy są w AGENTS.md.`;
 
   timing.readFilesMs = Date.now() - t0;
