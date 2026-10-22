@@ -290,6 +290,15 @@ function scriptOf(ch: string): string {
   return "Chinese";
 }
 
+// The router's reading of the visitor's language, named outright at the end of the
+// prompt: the general "same language" rule alone let an English question about a
+// Polish site get an answer that switched to Polish mid-sentence.
+const LANG_NAMES: Partial<Record<OfferLang, string>> = { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German" };
+function replyLanguage(rt: TurnRoute | null): string {
+  const name = rt && LANG_NAMES[rt.lang];
+  return name ? `\n\nREPLY LANGUAGE: ${name} - the whole reply in ${name}, even though our information is written in another language.` : "";
+}
+
 // Fixed texts of the router's replies, by the visitor's language (no model writes them).
 const REFUSAL: Record<OfferLang, string> = {
   pl: "Nie mam tej informacji w tym, co wiem o nas, więc nie chcę zgadywać.",
@@ -666,7 +675,7 @@ export class WebsiteChat {
     const gapC = this.gapDecision(lastUserMessage, factCheckC); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
-    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage, factCheckC);
+    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, lastUserMessage, factCheckC) + replyLanguage(rt);
 
     const sources = [...new Map(
       retrievedChunks.map((c) => [
@@ -1034,7 +1043,7 @@ export class WebsiteChat {
     const gapS = this.gapDecision(inputValidation.sanitized, factCheckS); // runs alongside generation
 
     const recentFlowId = this.recentlyCompletedFlows.get(effectiveSessionKey);
-    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, inputValidation.sanitized, factCheckS);
+    const systemPrompt = this.buildSystemPrompt(retrievedChunks, recentFlowId, inputValidation.sanitized, factCheckS) + replyLanguage(rtS);
 
     // Stream with a holdback: once a potential [[...]] marker starts, stop
     // forwarding tokens so the gap marker never flashes in the widget. If the
@@ -1043,16 +1052,7 @@ export class WebsiteChat {
     let raw = "";
     let emitted = 0;
     let holding = false;
-    if (factCheckS === "no_evidence") {
-      // Short reply, checked before the visitor sees it: generate, guard, then emit once.
-      let draft = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
-      draft = await this.guardNoEvidence(inputValidation.sanitized, systemPrompt, sanitizedMessages, draft);
-      const g = this.extractGapMarker(draft);
-      raw = g.text;
-      // Our reply now, with a "checking…" line until the network has answered.
-      onToken(raw + offerS + (netS ? "\n\n" + ECO_CHECKING[netS.lang] : ""));
-      emitted = raw.length;
-    } else await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
+    await this.backend.generateStream!(systemPrompt, sanitizedMessages, this.maxTokens, (delta) => {
       raw += delta;
       if (holding) return;
       const idx = raw.indexOf("[[", Math.max(0, emitted - 1));
@@ -1065,8 +1065,14 @@ export class WebsiteChat {
         holding = true;
       }
     });
+    // No answer in our information: the offer to pass the question on (and a
+    // "checking…" line while the network looks) shows right after our reply.
+    if (factCheckS === "no_evidence" && !holding) onToken(offerS + (netS ? "\n\n" + ECO_CHECKING[netS.lang] : ""));
     const gapStream = this.extractGapMarker(raw);
     raw = gapStream.text;
+    // Checked after the stream (the widget swaps in the final message): no flat
+    // "we don't offer it", no pointing elsewhere, no invented facts about us.
+    if (factCheckS === "no_evidence") raw = this.extractGapMarker(await this.guardNoEvidence(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw)).text;
     // The widget replaces the streamed bubble with the final message, so a rewrite
     // here fixes what the visitor ends up seeing.
     raw = this.extractGapMarker(await this.fixForeignScript(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw)).text;
@@ -1759,18 +1765,25 @@ Answer:`;
     } catch { return null; }
   }
 
-  // When Jev found no evidence, Jev also checks the draft: a reply that denies we
-  // offer something, or answers from general knowledge / points elsewhere, is
+  // When Jev found no evidence, Jev also checks the draft: a reply that flatly
+  // denies we offer something, points to other companies, or states facts about
+  // the business our official info does not support (prices, stock, brands) is
   // rewritten once with an explicit correction. The prompt rule alone was ignored
-  // ("rezonans is not in our offer", "Paris").
+  // ("rezonans is not in our offer", "Paris"). General advice passes.
   private async guardNoEvidence(question: string, systemPrompt: string, messages: ChatMessage[], draft: string): Promise<string> {
-    const v = await jevCheckNoEvidenceReply(question, draft);
-    if (!v || (v.denies < 0.5 && v.external < 0.5)) return draft;
+    const statements = splitStatements(draft);
+    const [v, scores] = await Promise.all([
+      jevCheckNoEvidenceReply(question, draft),
+      statements.length ? jevUnsupportedStatements(question, statements, this.verifySources([])).catch(() => null) : Promise.resolve([] as number[]),
+    ]);
+    const invented = scores ? statements.filter((_, i) => scores[i] >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) : [];
     const problems: string[] = [];
-    if (v.denies >= 0.5) problems.push("it says or implies that we do not offer or do something, although we simply have no information about it");
-    if (v.external >= 0.5) problems.push("it answers from general knowledge or points to other companies or places");
-    console.log(`[no-evidence] ${this.context.tenantId}: rewriting draft (denies=${v.denies.toFixed(2)}, external=${v.external.toFixed(2)})`);
-    const fix = `${systemPrompt}\n\n## CORRECTION\nYour previous draft was:\n"""\n${draft.slice(0, 1500)}\n"""\nIt breaks the final rule because ${problems.join(", and ")}. Write the reply again: say we don't have this information here and how the visitor can reach us to ask. Same language as the visitor.`;
+    if (v && v.denies >= 0.5) problems.push("it says or implies that we do not offer or do something, although we simply have no information about it");
+    if (v && v.external >= 0.5) problems.push("it points the visitor to other companies or places");
+    if (invented.length) problems.push(`it states facts about us that our information does not contain:\n${invented.map((b) => `- ${b}`).join("\n")}`);
+    if (problems.length === 0) return draft;
+    console.log(`[no-evidence] ${this.context.tenantId}: rewriting draft (denies=${v?.denies.toFixed(2)}, external=${v?.external.toFixed(2)}, invented=${invented.length})`);
+    const fix = `${systemPrompt}\n\n## CORRECTION\nYour previous draft was:\n"""\n${draft.slice(0, 1500)}\n"""\nIt breaks the final rule because ${problems.join(", and ")}. Write the reply again: say we don't have this information here (general advice may stay). Same language as the visitor.`;
     try {
       return await this.backend.generate(fix, messages, this.maxTokens);
     } catch {
@@ -1804,13 +1817,7 @@ Answer:`;
     if (!jevEnabled()) return text;
     const statements = splitStatements(text);
     if (statements.length === 0) return text;
-    const sources = [
-      renderOfficialInfo(this.context.businessProfile),
-      ...this.contextNotes.map((n) => `Q: ${n.question}\nA: ${n.answer}`),
-      // The same passages the model saw (up to 25): checking against fewer made
-      // correct lines of long lists look unsupported.
-      ...chunks.slice(0, 25).map((c) => c.content.slice(0, 2500)),
-    ].filter((x) => x && x.trim());
+    const sources = this.verifySources(chunks);
     const t0 = Date.now();
     const scores = await jevUnsupportedStatements(question, statements, sources);
     if (!scores) return text;
@@ -1824,6 +1831,16 @@ Answer:`;
     } catch {
       return text;
     }
+  }
+
+  private verifySources(chunks: { content: string }[]): string[] {
+    return [
+      renderOfficialInfo(this.context.businessProfile),
+      ...this.contextNotes.map((n) => `Q: ${n.question}\nA: ${n.answer}`),
+      // The same passages the model saw (up to 25): checking against fewer made
+      // correct lines of long lists look unsupported.
+      ...chunks.slice(0, 25).map((c) => c.content.slice(0, 2500)),
+    ].filter((x) => x && x.trim());
   }
 
   // Knowledge-gap decision by Jev: only when no evidence was found, and only for

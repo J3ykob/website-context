@@ -162,8 +162,9 @@ export async function jevIsKnowledgeGap(message: string): Promise<number | null>
 /**
  * Checks a draft reply written when the knowledge base had NO answer. Flags the
  * two failure modes the prompt rule alone did not stop: claiming the business
- * does not offer something (missing info is not a "no"), and answering from
- * general knowledge / pointing to other providers.
+ * does not offer something (missing info is not a "no"), and pointing to other
+ * providers. Invented facts about the business are checked statement by statement
+ * (jevUnsupportedStatements), which accepts our real contact details.
  */
 export async function jevCheckNoEvidenceReply(question: string, reply: string): Promise<{ denies: number; external: number } | null> {
   const answers = await jevAsk({ question, reply }, {
@@ -173,7 +174,7 @@ export async function jevCheckNoEvidenceReply(question: string, reply: string): 
     },
     external: {
       type: "noul",
-      instructions: "Does `reply` recommend another company, hospital, shop, website or place, or state specific facts about this business (its prices, stock, products or brands it carries, dates, terms)? General professional advice (how to choose, what to consider) is fine and does NOT count.",
+      instructions: "Does `reply` recommend or point the visitor to another company, hospital, shop, website or place? General professional advice (how to choose, what to consider) and our own contact details do NOT count.",
     },
   });
   const d = answers?.denies as JevNoulAnswer | undefined;
