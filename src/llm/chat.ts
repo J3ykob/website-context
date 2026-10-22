@@ -845,7 +845,7 @@ export class WebsiteChat {
     // (We're past all flow paths here, so flow-only demos are unaffected.)
     // Fallback: plain text generation (no flows active or backend doesn't support tools)
     let responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
-    if (factCheckC === "no_evidence") responseText = await this.guardNoEvidence(lastUserMessage, systemPrompt, sanitizedMessages, responseText);
+    if (factCheckC === "no_evidence") responseText = await this.guardNoEvidence(lastUserMessage, systemPrompt, sanitizedMessages, responseText, retrievedChunks);
     responseText = await this.fixForeignScript(lastUserMessage, systemPrompt, sanitizedMessages, responseText);
     if (factCheckC === "confirmed") responseText = await this.verifyAnswer(lastUserMessage, systemPrompt, sanitizedMessages, this.extractGapMarker(responseText).text, usableChunksC);
 
@@ -1005,7 +1005,13 @@ export class WebsiteChat {
     // otherwise the router decides (the full path reuses its decision).
     const pendingS = this.pendingDisambig.get(effectiveSessionKey);
     const busy = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey)
-      || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000) || this.handoffOffers.has(effectiveSessionKey);
+      || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000);
+    // The answer to our "pass it to the business?" offer: settled here (one Jev
+    // call), so a message that is not an answer still streams.
+    if (!busy && this.handoffOffers.has(effectiveSessionKey)) {
+      const handedOver = await this.handoffConsent(effectiveSessionKey, inputValidation.sanitized);
+      if (handedOver) { onToken(handedOver.message); return handedOver; }
+    }
     const rtS = busy ? null : await this.routeTurn(sanitizedMessages, inputValidation.sanitized);
     const flowsS = this.routableFlows();
     const flowInPlay = busy
@@ -1072,7 +1078,7 @@ export class WebsiteChat {
     raw = gapStream.text;
     // Checked after the stream (the widget swaps in the final message): no flat
     // "we don't offer it", no pointing elsewhere, no invented facts about us.
-    if (factCheckS === "no_evidence") raw = this.extractGapMarker(await this.guardNoEvidence(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw)).text;
+    if (factCheckS === "no_evidence") raw = this.extractGapMarker(await this.guardNoEvidence(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw, retrievedChunks)).text;
     // The widget replaces the streamed bubble with the final message, so a rewrite
     // here fixes what the visitor ends up seeing.
     raw = this.extractGapMarker(await this.fixForeignScript(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw)).text;
@@ -1767,14 +1773,15 @@ Answer:`;
 
   // When Jev found no evidence, Jev also checks the draft: a reply that flatly
   // denies we offer something, points to other companies, or states facts about
-  // the business our official info does not support (prices, stock, brands) is
+  // the business that neither our official info nor the passages the model saw
+  // support (prices, stock, brands; our real phone or address pass) is
   // rewritten once with an explicit correction. The prompt rule alone was ignored
   // ("rezonans is not in our offer", "Paris"). General advice passes.
-  private async guardNoEvidence(question: string, systemPrompt: string, messages: ChatMessage[], draft: string): Promise<string> {
+  private async guardNoEvidence(question: string, systemPrompt: string, messages: ChatMessage[], draft: string, chunks: { content: string }[]): Promise<string> {
     const statements = splitStatements(draft);
     const [v, scores] = await Promise.all([
       jevCheckNoEvidenceReply(question, draft),
-      statements.length ? jevUnsupportedStatements(question, statements, this.verifySources([])).catch(() => null) : Promise.resolve([] as number[]),
+      statements.length ? jevUnsupportedStatements(question, statements, this.verifySources(chunks)).catch(() => null) : Promise.resolve([] as number[]),
     ]);
     const invented = scores ? statements.filter((_, i) => scores[i] >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) : [];
     const problems: string[] = [];
