@@ -1,19 +1,25 @@
 import { countLlm } from "./turn-usage.js";
 
 // OpenRouter routes each call to one of a model's providers; a provider that
-// fails (404 "model not found", 429, 5xx) fails the call, though another would
-// answer. One retry, routed away from the provider that failed (its name is in
-// the error) and without the speed preference that picked it. Not for request
-// errors (400, 401, 402 - those won't change).
+// fails (404 "model not found", 429, 5xx, or a 400 the provider itself returned,
+// e.g. "model deprecated") fails the call, though another would answer. Up to two
+// retries, each routed away from every provider that failed so far (named in the
+// error) and without the speed preference that picked them. Request errors
+// (400 without a provider, 401, 402) are not retried - those won't change.
 type ProviderPrefs = { sort?: string; ignore?: string[] };
 async function withProviderRetry(call: (provider: ProviderPrefs) => Promise<Response>): Promise<Response> {
-  const r = await call({ sort: process.env.OPENROUTER_PROVIDER_SORT || "throughput" });
-  if (r.ok || ![404, 408, 429, 500, 502, 503, 504].includes(r.status)) return r;
-  const body = await r.text().catch(() => "");
-  let failed: string | undefined;
-  try { failed = JSON.parse(body)?.error?.metadata?.provider_name; } catch {}
-  console.warn(`[openrouter] provider error ${r.status}${failed ? ` (${failed})` : ""}, retrying elsewhere`);
-  return call(failed ? { ignore: [failed] } : {});
+  let r = await call({ sort: process.env.OPENROUTER_PROVIDER_SORT || "throughput" });
+  const failed: string[] = [];
+  for (let attempt = 0; attempt < 2 && !r.ok; attempt++) {
+    const body = await r.clone().text().catch(() => "");
+    let provider: string | undefined;
+    try { provider = JSON.parse(body)?.error?.metadata?.provider_name; } catch {}
+    if (![404, 408, 429, 500, 502, 503, 504].includes(r.status) && !(r.status === 400 && provider)) break;
+    if (provider && !failed.includes(provider)) failed.push(provider);
+    console.warn(`[openrouter] provider error ${r.status}${provider ? ` (${provider})` : ""}, retrying elsewhere`);
+    r = await call(failed.length ? { ignore: failed } : {});
+  }
+  return r;
 }
 export interface OpenRouterConfig {
   apiKey?: string;
