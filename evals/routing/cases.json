@@ -16,6 +16,8 @@
     { "id": "N2", "tenant": "masterbud_pl", "turns": [{ "user": "Czy dajecie 10 lat gwarancji na remont łazienki?", "route": ["knowledge", "refusal"], "network": [], "lang": "pl", "handoff": true, "judge": "Says it has no information about a 10-year guarantee and offers to pass the question to the business." }] },
     { "id": "N3", "tenant": "marsan_pl", "turns": [{ "user": "Czy macie parking dla klientów przy magazynie?", "route": ["knowledge", "refusal"], "network": [], "lang": "pl", "handoff": true, "judge": "Says it has no information about customer parking and offers to pass the question to the business." }] },
 
+    { "id": "N4", "tenant": "www_rentbud_pl", "turns": [{ "user": "Czy zagęszczarka 70 kg będzie wolna w najbliższą sobotę?", "route": ["knowledge", "refusal"], "network": [], "lang": "pl", "handoff": true, "judge": "Does not claim the compactor is or isn't available on Saturday (the price list says nothing about availability); may mention it is in the offer and its price; offers to pass the question to the business." }] },
+
     { "id": "O1", "tenant": "marsan_pl", "turns": [
       { "user": "Chcę zamówić 20 worków cementu z dostawą na piątek", "route": ["collect"], "network": [], "lang": "pl", "maxTotalMs": 12000, "judge": "Starts an order: asks for the missing details (address and/or name/phone), does not claim anything was sent." },
       { "user": "Marki, ul. Lipowa 5. Jan Testowy, 600 100 200", "route": ["collect"], "network": [], "lang": "pl", "maxTotalMs": 12000, "judge": "Shows a summary of the order (cement, 20 bags, Friday, Marki ul. Lipowa 5, Jan Testowy, 600 100 200) and asks to confirm." },

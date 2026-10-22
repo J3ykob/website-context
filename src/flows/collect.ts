@@ -230,11 +230,65 @@ Output {"status": "...", "missing": [...], "options": [...]}:
  * An existing value changes only on an explicit correction; a confirmation
  * never touches the values.
  */
+function inquiryOf(flow: FlowDefinition, s: CollectSession, fields: FlowInput[]): Inquiry {
+  return {
+    flowId: flow.id,
+    flowName: flow.name,
+    ...(s.via ? { via: s.via } : {}),
+    fields: fields.filter((f) => (s.values[f.name] || "").trim()).map((f) => ({ label: f.label, value: s.values[f.name] })),
+    transcript: s.transcript.slice(-30),
+    at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Jev: does the message only confirm the summary (when one was shown) or cancel the whole thing?
+ * Taken only when Jev is sure (>= 0.8); "yes, but change…" and new details are "other".
+ * null = read the message with the model.
+ */
+export async function quickAnswer(s: CollectSession, message: string, prior: string): Promise<"confirm" | "cancel" | null> {
+  const criteria: Record<string, string> = {
+    cancel: "Wants to stop or cancel the whole order / request (e.g. 'cancel it', 'no thanks, forget it').",
+    other: "Anything else: gives, adds or corrects details, asks something, agrees but changes or adds something, or is unclear.",
+  };
+  if (s.stage === "confirming") criteria.confirm = "Confirms the summary shown as it is (e.g. 'yes', 'correct', 'send it', 'ok') without changing or adding anything.";
+  const a = await jevAsk({ earlier_conversation: prior.slice(-1500), message: message.slice(0, 600) }, {
+    act: { type: "choice", instructions: "A customer is placing an order or request in a chat with a business. What does the customer's new `message` do?", criteria },
+  }, 3000).catch(() => null);
+  const c = a?.act as { choice?: string; probabilities?: Record<string, number> } | undefined;
+  if (!c?.choice || c.choice === "other" || (c.probabilities?.[c.choice] ?? 0) < 0.8) return null;
+  return c.choice === "confirm" || c.choice === "cancel" ? c.choice : null;
+}
+
+// Fixed replies for the two settled answers, by the conversation's language (named in English by the
+// reader). The order goes out with the customer's contact, so "the team will get back to you" is backed.
+const FIXED: Record<string, { confirm: string; cancel: string }> = {
+  polish: { confirm: "Dziękuję! Przekazuję zgłoszenie naszemu zespołowi - skontaktujemy się z Tobą.", cancel: "W porządku, anulowałem - nic nie zostało wysłane." },
+  english: { confirm: "Thank you! I'm passing your request to our team - they will get back to you.", cancel: "All right, it's cancelled - nothing was sent." },
+  ukrainian: { confirm: "Дякую! Передаю ваш запит нашій команді - ми з вами зв'яжемося.", cancel: "Гаразд, скасовано - нічого не надіслано." },
+  french: { confirm: "Merci ! Je transmets votre demande à notre équipe - elle vous recontactera.", cancel: "Très bien, c'est annulé - rien n'a été envoyé." },
+  german: { confirm: "Danke! Ich gebe Ihre Anfrage an unser Team weiter - es meldet sich bei Ihnen.", cancel: "In Ordnung, storniert - es wurde nichts gesendet." },
+};
+function fixedReply(kind: "confirm" | "cancel", language?: string): string | null {
+  const l = (language || "").trim().toLowerCase().split(/[\s(]/)[0];
+  return FIXED[l]?.[kind] ?? null;
+}
+
 export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, handOver = false): Promise<CollectResult> {
   s.at = Date.now();
   const fields = fieldsOf(flow);
   const prior = s.transcript.slice(-12).join("\n");
   s.transcript.push(`Customer: ${message.slice(0, 1000)}`);
+
+  // "Yes, send it" / "cancel": settled by one Jev question, answered with a fixed text in the
+  // conversation's language - no model call. Anything else (details, corrections, "yes but…") is read below.
+  const quick = await quickAnswer(s, message, prior);
+  const fixed = quick ? fixedReply(quick, s.language) : null;
+  if (quick === "cancel" && fixed) { s.transcript.push(`Assistant: ${fixed}`); return { reply: fixed, cancelled: true }; }
+  if (quick === "confirm" && fixed && s.stage === "confirming" && !missingRequired(flow, s).length) {
+    s.transcript.push(`Assistant: ${fixed}`);
+    return { reply: fixed, inquiry: inquiryOf(flow, s, fields) };
+  }
 
   const read = parseJsonObject(await llm(
     `You read one customer message in an order / inquiry chat for the business ${brand || "(this business)"} and output only JSON.`,
@@ -352,15 +406,7 @@ Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${s
   if (outcome === "cancel") return { reply, cancelled: true };
   if (outcome === "send") {
     s.transcript.push(`Assistant: ${reply}`);
-    const inquiry: Inquiry = {
-      flowId: flow.id,
-      flowName: flow.name,
-      ...(s.via ? { via: s.via } : {}),
-      fields: fields.filter((f) => (s.values[f.name] || "").trim()).map((f) => ({ label: f.label, value: s.values[f.name] })),
-      transcript: s.transcript.slice(-30),
-      at: new Date().toISOString(),
-    };
-    return { reply, inquiry };
+    return { reply, inquiry: inquiryOf(flow, s, fields) };
   }
   if (outcome === "summary") { s.stage = "confirming"; reply = `${reply}\n\n${summary(flow, s, out?.labels && typeof out.labels === "object" ? out.labels : {})}`; }
   else s.stage = "collecting";

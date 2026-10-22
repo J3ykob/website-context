@@ -915,10 +915,12 @@ export class WebsiteChat {
       }
     }
     const fromCatalog = await this.catalogRetrieve(lastUserMessage, retrievedChunks);
-    // The owner's offer items the message is about (judged by Jev), first.
+    // The owner's offer items the message is about (judged by Jev), first. Matched by name only - whether
+    // an item ANSWERS the question (its price yes, its availability on Saturday no) is judged by the gate
+    // like any passage; a preset score made every matching item "confirmed".
     const offer = (await offerHits).map((it) => ({
       content: renderItem(it),
-      metadata: { url: "", title: `Oferta: ${it.name}`, headingHierarchy: ["Oferta", it.category].filter(Boolean), type: "product", offer: true, jevScore: 1 } as Record<string, unknown>,
+      metadata: { url: "", title: `Oferta: ${it.name}`, headingHierarchy: ["Oferta", it.category].filter(Boolean), type: "product", offer: true } as Record<string, unknown>,
       score: 1,
     }));
     return offer.length ? [...offer, ...fromCatalog] : fromCatalog;
