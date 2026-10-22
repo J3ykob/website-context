@@ -1430,7 +1430,7 @@ export class WebsiteChat {
     // Each excerpt carries its business's name (statements name the business), plus
     // the fact that we checked these businesses (the reply's opening line).
     const evidence = [
-      { content: `We checked with these businesses we work with: ${found.map((f) => f.label).join(", ")}.` },
+      { content: `We checked with these businesses we work with: ${found.map((f) => f.label).join(", ")}.` + (this.handoffLinks ? ` The visitor can continue the conversation directly with each of them using the link below.` : "") },
       ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }]),
     ];
     reply = (await this.verifyAnswer(question, system, asked, reply, evidence)).trim() || reply;
