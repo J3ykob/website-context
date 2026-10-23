@@ -1798,7 +1798,7 @@ Answer:`;
     if (invented.length) problems.push(`it states facts about us that our information does not contain:\n${invented.map((b) => `- ${b}`).join("\n")}`);
     if (problems.length === 0) return draft;
     console.log(`[no-evidence] ${this.context.tenantId}: rewriting draft (denies=${v?.denies.toFixed(2)}, external=${v?.external.toFixed(2)}, invented=${invented.length})${invented.length ? `: ${invented.map((b) => b.slice(0, 80)).join(" | ")}` : ""}`);
-    const fix = `${systemPrompt}\n\n## CORRECTION\nYour previous draft was:\n"""\n${draft.slice(0, 1500)}\n"""\nIt breaks the final rule because ${problems.join(", and ")}. Write the reply again: say we don't have this information here (general advice may stay). Same language as the visitor.`;
+    const fix = `${systemPrompt}\n\n## CORRECTION\nYour previous draft was:\n"""\n${draft.slice(0, 1500)}\n"""\nIt breaks the final rule because ${problems.join(", and ")}. Write the reply again: say we don't have this information here. Do not say we don't offer or do it, do not point to any other company, shop or place, and state no facts about us that our information does not contain. General professional advice may stay. Same language as the visitor.`;
     try {
       return await this.backend.generate(fix, messages, this.maxTokens);
     } catch {
