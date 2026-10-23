@@ -23,6 +23,7 @@ import { validateInput } from "../security/input-guard.js";
 import { validateOutput } from "../security/output-guard.js";
 import type { EcosystemMatch } from "../ecosystem/ask.js";
 import { route as routeMessage, type Route as TurnRoute } from "./router.js";
+import { guessLang } from "./lang.js";
 import { isQuestionFlow } from "../flows/collect-store.js";
 import { setMemory as setProjectMemory } from "../projects/store.js";
 import { jevYesWhatNo, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
@@ -317,20 +318,20 @@ const HANDOFF_OFFER: Record<OfferLang, string> = {
   other: "I can pass this question on to our team directly so they can get back to you. Shall I?",
 };
 const QUOTE_OFFER: Record<OfferLang, string> = {
-  pl: "Mogę przekazać Twoją prośbę o wycenę naszemu zespołowi - przygotujemy ją i odezwiemy się. Przekazać?",
-  en: "I can pass your quote request on to our team - we'll prepare it and get back to you. Shall I?",
-  uk: "Можу передати ваш запит на розрахунок нашій команді - ми підготуємо його і зв'яжемося з вами. Передати?",
-  fr: "Je peux transmettre votre demande de devis à notre équipe - nous la préparerons et vous recontacterons. Je la transmets ?",
-  de: "Ich kann Ihre Angebotsanfrage an unser Team weitergeben - wir erstellen es und melden uns. Soll ich?",
-  other: "I can pass your quote request on to our team - we'll prepare it and get back to you. Shall I?",
+  pl: "Mogę przekazać Twoją prośbę o wycenę naszemu zespołowi, żeby mógł ją przygotować. Przekazać?",
+  en: "I can pass your quote request on to our team so they can prepare it. Shall I?",
+  uk: "Можу передати ваш запит на розрахунок нашій команді, щоб вона могла його підготувати. Передати?",
+  fr: "Je peux transmettre votre demande de devis à notre équipe pour qu'elle puisse la préparer. Je la transmets ?",
+  de: "Ich kann Ihre Angebotsanfrage an unser Team weitergeben, damit es das Angebot erstellen kann. Soll ich?",
+  other: "I can pass your quote request on to our team so they can prepare it. Shall I?",
 };
 const HANDOFF_EXPLAIN: Record<OfferLang, string> = {
-  pl: "Zapiszę Twoje pytanie razem z danymi kontaktowymi, które podasz, i przekażę je bezpośrednio naszemu zespołowi - odpowiemy Ci telefonicznie lub mailowo. Przekazać?",
-  en: "I'll note your question together with the contact details you give and pass it straight to our team - we'll reply by phone or email. Shall I?",
-  uk: "Я запишу ваше питання разом із вашими контактами і передам його безпосередньо нашій команді - ми відповімо телефоном або поштою. Передати?",
-  fr: "Je note votre question avec les coordonnées que vous me donnez et je la transmets directement à notre équipe - nous vous répondrons par téléphone ou par e-mail. Je la transmets ?",
-  de: "Ich notiere Ihre Frage mit Ihren Kontaktdaten und gebe sie direkt an unser Team weiter - wir antworten telefonisch oder per E-Mail. Soll ich?",
-  other: "I'll note your question together with the contact details you give and pass it straight to our team - we'll reply by phone or email. Shall I?",
+  pl: "Zapiszę Twoje pytanie razem z danymi kontaktowymi, które podasz, i przekażę je bezpośrednio naszemu zespołowi, żeby mógł Ci odpowiedzieć telefonicznie lub mailowo. Przekazać?",
+  en: "I'll note your question together with the contact details you give and pass it straight to our team, so they can reply by phone or email. Shall I?",
+  uk: "Я запишу ваше питання разом із вашими контактами і передам його безпосередньо нашій команді, щоб вона могла відповісти телефоном або поштою. Передати?",
+  fr: "Je note votre question avec les coordonnées que vous me donnez et je la transmets directement à notre équipe, pour qu'elle puisse vous répondre par téléphone ou par e-mail. Je la transmets ?",
+  de: "Ich notiere Ihre Frage mit Ihren Kontaktdaten und gebe sie direkt an unser Team weiter, damit es Ihnen telefonisch oder per E-Mail antworten kann. Soll ich?",
+  other: "I'll note your question together with the contact details you give and pass it straight to our team, so they can reply by phone or email. Shall I?",
 };
 const NO_PRICES: Record<OfferLang, string> = {
   pl: "Nie mam tutaj cen tych pozycji, więc nie policzę tego rzetelnie.",
@@ -348,10 +349,24 @@ const WHICH_ACTION: Record<OfferLang, (names: string[]) => string> = {
   de: (n) => `Ich kann bei mehreren Dingen helfen - möchten Sie ${n.join(" oder ")}?`,
   other: (n) => `I can help with a couple of things here - did you want ${n.join(" or ")}?`,
 };
-const BLOCKED = {
+const BLOCKED: Record<OfferLang, string> = {
   pl: "Jestem tu, żeby pomóc w sprawach naszej firmy. W czym mogę pomóc?",
   en: "I'm here to help you with questions about this business. How can I help?",
+  uk: "Я тут, щоб допомогти з питаннями щодо нашої компанії. Чим можу допомогти?",
+  fr: "Je suis là pour vous aider pour tout ce qui concerne notre entreprise. Comment puis-je vous aider ?",
+  de: "Ich bin hier, um Ihnen bei Fragen zu unserem Unternehmen zu helfen. Wie kann ich helfen?",
+  other: "I'm here to help you with questions about this business. How can I help?",
 };
+// Honest failure messages of the in-chat forms, when the model cannot be used.
+const COLLECT_FAILED: Record<OfferLang, { send: string; turn: string }> = {
+  pl: { send: "Przepraszam, nie udało mi się teraz przekazać zapytania. Skontaktuj się z nami bezpośrednio, a chętnie pomożemy.", turn: "Przepraszam, coś poszło nie tak. Napisz proszę jeszcze raz." },
+  en: { send: "Sorry, I couldn't pass your request on right now. Please contact us directly and we'll be happy to help.", turn: "Sorry, something went wrong. Please write that again." },
+  uk: { send: "Вибачте, зараз не вдалося передати ваш запит. Зв'яжіться з нами безпосередньо - ми охоче допоможемо.", turn: "Вибачте, щось пішло не так. Напишіть, будь ласка, ще раз." },
+  fr: { send: "Désolé, je n'ai pas pu transmettre votre demande pour le moment. Contactez-nous directement, nous vous aiderons volontiers.", turn: "Désolé, un problème est survenu. Pouvez-vous réécrire votre message ?" },
+  de: { send: "Entschuldigung, ich konnte Ihre Anfrage gerade nicht weitergeben. Bitte kontaktieren Sie uns direkt, wir helfen gern.", turn: "Entschuldigung, da ist etwas schiefgelaufen. Bitte schreiben Sie es noch einmal." },
+  other: { send: "Sorry, I couldn't pass your request on right now. Please contact us directly and we'll be happy to help.", turn: "Sorry, something went wrong. Please write that again." },
+};
+const LANG_OF_NAME: Record<string, OfferLang> = { polish: "pl", english: "en", ukrainian: "uk", french: "fr", german: "de" };
 
 // The line shown under our own reply while the network is being asked, by the
 // language Jev named; replaced by the final message when the search is done.
@@ -544,7 +559,7 @@ export class WebsiteChat {
     // --- Input validation ---
     const inputValidation = validateInput(lastUserMessage);
     if (inputValidation.blocked) {
-      return { message: this.isPolish(lastUserMessage) ? BLOCKED.pl : BLOCKED.en, sources: [] };
+      return { message: BLOCKED[guessLang(lastUserMessage)], sources: [] };
     }
 
     // Use sanitized message for processing (replaces the last user message in the array)
@@ -992,7 +1007,7 @@ export class WebsiteChat {
 
     const inputValidation = validateInput(lastUserMessage);
     if (inputValidation.blocked) {
-      const msg = this.isPolish(lastUserMessage) ? BLOCKED.pl : BLOCKED.en;
+      const msg = BLOCKED[guessLang(lastUserMessage)];
       onToken(msg);
       return { message: msg, sources: [] };
     }
@@ -1336,23 +1351,20 @@ export class WebsiteChat {
         const ok = this.onInquiry ? await this.onInquiry(r.inquiry).catch(() => false) : false;
         if (ok) return { message: r.reply, sources: [], collect: status("sent") };
         console.error(`[collect] inquiry for flow ${flow.id} could not be recorded`);
-        return { message: this.collectFailed(s.language, true), sources: [], collect: status("failed") };
+        return { message: this.collectFailed(s.language, true, message), sources: [], collect: status("failed") };
       }
       return { message: r.reply, sources: [], collect: status(s.stage) };
     } catch (e) {
       console.warn(`[collect] turn failed: ${(e as Error).message}`);
-      return { message: this.collectFailed(s.language, false), sources: [], collect: status(s.stage) };
+      return { message: this.collectFailed(s.language, false, message), sources: [], collect: status(s.stage) };
     }
   }
 
   // Honest failure messages for "in chat" flows, when the model itself cannot be
-  // used: Polish or English, by the language the model named earlier in the chat.
-  private collectFailed(language: string | undefined, sending: boolean): string {
-    const pl = language === "Polish";
-    if (sending) return pl
-      ? "Przepraszam, nie udało mi się teraz przekazać zapytania. Skontaktuj się z nami bezpośrednio, a chętnie pomożemy."
-      : "Sorry, I couldn't pass your request on right now. Please contact us directly and we'll be happy to help.";
-    return pl ? "Przepraszam, coś poszło nie tak. Napisz proszę jeszcze raz." : "Sorry, something went wrong. Please write that again.";
+  // used: by the language the form's reader named earlier, else the message's own.
+  private collectFailed(language: string | undefined, sending: boolean, message = ""): string {
+    const l = LANG_OF_NAME[(language || "").trim().toLowerCase().split(/[\s(]/)[0]] || guessLang(message);
+    return COLLECT_FAILED[l][sending ? "send" : "turn"];
   }
 
   private async startAgentFlow(flow: FlowDefinition, message: string): Promise<ChatResponse> {
@@ -1463,14 +1475,8 @@ export class WebsiteChat {
     };
   }
 
-  private isPolish(question: string): boolean {
-    const q = question.toLowerCase();
-    return /[ąćęłńóśźż]/.test(q) || /\b(czy|jak|ile|gdzie|jaki|jaka|macie|kiedy|dlaczego|kto|co)\b/.test(q);
-  }
-
   private refusal(question: string, lang?: OfferLang): string {
-    const l = lang || (this.isPolish(question) ? "pl" : "en");
-    return REFUSAL[l] || REFUSAL.en;
+    return REFUSAL[lang || guessLang(question)] || REFUSAL.en;
   }
 
   // Hard anti-hallucination gate: a focused binary check that the retrieved

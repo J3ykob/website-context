@@ -89,6 +89,12 @@ import { registerOfferRoutes } from "../src/offer/routes.js";
 import { registerProjectRoutes } from "../src/projects/routes.js";
 import { getHandoff, markHandoffOpened } from "../src/ecosystem/handoff.js";
 import { turnUsage, newTurnUsage } from "../src/llm/turn-usage.js";
+import { guessLang, BACKEND_DOWN } from "../src/llm/lang.js";
+// The visitor's latest message of a /api/chat request (for the language of fixed replies).
+const lastUserText = (req: any): string => {
+  const m = Array.isArray(req.body?.messages) ? req.body.messages : [];
+  return String([...m].reverse().find((x: any) => x?.role === "user")?.content || req.body?.message || "");
+};
 import { routeOf } from "../src/llm/chat.js";
 import { ensureCollectFlow } from "../src/flows/collect-store.js";
 
@@ -1314,7 +1320,7 @@ app.post("/api/chat", async (req, res) => {
         console.error(`[chat stream error] ${tenantId}: ${m.slice(0, 200)}`);
         lastChatError = { tenantId, cause: /OpenRouter request failed/i.test(m) ? (/\(402\)|insufficient credits/i.test(m) ? "llm-credits" : "llm-provider") : "stream-error", msg: m.slice(0, 300), at: new Date().toISOString() };
         if (!res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ error: "backend_unavailable", message: "Sorry — I'm having trouble right now. Please try again in a moment." })}\n\n`);
+          res.write(`data: ${JSON.stringify({ error: "backend_unavailable", message: BACKEND_DOWN[guessLang(lastUserText(req))] })}\n\n`);
           res.end();
         }
       }
@@ -1347,7 +1353,7 @@ app.post("/api/chat", async (req, res) => {
       // is what keeps genuinely-empty tenants from ever going active.
       res.status(503).json({
         error: "backend_unavailable",
-        message: "Sorry — I'm having trouble right now. Please try again in a moment.",
+        message: BACKEND_DOWN[guessLang(lastUserText(req))],
       });
     }
   }
