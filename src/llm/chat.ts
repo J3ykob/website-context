@@ -366,6 +366,8 @@ const COLLECT_FAILED: Record<OfferLang, { send: string; turn: string }> = {
   de: { send: "Entschuldigung, ich konnte Ihre Anfrage gerade nicht weitergeben. Bitte kontaktieren Sie uns direkt, wir helfen gern.", turn: "Entschuldigung, da ist etwas schiefgelaufen. Bitte schreiben Sie es noch einmal." },
   other: { send: "Sorry, I couldn't pass your request on right now. Please contact us directly and we'll be happy to help.", turn: "Sorry, something went wrong. Please write that again." },
 };
+// An in-chat form the customer has not answered for this long is dropped.
+const COLLECT_IDLE_MS = 30 * 60 * 1000;
 const LANG_OF_NAME: Record<string, OfferLang> = { polish: "pl", english: "en", ukrainian: "uk", french: "fr", german: "de" };
 
 // The line shown under our own reply while the network is being asked, by the
@@ -535,13 +537,10 @@ export class WebsiteChat {
     }
   }
 
-  // opts.noPartners: this call is itself an ecosystem query - never ask further businesses.
-  // opts.startFlowId: start that "in chat" flow for this session right away (no
-  // intent step); opts.via: who asked on the customer's behalf (kept on the inquiry).
   // Every conversation is a project (src/projects/conversation.ts): the turn is answered, then
   // recorded in the conversation's project with how it was handled.
-  async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>, opts?: { noPartners?: boolean; startFlowId?: string; via?: CollectVia }): Promise<ChatResponse> {
-    const r = await this.chatInner(messages, sessionKey, formState, opts);
+  async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>): Promise<ChatResponse> {
+    const r = await this.chatInner(messages, sessionKey, formState);
     this.recordConversationTurn(messages, sessionKey, r);
     return r;
   }
@@ -552,7 +551,7 @@ export class WebsiteChat {
     void conversationProject(this.context.tenantId, sessionKey || "default", user).then((pid) => recordTurn(pid, { user, assistant: r.message, route, data: r.project ? { project: r.project } : undefined }));
   }
 
-  private async chatInner(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>, opts?: { noPartners?: boolean; startFlowId?: string; via?: CollectVia }): Promise<ChatResponse> {
+  private async chatInner(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>): Promise<ChatResponse> {
     const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
     const effectiveSessionKey = sessionKey || "default";
 
@@ -571,15 +570,11 @@ export class WebsiteChat {
         )
       : messages;
 
-    if (opts?.startFlowId && !this.collectSessions.has(effectiveSessionKey)) {
-      const flow = this.context.flows.find((f) => f.id === opts.startFlowId && f.status === "active" && f.executionMode === "collect");
-      if (flow) return this.startCollect(flow, effectiveSessionKey, inputValidation.sanitized, opts.via);
-    }
     // An "in chat" flow (order / inquiry) in progress takes every message.
     const cs = this.collectSessions.get(effectiveSessionKey);
     if (cs) {
       const flow = this.context.flows.find((f) => f.id === cs.flowId && f.status === "active");
-      if (flow && Date.now() - cs.at < 30 * 60 * 1000) return this.runCollect(flow, cs, effectiveSessionKey, inputValidation.sanitized);
+      if (flow && Date.now() - cs.at < COLLECT_IDLE_MS) return this.runCollect(flow, cs, effectiveSessionKey, inputValidation.sanitized);
       this.collectSessions.delete(effectiveSessionKey);
     }
 
@@ -673,7 +668,7 @@ export class WebsiteChat {
     // at all to reason over). Otherwise the small model's verdict becomes an
     // advisory the big model weighs (see buildSystemPrompt).
     if (usableChunksC.length === 0) {
-      const netC0 = await this.networkStart(lastUserMessage, sanitizedMessages, rt, opts?.noPartners);
+      const netC0 = await this.networkStart(lastUserMessage, sanitizedMessages, rt);
       const own = this.refusal(lastUserMessage, rt?.lang) + this.handoffOffer(effectiveSessionKey, lastUserMessage, rt, "question");
       const viaNet = netC0 ? await this.networkReply(netC0) : null;
       if (viaNet) return { ...viaNet, message: own + "\n\n" + viaNet.message };
@@ -682,7 +677,7 @@ export class WebsiteChat {
     const factCheckC = await this.factCheck(lastUserMessage, usableChunksC);
     // We don't have it: for a real need the network is asked while we write our
     // own reply, and what it finds is added under that reply.
-    const netC = factCheckC === "no_evidence" ? await this.networkStart(lastUserMessage, sanitizedMessages, rt, opts?.noPartners) : null;
+    const netC = factCheckC === "no_evidence" ? await this.networkStart(lastUserMessage, sanitizedMessages, rt) : null;
     // No answer here: the offer to pass the question to the business comes first,
     // then what other businesses have.
     const offerC = factCheckC === "no_evidence" ? this.handoffOffer(effectiveSessionKey, lastUserMessage, rt, "question") : "";
@@ -1021,6 +1016,9 @@ export class WebsiteChat {
     // An open form / flow, a pending question or offer goes to the full path at once;
     // otherwise the router decides (the full path reuses its decision).
     const pendingS = this.pendingDisambig.get(effectiveSessionKey);
+    // A form left for 30 min is over (the full path drops it the same way): the message is routed afresh.
+    const csS = this.collectSessions.get(effectiveSessionKey);
+    if (csS && Date.now() - csS.at >= COLLECT_IDLE_MS) this.collectSessions.delete(effectiveSessionKey);
     const busy = this.hasActiveFlowSession(effectiveSessionKey) || this.collectSessions.has(effectiveSessionKey)
       || (!!pendingS && Date.now() - pendingS.at < 5 * 60 * 1000);
     // The answer to our "pass it to the business?" offer: settled here (one Jev
@@ -1400,8 +1398,8 @@ export class WebsiteChat {
   // the visitor explicitly asks to find it elsewhere, or asks for one specific
   // product or service - never a broad category or a follow-up. The search starts
   // now and runs while our own reply is written. null = nothing is asked.
-  private async networkStart(question: string, messages: ChatMessage[], rt: TurnRoute | null, noPartners?: boolean): Promise<NetworkAsk | null> {
-    if (noPartners || !this.askEcosystem || !rt) return null;
+  private async networkStart(question: string, messages: ChatMessage[], rt: TurnRoute | null): Promise<NetworkAsk | null> {
+    if (!this.askEcosystem || !rt) return null;
     const ask = rt.intent === "elsewhere" || (rt.intent !== "chitchat" && rt.specific >= 0.5 && rt.need >= 0.5 && rt.followup < 0.5);
     if (!ask) {
       console.log(`[ecosystem] ${this.context.tenantId}: not asked (${rt.intent}, specific ${rt.specific.toFixed(2)}, need ${rt.need.toFixed(2)}, follow-up ${rt.followup.toFixed(2)}): "${question.slice(0, 60)}"`);
