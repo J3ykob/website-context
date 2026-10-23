@@ -1297,6 +1297,8 @@ app.post("/api/chat", async (req, res) => {
     // What answering this message took (LLM / Jev calls, time, route) - for admins
     // only (routing evals): X-Admin-Secret header.
     const usage = newTurnUsage();
+    // Admin test of the safe mode without Jev (routing evals): Jev unavailable for this request only.
+    if (adminOk(req) && req.headers["x-test-no-jev"] === "1") (usage as any).noJev = true;
     const turnStart = Date.now();
     const traceFor = (r: any) => adminOk(req) ? { trace: { route: routeOf(r), ms: Date.now() - turnStart, ...usage } } : {};
 

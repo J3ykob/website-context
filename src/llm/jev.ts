@@ -12,7 +12,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { countJev } from "./turn-usage.js";
+import { countJev, jevOffForTurn } from "./turn-usage.js";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 
@@ -31,7 +31,7 @@ export interface JevNoulAnswer { type: "noul"; noul: number }
 export type JevAnswer = JevChoiceAnswer | JevNoulAnswer;
 
 export function jevEnabled(): boolean {
-  return !!process.env.JEV_API_KEY;
+  return !!process.env.JEV_API_KEY && !jevOffForTurn();
 }
 
 // TypeSafe latency is bimodal (from Render: ~80 ms, or 2-3.5 s in bursts for
@@ -42,7 +42,7 @@ export function jevEnabled(): boolean {
 // (the voice bot, 450 ms) are never hedged.
 export async function jevAsk(state: unknown, questions: Record<string, JevQuestion>, timeoutMs?: number): Promise<Record<string, JevAnswer> | null> {
   const key = process.env.JEV_API_KEY;
-  if (!key) return null;
+  if (!key || jevOffForTurn()) return null;
   const t0 = Date.now();
   const budget = timeoutMs ?? (Number(process.env.JEV_TIMEOUT_MS) || 2500);
   const schedule = (process.env.JEV_HEDGE_SCHEDULE || "300,800,1600,3000").split(",").map(Number).filter((n) => n > 0 && n < budget);

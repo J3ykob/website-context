@@ -1152,6 +1152,7 @@ export class WebsiteChat {
 
   /** The router's decision for this message (memoised: the stream path decides, the full path reuses it). */
   private async routeTurn(messages: ChatMessage[], message: string): Promise<TurnRoute | null> {
+    if (!jevEnabled()) return null; // safe mode: no decision (and no memoised one from before)
     const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
     const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
     const flows = this.routableFlows();

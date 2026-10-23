@@ -6,7 +6,7 @@
  * rules + an LLM judge (Workers AI), writes a report, and deletes everything the
  * run created (chat messages, projects, hand-off links).
  *
- *   ADMIN_SECRET=... npx tsx evals/routing/run.ts [--only K1,X2] [--base https://whisp.so] [--out file.json] [--keep]
+ *   ADMIN_SECRET=... npx tsx evals/routing/run.ts [--only K1,X2] [--base https://whisp.so] [--out file.json] [--keep] [--no-jev]
  *
  * Needs ADMIN_SECRET (trace) and a logged-in wrangler (judge + cleanup).
  */
@@ -19,6 +19,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (k: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
 const BASE = arg("--base") || "https://whisp.so";
 const ONLY = arg("--only")?.split(",");
+// --no-jev: the safe mode without Jev (the server treats Jev as down for these requests).
+const NO_JEV = process.argv.includes("--no-jev");
 const OUT = arg("--out") || resolve(HERE, `results-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "")}.json`);
 const ADMIN = process.env.ADMIN_SECRET || "";
 if (!ADMIN) throw new Error("ADMIN_SECRET is required");
@@ -50,7 +52,7 @@ const d1 = (sql: string, params: unknown[] = []) => cf(`d1/database/${D1}/query`
 async function streamTurn(tenant: string, session: string, messages: { role: string; content: string }[]) {
   const t0 = Date.now();
   let first = 0, done: any = null, live = "";
-  const r = await fetch(`${BASE}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": ADMIN }, body: JSON.stringify({ tenantId: tenant, sessionId: session, messages, stream: true }) });
+  const r = await fetch(`${BASE}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": ADMIN, ...(NO_JEV ? { "x-test-no-jev": "1" } : {}) }, body: JSON.stringify({ tenantId: tenant, sessionId: session, messages, stream: true }) });
   if (!r.ok || !r.body) return { first: 0, total: Date.now() - t0, done: { error: `HTTP ${r.status}`, message: "" }, live };
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
   for (;;) {
