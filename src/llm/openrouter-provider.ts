@@ -14,7 +14,18 @@ const avoided = new Map<string, number>();
 function avoidList(): string[] {
   const now = Date.now();
   for (const [p, until] of avoided) if (until < now) avoided.delete(p);
-  return [...avoided.keys()];
+  // At most the two most recent: skipping every provider would leave the model nowhere to run.
+  return [...avoided.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([p]) => p);
+}
+// A provider that is far slower than the others (seen: 15.7 s for 80 tokens where the others took
+// 2-6 s) is skipped for a while too - a visitor is waiting. Thresholds are generous on purpose.
+const SLOW_MS = 5 * 60_000;
+function noteSpeed(provider: string | undefined, ms: number, outTokens: number, firstTokenMs?: number): void {
+  if (!provider || provider === "?") return;
+  const slow = firstTokenMs !== undefined ? firstTokenMs > 5000 : outTokens < 300 && ms > 8000;
+  if (!slow) return;
+  avoided.set(provider, Math.max(avoided.get(provider) || 0, Date.now() + SLOW_MS));
+  console.warn(`[openrouter] ${provider} slow (${(ms / 1000).toFixed(1)}s, ${firstTokenMs !== undefined ? `first token ${(firstTokenMs / 1000).toFixed(1)}s` : `${outTokens} tokens`}) - skipped for 5 min`);
 }
 async function withProviderRetry(call: (provider: ProviderPrefs) => Promise<Response>): Promise<Response> {
   const skip = avoidList();
@@ -98,6 +109,7 @@ export class OpenRouterProvider {
     };
 
     countLlm(data.usage?.prompt_tokens || 0, data.usage?.completion_tokens || 0, t0, `${data.provider || "?"} out=${data.usage?.completion_tokens || 0}`);
+    noteSpeed(data.provider, Date.now() - t0, data.usage?.completion_tokens || 0);
     return {
       content: data.choices[0]?.message?.content || "",
       usage: data.usage || { prompt_tokens: 0, completion_tokens: 0 },
@@ -158,6 +170,7 @@ export class OpenRouterProvider {
       }
     }
     countLlm(0, 0, t0, `stream ${servedBy} first=${(first / 1000).toFixed(1)}s chars=${content.length}`);
+    if (first) noteSpeed(servedBy, Date.now() - t0, 0, first);
     return { content };
   }
 }
