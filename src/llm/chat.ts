@@ -150,7 +150,7 @@ interface LLMBackend {
   generateStream?(system: string, messages: ChatMessage[], maxTokens: number, onToken: (delta: string) => void): Promise<string>;
   generateStructured?(system: string, messages: ChatMessage[], maxTokens: number, schema: object): Promise<StructuredResponse>;
   // Tiny classification calls (yes/no, pick-a-number) on a small, fast model.
-  classify?(system: string, prompt: string): Promise<string>;
+  classify?(system: string, prompt: string, maxTokens?: number): Promise<string>;
   generateWithTools?(system: string, messages: ChatMessage[], maxTokens: number, mcpConfig: MCPServerConfig): Promise<GenerateWithToolsResult>;
 }
 
@@ -198,14 +198,14 @@ class OpenRouterBackend implements LLMBackend {
 
   // Small, fast model for internal classification (answerability gate, flow/mode
   // intent) — a big model is overkill for a one-word decision and adds latency.
-  async classify(system: string, prompt: string): Promise<string> {
+  async classify(system: string, prompt: string, maxTokens = 8): Promise<string> {
     // Only the fallback when Jev is unavailable, so accuracy beats speed:
     // gpt-4o-mini routed 6/6 test messages (gemini-2.5-flash-lite 5/6); the
     // previous default, ibm-granite/granite-4.1-8b, no longer exists (404).
     const model = process.env.OPENROUTER_FAST_MODEL || "openai/gpt-4o-mini";
     const result = await this.provider.chat(
       [{ role: "system", content: system }, { role: "user", content: prompt }],
-      { model, maxTokens: 8, temperature: 0 },
+      { model, maxTokens, temperature: 0 },
     );
     return result.content;
   }
@@ -862,7 +862,7 @@ export class WebsiteChat {
     let responseText = await this.backend.generate(systemPrompt, sanitizedMessages, this.maxTokens);
     if (factCheckC === "no_evidence") responseText = await this.guardNoEvidence(lastUserMessage, systemPrompt, sanitizedMessages, responseText, retrievedChunks);
     responseText = await this.fixForeignScript(lastUserMessage, systemPrompt, sanitizedMessages, responseText);
-    if (factCheckC === "confirmed") responseText = await this.verifyAnswer(lastUserMessage, systemPrompt, sanitizedMessages, this.extractGapMarker(responseText).text, usableChunksC);
+    if (factCheckC === "confirmed" || factCheckC === "no_confirmation") responseText = await this.verifyAnswer(lastUserMessage, systemPrompt, sanitizedMessages, this.extractGapMarker(responseText).text, usableChunksC);
 
     // Sanitize: if LLM returned JSON instead of plain text, extract the message
     try {
@@ -1099,7 +1099,7 @@ export class WebsiteChat {
     // The widget replaces the streamed bubble with the final message, so a rewrite
     // here fixes what the visitor ends up seeing.
     raw = this.extractGapMarker(await this.fixForeignScript(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw)).text;
-    if (factCheckS === "confirmed") raw = this.extractGapMarker(await this.verifyAnswer(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw, usableStream)).text;
+    if (factCheckS === "confirmed" || factCheckS === "no_confirmation") raw = this.extractGapMarker(await this.verifyAnswer(inputValidation.sanitized, systemPrompt, sanitizedMessages, raw, usableStream)).text;
     if (holding && !gapStream.question) {
       onToken(raw.slice(Math.min(emitted, raw.length)));
     }
@@ -1831,12 +1831,15 @@ Answer:`;
   // one rewrite that corrects exactly those. ~0.3-0.4s, after the stream, so the
   // first token is not delayed; the widget swaps in the final message.
   private async verifyAnswer(question: string, systemPrompt: string, messages: ChatMessage[], text: string, chunks: { content: string }[]): Promise<string> {
-    if (!jevEnabled()) return text;
+    const jev = jevEnabled();
+    if (!jev && !this.backend.classify) return text;
     const statements = splitStatements(text);
     if (statements.length === 0) return text;
     const sources = this.verifySources(chunks);
     const t0 = Date.now();
-    const scores = await jevUnsupportedStatements(question, statements, sources);
+    // Without Jev (safe mode) the small fallback model does the same check: the gate alone let
+    // "W8 concrete is in our offer" through on a general description of the offer.
+    const scores = jev ? await jevUnsupportedStatements(question, statements, sources) : await this.unsupportedByFastModel(question, statements, sources);
     if (!scores) return text;
     const min = Number(process.env.JEV_VERIFY_MIN) || 0.6;
     const bad = statements.filter((_, i) => scores[i] >= min);
@@ -1858,6 +1861,20 @@ Answer:`;
       // correct lines of long lists look unsupported.
       ...chunks.slice(0, 25).map((c) => c.content.slice(0, 2500)),
     ].filter((x) => x && x.trim());
+  }
+
+  // The statement check of verifyAnswer by the small fallback model (Jev unavailable): 1 = unsupported.
+  private async unsupportedByFastModel(question: string, statements: string[], sources: string[]): Promise<number[] | null> {
+    const prompt = `Sources (everything known about the business):\n"""\n${sources.join("\n---\n").slice(0, 12000)}\n"""\n\nThe visitor asked: "${question}"\n\nStatements of the reply:\n${statements.map((st, i) => `${i + 1}. ${st}`).join("\n")}\n\nWhich statements state a fact about the business (what it offers, has, sells or does, a price, time, number, address or contact) that the sources do not support or contradict? Greetings, offers to help, general advice and invitations to contact the business are fine. Answer with JSON only: a list of statement numbers, e.g. [2] or [].`;
+    try {
+      const raw = await this.backend.classify!("You check a reply against its sources. Output only a JSON list of numbers.", prompt, 40);
+      const m = raw.match(/\[[\d,\s]*\]/);
+      if (!m) return null;
+      const bad = new Set((JSON.parse(m[0]) as number[]).map((n) => n - 1));
+      return statements.map((_, i) => (bad.has(i) ? 1 : 0));
+    } catch {
+      return null;
+    }
   }
 
   // Knowledge-gap decision by Jev: only when no evidence was found, and only for
