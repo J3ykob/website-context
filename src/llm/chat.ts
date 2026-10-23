@@ -1518,6 +1518,7 @@ ${context}
 Can this question be answered HONESTLY from the excerpts — either directly, or by fairly summarizing / describing what the excerpts show?
 - Reply "yes" if the answer is present, OR if the excerpts contain concrete examples or evidence you can honestly describe to address the question. For a descriptive question like "what do you do / what services", excerpts that describe specific projects or work ARE an answer — you can say "we do work such as these projects". Meta-summarising the available material counts as answering.
 - Reply "no" ONLY when answering would require a SPECIFIC fact that is simply not in the excerpts — an exact number, price, date, headcount, policy — or the excerpts are about an entirely unrelated topic. Never invent such specifics.
+- If the visitor asks whether the business has, sells, rents or does a SPECIFIC product, grade, model or service (e.g. "W8 waterproof concrete", "an 18 m boom lift"), reply "yes" ONLY if the excerpts name that product or service (or an exact equivalent). A general description of the offer ("building materials", "a wide range") is NOT an answer to it.
 
 Reply with ONLY one word: yes or no.`;
     try {
@@ -1639,7 +1640,7 @@ A checker read every relevant passage of our knowledge base for this exact quest
 A fast, deliberately strict fact-checking model reviewed the sources above for this exact question and concluded: **the sources ${factCheck === "confirmed" ? "appear to contain relevant information for it" : "do NOT clearly contain a direct answer"}**.
 This checker is small and strict, so read its verdict with judgment, in both directions:
 - It frequently UNDERVALUES descriptive questions you can answer by summarising examples (e.g. describing the projects/work in the sources to explain "what we do" or "what we offer"). If you can answer honestly this way, DO answer — even when the checker said no.
-- It can also be too lenient. Even if it said the info is there, never state a specific fact (a number, price, date, headcount, policy) that is not actually in the sources.
+- It can also be too lenient. Even if it said the info is there, never state a specific fact (a number, price, date, headcount, policy) that is not actually in the sources - and never say we have, sell or do a specific product, grade or service the sources do not name (a general "wide range of materials" does not mean we carry it).
 - Only when a truthful answer would require a specific fact that is genuinely absent: briefly say you don't have that exact detail, point the visitor to contact us, and end your reply with the marker [[gap: <the unanswered question, in the site's language>]].` : ""}
 
 ## Relevant Context:
