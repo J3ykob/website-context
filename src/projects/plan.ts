@@ -66,6 +66,8 @@ Rules:
   list with several items, a comparison table, a plan or document. A short answer (one item, one price, a
   simple choice) stays in odpowiedz.txt alone - no file. Customer files go to ${CUSTOMER_DIR}/ (csv for
   tables, md for documents).
+- Acceptance: criteria about the listed outputs only, in their listed formats - never require a file,
+  column or format that is not in "outputs" (a short answer in odpowiedz.txt is not checked for a CSV).
 - Inputs: only files listed in the inventory.
 - Facts: only what was stated, copied in the requester's own words and language (quote them); never translate,
   paraphrase or rename products or terms - a wrong rewording changes the request. If something essential is
