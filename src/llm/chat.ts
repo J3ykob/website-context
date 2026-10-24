@@ -1470,7 +1470,13 @@ export class WebsiteChat {
     // the fact that we checked these businesses (the reply's opening line).
     const evidence = [
       { content: `We checked with these businesses we work with: ${found.map((f) => f.label).join(", ")}.` + (this.handoffLinks ? ` The visitor can continue the conversation directly with each of them using the link below.` : "") },
-      ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }]),
+      // The ranking already judged from each business's own pages that it offers what was asked
+      // (src/ecosystem/ask.ts, Jev): that verdict is evidence for "X offers it" too.
+      ...found.flatMap((f) => [
+        ...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })),
+        { content: `${f.label} contact: ${f.contact}` },
+        { content: `${f.label} offers, sells, rents or does what the visitor asked for ("${question.slice(0, 300)}") - checked against its own website.` },
+      ]),
     ];
     reply = await this.trimUnsupported(question, system, asked, reply, evidence, found.map((f) => f.label));
     // One link per recommended business: the customer continues with that
