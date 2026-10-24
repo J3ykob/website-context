@@ -6,7 +6,7 @@
  * (Jev) and the project agent does it in the project's sandbox (src/projects/agent.ts). The reply
  * then arrives in the same chat when the agent is done (the widget polls /api/chat/agent).
  */
-import { createProject, findOpenProject, addEvent, getProject, setMemory } from "./store.js";
+import { createProject, findOpenProject, addEvent, getProject, setMemory, claimMemory } from "./store.js";
 import { writeFile, readFile } from "./repo.js";
 import { agentEnabled, agentStatus, type AgentRunState } from "./agent.js";
 import { jevAsk } from "../llm/jev.js";
@@ -393,8 +393,7 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
     if (rv.status === "pending" || rv.status === "changes_requested") {
       const lang = await replyLanguage(projectId);
       const text = REVIEWING[lang] || REVIEWING.en;
-      if ((p?.memory.reviewNotified as string | undefined) !== s.runId) {
-        await setMemory(projectId, { reviewNotified: s.runId });
+      if ((p?.memory.reviewNotified as string | undefined) !== s.runId && (await claimMemory(projectId, "reviewNotified", s.runId))) {
         await onDeliver(text).catch(() => {});
       }
       // Waiting too long: the customer hears so once - where the result will appear, and that an email
@@ -402,8 +401,7 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
       const { reviewLateMs } = await import("./review.js");
       if (rv.status === "pending" && Date.now() - Date.parse(rv.createdAt) > reviewLateMs()) {
         const late = (REVIEW_LATE[lang] || REVIEW_LATE.en).replace("{link}", `${process.env.BASE_URL || "https://whisp.so"}/p/${await customerLink(projectId).catch(() => "")}`);
-        if ((p?.memory.reviewLate as string | undefined) !== s.runId) {
-          await setMemory(projectId, { reviewLate: s.runId });
+        if ((p?.memory.reviewLate as string | undefined) !== s.runId && (await claimMemory(projectId, "reviewLate", s.runId))) {
           await onDeliver(late).catch(() => {});
         }
         return { status: "review", message: late, projectId };
@@ -414,8 +412,8 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
     else { message = rv.final.trim(); files = []; }
   }
   if (!message) message = COULD_NOT[await replyLanguage(projectId)] || COULD_NOT.en;
-  if (!delivered) {
-    await setMemory(projectId, { delivered: s.runId, ownerLoop: false });
+  if (!delivered && (await claimMemory(projectId, "delivered", s.runId))) {
+    await setMemory(projectId, { ownerLoop: false });
     await onDeliver(message).catch(() => {});
     if (onFinal) await onFinal(message, files, "final").catch(() => {});
     await addEvent(projectId, { kind: "delivered", actor: "chat", data: { runId: s.runId, status: s.status, files } }).catch(() => {});

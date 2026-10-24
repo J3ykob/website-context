@@ -110,6 +110,21 @@ export async function setMemory(id: string, patch: Record<string, unknown>): Pro
   if (!rows.length) throw new Error(`no project ${id}`);
 }
 
+/**
+ * Sets memory[key] = value only if it is not already that value, atomically: true for the one caller
+ * that set it. For "do this once per run" steps that two paths reach at the same moment (the widget's
+ * poll and the server-side delivery both delivered a result - the customer got it twice).
+ */
+export async function claimMemory(id: string, key: string, value: string): Promise<boolean> {
+  if (!/^[A-Za-z0-9_]+$/.test(key)) throw new Error(`bad memory key ${key}`);
+  await ensureSchema();
+  const rows = await d1Query(
+    `UPDATE projects SET memory = json_set(COALESCE(NULLIF(memory, ''), '{}'), ?, ?), updated_at = ? WHERE id = ? AND COALESCE(json_extract(NULLIF(memory, ''), ?), '') != ? RETURNING id`,
+    [`$.${key}`, value, now(), id, `$.${key}`, value],
+  );
+  return rows.length > 0;
+}
+
 export async function setStatus(id: string, status: ProjectStatus, actor: string): Promise<void> {
   await ensureSchema();
   await d1Query("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?", [status, now(), id]);
