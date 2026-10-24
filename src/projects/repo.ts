@@ -109,7 +109,11 @@ export async function recordVerification(id: string, results: { reqId: string; s
   for (const r of results) await setRequirement(id, r.reqId, r.status, r.evidence);
   const met = results.filter((r) => r.status === "met").length, failed = results.filter((r) => r.status === "failed").length;
   await writeFile(id, file, JSON.stringify({ at: new Date().toISOString(), met, failed, results }, null, 2), "json", author);
-  await addEvent(id, { kind: "verification", actor: author, data: { met, failed, file } });
+  // Which checks failed, with their wording: a failed check sends the result to the owner or into
+  // another run, and intermittent ones (a planner criterion) are otherwise invisible once data is gone.
+  const failedReqs = failed ? (await listRequirements(id)).filter((r) => results.some((x) => x.reqId === r.id && x.status === "failed")) : [];
+  if (failedReqs.length) console.warn(`[verification] ${id}: ${failed} failed - ${failedReqs.map((r) => `${r.id} "${r.text.slice(0, 140)}" (${r.evidence.slice(0, 120)})`).join(" | ")}`);
+  await addEvent(id, { kind: "verification", actor: author, data: { met, failed, file, ...(failedReqs.length ? { failedReqs: failedReqs.map((r) => ({ id: r.id, text: r.text.slice(0, 200), evidence: r.evidence.slice(0, 200) })) } : {}) } });
   return { met, failed };
 }
 

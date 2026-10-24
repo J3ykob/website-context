@@ -111,7 +111,7 @@ async function agentTimeline(projectId: string): Promise<string[]> {
       if (r.kind === "agent_started") extra = ` attempt ${x.attempt} ${Object.entries(x.timing || {}).filter(([, v]) => Number(v) >= 500).map(([k, v]) => `${k}=${(Number(v) / 1000).toFixed(1)}s`).join(" ")}`;
       if (r.kind === "network_offers") extra = ` answered ${x.answered} declined ${x.declined}`;
       if (r.kind === "agent_finished") extra = ` ${x.state} steps ${x.usage?.steps} $${x.usage?.costUsd}`;
-      if (r.kind === "verification") extra = ` met ${x.met} failed ${x.failed}`;
+      if (r.kind === "verification") extra = ` met ${x.met} failed ${x.failed}${(x.failedReqs || []).map((f: any) => ` [${f.id}: ${f.text}]`).join("")}`;
     } catch {}
     return `${((Date.parse(r.at) - t0) / 1000).toFixed(0)}s ${r.kind}${extra}`;
   });
