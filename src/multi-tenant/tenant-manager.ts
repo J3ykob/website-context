@@ -64,6 +64,18 @@ export class TenantManager {
       this.cache.set(tenantId, cached);
       return cached.chat;
     }
+    // One load per tenant at a time: two first requests at once each built their own chat, the second
+    // replaced the first in the cache, and the conversation state (an order form in progress) of the
+    // first visitor was lost with it.
+    const pending = this.loading.get(tenantId);
+    if (pending) return pending;
+    const load = this.loadChat(tenantId).finally(() => this.loading.delete(tenantId));
+    this.loading.set(tenantId, load);
+    return load;
+  }
+  private loading = new Map<string, Promise<WebsiteChat>>();
+
+  private async loadChat(tenantId: string): Promise<WebsiteChat> {
 
     // Load context metadata from disk or R2
     const metaPath = resolve(DATA_ROOT, tenantId, "context-meta.json");
