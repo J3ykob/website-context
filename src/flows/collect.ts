@@ -262,17 +262,29 @@ export async function quickAnswer(s: CollectSession, message: string, prior: str
 
 // Fixed replies for the two settled answers, by the conversation's language (named in English by the
 // reader). The order goes out with the customer's contact, so "the team will get back to you" is backed.
-const FIXED: Record<string, { confirm: string; cancel: string }> = {
-  polish: { confirm: "Dziękuję! Przekazuję zgłoszenie naszemu zespołowi - skontaktujemy się z Tobą.", cancel: "W porządku, anulowałem - nic nie zostało wysłane." },
-  english: { confirm: "Thank you! I'm passing your request to our team - they will get back to you.", cancel: "All right, it's cancelled - nothing was sent." },
-  ukrainian: { confirm: "Дякую! Передаю ваш запит нашій команді - ми з вами зв'яжемося.", cancel: "Гаразд, скасовано - нічого не надіслано." },
-  french: { confirm: "Merci ! Je transmets votre demande à notre équipe - elle vous recontactera.", cancel: "Très bien, c'est annulé - rien n'a été envoyé." },
-  german: { confirm: "Danke! Ich gebe Ihre Anfrage an unser Team weiter - es meldet sich bei Ihnen.", cancel: "In Ordnung, storniert - es wurde nichts gesendet." },
+// The usual turns (ask for the missing details, show the summary) are fixed sentences around the
+// field names in the customer's language - no second model call per turn.
+interface Fixed { confirm: string; cancel: string; ask: (fields: string[]) => string; check: string; lower: boolean }
+const FIXED: Record<string, Fixed> = {
+  polish: { confirm: "Dziękuję! Przekazuję zgłoszenie naszemu zespołowi - skontaktujemy się z Tobą.", cancel: "W porządku, anulowałem - nic nie zostało wysłane.",
+    ask: (f) => `Proszę podać jeszcze: ${f.join(" oraz ")}.`, check: "Sprawdź proszę podsumowanie i potwierdź je albo napisz, co poprawić.", lower: true },
+  english: { confirm: "Thank you! I'm passing your request to our team - they will get back to you.", cancel: "All right, it's cancelled - nothing was sent.",
+    ask: (f) => `Could you also give me: ${f.join(" and ")}?`, check: "Please check the summary and confirm it, or tell me what to correct.", lower: true },
+  ukrainian: { confirm: "Дякую! Передаю ваш запит нашій команді - ми з вами зв'яжемося.", cancel: "Гаразд, скасовано - нічого не надіслано.",
+    ask: (f) => `Будь ласка, вкажіть ще: ${f.join(" та ")}.`, check: "Перевірте, будь ласка, підсумок і підтвердьте його або напишіть, що виправити.", lower: true },
+  french: { confirm: "Merci ! Je transmets votre demande à notre équipe - elle vous recontactera.", cancel: "Très bien, c'est annulé - rien n'a été envoyé.",
+    ask: (f) => `Pourriez-vous m'indiquer encore : ${f.join(" et ")} ?`, check: "Vérifiez le récapitulatif et confirmez-le, ou dites-moi ce qu'il faut corriger.", lower: true },
+  german: { confirm: "Danke! Ich gebe Ihre Anfrage an unser Team weiter - es meldet sich bei Ihnen.", cancel: "In Ordnung, storniert - es wurde nichts gesendet.",
+    ask: (f) => `Bitte nennen Sie mir noch: ${f.join(" und ")}.`, check: "Bitte prüfen Sie die Zusammenfassung und bestätigen Sie sie, oder sagen Sie mir, was ich korrigieren soll.", lower: false },
 };
+const langKey = (language?: string) => (language || "").trim().toLowerCase().split(/[\s(]/)[0];
 function fixedReply(kind: "confirm" | "cancel", language?: string): string | null {
-  const l = (language || "").trim().toLowerCase().split(/[\s(]/)[0];
-  return FIXED[l]?.[kind] ?? null;
+  return FIXED[langKey(language)]?.[kind] ?? null;
 }
+// The field names translated into a language: asked for once (inside the turn's reading call),
+// then reused for every turn of that form in that language.
+const labelCache = new Map<string, Record<string, string>>();
+const labelKey = (flow: FlowDefinition, language: string) => `${flow.id}|${flow.updatedAt || ""}|${langKey(language)}`;
 
 export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, handOver = false): Promise<CollectResult> {
   s.at = Date.now();
@@ -290,6 +302,7 @@ export async function collectTurn(flow: FlowDefinition, s: CollectSession, messa
     return { reply: fixed, inquiry: inquiryOf(flow, s, fields) };
   }
 
+  const needLabels = !(s.language && labelCache.has(labelKey(flow, s.language)));
   const read = parseJsonObject(await llm(
     `You read one customer message in an order / inquiry chat for the business ${brand || "(this business)"} and output only JSON.`,
     `Fields (key | label | hint):
@@ -303,11 +316,12 @@ ${prior || "(none)"}
 
 The customer's new message: """${message.slice(0, 1000)}"""
 
-Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
+Output {"language": "...", "switched": false, "intent": "...", "values": {...}${needLabels ? `, "labels": {...}` : ""}}:
 - "language": the language the customer writes their sentences in, named in English (e.g. "Polish", "English", "Ukrainian"). Ignore names of places, streets, people and products (a Polish street name in an English sentence is still English).${s.language ? `
 - "switched": true only if in this message the customer clearly writes whole sentences in a language other than ${s.language}, the language of the conversation so far; otherwise false.` : ""}
 - "intent": "confirm" (they confirm the summary / say it is correct), "cancel" (they want to stop the whole order or inquiry), "change" (they correct something already given), or "answer" (anything else: giving details, asking something).
-- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. A question the customer asks (price, availability...) goes into "notes". Dates and relative days ("jutro", "next Friday", "w sobotę") as a concrete calendar date with its weekday, in the customer's language (e.g. "piątek, 17.10.2026"), counted from today. Empty object if the message gives no values.`,
+${needLabels ? `- "labels": every field name above translated into the language of "language", as {key: name}, written as it would appear in a form (e.g. "Delivery address").
+` : ""}- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. A question the customer asks (price, availability...) goes into "notes". Dates and relative days ("jutro", "next Friday", "w sobotę") as a concrete calendar date with its weekday, in the customer's language (e.g. "piątek, 17.10.2026"), counted from today. Empty object if the message gives no values.`,
     500,
   ));
   if (!read) throw new Error("collect: unparseable model reply");
@@ -317,6 +331,11 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
   // is not a switch).
   if (typeof read.language === "string" && read.language.trim() && (!s.language || read.switched === true)) s.language = read.language.trim().slice(0, 30);
   const language = s.language || "the same language as the customer's latest message";
+  if (needLabels && s.language && read.labels && typeof read.labels === "object") {
+    const tr: Record<string, string> = {};
+    for (const f of fields) if (typeof read.labels[f.name] === "string" && read.labels[f.name].trim()) tr[f.name] = read.labels[f.name].trim().slice(0, 80);
+    if (Object.keys(tr).length === fields.length) labelCache.set(labelKey(flow, s.language), tr);
+  }
   if (intent !== "confirm" && intent !== "cancel" && read.values && typeof read.values === "object") {
     for (const f of fields) {
       const v = typeof read.values[f.name] === "string" ? read.values[f.name].trim().slice(0, 500) : "";
@@ -375,6 +394,19 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
   if (offerNote && outcome !== "cancel" && outcome !== "send") task = `${offerNote} Then: ${task}`;
   const asked = (read.values?.notes || "").trim();
   if (asked && outcome !== "cancel") task += " They also asked something: do not answer it and promise nothing (no prices, availability or dates); say the team will reply to it together with the order.";
+
+  // The usual turn - ask for missing details or show the summary, nothing else to say - from the
+  // fixed sentences and the translated field names: no model call.
+  const fx = FIXED[langKey(s.language)];
+  const tr = s.language ? labelCache.get(labelKey(flow, s.language)) : undefined;
+  if (fx && tr && !offerAsk && !offerNote && !asked && (outcome === "ask" || outcome === "summary")) {
+    const name = (f: FlowInput) => { const l = tr[f.name] || f.label; return fx.lower ? l.charAt(0).toLowerCase() + l.slice(1) : l; };
+    let reply = outcome === "ask" ? fx.ask(missing.slice(0, 2).map(name)) : fx.check;
+    if (outcome === "summary") { s.stage = "confirming"; reply = `${reply}\n\n${summary(flow, s, tr)}`; }
+    else s.stage = "collecting";
+    s.transcript.push(`Assistant: ${reply}`);
+    return { reply };
+  }
 
   // The reply as JSON: the message text, and (for the summary) the field names
   // translated into the customer's language.
