@@ -97,6 +97,26 @@ function langOf(t: string): string {
   return top[1] > 0 ? top[0] : "?";
 }
 
+// Where an agent turn's time went: the project's events, seconds from its start, with the run's
+// own timings (prepare / plan / runner) and retries - so a slow run shows its cause.
+async function agentTimeline(projectId: string): Promise<string[]> {
+  const d = await d1("SELECT kind, at, data FROM project_events WHERE project_id = ? ORDER BY id", [projectId]);
+  const rows: any[] = d?.result?.[0]?.results || [];
+  if (!rows.length) return [];
+  const t0 = Date.parse(rows[0].at);
+  return rows.map((r) => {
+    let extra = "";
+    try {
+      const x = JSON.parse(r.data || "{}");
+      if (r.kind === "agent_started") extra = ` attempt ${x.attempt} ${Object.entries(x.timing || {}).filter(([, v]) => Number(v) >= 500).map(([k, v]) => `${k}=${(Number(v) / 1000).toFixed(1)}s`).join(" ")}`;
+      if (r.kind === "network_offers") extra = ` answered ${x.answered} declined ${x.declined}`;
+      if (r.kind === "agent_finished") extra = ` ${x.state} steps ${x.usage?.steps} $${x.usage?.costUsd}`;
+      if (r.kind === "verification") extra = ` met ${x.met} failed ${x.failed}`;
+    } catch {}
+    return `${((Date.parse(r.at) - t0) / 1000).toFixed(0)}s ${r.kind}${extra}`;
+  });
+}
+
 async function judge(c: Case, history: { role: string; content: string }[], t: Turn, reply: string): Promise<{ ok: boolean; note: string }> {
   const prompt =
     `You grade one reply of a business's website chat assistant (business id: ${c.tenant}). Today is ${new Date().toISOString().slice(0, 10)} (${new Date().toLocaleDateString("en-GB", { weekday: "long" })}).\n` +
@@ -128,10 +148,11 @@ async function runCase(c: Case): Promise<void> {
     const s = await streamTurn(c.tenant, session, history);
     let reply = String(s.done.message || "");
     const trace = s.done.trace || {};
-    let total = s.total, asyncStatus: string | undefined;
+    let total = s.total, asyncStatus: string | undefined, agentSteps: string[] = [];
     if (s.done.project?.agent) {
       const a = await agentResult(c.tenant, session, s.done.project.id, t.maxTotalMs || 180000, Date.now() - s.total);
       asyncStatus = a.status; total = a.ms; if (a.message) reply = `${reply}\n\n${a.message}`;
+      agentSteps = await agentTimeline(s.done.project.id);
     }
     history.push({ role: "assistant", content: reply });
     const fails: string[] = [];
@@ -153,7 +174,7 @@ async function runCase(c: Case): Promise<void> {
     if (s.done.error) fails.push(`error ${s.done.error}`);
     const j = await judge(c, history, t, reply);
     if (!j.ok) fails.push(`judge: ${j.note}`);
-    const row = { id: `${c.id}.${i + 1}`, tenant: c.tenant, user: t.user, route, partners, firstMs: s.first, totalMs: total, llm: trace.llmCalls, jev: trace.jevCalls, steps: trace.steps || [], asyncStatus, pass: fails.length === 0, fails, judgeNote: j.note, reply: reply.slice(0, 1500) };
+    const row = { id: `${c.id}.${i + 1}`, tenant: c.tenant, user: t.user, route, partners, firstMs: s.first, totalMs: total, llm: trace.llmCalls, jev: trace.jevCalls, steps: trace.steps || [], agentSteps, asyncStatus, pass: fails.length === 0, fails, judgeNote: j.note, reply: reply.slice(0, 1500) };
     results.push(row);
     lines.push(`${row.pass ? "PASS" : "FAIL"} ${row.id.padEnd(5)} ${route.padEnd(9)} first ${(s.first / 1000).toFixed(1)}s total ${(total / 1000).toFixed(1)}s llm ${trace.llmCalls ?? "?"} jev ${trace.jevCalls ?? "?"}${asyncStatus ? ` agent=${asyncStatus}` : ""} | ${t.user.slice(0, 48)}${fails.length ? `\n      - ${fails.join("\n      - ")}` : ""}`);
     await new Promise((r) => setTimeout(r, 2500));

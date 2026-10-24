@@ -124,7 +124,7 @@ async function describedOffers(parts: string[], ids: string[], about: (id: strin
  * The whole round: split, broadcast, pick. tenantIds: the network (the business running the project
  * included - its offer competes like any other). Never throws: a failure means no network offers.
  */
-export async function broadcastNeed(need: string, tenantIds: string[]): Promise<Broadcast> {
+export async function broadcastNeed(need: string, tenantIds: string[], ownFirst?: string): Promise<Broadcast> {
   const t0 = Date.now();
   const parts = await splitNeed(need).catch(() => [] as string[]);
   if (!parts.length) return { parts, answered: 0, declined: tenantIds.length, picked: [], ms: Date.now() - t0 };
@@ -133,18 +133,28 @@ export async function broadcastNeed(need: string, tenantIds: string[]): Promise<
   const members = new Map((await networkMembers(tenantIds[0]).catch(() => [])).map((m) => [m.tenantId, m]));
   const query = parts.join("\n");
   const offers = new Map(await Promise.all(tenantIds.map(async (id) => [id, (await loadOffer(id).catch(() => null))?.items || []] as const)));
-  const withList = tenantIds.filter((id) => offers.get(id)!.length);
-  const withoutList = tenantIds.filter((id) => !offers.get(id)!.length && (members.get(id)?.about || "").trim());
-  const answers = [
-    ...(await Promise.all(withList.map(async (id) => {
-      const all = offers.get(id)!;
-      // Its offer has nothing for the request: it declines without a model call.
-      const matched = await offerMatches(id, all, query).catch(() => null);
-      if (matched !== null && !matched.length) return [];
-      return answerAs(id, parts, matched ?? all.slice(0, 15), members.get(id)?.about || "", businessLabel(id)).catch(() => [] as NetworkOffer[]);
-    }))).flat(),
-    ...(await describedOffers(parts, withoutList, (id) => members.get(id)?.about || "", businessLabel)),
-  ];
+  const answersOf = async (ids: string[]): Promise<NetworkOffer[]> => {
+    const withList = ids.filter((id) => offers.get(id)!.length);
+    const withoutList = ids.filter((id) => !offers.get(id)!.length && (members.get(id)?.about || "").trim());
+    return [
+      ...(await Promise.all(withList.map(async (id) => {
+        const all = offers.get(id)!;
+        // Its offer has nothing for the request: it declines without a model call.
+        const matched = await offerMatches(id, all, query).catch(() => null);
+        if (matched !== null && !matched.length) return [];
+        return answerAs(id, parts, matched ?? all.slice(0, 15), members.get(id)?.about || "", businessLabel(id)).catch(() => [] as NetworkOffer[]);
+      }))).flat(),
+      ...(await describedOffers(parts, withoutList, (id) => members.get(id)?.about || "", businessLabel)),
+    ];
+  };
+  // The business running the project first: when its own price list has a priced offer for every
+  // part, the network is not asked at all (Rentbud pricing its own machines asked 15 others).
+  let answers: NetworkOffer[];
+  if (ownFirst && tenantIds.includes(ownFirst) && offers.get(ownFirst)?.length) {
+    const mine = await answersOf([ownFirst]);
+    const covered = parts.every((_, k) => mine.some((a) => a.part === k && a.precise));
+    answers = covered ? mine : [...mine, ...(await answersOf(tenantIds.filter((id) => id !== ownFirst)))];
+  } else answers = await answersOf(tenantIds);
   const answeredBy = new Set(answers.map((a) => a.tenantId));
   // Per part: precise offers first, then the vague ones - so the 50 given to Jev keep the concrete ones.
   const picked = (await Promise.all(parts.map((p, k) => pickBest(need, p,

@@ -282,7 +282,7 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
       parts = prevB.parts;
     } else {
       const { broadcastNeed } = await import("./broadcast.js");
-      const b = await broadcastNeed(need, tenantIds);
+      const b = await broadcastNeed(need, tenantIds, project.initiatorTenantId);
       networkOffers = b.picked; parts = b.parts;
       await setMemory(projectId, { broadcast: { need: needHash, parts: b.parts, picked: b.picked.map((o) => ({ ...o, items: o.items.map((i) => i.id) })) } });
       await addEvent(projectId, { kind: "network_offers", actor: "system", data: { ms: b.ms, parts: b.parts, answered: b.answered, declined: b.declined, picked: b.picked.map((o) => ({ tenantId: o.tenantId, part: o.part, precise: o.precise, text: o.text.slice(0, 300) })) } }).catch(() => {});
