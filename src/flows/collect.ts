@@ -137,6 +137,15 @@ type OfferVerdict = { status: "ok" } | { status: "several" | "not_offered"; opti
  * appear in the knowledge text itself, so nothing is invented.
  */
 /** Today's date in Warsaw, for turning "tomorrow" into a date. */
+// The next two weeks with their weekdays: the model counted "piątek" from a Saturday as that same
+// Saturday; looking a date up is reliable where counting is not.
+function nextDays(n = 14): string {
+  // From noon of today's Warsaw date, in UTC: 24 h steps never skip or repeat a day across a DST change.
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const noon = Date.parse(`${today}T12:00:00Z`);
+  const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
+  return Array.from({ length: n }, (_, i) => fmt.format(new Date(noon + i * 86_400_000)).replace(/\//g, ".") + (i === 0 ? " (today)" : i === 1 ? " (tomorrow)" : "")).join("; ");
+}
 function todayLine(): string {
   const d = new Date();
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -308,7 +317,7 @@ export async function collectTurn(flow: FlowDefinition, s: CollectSession, messa
     `Fields (key | label | hint):
 ${fields.map((f) => `${f.name} | ${f.label} | ${f.description || ""}`).join("\n")}
 
-Today is ${todayLine()}.
+Today is ${todayLine()}. The coming days (look dates up here, don't count): ${nextDays()}.
 Values collected so far: ${JSON.stringify(s.values)}
 ${s.stage === "confirming" ? "The customer was just shown a summary of these values and asked to confirm it." : ""}
 Earlier conversation:
