@@ -26,7 +26,7 @@ import { route as routeMessage, type Route as TurnRoute } from "./router.js";
 import { guessLang } from "./lang.js";
 import { isQuestionFlow } from "../flows/collect-store.js";
 import { setMemory as setProjectMemory } from "../projects/store.js";
-import { jevYesWhatNo, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
+import { jevYesWhatNo, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, dropStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
@@ -379,7 +379,8 @@ const ECO_CHECKING: Record<OfferLang, string> = {
 };
 
 // A network search started alongside our own reply (see networkStart).
-interface NetworkAsk { need: string; lang: OfferLang; matches: Promise<EcosystemMatch[]> }
+// `reply` is written as soon as the matches are known - alongside our own reply, not after it.
+interface NetworkAsk { need: string; lang: OfferLang; matches: Promise<EcosystemMatch[]>; reply: Promise<ChatResponse | null> }
 
 /** How a reply was produced (recorded per turn, reported in admin traces). */
 export function routeOf(r: ChatResponse): Route {
@@ -1412,13 +1413,32 @@ export class WebsiteChat {
       console.warn(`[ecosystem] ${this.context.tenantId}: broadcast failed: ${(e as Error).message}`);
       return [] as EcosystemMatch[];
     });
-    return { need, lang: rt.lang, matches };
+    const reply = matches.then((found) => (found.length ? this.answerViaPartner(need, found) : null)).catch(() => null);
+    return { need, lang: rt.lang, matches, reply };
+  }
+
+  // The partner reply is a list of "business X offers Y": a statement its excerpts don't support is
+  // cut out (no model call, ~5 s less) as long as every recommended business is still named in what
+  // remains; otherwise - or when a statement can't be located - the usual rewrite.
+  private async trimUnsupported(question: string, system: string, asked: ChatMessage[], reply: string, evidence: { content: string }[], labels: string[]): Promise<string> {
+    if (!jevEnabled()) return (await this.verifyAnswer(question, system, asked, reply, evidence)).trim() || reply;
+    const statements = splitStatements(reply);
+    const scores = statements.length ? await jevUnsupportedStatements(question, statements, evidence.map((e) => e.content)) : [];
+    if (!scores) return reply;
+    const bad = statements.filter((_, i) => scores[i] >= (Number(process.env.JEV_VERIFY_MIN) || 0.6));
+    if (!bad.length) return reply;
+    const cut = dropStatements(reply, bad);
+    const named = (t: string) => labels.every((l) => t.toLowerCase().includes(l.toLowerCase()));
+    if (cut && named(cut)) {
+      console.log(`[verify] ${this.context.tenantId}: partner reply - cut ${bad.length}/${statements.length}: ${bad.map((b) => b.slice(0, 80)).join(" | ")}`);
+      return cut;
+    }
+    return (await this.verifyAnswer(question, system, asked, reply, evidence)).trim() || reply;
   }
 
   /** What the network found, as a reply to add under ours; null when nobody fits. */
   private async networkReply(net: NetworkAsk): Promise<ChatResponse | null> {
-    const found = await net.matches;
-    return found.length ? this.answerViaPartner(net.need, found) : null;
+    return net.reply;
   }
 
   // Ecosystem: our own content has nothing on the question -> the best-ranked
@@ -1437,7 +1457,7 @@ export class WebsiteChat {
       `We checked businesses we work with; excerpts from their own websites:\n\n${material}\n\n` +
       `Write a short reply in the visitor's language: say in one short sentence that you also checked with businesses we work with, ` +
       `then say what each of them offers that answers the question, naming them, with their contact details. ` +
-      `Use only facts from the excerpts - add nothing, do not claim that we sell or do it, and do not describe our own offer. Full sentences, no preamble.` +
+      `Use only facts from the excerpts, in their own wording (no grades, adjectives or details they do not state) - add nothing, do not claim that we sell or do it, and do not describe our own offer. Full sentences, no preamble.` +
       (this.handoffLinks ? ` End with one short sentence saying they can continue the conversation directly with ${found.length > 1 ? "any of them" : "them"} using the link${found.length > 1 ? "s" : ""} below (do not write the links yourself).` : "");
     // Written from this question alone: the earlier conversation (other businesses,
     // our own offer) is not material for it and got mixed in.
@@ -1452,7 +1472,7 @@ export class WebsiteChat {
       { content: `We checked with these businesses we work with: ${found.map((f) => f.label).join(", ")}.` + (this.handoffLinks ? ` The visitor can continue the conversation directly with each of them using the link below.` : "") },
       ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }]),
     ];
-    reply = (await this.verifyAnswer(question, system, asked, reply, evidence)).trim() || reply;
+    reply = await this.trimUnsupported(question, system, asked, reply, evidence, found.map((f) => f.label));
     // One link per recommended business: the customer continues with that
     // business's own bot, which gets this conversation (see handoff.ts).
     let message = reply;

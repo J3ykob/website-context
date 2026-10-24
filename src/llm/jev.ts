@@ -234,15 +234,39 @@ export async function jevYesWhatNo(offer: string, message: string): Promise<"yes
 }
 
 /** Split a reply into checkable statements (sentences and list items). */
+// Sentence ends before a capital letter, but never after Polish abbreviations
+// ("ul.", "pon.-pt.", "np.", "tel.") or inside times/prices. Newlines always end one.
+const SENTENCE_END = /(\n+)|(?<=(?<!(?:^|[\s(])(?:ul|al|pl|os|pon|pt|wt|śr|czw|sob|niedz|np|tj|tzw|nr|lok|tel|godz|in|dr|prof|mgr|ok|św|bud|ww|m|r|zł))[.!?])(\s+)(?=[A-ZĄĆĘŁŃÓŚŹŻ])/;
+const unlink = (t: string) => t.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+const cleanStatement = (t: string) => t.replace(/^[\s*#>-]+|\*\*/g, "").trim();
+
 export function splitStatements(reply: string): string[] {
-  return reply
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    // Sentence ends before a capital letter, but never after Polish abbreviations
-    // ("ul.", "pon.-pt.", "np.", "tel.") or inside times/prices.
-    .split(/\n+|(?<=(?<!(?:^|[\s(])(?:ul|al|pl|os|pon|pt|wt|śr|czw|sob|niedz|np|tj|tzw|nr|lok|tel|godz|in|dr|prof|mgr|ok|św|bud|ww|m|r|zł))[.!?])\s+(?=[A-ZĄĆĘŁŃÓŚŹŻ])/)
-    .map((s) => s.replace(/^[\s*#>-]+|\*\*/g, "").trim())
+  return unlink(reply)
+    .split(SENTENCE_END)
+    .filter((s, i) => i % 3 === 0 && s !== undefined)
+    .map(cleanStatement)
     .filter((s) => s.length >= 12)
     .slice(0, 24);
+}
+
+/**
+ * The reply without the given statements (as splitStatements wrote them), cut at the same sentence
+ * boundaries, everything else untouched. null when a statement can't be located exactly - the caller
+ * then rewrites instead.
+ */
+export function dropStatements(reply: string, drop: string[]): string | null {
+  if (!drop.length) return reply;
+  const parts = reply.split(SENTENCE_END);
+  const want = new Set(drop);
+  let out = "";
+  for (let i = 0; i < parts.length; i += 3) {
+    const seg = parts[i] ?? "";
+    const gap = (parts[i + 1] ?? "") + (parts[i + 2] ?? "");
+    const c = cleanStatement(unlink(seg));
+    if (want.has(c)) { want.delete(c); continue; }
+    out += seg + gap;
+  }
+  return want.size ? null : out.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /**
