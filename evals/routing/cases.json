@@ -43,7 +43,7 @@
     { "id": "X4", "tenant": "rutas_pl", "turns": [{ "user": "Szukam materiałów budowlanych", "route": ["knowledge", "refusal"], "network": [], "lang": "pl", "judge": "Answers as the business (it does renovations, not material sales) without recommending other businesses." }] },
     { "id": "X5", "tenant": "marsan_pl", "turns": [
       { "user": "Szukam betonu wodoszczelnego W8 na fundamenty", "route": ["network"], "network": ["beton_lazy_pl"], "lang": "pl", "maxTotalMs": 20000, "maxLlm": 4, "judge": "Recommends Budomat Łazy." },
-      { "user": "Dobra, ale konkretnie co wy macie?", "route": ["knowledge", "refusal"], "network": [], "lang": "pl", "judge": "Answers about Marsan's own offer (building and finishing materials distribution) without recommending other businesses again and without inventing specific products." }
+      { "user": "Dobra, ale konkretnie co wy macie?", "route": ["knowledge", "refusal"], "network": [], "lang": "pl", "judge": "Answers about Marsan's own offer in general (building and finishing materials distribution, delivery, contact) without recommending other businesses again and without inventing specific products. Marsan's information names no concrete or cement products, so saying it has no details on those specifically is correct; facts like its number of products or years on the market come from its site." }
     ] },
 
     { "id": "E1", "tenant": "marsan_pl", "turns": [{ "user": "Dzień dobry", "route": ["knowledge", "refusal"], "network": [], "lang": "pl", "maxLlm": 2, "judge": "Greets back briefly and offers help." }] },
