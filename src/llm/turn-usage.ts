@@ -8,7 +8,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean }
+export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean; debug?: Record<string, unknown> }
 export const turnUsage = new AsyncLocalStorage<TurnUsage>();
 export const newTurnUsage = (): Omit<TurnUsage, "at"> & { at: number } => ({ llmCalls: 0, llmIn: 0, llmOut: 0, jevCalls: 0, jevIn: 0, at: Date.now(), steps: [] });
 
@@ -21,6 +21,11 @@ export function countLlm(inTok = 0, outTok = 0, started?: number, detail = ""): 
   if (started) u.steps.push(`llm @${sec(started - u.at)}s ${sec(Date.now() - started)}s${detail ? ` ${detail}` : ""}`);
 }
 /** Admin test of the no-Jev safe mode (header x-test-no-jev): Jev counts as unavailable for this request. */
+/** Admin trace detail for this turn (what was selected, why a reply was blocked) - for evals. */
+export function noteTurn(key: string, value: unknown): void {
+  const u = turnUsage.getStore();
+  if (u) (u.debug ||= {})[key] = value;
+}
 export const jevOffForTurn = (): boolean => !!turnUsage.getStore()?.noJev;
 
 

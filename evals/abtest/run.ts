@@ -75,7 +75,7 @@ async function play(c: Case, variant: string) {
       agent = a.status; total = a.ms; if (a.message) reply = `${reply}\n\n${a.message}`;
     }
     const tr = s.done.trace || {};
-    turns.push({ user, reply, firstMs: s.first, totalMs: total, agent, error: s.done.error || null, route: tr.route, llm: tr.llmCalls, llmIn: tr.llmIn, llmOut: tr.llmOut, jev: tr.jevCalls });
+    turns.push({ user, reply, firstMs: s.first, totalMs: total, agent, error: s.done.error || null, route: tr.route, llm: tr.llmCalls, llmIn: tr.llmIn, llmOut: tr.llmOut, jev: tr.jevCalls, debug: tr.debug, steps: tr.steps });
     history.push({ role: "assistant", content: reply });
   }
   return { id: c.id, variant: variant || "base", turns };
