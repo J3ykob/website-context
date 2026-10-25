@@ -1,3 +1,4 @@
+import { decodeResponse } from "./decode.js";
 import { chromium, Browser, Page } from "playwright";
 
 export interface FetchResult {
@@ -69,7 +70,7 @@ async function fetchStatic(
     }
   }
 
-  const html = await response.text();
+  const html = await decodeResponse(response);
   const headers: Record<string, string> = {};
   response.headers.forEach((value, key) => {
     headers[key] = value;

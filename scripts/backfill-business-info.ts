@@ -13,6 +13,7 @@
  */
 import { downloadTenantFile, uploadToR2 } from "../src/storage/r2.js";
 import { extractOfficialInfo } from "../src/context/business-profile.js";
+import { decodeResponse } from "../src/scraper/decode.js";
 import { verifyOfficialInfo } from "../src/context/profile-verify.js";
 
 const CONTACT_RE = /kontakt|contact|impressum|o-nas|contacto|contatti|kontakt-oss|contact-us|nous-contacter/i;
@@ -31,7 +32,7 @@ async function fetchStatic(url: string): Promise<string | null> {
       redirect: "follow", signal: AbortSignal.timeout(12000),
     });
     if (!r.ok) return null;
-    return await r.text();
+    return await decodeResponse(r);
   } catch { return null; }
 }
 
