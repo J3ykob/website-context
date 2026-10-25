@@ -55,11 +55,20 @@ export function buildPackIndex(catalog: KnowledgeCatalog | null): PackIndex | nu
 
 /** Candidate packs for this turn: the pages of the passages vector search found, best first, plus the
  *  small topic packs of their catalogs and the contact/locations topics. */
-export function candidatePacks(index: PackIndex, hits: { metadata: Record<string, unknown> }[], max = 14): Pack[] {
+export function candidatePacks(index: PackIndex, hits: { content?: string; metadata: Record<string, unknown> }[], max = 14): Pack[] {
   const out: Pack[] = [];
   const push = (id?: string) => { const p = id ? index.packs.get(id) : undefined; if (p && !out.includes(p)) out.push(p); };
+  // Search hits the catalog doesn't know (pages scraped after it was built): a pack of their own per page.
+  const loose = new Map<string, Pack>();
   for (const h of hits) {
     const url = String(h.metadata.url || "");
+    if (!index.byUrl.has(url) && h.content) {
+      let p = loose.get(url);
+      if (!p) { p = { id: `hit:${url}`, title: String(h.metadata.title || url), url, catalogs: [], chunks: [], chars: 0 }; loose.set(url, p); if (!out.includes(p)) out.push(p); }
+      p.chunks.push({ id: String(h.metadata.id || `${url}#${p.chunks.length}`), catalogId: "", content: h.content, url, title: p.title, type: String(h.metadata.type || "") });
+      p.chars += h.content.length;
+      continue;
+    }
     push(index.byUrl.get(url));
     const cat = String(h.metadata.catalog || "");
     if (cat) push(index.topics.get(cat));
@@ -90,8 +99,10 @@ export async function scorePacks(conversation: string, packs: Pack[], hits?: str
   if (!packs.length) return [];
   const questions: Record<string, JevQuestion> = {};
   const state: Record<string, unknown> = { conversation };
+  // Few candidates: Jev sees more of each (a small site's long passages); many: at least 900 characters.
+  const chars = Math.min(3000, Math.max(900, Math.floor(12000 / packs.length)));
   packs.forEach((p, i) => {
-    state[`pack${i}`] = `${p.title}${p.url ? ` (${p.url})` : ""}: ${preview(p, hits)}`;
+    state[`pack${i}`] = `${p.title}${p.url ? ` (${p.url})` : ""}: ${preview(p, hits, chars)}`;
     questions[`p${i}`] = {
       type: "noul",
       instructions: `Does \`pack${i}\` (a block of the business's own information) contain information needed to answer the customer's LATEST message in \`conversation\` (read with the earlier messages: a follow-up refers to what was discussed)? A pack about a different product category, place or topic is no.`,
