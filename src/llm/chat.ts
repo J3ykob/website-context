@@ -788,7 +788,7 @@ export class WebsiteChat {
         const found = await Promise.race([net.matches, new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 3500))]);
         if (found.length) {
           const links = this.handoffLinks ? await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [{ role: "user", content: net.need }], net.need).catch(() => ({} as Record<string, string>)) : ({} as Record<string, string>);
-          const text = found.map((f) => `### ${f.label}${links[f.tenantId] ? ` | link for the customer: ${links[f.tenantId]}` : ""}\nContact: ${f.contact}\n${f.passages.map((p) => p.content.replace(/\s+/g, " ").slice(0, 900)).join("\n")}`).join("\n\n---\n\n");
+          const text = found.map((f) => `### ${f.label}${links[f.tenantId] ? ` | link for the customer: ${links[f.tenantId]}` : ""}\nContact: ${f.contact || "no phone or e-mail known - only the link"}\n${f.passages.map((p) => p.content.replace(/\s+/g, " ").slice(0, 900)).join("\n")}`).join("\n\n---\n\n");
           const evidence = [
             { content: `Businesses from our network checked for the customer: ${found.map((f) => f.label).join(", ")}.` },
             ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }, { content: `${f.label} offers, sells, rents or does what the customer asked for ("${net.need.slice(0, 300)}") - checked against its own website.` }]),
@@ -892,6 +892,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (nl("unanswered") >= 0.6) problems.push("it skips a part of the customer's question - answer every part, or say for that part that you don't know");
       if (nl("claimsSent") >= 0.6) problems.push("it says the customer's request or details have been passed on or sent, but nothing has been sent - do not claim that");
       if (needContact && !hasContact(text)) problems.push("it does not give our phone number or e-mail from the official info - give it so the customer can ask us directly");
+      if (network && hasContact(text)) problems.push("it gives our own phone number or e-mail, as if it were a recommended business's - give each business only the contact shown for it");
       if (network && nl("vouches") >= 0.6) problems.push("it praises or vouches for another company - describe them only by what they offer");
       if (!network && nl("callUs") >= 0.6 && (!hasPhone || !hasEmail) && !/\d{3}[\s-]?\d{3}[\s-]?\d{3}|@/.test(text)) problems.push(`it suggests ${!hasPhone && !hasEmail ? "calling or e-mailing" : !hasPhone ? "calling" : "e-mailing"} us, but our information shows no ${!hasPhone && !hasEmail ? "phone number or e-mail" : !hasPhone ? "phone number" : "e-mail"} - point only to channels shown in our information (e.g. the contact form)`);
       if (network) for (const l of network.links) if (!text.includes(l)) problems.push(`it leaves out the link ${l} for one of the recommended businesses`);
