@@ -750,7 +750,7 @@ export class WebsiteChat {
       const query = followup && prevUser ? `${prevUser}\n${prevReply.slice(0, 200)}\n${question}` : question;
       // A real need we can't meet may go to the network: started now, used below if our packs don't answer.
       const net = rt && !behaviour.length ? await this.networkStart(question, messages, rt) : null;
-      const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 30) }).catch(() => []);
+      const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch(() => []);
       let scored: { p: Pack; s: number }[] = [];
       let hitIds: string[] | undefined;
       if (this.packIndex) {
