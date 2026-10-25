@@ -197,7 +197,7 @@ export function splitStatements(reply: string): string[] {
  * Answer verification: P(statement asserts a fact about the business that the
  * sources do not support) for every statement of a reply, in one call.
  */
-export async function jevUnsupportedStatements(question: string, statements: string[], sources: string[]): Promise<number[] | null> {
+export async function jevUnsupportedStatements(question: string, statements: string[], sources: string[], timeoutMs = 4000): Promise<number[] | null> {
   if (statements.length === 0) return [];
   const questions: Record<string, JevQuestion> = {};
   statements.forEach((_, i) => {
@@ -210,7 +210,7 @@ export async function jevUnsupportedStatements(question: string, statements: str
       },
     };
   });
-  const answers = await jevAsk({ question, sources, statements }, questions, 4000);
+  const answers = await jevAsk({ question, sources, statements }, questions, timeoutMs);
   if (!answers) return null;
   const out = statements.map((_, i) => (answers[`s${i}`] as JevNoulAnswer | undefined)?.noul);
   return out.every((v) => typeof v === "number") ? (out as number[]) : null;

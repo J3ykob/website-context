@@ -814,6 +814,23 @@ export class WebsiteChat {
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
     }
+    // A/B variant "whole": a small site goes to the model whole (selection still decides network referrals).
+    let whole = false;
+    if (turnVariant() === "whole" && this.packIndex && !network && !opts.noFacts && !opts.behaviour?.length) {
+      const pages = [...this.packIndex.packs.values()].filter((p) => p.url && !p.id.startsWith("hit:"));
+      const size = pages.reduce((s, p) => s + p.chars, 0);
+      noteTurn("whole", { pages: pages.length, chars: size, used: size <= 150000 });
+      if (size <= 150000) {
+        whole = true;
+        ({ text: packText, passages } = renderPacks(pages, 200000));
+        answered = passages.length > 0;
+        const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
+        behaviour.length = 0;
+        behaviour.push(BEHAVIOUR.answer, BEHAVIOUR.wholeGaps);
+        opts.handoffKind = undefined;
+        if (offerOk) { behaviour.push(BEHAVIOUR.handoffIfGap); opts.handoffKind = "question"; }
+      }
+    }
     behaviour.push(...(opts.extra || []));
 
     const brand = this.brandName || this.context.businessProfile?.businessName?.value || this.getAllowedDomain() || "our business";
@@ -895,7 +912,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (!text.trim()) return { problems: ["it is empty - write the reply"], offers: 0 };
       const statements = splitStatements(text);
       const [unsup, checks] = await Promise.all([
-        !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000)).catch(() => null) : Promise.resolve(null),
+        !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000), whole ? 15000 : 4000).catch(() => null) : Promise.resolve(null),
         jevEnabled() ? jevAsk({ conversation: convo, reply: text }, {
           offers: { type: "noul", instructions: "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
           denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
@@ -910,6 +927,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       ]);
       const nl = (k: string) => ((checks?.[k] as JevNoulAnswer | undefined)?.noul ?? 0);
       const bad = unsup ? statements.filter((_, i) => unsup[i] >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) : [];
+      if (!opts.noFacts && statements.length && jevEnabled() && !unsup) noteTurn("factCheckUnavailable", true);
       if (bad.length) problems.push(`these statements are not supported by our information (remove or correct them): ${bad.map((b) => `"${b}"`).join("; ")}`);
       if (!wantOffer && nl("offers") >= 0.6) problems.push("it offers to pass the question on to our team, which this reply must not do");
       if (!network && !answered && nl("denies") >= 0.6) problems.push("it says we do not offer or do something, although our information simply does not cover it");
@@ -1338,7 +1356,7 @@ ${whatToDo.map((b) => `- ${b}`).join("\n")}
       ...earlier,
       // The same passages the model saw (up to 25): checking against fewer made
       // correct lines of long lists look unsupported.
-      ...chunks.slice(0, 25).map((c) => c.content.slice(0, maxLen)),
+      ...chunks.slice(0, 600).map((c) => c.content.slice(0, maxLen)),
     ].filter((x) => x && x.trim());
   }
 
