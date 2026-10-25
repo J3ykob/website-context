@@ -640,9 +640,10 @@ export class WebsiteChat {
     // Answering our offer to pass the question on: only an explicit yes starts the form ("ok, thanks" is not a yes).
     const offer = this.handoffOffers.get(sessionKey);
     if (offer && Date.now() - offer.at < 30 * 60 * 1000 && !this.collectSessions.has(sessionKey)) {
-      const a = await jevAsk({ our_offer: "We offered to pass the customer's question on to our team and asked whether they want that.", message: question }, {
+      const ourReply = sanitizedMessages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || "";
+      const a = await jevAsk({ our_offer: `We offered to pass the customer's question on to our team and asked whether they want that. Our reply was: ${ourReply.slice(-600)}`, message: question }, {
         answer: { type: "choice", instructions: "How does the customer's `message` answer `our_offer`?", criteria: {
-          yes: "Explicitly agrees to have it passed on (e.g. 'tak, przekaż', 'yes please', 'proszę', gives contact details for it).",
+          yes: "Explicitly agrees to have it passed on (e.g. 'tak, przekaż', 'yes please', 'proszę'), or replies with their contact details (name, phone, e-mail, address).",
           what: "Asks what that means or how it works.",
           no: "Declines (e.g. 'nie', 'nie trzeba', 'no thanks').",
           other: "Anything else: thanks or ok without agreeing, a new question, another topic.",
@@ -684,7 +685,7 @@ export class WebsiteChat {
     if (rt && rt.intent === "order" && rt.flow >= 0) {
       const flows = this.routableFlows();
       const picked = rt.flowAmbiguous.length > 1 ? rt.flowAmbiguous.slice(0, 2).map((i) => flows[i]).filter(Boolean) : [flows[rt.flow]].filter(Boolean);
-      const elsewhere = picked.length === 1 && picked[0].executionMode === "collect" && this.offerItems.length > 0 && agentEnabled() && (await this.hasNetwork())
+      const elsewhere = picked.length === 1 && picked[0].executionMode === "collect" && agentEnabled() && (await this.hasNetwork())
         ? await this.notOfferedHere(question).catch(() => false) : false;
       if (picked.length > 1) {
         this.pendingDisambig.set(sessionKey, { flows: picked.slice(0, 3), at: Date.now() });
@@ -856,8 +857,15 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const siteHost = (() => { try { return new URL(this.context.siteMap[0]?.url || `https://${this.getAllowedDomain()}`).hostname.replace(/^www\./, ""); } catch { return ""; } })();
     const customerText = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
     const wantOffer = !!opts.handoffKind || !!opts.keepOffer;
+    // Our own phone numbers / e-mails: a reply without an answer should give one (unless the last reply already did).
+    const prof = this.context.businessProfile;
+    const ownContacts = [prof?.primaryPhone?.value, prof?.primaryEmail?.value, ...(prof?.alternatePhones || [])].filter(Boolean).map((c) => String(c).includes("@") ? String(c).toLowerCase() : String(c).replace(/\D/g, "").slice(-9)).filter((c) => c.length >= 6);
+    const hasContact = (t: string) => { const digits = t.replace(/\D/g, ""), low = t.toLowerCase(); return ownContacts.some((c) => (c.includes("@") ? low : digits).includes(c)); };
+    const prevAssistant = messages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || "";
+    const needContact = ownContacts.length > 0 && !network && behaviour.some((b) => b === BEHAVIOUR.noInfo || b === BEHAVIOUR.partial || b === BEHAVIOUR.quote) && !hasContact(prevAssistant);
     const check = async (text: string): Promise<{ problems: string[]; offers: number }> => {
       const problems: string[] = [];
+      if (!text.trim()) return { problems: ["it is empty - write the reply"], offers: 0 };
       const statements = splitStatements(text);
       const [unsup, checks] = await Promise.all([
         !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000)).catch(() => null) : Promise.resolve(null),
@@ -869,6 +877,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
           promises: { type: "noul", instructions: "Does `reply` offer or promise that WE will do something for the customer in this chat or later - check availability or stock, calculate a cost, measure, book, reserve, call them back, send them something? (Offering to pass the question on to the team, or inviting them to contact us, does not count.)" },
           meta: { type: "noul", instructions: "Does `reply` refer to an internal resource it was given - 'in our information', 'w dostępnych informacjach', 'w naszych materiałach', 'in the information provided', 'according to the data/sources'? Plain statements like 'I don't have that information', 'nie mam tej informacji' or 'we don't list it on our website' are NOT this." },
           unanswered: { type: "noul", instructions: "Does the customer's latest message in `conversation` ask about several things, and does `reply` skip one of them without saying anything about it?" },
+          claimsSent: { type: "noul", instructions: "Does `reply` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered (already done, not offered)?" },
           vouches: { type: "noul", instructions: "Does `reply` praise or vouch for another company (e.g. 'reliable', 'trusted', 'experienced', 'sprawdzona')?" },
         }, 4000).catch(() => null) : Promise.resolve(null),
       ]);
@@ -881,6 +890,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (nl("promises") >= 0.6) problems.push("it offers or promises something this chat cannot do (checking availability, calculating, measuring, booking, calling back) - offer nothing of the kind");
       if (nl("meta") >= 0.6) problems.push("it talks about 'our information' / 'materials' / 'data' instead of speaking as the business");
       if (nl("unanswered") >= 0.6) problems.push("it skips a part of the customer's question - answer every part, or say for that part that you don't know");
+      if (nl("claimsSent") >= 0.6) problems.push("it says the customer's request or details have been passed on or sent, but nothing has been sent - do not claim that");
+      if (needContact && !hasContact(text)) problems.push("it does not give our phone number or e-mail from the official info - give it so the customer can ask us directly");
       if (network && nl("vouches") >= 0.6) problems.push("it praises or vouches for another company - describe them only by what they offer");
       if (!network && nl("callUs") >= 0.6 && (!hasPhone || !hasEmail) && !/\d{3}[\s-]?\d{3}[\s-]?\d{3}|@/.test(text)) problems.push(`it suggests ${!hasPhone && !hasEmail ? "calling or e-mailing" : !hasPhone ? "calling" : "e-mailing"} us, but our information shows no ${!hasPhone && !hasEmail ? "phone number or e-mail" : !hasPhone ? "phone number" : "e-mail"} - point only to channels shown in our information (e.g. the contact form)`);
       if (network) for (const l of network.links) if (!text.includes(l)) problems.push(`it leaves out the link ${l} for one of the recommended businesses`);
