@@ -78,9 +78,14 @@ export function htmlToMarkdown(fetchResult: FetchResult): MarkdownResult {
     // For content-heavy pages, use the full body to avoid missing content
     $main = $("body");
   } else {
+    // The main area must hold a real share of the page's text: the first match of a page-builder
+    // selector is often an empty widget (beton-lazy.pl's first .elementor-widget-container is an
+    // image), which made whole pages convert to nothing.
+    const textLen = (el: cheerio.Cheerio<AnyNode>) => el.text().replace(/\s+/g, " ").trim().length;
+    const bodyLen = textLen($("body"));
     for (const selector of mainSelectors) {
       const found = $(selector);
-      if (found.length > 0) {
+      if (found.length > 0 && textLen(found.first()) >= Math.max(1, bodyLen * 0.3)) {
         $main = found.first();
         break;
       }
@@ -204,6 +209,16 @@ function extractItemContent(
   return null;
 }
 
+const BLOCK = "p,div,li,td,th,tr,dt,dd,h1,h2,h3,h4,h5,h6,section,article,header,footer,address,blockquote,figcaption";
+/** An element's text with its line breaks and inner blocks kept apart: `.text()` glued
+ *  "Płytowa 1<br>03-046 Warszawa" into "Płytowa 103-046 Warszawa" and "<p>Name</p><p>Role</p>" into "NameRole". */
+function textOf($: cheerio.CheerioAPI, $el: cheerio.Cheerio<AnyNode>, lineBreak = " "): string {
+  const c = $el.clone();
+  c.find("br").replaceWith(lineBreak === "\n" ? "\n" : " ");
+  c.find(BLOCK).each((_, e) => { $(e).append(lineBreak === "\n" ? "\n" : " "); });
+  return c.text().replace(/[ \t\u00a0]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n").trim();
+}
+
 function convertToMarkdown(
   $: cheerio.CheerioAPI,
   $root: cheerio.Cheerio<AnyNode>
@@ -226,7 +241,7 @@ function convertToMarkdown(
 
     // Headings
     if (/^h[1-6]$/.test(tag)) {
-      const t = $el.text().trim();
+      const t = textOf($, $el);
       if (t) { lines.push(""); lines.push("#".repeat(parseInt(tag[1])) + " " + t); lines.push(""); }
       return;
     }
@@ -245,7 +260,7 @@ function convertToMarkdown(
     if (tag === "ul" || tag === "ol") {
       lines.push("");
       $el.children("li").each((i, li) => {
-        const t = $(li).text().trim();
+        const t = textOf($, $(li));
         if (t) lines.push((tag === "ol" ? (i+1) + ". " : "- ") + t);
       });
       lines.push("");
@@ -256,7 +271,7 @@ function convertToMarkdown(
     if (tag === "table") {
       const rows: string[][] = [];
       $el.find("tr").each((_, tr) => {
-        const cells = $(tr).find("th,td").map((_, c) => $(c).text().trim()).get();
+        const cells = $(tr).find("th,td").map((_, c) => textOf($, $(c))).get();
         if (cells.length) rows.push(cells);
       });
       if (rows.length) {
@@ -278,7 +293,7 @@ function convertToMarkdown(
 
     // Blockquotes
     if (tag === "blockquote") {
-      const t = $el.text().trim();
+      const t = textOf($, $el);
       if (t) { lines.push(""); lines.push("> " + t); lines.push(""); }
       return;
     }
@@ -292,7 +307,7 @@ function convertToMarkdown(
 
     // Paragraphs
     if (tag === "p") {
-      const t = $el.text().trim();
+      const t = textOf($, $el, "\n");
       if (t) { lines.push(t); lines.push(""); }
       return;
     }

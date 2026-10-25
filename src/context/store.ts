@@ -268,10 +268,11 @@ function buildChunks(
       ? `## ${section.heading}\n\n${section.content}`
       : section.content;
 
-    // If this section is just a heading with no body content, save it
-    // as a prefix for the next section (e.g., "## desery" followed by items)
+    // A heading with no body content is kept as a prefix for the next section (e.g., "## desery"
+    // followed by items). Several in a row add up: a list made of headings (insanit.waw.pl's
+    // services as <h6>s) was overwritten one by one, and the last ones were dropped.
     if (section.heading && section.content.trim().length < 5) {
-      pendingParentHeading = `## ${section.heading}\n\n`;
+      pendingParentHeading += `## ${section.heading}\n\n`;
       continue;
     }
 
@@ -315,6 +316,11 @@ function buildChunks(
     }
   }
   if (accumulator) merged.push(accumulator);
+  // Headings at the end of the page with no body after them are content too.
+  if (pendingParentHeading.trim()) {
+    const last = sections[sections.length - 1];
+    merged.push({ heading: last.heading, level: last.level, url: last.url, headingPath: last.headingPath.slice(0, -1), content: pendingParentHeading.trim() });
+  }
 
   // Step 2: Create chunks from merged sections
   const chunks: ContentChunk[] = [];

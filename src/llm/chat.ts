@@ -771,7 +771,7 @@ export class WebsiteChat {
         if (rel) passages = hits.slice(0, 12).filter((_, i) => rel[i] >= 0.5).map((h) => h.content);
         packText = passages.map((p) => p).join("\n\n---\n\n");
       }
-      if (scored.length) ({ text: packText, used, passages } = renderPacks(scored.map((x) => x.p), 14000, hitIds!));
+      if (scored.length) ({ text: packText, used, passages } = renderPacks(scored.map((x) => x.p), undefined, hitIds!));
       answered = passages.length > 0;
       // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer
       // to ask the team - the network only when nothing of ours is relevant (we may well do it).
@@ -837,8 +837,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
 - Never say we don't offer, sell or do something unless our information says so.
 - If the question is ambiguous (several locations, variants or departments), say which applies or ask briefly.
 - General professional advice is fine when asked, clearly as general advice.
-- Write naturally, like a helpful person at the business: full sentences, no lists unless listing 4+ items, at most about 80 words unless the customer asks for full details. One closing offer or question at most.
-- Offer only what this chat can really do: answer from our information${opts.handoffKind || opts.keepOffer ? ", pass this question on to our team (as instructed above)" : ""}. Never offer to check availability or stock, calculate, measure, book, reserve or call the customer back yourself.
+- Write naturally, like a helpful person at the business: full sentences, no lists unless listing 4+ items, at most about 80 words unless the customer asks for full details.
+- End with at most one question${opts.handoffKind || opts.keepOffer ? " (the offer to pass the question on, when instructed above)" : ""}. Never offer to do something yourself - send, check, calculate, measure, book, arrange or call back: this chat can only answer.
 - Links only as given above, as markdown [name](url).
 - Answer every part of the customer's message; for a part our information doesn't cover, say so for that part.
 - For a specific location, branch or department, use the address, phone and hours shown for that one; the official info is the general contact.
