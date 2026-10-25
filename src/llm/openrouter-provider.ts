@@ -1,4 +1,4 @@
-import { countLlm } from "./turn-usage.js";
+import { countLlm, turnVariant } from "./turn-usage.js";
 
 // OpenRouter routes each call to one of a model's providers; a provider that
 // fails (404 "model not found", 429, 5xx, or a 400 the provider itself returned,
@@ -10,6 +10,8 @@ type ProviderPrefs = { sort?: string; ignore?: string[] };
 // A provider that failed is skipped by every call for a while (Vertex kept
 // answering 404 for hours; each call paid a failed attempt first).
 const AVOID_MS = 10 * 60_000;
+// Admin A/B (header x-test-variant: model:<openrouter id>): the reply model for this request.
+const testModel = (): string => { const v = turnVariant(); return v.startsWith("model:") ? v.slice(6) : ""; };
 const avoided = new Map<string, number>();
 function avoidList(): string[] {
   const now = Date.now();
@@ -89,7 +91,7 @@ export class OpenRouterProvider {
         "X-Title": this.siteName,
       },
       body: JSON.stringify({
-        model: overrides?.model || this.model,
+        model: overrides?.model || testModel() || this.model,
         messages,
         max_tokens: overrides?.maxTokens ?? this.maxTokens,
         temperature: overrides?.temperature ?? this.temperature,
@@ -133,7 +135,7 @@ export class OpenRouterProvider {
         "X-Title": this.siteName,
       },
       body: JSON.stringify({
-        model: this.model,
+        model: testModel() || this.model,
         messages,
         max_tokens: this.maxTokens,
         temperature: this.temperature,

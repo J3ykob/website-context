@@ -62,7 +62,7 @@ async function agentResult(tenant: string, session: string, projectId: string, t
 }
 
 async function play(c: Case, variant: string) {
-  const session = `${RUN}-${variant || "base"}-${c.id}`;
+  const session = `${RUN}-${(variant || "base").replace(/[^a-z0-9]+/gi, "_")}-${c.id}`;
   const history: { role: string; content: string }[] = [];
   const turns: any[] = [];
   for (const user of c.turns) {
