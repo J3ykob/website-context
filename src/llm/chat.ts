@@ -1678,7 +1678,7 @@ ${contextBlocks}
 - When linking to pages, use proper markdown: [Page Name](https://url). NEVER use arrow symbols like "Page Name →" without a URL. If you don't have the URL, just mention the page name without a link.
 - NEVER say "check each hotel's policy" or "contact them directly" - if you know details, share them. If you don't, say "I don't have those details right now, but I can help with something else."
 - Do NOT use emojis. No 🔍🌟🏢🤝📈🚀💡🏡💰📞📝. Just plain text.
-- Keep answers SHORT, but always in full sentences - never a bare value (a lone phone number, time or address). 2-4 sentences for simple questions. Only use bullet points or headers when listing 4+ items. Don't write essays. Exception: when the visitor asks about ALL locations, branches, products or options (e.g. "where are you and when are you open"), list every one found in the sources compactly, one line each.
+- Keep answers SHORT, but always in full sentences - never a bare value (a lone phone number, time or address). 2-4 sentences for simple questions, and at most about 80 words for any answer unless the visitor asks for a full list or details of everything (then list compactly). Only use bullet points or headers when listing 4+ items. Don't write essays. Exception: when the visitor asks about ALL locations, branches, products or options (e.g. "where are you and when are you open"), list every one found in the sources compactly, one line each.
 
 ## Rules:
 - Only use information from the context above
@@ -1815,7 +1815,7 @@ Answer:`;
     const statements = splitStatements(draft);
     const [v, scores] = await Promise.all([
       jevCheckNoEvidenceReply(question, draft),
-      statements.length ? jevUnsupportedStatements(question, statements, this.verifySources(chunks)).catch(() => null) : Promise.resolve([] as number[]),
+      statements.length ? jevUnsupportedStatements(question, statements, this.verifySources(chunks, messages)).catch(() => null) : Promise.resolve([] as number[]),
     ]);
     const invented = scores ? statements.filter((_, i) => scores[i] >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) : [];
     const problems: string[] = [];
@@ -1859,7 +1859,7 @@ Answer:`;
     if (!jev && !this.backend.classify) return text;
     const statements = splitStatements(text);
     if (statements.length === 0) return text;
-    const sources = this.verifySources(chunks);
+    const sources = this.verifySources(chunks, messages);
     const t0 = Date.now();
     // Without Jev (safe mode) the small fallback model does the same check: the gate alone let
     // "W8 concrete is in our offer" through on a general description of the offer.
@@ -1877,10 +1877,17 @@ Answer:`;
     }
   }
 
-  private verifySources(chunks: { content: string }[]): string[] {
+  // Everything the reply model was given as fact: official info, owner notes, the site's page list
+  // ("see our Realizacje page"), our own earlier replies in this conversation (each was checked when
+  // it was sent - a follow-up repeating the address was flagged without them), and the passages.
+  private verifySources(chunks: { content: string }[], messages: ChatMessage[] = []): string[] {
+    const pages = this.context.siteMap.slice(0, 20).map((p) => `- ${p.title} (${p.url})`).join("\n");
+    const earlier = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-2).map((m) => `Earlier in this conversation we said: ${m.content.slice(0, 1500)}`);
     return [
       renderOfficialInfo(this.context.businessProfile),
       ...this.contextNotes.map((n) => `Q: ${n.question}\nA: ${n.answer}`),
+      pages ? `Pages of our website:\n${pages}` : "",
+      ...earlier,
       // The same passages the model saw (up to 25): checking against fewer made
       // correct lines of long lists look unsupported.
       ...chunks.slice(0, 25).map((c) => c.content.slice(0, 2500)),

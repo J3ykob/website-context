@@ -282,7 +282,7 @@ export async function jevUnsupportedStatements(question: string, statements: str
       instructions: `Does \`statements[${i}]\` state a fact about the business that the \`sources\` do not support or that they contradict?`,
       criteria: {
         true: "It states a specific fact (what we do or offer, where it happens, who does it, a price, time, number, address or contact) that is missing from the sources or differs from them.",
-        false: "The sources support it (stated or directly implied), or it is only a greeting, an offer to help, or a general invitation to contact us.",
+        false: "The sources support it (stated or directly implied), or it is only a greeting, an offer to help, a general invitation to contact us, or a statement that some information is not available here.",
       },
     };
   });
