@@ -1217,11 +1217,13 @@ export class WebsiteChat {
       const net = rt && !behaviour.length ? await this.networkStart(question, messages, rt, false) : null;
       const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch(() => []);
       let scored: { p: Pack; s: number }[] = [];
+      let hitIds: Set<string> | undefined;
       if (this.packIndex) {
         const byId = new Map(this.knowledgeCatalog!.chunks.map((c) => [c.id, c]));
         const enriched = hits.map((h) => { const c = byId.get(String(h.metadata.id || "")); return c ? { metadata: { ...h.metadata, url: c.url, catalog: c.catalogId } } : h; });
         const cands = candidatePacks(this.packIndex, enriched);
-        const scores = await scorePacks(convo, cands);
+        hitIds = new Set(hits.map((h) => String(h.metadata.id || "")).filter(Boolean));
+        const scores = await scorePacks(convo, cands, hitIds);
         if (scores) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.5).sort((a, b) => b.s - a.s).slice(0, 4);
         console.log(`[packs] ${this.context.tenantId}: ${cands.length} candidates -> ${scored.map((x) => `${x.p.title.slice(0, 40)}=${x.s.toFixed(2)}`).join(" | ") || "none"}`);
       } else {
@@ -1230,7 +1232,7 @@ export class WebsiteChat {
         if (rel) passages = hits.slice(0, 12).filter((_, i) => rel[i] >= 0.5).map((h) => h.content);
         packText = passages.map((p) => p).join("\n\n---\n\n");
       }
-      if (scored.length) ({ text: packText, used, passages } = renderPacks(scored.map((x) => x.p)));
+      if (scored.length) ({ text: packText, used, passages } = renderPacks(scored.map((x) => x.p), 14000, hitIds!));
       answered = passages.length > 0;
       if (!answered && net) {
         const found = await Promise.race([net.matches, new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 3500))]);

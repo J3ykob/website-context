@@ -70,19 +70,25 @@ export function candidatePacks(index: PackIndex, hits: { metadata: Record<string
   return out.slice(0, max + 2);
 }
 
-function preview(p: Pack, chars = 700): string {
+// The pack's passages with the ones the search matched first: a long page (a price list of many
+// machines) is judged and sent by the part the conversation is about, not by its first lines.
+function ordered(p: Pack, hits?: Set<string>): CatalogChunk[] {
+  if (!hits?.size) return p.chunks;
+  return [...p.chunks.filter((c) => hits.has(c.id)), ...p.chunks.filter((c) => !hits.has(c.id))];
+}
+function preview(p: Pack, hits?: Set<string>, chars = 900): string {
   let s = "";
-  for (const c of p.chunks) { if (s.length >= chars) break; s += c.content.replace(/\s+/g, " ").slice(0, chars - s.length) + " … "; }
+  for (const c of ordered(p, hits)) { if (s.length >= chars) break; s += c.content.replace(/\s+/g, " ").slice(0, chars - s.length) + " … "; }
   return s;
 }
 
 /** Jev: how much each candidate pack helps with the customer's latest message, read with the conversation. */
-export async function scorePacks(conversation: string, packs: Pack[]): Promise<number[] | null> {
+export async function scorePacks(conversation: string, packs: Pack[], hits?: Set<string>): Promise<number[] | null> {
   if (!packs.length) return [];
   const questions: Record<string, JevQuestion> = {};
   const state: Record<string, unknown> = { conversation };
   packs.forEach((p, i) => {
-    state[`pack${i}`] = `${p.title}${p.url ? ` (${p.url})` : ""}: ${preview(p)}`;
+    state[`pack${i}`] = `${p.title}${p.url ? ` (${p.url})` : ""}: ${preview(p, hits)}`;
     questions[`p${i}`] = {
       type: "noul",
       instructions: `Does \`pack${i}\` (a block of the business's own information) contain information needed to answer the customer's LATEST message in \`conversation\` (read with the earlier messages: a follow-up refers to what was discussed)? A pack about a different product category, place or topic is no.`,
@@ -95,7 +101,7 @@ export async function scorePacks(conversation: string, packs: Pack[]): Promise<n
 }
 
 /** The chosen packs as prompt text, within a budget: best pack first, each whole when it fits. */
-export function renderPacks(packs: Pack[], budget = 14000): { text: string; used: Pack[]; passages: string[] } {
+export function renderPacks(packs: Pack[], budget = 14000, hits?: Set<string>): { text: string; used: Pack[]; passages: string[] } {
   let left = budget;
   const blocks: string[] = [];
   const used: Pack[] = [];
@@ -103,7 +109,7 @@ export function renderPacks(packs: Pack[], budget = 14000): { text: string; used
   for (const p of packs) {
     if (left < 600) break;
     let body = "";
-    for (const c of p.chunks) {
+    for (const c of ordered(p, hits)) {
       const t = c.content.trim();
       if (body.length + t.length > Math.min(left, 6000)) break;
       body += (body ? "\n\n" : "") + t;
