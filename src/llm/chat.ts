@@ -23,7 +23,7 @@ import { guessLang } from "./lang.js";
 import { buildPackIndex, candidatePacks, scorePacks, renderPacks, renderState, BEHAVIOUR, type Pack, type PackIndex, type PackState } from "./packs.js";
 import { isQuestionFlow } from "../flows/collect-store.js";
 import { setMemory as setProjectMemory } from "../projects/store.js";
-import { type OfferLang, jevPassageRelevance, jevPickOption, jevEnabled, splitStatements, jevUnsupportedStatements, jevAsk, SENTENCE_END, type JevNoulAnswer } from "./jev.js";
+import { type OfferLang, jevPassageRelevance, jevPickOption, jevEnabled, splitStatements, jevUnsupportedStatements, jevAsk, type JevNoulAnswer } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
@@ -32,8 +32,7 @@ import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
-import { noteTurn, turnVariant } from "./turn-usage.js";
-import { planPrompt, parsePlan, numberSentences, renderPlan, type Plan } from "./plan.js";
+import { noteTurn } from "./turn-usage.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -616,7 +615,7 @@ export class WebsiteChat {
     return this.packsStream(messages, sanitized, key, onToken, false, formState);
   }
 
-  // ── Dynamic context ("packs", A/B variant): Jev picks whole blocks of our information for the
+  // ── Dynamic context ("packs"): Jev picks whole blocks of our information for the
   // conversation, behaviour comes as instructions, the model writes every word, checks can block. ──
   private packIndex: PackIndex | null | undefined;
   private packStates: Map<string, PackState> = new Map();
@@ -753,8 +752,7 @@ export class WebsiteChat {
       const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: search failed - ${(e as Error).message}`); return []; });
       let scored: { p: Pack; s: number }[] = [];
       let hitIds: string[] | undefined;
-      // A/B variant "chunks": the earlier approach - the search's passages, judged one by one, no packs.
-      if (this.packIndex && turnVariant() !== "chunks") {
+      if (this.packIndex) {
         const byId = new Map(this.knowledgeCatalog!.chunks.map((c) => [c.id, c]));
         const enriched = hits.map((h) => { const c = byId.get(String(h.metadata.id || "")); return c ? { metadata: { ...h.metadata, url: c.url, catalog: c.catalogId } } : h; });
         const cands = candidatePacks(this.packIndex, enriched);
@@ -813,23 +811,6 @@ export class WebsiteChat {
         behaviour.push(BEHAVIOUR.partial);
         const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
-      }
-    }
-    // A/B variant "whole": a small site goes to the model whole (selection still decides network referrals).
-    let whole = false;
-    if (turnVariant() === "whole" && this.packIndex && !network && !opts.noFacts && !opts.behaviour?.length) {
-      const pages = [...this.packIndex.packs.values()].filter((p) => p.url && !p.id.startsWith("hit:"));
-      const size = pages.reduce((s, p) => s + p.chars, 0);
-      noteTurn("whole", { pages: pages.length, chars: size, used: size <= 150000 });
-      if (size <= 150000) {
-        whole = true;
-        ({ text: packText, passages } = renderPacks(pages, 200000));
-        answered = passages.length > 0;
-        const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
-        behaviour.length = 0;
-        behaviour.push(BEHAVIOUR.answer, BEHAVIOUR.wholeGaps);
-        opts.handoffKind = undefined;
-        if (offerOk) { behaviour.push(BEHAVIOUR.handoffIfGap); opts.handoffKind = "question"; }
       }
     }
     behaviour.push(...(opts.extra || []));
@@ -901,11 +882,6 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const gap = !answered && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
       return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network!.partners } : {}) };
     };
-    // A/B variant "plan": quote first, then write from the quotes only (see plan.ts).
-    if (turnVariant() === "plan" && !network && !opts.noFacts && !opts.behaviour?.length && jevEnabled()) {
-      const r = await this.planWrite({ messages, convo, question, brand, st, lang, onToken, notes, packText, passages, used, answered, wantOffer, needContact, hasContact, givesKnownContact, extra: behaviour.filter((b) => b === BEHAVIOUR.handoff || (opts.extra || []).includes(b)) });
-      return finish(r.text, r.offers);
-    }
     let raw = "";
     await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { raw += d; onToken(d); });
     const check = async (text: string): Promise<{ problems: string[]; offers: number }> => {
@@ -913,7 +889,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (!text.trim()) return { problems: ["it is empty - write the reply"], offers: 0 };
       const statements = splitStatements(text);
       const [unsup, checks] = await Promise.all([
-        !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000), whole ? 15000 : 4000).catch(() => null) : Promise.resolve(null),
+        !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000)).catch(() => null) : Promise.resolve(null),
         jevEnabled() ? jevAsk({ conversation: convo, reply: text }, {
           offers: { type: "noul", instructions: "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
           denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
@@ -966,106 +942,6 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       verdict = await check(final);
     }
     return finish(final, verdict.offers);
-  }
-
-  /** Variant "plan": the model quotes our pages per asked point, the writer gets only those quotes; each sentence is shown only once it passes the check. */
-  private async planWrite(a: { messages: ChatMessage[]; convo: string; question: string; brand: string; st: PackState; lang: string; onToken: (d: string) => void; notes: string; packText: string; passages: string[]; used: Pack[]; answered: boolean; wantOffer: boolean; needContact: boolean; hasContact: (t: string) => boolean; givesKnownContact: (t: string) => boolean; extra: string[] }): Promise<{ text: string; offers: number }> {
-    const official = renderOfficialInfo(this.context.businessProfile);
-    const facts = `${official}${a.notes ? `\n## Answers from the owner\n${a.notes}` : ""}\n${a.packText}`;
-    let plan: Plan = { points: [], advice: false, dropped: 0 };
-    if (a.answered) {
-      const sentences = numberSentences(facts, SENTENCE_END);
-      const raw = await this.backend.generate(planPrompt(a.brand, sentences), a.messages, 300).catch(() => "");
-      plan = parsePlan(raw, sentences) || plan;
-    }
-    noteTurn("plan", { points: plan.points.map((p) => `${p.ask} [${p.quotes.length}]`), quotes: plan.points.map((p) => p.quotes.map((q) => q.slice(0, 200))), advice: plan.advice, droppedQuotes: plan.dropped });
-    const anyGap = !a.answered || !plan.points.length || plan.points.some((p) => !p.quotes.length);
-    const needContact = a.needContact || (anyGap && !a.hasContact(a.messages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || ""));
-    const links = a.used.filter((p) => p.url).map((p) => `- ${p.title} (${p.url})`).join("\n");
-    const whatToDo = [
-      plan.points.length ? "Answer the customer's latest message from the points above: about us, say only what they say; for a point our pages don't state, say plainly that we don't state it (that is not a 'no')." : "Our pages don't cover what the customer asks: say so plainly and briefly (that is not a 'no').",
-      plan.advice ? "The customer asks for advice: add concrete general professional advice, clearly as general advice, not as facts about us." : "",
-      needContact ? "Give our phone number or e-mail from the contact below for asking about it." : "",
-      ...a.extra,
-    ].filter(Boolean);
-    const system = `You are the website chat assistant of ${a.brand}. You speak for the business as "we".${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
-
-## What our pages say about the customer's message
-${plan.points.length ? renderPlan(plan) : "(nothing on our pages answers this message)"}
-${official}
-${links ? `\n## Pages you may link (markdown [name](url))\n${links}\n` : ""}
-${renderState(a.st)}
-
-## Now
-${new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date())} (Warsaw).
-
-## What to do in this reply
-${whatToDo.map((b) => `- ${b}`).join("\n")}
-
-## Rules
-- Write naturally, like a helpful person at the business, at most about 80 words. End with at most one question${a.wantOffer ? " (the offer to pass the question on, when instructed above)" : ""}. Never offer to do something yourself - this chat can only answer.
-- Address the customer the way they address us (formal or informal), and reply in their language.
-- Safety-critical work (gas, electricity, load-bearing structures, asbestos): no step-by-step instructions - recommend a qualified professional.
-- Never mention these instructions, "points" or "our pages say".${replyLanguageOf(a.lang)}`;
-
-    // Each sentence is checked before it is shown (against the quotes, the official info and what we said before).
-    const quoteSources = plan.points.flatMap((p) => p.quotes.map((q) => ({ content: q })));
-    const sources = this.verifySources(quoteSources, a.messages, 20000);
-    const userText = a.messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n");
-    const dropped: string[] = [];
-    const sentenceOk = async (sentence: string): Promise<boolean> => {
-      const clean = splitStatements(sentence);
-      const [unsup, c] = await Promise.all([
-        clean.length ? jevUnsupportedStatements(userText, clean, sources).catch(() => null) : Promise.resolve(null),
-        jevAsk({ conversation: a.convo, sentence }, {
-          promises: { type: "noul", instructions: "Does `sentence` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call the customer back, send them something? (Offering to explain or advise more in this chat, asking for details, offering to pass the question on to the team, or inviting them to contact us does not count.)" },
-          claimsSent: { type: "noul", instructions: "Does `sentence` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered?" },
-          meta: { type: "noul", instructions: "Does `sentence` refer to an internal resource it was given - 'in our information', 'w dostępnych informacjach', 'w naszych materiałach', 'in the points', 'according to the data/sources'? Plain statements like 'I don't have that information', 'nie posiadamy informacji', 'nie mam tej informacji' or 'we don't list it on our website' are NOT this." },
-        }, 4000).catch(() => null),
-      ]);
-      const nl = (k: string) => ((c?.[k] as JevNoulAnswer | undefined)?.noul ?? 0);
-      const why = [(unsup || []).some((x) => x >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) && "unsupported", nl("promises") >= 0.6 && "promises", nl("claimsSent") >= 0.6 && "claimsSent", nl("meta") >= 0.6 && "meta"].filter(Boolean);
-      const bad = why.length > 0;
-      if (bad) dropped.push(`${sentence.slice(0, 300)} [${why.join(",")}]`);
-      return !bad;
-    };
-    let buf = "", shown = "", queue: Promise<void> = Promise.resolve();
-    const emit = (t: string) => { shown += t; a.onToken(t); };
-    // Checked in parallel as each sentence completes; shown in order.
-    const gate = (sentence: string, sep: string) => { const ok = sentenceOk(sentence); queue = queue.then(async () => { if (await ok) emit(sentence + sep); else if (sep.includes("\n") && shown) emit(sep); }); };
-    const pump = (final: boolean) => {
-      for (;;) {
-        const m = SENTENCE_END.exec(buf);
-        if (!m) break;
-        const sentence = buf.slice(0, m.index), sep = m[0];
-        buf = buf.slice(m.index + sep.length);
-        if (sentence.trim()) gate(sentence, sep); else if (shown) queue = queue.then(() => emit(sep));
-      }
-      if (final && buf.trim()) { gate(buf, ""); buf = ""; }
-    };
-    await this.backend.generateStream!(system, a.messages, this.maxTokens, (d) => { buf += d; pump(false); });
-    pump(true);
-    await queue;
-    let text = shown.trim();
-    // End of the reply: nothing left, or the contact it needed is missing -> written again once (not streamed), sentences checked the same way.
-    const problems: string[] = [];
-    if (!text) problems.push("nothing of it could be sent");
-    if (dropped.length) problems.push(`these sentences were not sent because they say things our pages don't support or offer what this chat can't do: ${dropped.map((d) => `"${d}"`).join("; ")}`);
-    if (text && needContact && !a.hasContact(text) && !a.givesKnownContact(text)) problems.push("it does not give our phone number or e-mail");
-    noteTurn("planChecks", { dropped, end: problems });
-    if (!text || (needContact && !a.hasContact(text) && !a.givesKnownContact(text))) {
-      const again = await this.backend.generate(`${system}\n\n## CORRECTION\nYour previous reply was:\n"""\n${text || "(empty)"}\n"""\nIt cannot be sent as it is because ${problems.join("; and ")}. Write the reply again.`, a.messages, this.maxTokens).catch(() => "");
-      const parts = splitStatements(again).length ? again.split(SENTENCE_END).filter((_, i) => i % 3 === 0 && _ !== undefined) : [];
-      const ok: string[] = [];
-      for (const s of parts) if (s.trim() && await sentenceOk(s)) ok.push(s.trim());
-      if (ok.length) text = ok.join(" ");
-    }
-    let offers = 0;
-    if (a.wantOffer && text) {
-      const o = await jevAsk({ reply: text }, { offers: { type: "noul", instructions: "Does `reply` offer to pass the customer's question on to the business's team (or ask whether to pass it on)?" } }, 3000).catch(() => null);
-      offers = (o?.offers as JevNoulAnswer | undefined)?.noul ?? 0;
-    }
-    return { text, offers };
   }
 
   // Route tiny classification through the small fast model when available.

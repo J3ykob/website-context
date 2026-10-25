@@ -191,7 +191,5 @@ export const BEHAVIOUR = {
   midForm: "The customer is in the middle of an order or inquiry form and asked a question. Answer it from our information (or say we don't have that information), then invite them in one short sentence to continue with the form. Do not offer to pass anything on.",
   calcStarted: "A calculation for the customer has just been started and its result will appear in this chat in a minute or two. Tell the customer that briefly in your own words (one or two sentences); do not give any figures yourself.",
   whichAction: (names: string[]) => `The customer's message could start more than one of our actions: ${names.join("; ")}. Ask briefly which one they mean.`,
-  wholeGaps: "If our information doesn't state something the customer asks, say so plainly for that part (missing information is not a 'no' - never say we don't offer or do it) and give our phone or e-mail for asking about it.",
-  handoffIfGap: "If something asked is not stated, offer once, in your own words, to pass the question on to our team, and ask whether the customer wants that.",
   smalltalk: "This is a greeting, thanks or small talk: reply naturally and briefly and offer help with our business. No offers to pass anything on.",
 };
