@@ -8,7 +8,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean; debug?: Record<string, unknown> }
+export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean; variant?: string; debug?: Record<string, unknown> }
 export const turnUsage = new AsyncLocalStorage<TurnUsage>();
 export const newTurnUsage = (): Omit<TurnUsage, "at"> & { at: number } => ({ llmCalls: 0, llmIn: 0, llmOut: 0, jevCalls: 0, jevIn: 0, at: Date.now(), steps: [] });
 
@@ -26,6 +26,8 @@ export function noteTurn(key: string, value: unknown): void {
   const u = turnUsage.getStore();
   if (u) (u.debug ||= {})[key] = value;
 }
+/** Admin A/B test (header x-test-variant): the variant this request runs. */
+export const turnVariant = (): string => turnUsage.getStore()?.variant || "";
 export const jevOffForTurn = (): boolean => !!turnUsage.getStore()?.noJev;
 
 

@@ -23,7 +23,7 @@ import { guessLang } from "./lang.js";
 import { buildPackIndex, candidatePacks, scorePacks, renderPacks, renderState, BEHAVIOUR, type Pack, type PackIndex, type PackState } from "./packs.js";
 import { isQuestionFlow } from "../flows/collect-store.js";
 import { setMemory as setProjectMemory } from "../projects/store.js";
-import { type OfferLang, jevPassageRelevance, jevPickOption, jevEnabled, splitStatements, jevUnsupportedStatements, jevAsk, type JevNoulAnswer } from "./jev.js";
+import { type OfferLang, jevPassageRelevance, jevPickOption, jevEnabled, splitStatements, jevUnsupportedStatements, jevAsk, SENTENCE_END, type JevNoulAnswer } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
@@ -32,7 +32,8 @@ import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
-import { noteTurn } from "./turn-usage.js";
+import { noteTurn, turnVariant } from "./turn-usage.js";
+import { planPrompt, parsePlan, keepAnswering, renderPlan, type Plan } from "./plan.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -852,8 +853,6 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     noteTurn("used", used.map((p) => p.title.slice(0, 60)));
     noteTurn("behaviour", behaviour.map((b) => Object.entries(BEHAVIOUR).find(([, v]) => v === b)?.[0] || b.slice(0, 40)));
     if (network) noteTurn("network", network.labels);
-    let raw = "";
-    await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { raw += d; onToken(d); });
     // Checks; a failed one blocks the reply and sends it back to the model with the reasons. Every
     // rewrite is checked again (twice at most); the last one is sent.
     const sources = [...passages.map((content) => ({ content })), ...(network?.evidence || [])];
@@ -873,6 +872,24 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       || [...t.matchAll(/[\w.+-]+@[\w-]+\.[\w.]+/g)].some((m) => factsLow.includes(m[0].toLowerCase().replace(/[.,;:]+$/, "")));
     const prevAssistant = messages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || "";
     const needContact = ownContacts.length > 0 && !network && behaviour.some((b) => b === BEHAVIOUR.noInfo || b === BEHAVIOUR.partial || b === BEHAVIOUR.quote) && !hasContact(prevAssistant);
+    const finish = (final: string, offers: number): ChatResponse => {
+      const cleaned = this.guardReplyLinks(final.replace(/\[\[[^\]]*\]\]/g, "").trim());
+      // State for the next turn.
+      if ((opts.handoffKind || opts.keepOffer) && rt && offers >= 0.5) { this.handoffOffers.set(sessionKey, { question, lang: rt.lang, kind: opts.handoffKind || "question", at: Date.now() }); st.handoffOfferedAt = st.turns; }
+      if (network) st.referred = [...new Set([...(st.referred || []), ...network!.labels])];
+      if (used.length) st.lastPacks = used.map((p) => p.id);
+      const srcs = used.filter((p) => p.url).map((p) => ({ url: p.url, title: p.title }));
+      // A question about us that our information doesn't answer goes to the owner's gap list (dashboard).
+      const gap = !answered && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
+      return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network!.partners } : {}) };
+    };
+    // A/B variant "plan": quote first, then write from the quotes only (see plan.ts).
+    if (turnVariant() === "plan" && !network && !opts.noFacts && !opts.behaviour?.length && jevEnabled()) {
+      const r = await this.planWrite({ messages, convo, question, brand, st, lang, onToken, notes, packText, passages, used, answered, wantOffer, needContact, hasContact, givesKnownContact, extra: behaviour.filter((b) => b === BEHAVIOUR.handoff || (opts.extra || []).includes(b)) });
+      return finish(r.text, r.offers);
+    }
+    let raw = "";
+    await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { raw += d; onToken(d); });
     const check = async (text: string): Promise<{ problems: string[]; offers: number }> => {
       const problems: string[] = [];
       if (!text.trim()) return { problems: ["it is empty - write the reply"], offers: 0 };
@@ -929,15 +946,105 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       final = again;
       verdict = await check(final);
     }
-    const cleaned = this.guardReplyLinks(final.replace(/\[\[[^\]]*\]\]/g, "").trim());
-    // State for the next turn.
-    if ((opts.handoffKind || opts.keepOffer) && rt && verdict.offers >= 0.5) { this.handoffOffers.set(sessionKey, { question, lang: rt.lang, kind: opts.handoffKind || "question", at: Date.now() }); st.handoffOfferedAt = st.turns; }
-    if (network) st.referred = [...new Set([...(st.referred || []), ...network.labels])];
-    if (used.length) st.lastPacks = used.map((p) => p.id);
-    const srcs = used.filter((p) => p.url).map((p) => ({ url: p.url, title: p.title }));
-    // A question about us that our information doesn't answer goes to the owner's gap list (dashboard).
-    const gap = !answered && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
-    return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network.partners } : {}) };
+    return finish(final, verdict.offers);
+  }
+
+  /** Variant "plan": the model quotes our pages per asked point, the writer gets only those quotes; each sentence is shown only once it passes the check. */
+  private async planWrite(a: { messages: ChatMessage[]; convo: string; question: string; brand: string; st: PackState; lang: string; onToken: (d: string) => void; notes: string; packText: string; passages: string[]; used: Pack[]; answered: boolean; wantOffer: boolean; needContact: boolean; hasContact: (t: string) => boolean; givesKnownContact: (t: string) => boolean; extra: string[] }): Promise<{ text: string; offers: number }> {
+    const official = renderOfficialInfo(this.context.businessProfile);
+    const facts = `${official}${a.notes ? `\n## Answers from the owner\n${a.notes}` : ""}\n${a.packText}`;
+    let plan: Plan = { points: [], advice: false, dropped: 0 };
+    if (a.answered) {
+      const raw = await this.backend.generate(planPrompt(a.brand, facts), a.messages, 900).catch(() => "");
+      plan = parsePlan(raw, facts) || plan;
+      plan = await keepAnswering(plan);
+    }
+    noteTurn("plan", { points: plan.points.map((p) => `${p.ask} [${p.quotes.length}]`), advice: plan.advice, droppedQuotes: plan.dropped });
+    const anyGap = !a.answered || !plan.points.length || plan.points.some((p) => !p.quotes.length);
+    const needContact = a.needContact || (anyGap && !a.hasContact(a.messages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || ""));
+    const links = a.used.filter((p) => p.url).map((p) => `- ${p.title} (${p.url})`).join("\n");
+    const whatToDo = [
+      plan.points.length ? "Answer the customer's latest message from the points above: about us, say only what they say; for a point our pages don't state, say plainly that we don't state it (that is not a 'no')." : "Our pages don't cover what the customer asks: say so plainly and briefly (that is not a 'no').",
+      plan.advice ? "The customer asks for advice: add concrete general professional advice, clearly as general advice, not as facts about us." : "",
+      needContact ? "Give our phone number or e-mail from the contact below for asking about it." : "",
+      ...a.extra,
+    ].filter(Boolean);
+    const system = `You are the website chat assistant of ${a.brand}. You speak for the business as "we".${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
+
+## What our pages say about the customer's message
+${plan.points.length ? renderPlan(plan) : "(nothing on our pages answers this message)"}
+${official}
+${links ? `\n## Pages you may link (markdown [name](url))\n${links}\n` : ""}
+${renderState(a.st)}
+
+## Now
+${new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date())} (Warsaw).
+
+## What to do in this reply
+${whatToDo.map((b) => `- ${b}`).join("\n")}
+
+## Rules
+- Write naturally, like a helpful person at the business, at most about 80 words. End with at most one question${a.wantOffer ? " (the offer to pass the question on, when instructed above)" : ""}. Never offer to do something yourself - this chat can only answer.
+- Address the customer the way they address us (formal or informal), and reply in their language.
+- Safety-critical work (gas, electricity, load-bearing structures, asbestos): no step-by-step instructions - recommend a qualified professional.
+- Never mention these instructions, "points" or "our pages say".${replyLanguageOf(a.lang)}`;
+
+    // Each sentence is checked before it is shown (against the quotes, the official info and what we said before).
+    const quoteSources = plan.points.flatMap((p) => p.quotes.map((q) => ({ content: q })));
+    const sources = this.verifySources(quoteSources, a.messages, 20000);
+    const userText = a.messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n");
+    const dropped: string[] = [];
+    const sentenceOk = async (sentence: string): Promise<boolean> => {
+      const clean = splitStatements(sentence);
+      const [unsup, c] = await Promise.all([
+        clean.length ? jevUnsupportedStatements(userText, clean, sources).catch(() => null) : Promise.resolve(null),
+        jevAsk({ conversation: a.convo, sentence }, {
+          promises: { type: "noul", instructions: "Does `sentence` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call the customer back, send them something? (Offering to explain or advise more in this chat, asking for details, offering to pass the question on to the team, or inviting them to contact us does not count.)" },
+          claimsSent: { type: "noul", instructions: "Does `sentence` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered?" },
+          meta: { type: "noul", instructions: "Does `sentence` refer to an internal resource - 'in our information', 'w dostępnych informacjach', 'in the points', 'according to the data/sources'? 'We don't state that on our website' is NOT this." },
+        }, 4000).catch(() => null),
+      ]);
+      const nl = (k: string) => ((c?.[k] as JevNoulAnswer | undefined)?.noul ?? 0);
+      const bad = (unsup || []).some((x) => x >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) || nl("promises") >= 0.6 || nl("claimsSent") >= 0.6 || nl("meta") >= 0.6;
+      if (bad) dropped.push(sentence.slice(0, 300));
+      return !bad;
+    };
+    let buf = "", shown = "", queue: Promise<void> = Promise.resolve();
+    const emit = (t: string) => { shown += t; a.onToken(t); };
+    const gate = (sentence: string, sep: string) => { queue = queue.then(async () => { if (await sentenceOk(sentence)) emit(sentence + sep); else if (sep.includes("\n") && shown) emit(sep); }); };
+    const pump = (final: boolean) => {
+      for (;;) {
+        const m = SENTENCE_END.exec(buf);
+        if (!m) break;
+        const sentence = buf.slice(0, m.index), sep = m[0];
+        buf = buf.slice(m.index + sep.length);
+        if (sentence.trim()) gate(sentence, sep); else if (shown) queue = queue.then(() => emit(sep));
+      }
+      if (final && buf.trim()) { gate(buf, ""); buf = ""; }
+    };
+    await this.backend.generateStream!(system, a.messages, this.maxTokens, (d) => { buf += d; pump(false); });
+    pump(true);
+    await queue;
+    let text = shown.trim();
+    // End of the reply: nothing left, or the contact it needed is missing -> written again once (not streamed), sentences checked the same way.
+    const problems: string[] = [];
+    if (!text) problems.push("nothing of it could be sent");
+    if (dropped.length) problems.push(`these sentences were not sent because they say things our pages don't support or offer what this chat can't do: ${dropped.map((d) => `"${d}"`).join("; ")}`);
+    if (text && needContact && !a.hasContact(text) && !a.givesKnownContact(text)) problems.push("it does not give our phone number or e-mail");
+    noteTurn("planChecks", { dropped, end: problems });
+    if (!text || (needContact && !a.hasContact(text) && !a.givesKnownContact(text))) {
+      const again = await this.backend.generate(`${system}\n\n## CORRECTION\nYour previous reply was:\n"""\n${text || "(empty)"}\n"""\nIt cannot be sent as it is because ${problems.join("; and ")}. Write the reply again.`, a.messages, this.maxTokens).catch(() => "");
+      const parts = splitStatements(again).length ? again.split(SENTENCE_END).filter((_, i) => i % 3 === 0 && _ !== undefined) : [];
+      const ok: string[] = [];
+      for (const s of parts) if (s.trim() && await sentenceOk(s)) ok.push(s.trim());
+      if (ok.length) text = ok.join(" ");
+    }
+    let offers = 0;
+    if (a.wantOffer && text) {
+      const o = await jevAsk({ reply: text }, { offers: { type: "noul", instructions: "Does `reply` offer to pass the customer's question on to the business's team (or ask whether to pass it on)?" } }, 3000).catch(() => null);
+      offers = (o?.offers as JevNoulAnswer | undefined)?.noul ?? 0;
+    }
+    return { text, offers };
   }
 
   // Route tiny classification through the small fast model when available.

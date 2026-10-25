@@ -1300,6 +1300,7 @@ app.post("/api/chat", async (req, res) => {
     const usage = newTurnUsage();
     // Admin test of the safe mode without Jev (routing evals): Jev unavailable for this request only.
     if (adminOk(req) && req.headers["x-test-no-jev"] === "1") (usage as any).noJev = true;
+    if (adminOk(req) && typeof req.headers["x-test-variant"] === "string") (usage as any).variant = req.headers["x-test-variant"];
     const turnStart = Date.now();
     const traceFor = (r: any) => adminOk(req) ? { trace: { route: routeOf(r), ms: Date.now() - turnStart, ...usage } } : {};
 

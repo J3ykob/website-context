@@ -179,7 +179,7 @@ export type OfferLang = (typeof OFFER_LANGS)[number];
 /** Split a reply into checkable statements (sentences and list items). */
 // Sentence ends before a capital letter, but never after Polish abbreviations
 // ("ul.", "pon.-pt.", "np.", "tel.") or inside times/prices. Newlines always end one.
-const SENTENCE_END = /(\n+)|(?<=(?<!(?:^|[\s(])(?:ul|al|pl|os|pon|pt|wt|śr|czw|sob|niedz|np|tj|tzw|nr|lok|tel|godz|in|dr|prof|mgr|ok|św|bud|ww|m|r|zł))[.!?])(\s+)(?=[A-ZĄĆĘŁŃÓŚŹŻ])/;
+export const SENTENCE_END = /(\n+)|(?<=(?<!(?:^|[\s(])(?:ul|al|pl|os|pon|pt|wt|śr|czw|sob|niedz|np|tj|tzw|nr|lok|tel|godz|in|dr|prof|mgr|ok|św|bud|ww|m|r|zł))[.!?])(\s+)(?=[A-ZĄĆĘŁŃÓŚŹŻÀ-ÖØ-ÞА-ЯЄІЇҐ])/;
 const unlink = (t: string) => t.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 const cleanStatement = (t: string) => t.replace(/^[\s*#>-]+|\*\*/g, "").trim();
 
