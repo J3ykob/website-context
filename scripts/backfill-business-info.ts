@@ -13,6 +13,7 @@
  */
 import { downloadTenantFile, uploadToR2 } from "../src/storage/r2.js";
 import { extractOfficialInfo } from "../src/context/business-profile.js";
+import { verifyOfficialInfo } from "../src/context/profile-verify.js";
 
 const CONTACT_RE = /kontakt|contact|impressum|o-nas|contacto|contatti|kontakt-oss|contact-us|nous-contacter/i;
 const SERVE_URL = process.env.SERVE_URL || "https://whisp.so";
@@ -57,7 +58,8 @@ async function backfillOne(tenantId: string, dry: boolean): Promise<void> {
   }
   if (!pages.length) { console.log(`[${tenantId}] SKIP — could not fetch any page`); return; }
 
-  const info = extractOfficialInfo(pages, siteUrl);
+  // Same two steps as the scrape: typed sources, then checked against the pages and gaps filled (Jev).
+  const info = await verifyOfficialInfo(extractOfficialInfo(pages, siteUrl), pages);
   console.log(`[${tenantId}] ${pages.length} pages | phone=${info.primaryPhone?.value || "(absent)"} [${info.primaryPhone?.source || "-"}] email=${info.primaryEmail?.value || "(absent)"} addr=${info.primaryAddress ? "Y" : "-"} hours=${info.openingHours ? "Y" : "-"} alts=${(info.alternatePhones || []).length} | ${info.extractionBasis}`);
   if (dry) return;
 

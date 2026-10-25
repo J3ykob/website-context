@@ -5,6 +5,7 @@ import type { CrawlResult, ScrapedPage } from "../scraper/types.js";
 import { htmlToMarkdown, type MarkdownSection } from "../scraper/markdown.js";
 import { fetchPage } from "../scraper/fetcher.js";
 import { extractOfficialInfo } from "./business-profile.js";
+import { verifyOfficialInfo } from "./profile-verify.js";
 import { OpenRouterProvider } from "../llm/openrouter-provider.js";
 import type {
   WebsiteContext,
@@ -179,7 +180,8 @@ export function createContextBuilder() {
     // Canonical Official Business Info — built from authoritative typed sources (JSON-LD,
     // tel:/mailto:) so the chat can answer "what's your main phone/email/address?" from one
     // always-injected block instead of losing to testimonial/listing chunks in retrieval.
-    const businessProfile = extractOfficialInfo(profilePages, homeUrl || firstUrl);
+    // Then checked against what the pages show, and gaps filled from their text (profile-verify.ts).
+    const businessProfile = await verifyOfficialInfo(extractOfficialInfo(profilePages, homeUrl || firstUrl), profilePages).catch(() => extractOfficialInfo(profilePages, homeUrl || firstUrl));
 
     return {
       tenantId: "", // set by caller
