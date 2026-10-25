@@ -31,7 +31,7 @@ const cases: Case[] = readdirSync(DIR).filter((f) => /^cases-.*\.json$/.test(f))
 async function streamTurn(variant: string, tenant: string, session: string, messages: { role: string; content: string }[]) {
   const t0 = Date.now();
   let first = 0, done: any = null;
-  const r = await fetch(`${BASE}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": ADMIN, ...(variant ? { "x-test-variant": variant } : {}) }, body: JSON.stringify({ tenantId: tenant, sessionId: session, messages, stream: true }) }).catch(() => null);
+  const r = await fetch(`${BASE}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": ADMIN, "x-test-variant": variant || "base" }, body: JSON.stringify({ tenantId: tenant, sessionId: session, messages, stream: true }) }).catch(() => null);
   if (!r || !r.ok || !r.body) return { first: 0, total: Date.now() - t0, done: { error: `HTTP ${r?.status}`, message: "" } };
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
   for (;;) {

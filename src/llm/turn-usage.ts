@@ -23,8 +23,12 @@ export function countLlm(inTok = 0, outTok = 0, started?: number, detail = ""): 
 /** Admin test of the no-Jev safe mode (header x-test-no-jev): Jev counts as unavailable for this request. */
 export const jevOffForTurn = (): boolean => !!turnUsage.getStore()?.noJev;
 
-/** A/B test of the reply pipeline (header x-test-variant, admins only): "packs" = dynamic context. */
-export const variantForTurn = (): string => turnUsage.getStore()?.variant || process.env.CHAT_VARIANT || "";
+/**
+ * The reply pipeline: "packs" (dynamic context, every word model-written) for everyone since
+ * 2026-10-25 after the blind A/B (+0.23 overall, -39% errors). CHAT_VARIANT=base rolls it back;
+ * admins can force either per request (header x-test-variant) for comparisons.
+ */
+export const variantForTurn = (): string => turnUsage.getStore()?.variant || process.env.CHAT_VARIANT || "packs";
 
 export function countJev(inTok = 0, started?: number): void {
   const u = turnUsage.getStore();

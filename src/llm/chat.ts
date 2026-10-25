@@ -547,6 +547,8 @@ export class WebsiteChat {
   // Every conversation is a project (src/projects/conversation.ts): the turn is answered, then
   // recorded in the conversation's project with how it was handled.
   async chat(messages: ChatMessage[], sessionKey?: string, formState?: Record<string, string>): Promise<ChatResponse> {
+    // The packs pipeline answers through the streaming path (Messenger, API callers without streaming).
+    if (variantForTurn() === "packs" && this.backend.generateStream) return this.chatStream(messages, sessionKey, () => {}, formState);
     const r = await this.chatInner(messages, sessionKey, formState);
     this.recordConversationTurn(messages, sessionKey, r);
     return r;
