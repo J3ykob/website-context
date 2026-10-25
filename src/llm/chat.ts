@@ -1292,6 +1292,13 @@ export class WebsiteChat {
       }
       if (scored.length) ({ text: packText, used, passages } = renderPacks(scored.map((x) => x.p), 14000, hitIds!));
       answered = passages.length > 0;
+      // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer
+      // to ask the team - the network only when nothing of ours is relevant (we may well do it).
+      let partial = false;
+      if (answered && jevEnabled()) {
+        const f = await jevAsk({ conversation: convo, our_information: passages.join("\n\n").slice(0, 9000) }, { full: { type: "noul", instructions: "Does `our_information` contain everything needed to answer the customer's LATEST message in `conversation` (every part and detail asked)?" } }, 4000).catch(() => null);
+        partial = ((f?.full as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5;
+      }
       if (!answered && net) {
         const found = await Promise.race([net.matches, new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 3500))]);
         if (found.length) {
@@ -1312,6 +1319,11 @@ export class WebsiteChat {
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
       if (answered) behaviour.unshift(BEHAVIOUR.answer);
+      if (answered && partial) {
+        behaviour.push(BEHAVIOUR.partial);
+        const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
+        if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
+      }
     }
     behaviour.push(...(opts.extra || []));
 
@@ -1369,7 +1381,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
           contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)? Saying we have no information on something and recommending another business for it is NOT a contradiction." },
           callUs: { type: "noul", instructions: "Does `reply` tell the customer to call us, phone us, or e-mail us (or mention our phone number or e-mail as a way to reach us)?" },
           promises: { type: "noul", instructions: "Does `reply` offer or promise that WE will do something for the customer in this chat or later - check availability or stock, calculate a cost, measure, book, reserve, call them back, send them something? (Offering to pass the question on to the team, or inviting them to contact us, does not count.)" },
-          meta: { type: "noul", instructions: "Does `reply` talk about 'our information', 'the information provided', 'our materials', 'available data' or 'sources' as such, instead of simply saying what we know or don't know?" },
+          meta: { type: "noul", instructions: "Does `reply` refer to an internal resource it was given - 'in our information', 'w dostępnych informacjach', 'w naszych materiałach', 'in the information provided', 'according to the data/sources'? Plain statements like 'I don't have that information', 'nie mam tej informacji' or 'we don't list it on our website' are NOT this." },
           unanswered: { type: "noul", instructions: "Does the customer's latest message in `conversation` ask about several things, and does `reply` skip one of them without saying anything about it?" },
           vouches: { type: "noul", instructions: "Does `reply` praise or vouch for another company (e.g. 'reliable', 'trusted', 'experienced', 'sprawdzona')?" },
         }, 4000).catch(() => null) : Promise.resolve(null),
