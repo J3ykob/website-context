@@ -753,7 +753,8 @@ export class WebsiteChat {
       const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: search failed - ${(e as Error).message}`); return []; });
       let scored: { p: Pack; s: number }[] = [];
       let hitIds: string[] | undefined;
-      if (this.packIndex) {
+      // A/B variant "chunks": the earlier approach - the search's passages, judged one by one, no packs.
+      if (this.packIndex && turnVariant() !== "chunks") {
         const byId = new Map(this.knowledgeCatalog!.chunks.map((c) => [c.id, c]));
         const enriched = hits.map((h) => { const c = byId.get(String(h.metadata.id || "")); return c ? { metadata: { ...h.metadata, url: c.url, catalog: c.catalogId } } : h; });
         const cands = candidatePacks(this.packIndex, enriched);
