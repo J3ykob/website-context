@@ -392,7 +392,7 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
     const rv = (await reviewForRun(projectId, s.runId)) || (await openReview(projectId, tenantId, s.runId, forOwner, files));
     if (rv.status === "pending" || rv.status === "changes_requested") {
       const lang = await replyLanguage(projectId);
-      const text = REVIEWING[lang] || REVIEWING.en;
+      const text = await wordNotice(projectId, s.runId, "reviewing", lang, REVIEWING[lang] || REVIEWING.en, "The result is ready, but the business checks it before it reaches the customer; it will appear in this chat once approved.");
       if ((p?.memory.reviewNotified as string | undefined) !== s.runId && (await claimMemory(projectId, "reviewNotified", s.runId))) {
         await onDeliver(text).catch(() => {});
       }
@@ -400,7 +400,8 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
       // follows if they left one. Nothing is promised about when the owner decides.
       const { reviewLateMs } = await import("./review.js");
       if (rv.status === "pending" && Date.now() - Date.parse(rv.createdAt) > reviewLateMs()) {
-        const late = (REVIEW_LATE[lang] || REVIEW_LATE.en).replace("{link}", `${process.env.BASE_URL || "https://whisp.so"}/p/${await customerLink(projectId).catch(() => "")}`);
+        const link = `${process.env.BASE_URL || "https://whisp.so"}/p/${await customerLink(projectId).catch(() => "")}`;
+        const late = await wordNotice(projectId, s.runId, "late", lang, (REVIEW_LATE[lang] || REVIEW_LATE.en).replace("{link}", link), `The business has not approved the result yet. Once it does, it will appear in this chat and at this link: ${link} (and by e-mail if the customer left one). They don't have to wait on the page. Promise nothing about when.`);
         if ((p?.memory.reviewLate as string | undefined) !== s.runId && (await claimMemory(projectId, "reviewLate", s.runId))) {
           await onDeliver(late).catch(() => {});
         }
@@ -411,7 +412,7 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
     if (rv.status === "approved") message = (rv.final || rv.draft || draft).trim();
     else { message = rv.final.trim(); files = []; }
   }
-  if (!message) message = COULD_NOT[await replyLanguage(projectId)] || COULD_NOT.en;
+  if (!message) { const l = await replyLanguage(projectId); message = await wordNotice(projectId, s.runId, "couldnot", l, COULD_NOT[l] || COULD_NOT.en, "We could not prepare the result this time. Suggest asking again or contacting the business directly. Promise nothing."); }
   if (!delivered && (await claimMemory(projectId, "delivered", s.runId))) {
     await setMemory(projectId, { ownerLoop: false });
     await onDeliver(message).catch(() => {});
@@ -421,6 +422,30 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   // Done when the customer gets real content: the agent's reply, or the owner's approved / own text.
   const ownerText = message !== draft && message !== (COULD_NOT[await replyLanguage(projectId)] || COULD_NOT.en);
   return { status: (s.status === "done" && !!draft) || ownerText ? "done" : "failed", message, files, projectId };
+}
+
+/**
+ * A notice to the customer about their calculation. In the packs variant (recorded on the project when it
+ * started) the model words it, once per run (kept in the project); otherwise the fixed text.
+ */
+async function wordNotice(projectId: string, runId: string, kind: string, lang: string, fixed: string, what: string): Promise<string> {
+  const p = await getProject(projectId);
+  if (p?.memory.variant !== "packs") return fixed;
+  const key = `notice_${kind}`;
+  const kept = p.memory[key] as { runId: string; text: string } | undefined;
+  if (kept?.runId === runId && kept.text) return kept.text;
+  const names: Record<string, string> = { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German" };
+  let text = "";
+  try {
+    const { OpenRouterProvider } = await import("../llm/openrouter-provider.js");
+    text = (await new OpenRouterProvider().chat([
+      { role: "system", content: `You are the website chat assistant of a business, speaking as "we". Write one short chat message (one or two sentences) to the customer: ${what} Write it in ${names[lang] || "the customer's language"}, naturally, no greeting.` },
+      { role: "user", content: "Write the message." },
+    ], { maxTokens: 160, temperature: 0.4 })).content.trim();
+  } catch {}
+  if (!text) return fixed;
+  await setMemory(projectId, { [key]: { runId, text } }).catch(() => {});
+  return text;
 }
 
 async function replyLanguage(projectId: string): Promise<string> {

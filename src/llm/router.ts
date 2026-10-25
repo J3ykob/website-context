@@ -22,6 +22,8 @@ export interface Route {
   price: number;
   /** A specific, concrete product or service (not a broad category). */
   specific: number;
+  /** The message gives the prices to calculate with itself. */
+  ownPrices: number;
   /** Looking for a product or service another business could provide (not this business's own terms). */
   need: number;
   /** A follow-up on the previous reply rather than a new request. */
@@ -31,7 +33,7 @@ export interface Route {
 }
 
 const INTENTS: Record<Intent, string> = {
-  order: "Wants to place an order, a booking, a rental or a sign-up now, or to start one of the business's actions (e.g. 'I'll take 20 bags', 'book me for Friday', 'I want to rent it').",
+  order: "Wants to place an order, a booking, a rental or a sign-up now, or to start one of the business's actions (e.g. 'I'll take 20 bags', 'book me for Friday', 'I want to rent it'). Asking what something would cost is NOT an order.",
   ask: "Asks the business something or asks for advice: what it offers, whether it has or does something, how something works, which product or solution to choose, prices of single items, contact, location, hours, references, terms - answered by the business's information or expertise, without computing figures.",
   calculate: "Asks to work out figures from quantities, sizes or periods the visitor gives: the total cost of several listed items with quantities, how much or how many of a material is needed for given dimensions, a cost over a rental period, or a comparison of options with numbers.",
   elsewhere: "Explicitly asks to find it somewhere else: to check with or recommend other businesses, suppliers or places (e.g. 'where else can I get it?', 'can you recommend someone who does roofs?').",
@@ -47,6 +49,7 @@ export async function route(previousUser: string, previousReply: string, message
       type: "noul",
       instructions: "Does `message` (read with `previous_visitor_message` if it continues it) ask for one specific, concrete product or service, named precisely enough to ask a supplier for it - a specific kind, grade, model, size or parameter (e.g. 'waterproof concrete', 'facade scaffolding rental', 'an 18 m boom lift', '60x60 porcelain tiles')? Answer no for a broad category ('building materials', 'what do you have'), a question about this business itself, or small talk.",
     },
+    ownPrices: { type: "noul", instructions: "Does `message` itself give the prices or rates to calculate with (e.g. 'a bag costs 25 zł, how much for 20?')?" },
     need: {
       type: "noul",
       instructions: "Is the visitor looking for a product or service they want to get (buy, rent or have done) - something another business could also provide? Answer no when `message` asks about this business's own terms, guarantee, policies, facilities, location, people or way of working (e.g. 'do you give a 10-year guarantee?', 'is there parking?'), even if it names a service.",
@@ -83,6 +86,7 @@ export async function route(previousUser: string, previousReply: string, message
     price: nl("price"),
     specific: nl("specific"),
     need: nl("need"),
+    ownPrices: nl("ownPrices"),
     followup: previousReply.trim() ? nl("followup") : 0,
     lang: lang && (OFFER_LANGS as readonly string[]).includes(lang) ? lang : "en",
     probabilities: it.probabilities || {},

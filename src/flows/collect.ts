@@ -256,9 +256,10 @@ function inquiryOf(flow: FlowDefinition, s: CollectSession, fields: FlowInput[])
  * Taken only when Jev is sure (>= 0.8); "yes, but change…" and new details are "other".
  * null = read the message with the model.
  */
-export async function quickAnswer(s: CollectSession, message: string, prior: string): Promise<"confirm" | "cancel" | null> {
+export async function quickAnswer(s: CollectSession, message: string, prior: string): Promise<"confirm" | "cancel" | "pause" | null> {
   const criteria: Record<string, string> = {
     cancel: "Wants to stop or cancel the whole order / request (e.g. 'cancel it', 'no thanks, forget it').",
+    pause: "Wants to stop for now and maybe continue later, without cancelling (e.g. 'wait, I need to measure first', 'hold on', 'not yet').",
     other: "Anything else: gives, adds or corrects details, asks something, agrees but changes or adds something, or is unclear.",
   };
   if (s.stage === "confirming") criteria.confirm = "Confirms the summary shown as it is (e.g. 'yes', 'correct', 'send it', 'ok') without changing or adding anything.";
@@ -267,7 +268,7 @@ export async function quickAnswer(s: CollectSession, message: string, prior: str
   }, 3000).catch(() => null);
   const c = a?.act as { choice?: string; probabilities?: Record<string, number> } | undefined;
   if (!c?.choice || c.choice === "other" || (c.probabilities?.[c.choice] ?? 0) < 0.8) return null;
-  return c.choice === "confirm" || c.choice === "cancel" ? c.choice : null;
+  return c.choice === "confirm" || c.choice === "cancel" || c.choice === "pause" ? c.choice : null;
 }
 
 // Fixed replies for the two settled answers, by the conversation's language (named in English by the
@@ -288,8 +289,8 @@ const FIXED: Record<string, Fixed> = {
     ask: (f) => `Bitte nennen Sie mir noch: ${f.join(" und ")}.`, check: "Bitte prüfen Sie die Zusammenfassung und bestätigen Sie sie, oder sagen Sie mir, was ich korrigieren soll.", lower: false },
 };
 const langKey = (language?: string) => (language || "").trim().toLowerCase().split(/[\s(]/)[0];
-function fixedReply(kind: "confirm" | "cancel", language?: string): string | null {
-  return FIXED[langKey(language)]?.[kind] ?? null;
+function fixedReply(kind: "confirm" | "cancel" | "pause", language?: string): string | null {
+  return kind === "pause" ? null : FIXED[langKey(language)]?.[kind] ?? null;
 }
 // The field names translated into a language: asked for once (inside the turn's reading call),
 // then reused for every turn of that form in that language.
@@ -315,7 +316,7 @@ export async function collectTurn(flow: FlowDefinition, s: CollectSession, messa
   }
 
   const needLabels = !(s.language && labelCache.has(labelKey(flow, s.language)));
-  const read = quick && llmOnly ? ({ intent: quick, values: {} } as any) : parseJsonObject(await llm(
+  const read = quick && (llmOnly || quick === "pause") ? ({ intent: quick, values: {} } as any) : parseJsonObject(await llm(
     `You read one customer message in an order / inquiry chat for the business ${brand || "(this business)"} and output only JSON.`,
     `Fields (key | label | hint):
 ${fields.map((f) => `${f.name} | ${f.label} | ${f.description || ""}`).join("\n")}
@@ -337,7 +338,7 @@ ${needLabels ? `- "labels": every field name above translated into the language 
     500,
   ));
   if (!read) throw new Error("collect: unparseable model reply");
-  const intent = quick && llmOnly ? quick : ["confirm", "cancel", "change", "answer"].includes(read.intent) ? read.intent : "answer";
+  const intent = quick && (llmOnly || quick === "pause") ? quick : ["confirm", "cancel", "change", "answer"].includes(read.intent) ? read.intent : "answer";
   // The conversation's language is set by the first message and changes only
   // when the customer clearly switches (a Polish address in an English message
   // is not a switch).
@@ -398,7 +399,9 @@ ${needLabels ? `- "labels": every field name above translated into the language 
   // What the reply must do - decided here, not by the model.
   let task: string;
   let outcome: "cancel" | "send" | "summary" | "ask";
-  if (intent === "cancel") { outcome = "cancel"; task = "Acknowledge in one short sentence that the order / inquiry is cancelled."; }
+  // A pause keeps everything; the next time the summary is shown again before anything can be sent.
+  if (intent === "pause") { s.stage = "collecting"; outcome = "ask"; task = "The customer wants to pause. Confirm in one or two short sentences that nothing was sent, what you have noted so far stays here, and they can continue whenever they are ready."; }
+  else if (intent === "cancel") { outcome = "cancel"; task = "Confirm in one short sentence that you have stopped and nothing was sent to the team (no order or request was placed - do not say an order was cancelled)."; }
   else if (intent === "confirm" && s.stage === "confirming" && !missing.length) { outcome = "send"; task = `Thank them in one short sentence and say their order / request is being passed to the team, who will get back to them.`; }
   else if (offerAsk) { outcome = "ask"; task = offerAsk; }
   else if (!missing.length) { outcome = "summary"; task = "In ONE sentence, ask them to check the summary and confirm it or correct anything. Do not list the details yourself."; }
@@ -411,7 +414,7 @@ ${needLabels ? `- "labels": every field name above translated into the language 
   // fixed sentences and the translated field names: no model call.
   const fx = FIXED[langKey(s.language)];
   const tr = s.language ? labelCache.get(labelKey(flow, s.language)) : undefined;
-  if (!llmOnly && fx && tr && !offerAsk && !offerNote && !asked && (outcome === "ask" || outcome === "summary")) {
+  if (!llmOnly && intent !== "pause" && fx && tr && !offerAsk && !offerNote && !asked && (outcome === "ask" || outcome === "summary")) {
     const name = (f: FlowInput) => { const l = tr[f.name] || f.label; return fx.lower ? l.charAt(0).toLowerCase() + l.slice(1) : l; };
     let reply = outcome === "ask" ? fx.ask(missing.slice(0, 2).map(name)) : fx.check;
     if (outcome === "summary") { s.stage = "confirming"; reply = `${reply}\n\n${summary(flow, s, tr)}`; }
@@ -423,7 +426,7 @@ ${needLabels ? `- "labels": every field name above translated into the language 
   // The reply as JSON: the message text, and (for the summary) the field names
   // translated into the customer's language.
   const shown = fields.filter((f) => (s.values[f.name] || "").trim());
-  const replySystem = `You are the chat assistant of ${brand || "this business"}. Write the assistant's next chat message: short, friendly, no lists. Write it in ${language}; the field names in the task may be in another language - translate them into ${language}. Output only JSON.`;
+  const replySystem = `You are the chat assistant of ${brand || "this business"}. Write the assistant's next chat message: short, friendly, no lists. Write it in ${language}; the field names in the task may be in another language - translate them into ${language}. Nothing is sent to the team until the customer confirms the summary - never say that anything was sent, passed on or booked${outcome === "send" ? " (except now: it is being passed on)" : ""}. If a field does not fit what the customer wants (e.g. a delivery address for a renovation job), ask for its sensible equivalent (e.g. the address of the job). Output only JSON.`;
   const replyUser = `Customer's latest message: """${message.slice(0, 600)}"""
 
 Your task: ${task}
