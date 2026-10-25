@@ -12,6 +12,9 @@ type ProviderPrefs = { sort?: string; ignore?: string[] };
 const AVOID_MS = 10 * 60_000;
 // Admin A/B (header x-test-variant: model:<openrouter id>): the reply model for this request.
 const testModel = (): string => { const v = turnVariant(); return v.startsWith("model:") ? v.slice(6) : ""; };
+// Chat replies are written without hidden reasoning: models that reason by default (claude-haiku-5.5)
+// spent 170-230 of max_tokens on it, so replies stopped mid-sentence (finish_reason "length").
+const REASONING = process.env.OPENROUTER_REASONING === "on" ? {} : { reasoning: { enabled: false } };
 const avoided = new Map<string, number>();
 function avoidList(): string[] {
   const now = Date.now();
@@ -94,6 +97,7 @@ export class OpenRouterProvider {
         model: overrides?.model || testModel() || this.model,
         messages,
         max_tokens: overrides?.maxTokens ?? this.maxTokens,
+        ...REASONING,
         temperature: overrides?.temperature ?? this.temperature,
         // The fastest of the model's providers (a visitor is waiting); OPENROUTER_PROVIDER_SORT=price to change.
         provider,
@@ -141,6 +145,7 @@ export class OpenRouterProvider {
         temperature: this.temperature,
         stream: true,
         provider,
+        ...REASONING,
       }),
     }));
 
@@ -155,8 +160,8 @@ export class OpenRouterProvider {
     let content = "";
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      // The last line may come without a newline (Anthropic models' streams): read it too, or the reply's end is lost.
+      buffer += done ? decoder.decode() + "\n" : decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || ""; // keep the (possibly incomplete) last line
       for (const line of lines) {
@@ -171,6 +176,7 @@ export class OpenRouterProvider {
           if (delta) { if (!first) first = Date.now() - t0; content += delta; onToken(delta); }
         } catch { /* partial JSON across chunks — ignored, completes next read */ }
       }
+      if (done) break;
     }
     countLlm(0, 0, t0, `stream ${servedBy} first=${(first / 1000).toFixed(1)}s chars=${content.length}`);
     if (first) noteSpeed(servedBy, Date.now() - t0, 0, first);
