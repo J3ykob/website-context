@@ -959,7 +959,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const raw = await this.backend.generate(planPrompt(a.brand, sentences), a.messages, 300).catch(() => "");
       plan = parsePlan(raw, sentences) || plan;
     }
-    noteTurn("plan", { points: plan.points.map((p) => `${p.ask} [${p.quotes.length}]`), advice: plan.advice, droppedQuotes: plan.dropped });
+    noteTurn("plan", { points: plan.points.map((p) => `${p.ask} [${p.quotes.length}]`), quotes: plan.points.map((p) => p.quotes.map((q) => q.slice(0, 200))), advice: plan.advice, droppedQuotes: plan.dropped });
     const anyGap = !a.answered || !plan.points.length || plan.points.some((p) => !p.quotes.length);
     const needContact = a.needContact || (anyGap && !a.hasContact(a.messages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || ""));
     const links = a.used.filter((p) => p.url).map((p) => `- ${p.title} (${p.url})`).join("\n");
@@ -1001,12 +1001,13 @@ ${whatToDo.map((b) => `- ${b}`).join("\n")}
         jevAsk({ conversation: a.convo, sentence }, {
           promises: { type: "noul", instructions: "Does `sentence` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call the customer back, send them something? (Offering to explain or advise more in this chat, asking for details, offering to pass the question on to the team, or inviting them to contact us does not count.)" },
           claimsSent: { type: "noul", instructions: "Does `sentence` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered?" },
-          meta: { type: "noul", instructions: "Does `sentence` refer to an internal resource - 'in our information', 'w dostępnych informacjach', 'in the points', 'according to the data/sources'? 'We don't state that on our website' is NOT this." },
+          meta: { type: "noul", instructions: "Does `sentence` refer to an internal resource it was given - 'in our information', 'w dostępnych informacjach', 'w naszych materiałach', 'in the points', 'according to the data/sources'? Plain statements like 'I don't have that information', 'nie posiadamy informacji', 'nie mam tej informacji' or 'we don't list it on our website' are NOT this." },
         }, 4000).catch(() => null),
       ]);
       const nl = (k: string) => ((c?.[k] as JevNoulAnswer | undefined)?.noul ?? 0);
-      const bad = (unsup || []).some((x) => x >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) || nl("promises") >= 0.6 || nl("claimsSent") >= 0.6 || nl("meta") >= 0.6;
-      if (bad) dropped.push(sentence.slice(0, 300));
+      const why = [(unsup || []).some((x) => x >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) && "unsupported", nl("promises") >= 0.6 && "promises", nl("claimsSent") >= 0.6 && "claimsSent", nl("meta") >= 0.6 && "meta"].filter(Boolean);
+      const bad = why.length > 0;
+      if (bad) dropped.push(`${sentence.slice(0, 300)} [${why.join(",")}]`);
       return !bad;
     };
     let buf = "", shown = "", queue: Promise<void> = Promise.resolve();
