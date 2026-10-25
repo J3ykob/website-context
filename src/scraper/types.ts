@@ -32,6 +32,8 @@ export interface PageMetadata {
   language?: string;
   keywords?: string[];
   author?: string;
+  /** A dated post (blog / news): article:published_time or a CMS post body class. */
+  isPost?: boolean;
 }
 
 export interface PageLink {

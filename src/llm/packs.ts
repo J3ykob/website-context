@@ -28,7 +28,8 @@ const TOPIC_CATALOGS = new Set(["contact", "locations", "policies", "people"]);
 
 const norm = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 160);
 
-export function buildPackIndex(catalog: KnowledgeCatalog | null): PackIndex | null {
+/** `articles`: URLs the scrape found to be posts (blog / news), besides the ones ARTICLE_URL recognises. */
+export function buildPackIndex(catalog: KnowledgeCatalog | null, articles?: Set<string>): PackIndex | null {
   if (!catalog?.chunks?.length) return null;
   const packs = new Map<string, Pack>();
   const byUrl = new Map<string, string>();
@@ -42,7 +43,7 @@ export function buildPackIndex(catalog: KnowledgeCatalog | null): PackIndex | nu
   for (const c of catalog.chunks) {
     const url = c.url || `#${c.catalogId}`;
     let id = byUrl.get(url);
-    if (!id) { id = `page:${url}`; byUrl.set(url, id); packs.set(id, { id, title: c.title || url, url, catalogs: [], chunks: [], chars: 0, article: ARTICLE_URL.test(url) }); }
+    if (!id) { id = `page:${url}`; byUrl.set(url, id); packs.set(id, { id, title: c.title || url, url, catalogs: [], chunks: [], chars: 0, article: ARTICLE_URL.test(url) || !!articles?.has(url) }); }
     add(packs.get(id)!, c);
   }
   for (const def of catalog.catalogs) {
@@ -66,7 +67,9 @@ export function candidatePacks(index: PackIndex, hits: { content?: string; metad
     return all.sort((a, b) => rank(a) - rank(b));
   }
   const out: Pack[] = [];
-  const push = (id?: string) => { const p = id ? index.packs.get(id) : undefined; if (p && !out.includes(p)) out.push(p); };
+  // Articles (blog posts) take at most a few places: a blog-heavy site's posts outranked its own offer pages.
+  let articles = 0;
+  const push = (id?: string) => { const p = id ? index.packs.get(id) : undefined; if (!p || out.includes(p) || (p.article && articles >= 4)) return; if (p.article) articles++; out.push(p); };
   // Search hits the catalog doesn't know (pages scraped after it was built): a pack of their own per page.
   const loose = new Map<string, Pack>();
   for (const h of hits) {

@@ -6,6 +6,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import { fetchPage, closeBrowser } from "../src/scraper/fetcher.js";
 import { htmlToMarkdown } from "../src/scraper/markdown.js";
 import { createContextBuilder } from "../src/context/store.js";
+import { extractPage } from "../src/scraper/extractor.js";
 
 afterAll(async () => { await closeBrowser(); });
 
@@ -29,4 +30,9 @@ describe("page text", () => {
     const ctx = await b.finish(url);
     expect(ctx.chunks.map((c) => c.content).join("\n")).toContain("Pompy ciepła");
   }, 120000);
+
+  it("tells a blog post from a page on a Yoast site (og:type is 'article' on both)", async () => {
+    expect(extractPage(await fetchPage("https://beton-lazy.pl/jak-szybko-wiaze-beton/")).metadata.isPost).toBe(true);
+    expect(extractPage(await fetchPage("https://beton-lazy.pl/beton-z-mikrowloknem/")).metadata.isPost).toBe(false);
+  }, 60000);
 });

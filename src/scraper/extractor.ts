@@ -59,6 +59,8 @@ function extractMetadata($: cheerio.CheerioAPI): PageMetadata {
       .map((k) => k.trim())
       .filter(Boolean),
     author: $('meta[name="author"]').attr("content")?.trim(),
+    // Posts, not pages: og:type is "article" on every page of Yoast sites, so it can't tell them apart.
+    isPost: $('meta[property="article:published_time"]').length > 0 || /\b(single-post|post-template-default)\b/.test($("body").attr("class") || ""),
   };
 }
 

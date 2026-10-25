@@ -741,7 +741,7 @@ export class WebsiteChat {
     const lang = st.lang || rt?.lang || "";
     // Preset behaviour (small talk, quote, explaining the offer, which action) needs no knowledge selection.
     if (opts.packs === undefined && !opts.noFacts && !opts.behaviour?.length) {
-      if (this.packIndex === undefined) this.packIndex = buildPackIndex(this.knowledgeCatalog);
+      if (this.packIndex === undefined) this.packIndex = buildPackIndex(this.knowledgeCatalog, new Set(this.context.siteMap.filter((p) => p.type === "article").map((p) => p.url)));
       const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
       // A follow-up or a short message keeps its subject: the previous question and what our last reply was about.
       const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
@@ -749,7 +749,7 @@ export class WebsiteChat {
       const query = followup && prevUser ? `${prevUser}\n${prevReply.slice(0, 200)}\n${question}` : question;
       // A real need we can't meet may go to the network: started now, used below if our packs don't answer.
       const net = rt && !behaviour.length ? await this.networkStart(question, messages, rt) : null;
-      const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch(() => []);
+      const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 30) }).catch(() => []);
       let scored: { p: Pack; s: number }[] = [];
       let hitIds: string[] | undefined;
       if (this.packIndex) {

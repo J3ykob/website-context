@@ -426,10 +426,8 @@ function classifyPageType(
   const hasFAQ = page.structuredData.some((s) => s.type === "FAQPage");
   if (hasFAQ) return "faq";
 
-  const hasArticle = page.structuredData.some(
-    (s) => s.type === "Article" || s.type === "BlogPosting" || s.type === "NewsArticle"
-  );
-  if (hasArticle) return "article";
+  const types = page.structuredData.flatMap((s) => (Array.isArray(s.type) ? s.type : [s.type]));
+  if (page.metadata?.isPost || types.some((t) => t === "Article" || t === "BlogPosting" || t === "NewsArticle")) return "article";
 
   if (page.forms.length > 0) return "form";
 
