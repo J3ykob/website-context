@@ -1237,7 +1237,8 @@ app.post("/api/chat", async (req, res) => {
     const sessionKey = sessionId || `${tenantId}_default`;
     const clientIp = ((req.headers["x-forwarded-for"] as string) || req.ip || "").split(",")[0].trim();
     const rc = checkChatRate(sessionKey);
-    const iprc = clientIp ? checkIpChatRate(clientIp) : { ok: true as boolean, retry: undefined as number | undefined };
+    // Admin-authenticated test traffic (routing / A-B evals from one machine) skips the per-IP backstop.
+    const iprc = clientIp && !adminOk(req) ? checkIpChatRate(clientIp) : { ok: true as boolean, retry: undefined as number | undefined };
     if (!rc.ok || !iprc.ok) {
       res.status(429).json({
         error: "Rate limited",
