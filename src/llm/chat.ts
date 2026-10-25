@@ -33,7 +33,7 @@ import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY,
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 import { noteTurn, turnVariant } from "./turn-usage.js";
-import { planPrompt, parsePlan, keepAnswering, renderPlan, type Plan } from "./plan.js";
+import { planPrompt, parsePlan, numberSentences, renderPlan, type Plan } from "./plan.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -750,7 +750,7 @@ export class WebsiteChat {
       const query = followup && prevUser ? `${prevUser}\n${prevReply.slice(0, 200)}\n${question}` : question;
       // A real need we can't meet may go to the network: started now, used below if our packs don't answer.
       const net = rt && !behaviour.length ? await this.networkStart(question, messages, rt) : null;
-      const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch(() => []);
+      const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: search failed - ${(e as Error).message}`); return []; });
       let scored: { p: Pack; s: number }[] = [];
       let hitIds: string[] | undefined;
       if (this.packIndex) {
@@ -955,9 +955,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const facts = `${official}${a.notes ? `\n## Answers from the owner\n${a.notes}` : ""}\n${a.packText}`;
     let plan: Plan = { points: [], advice: false, dropped: 0 };
     if (a.answered) {
-      const raw = await this.backend.generate(planPrompt(a.brand, facts), a.messages, 900).catch(() => "");
-      plan = parsePlan(raw, facts) || plan;
-      plan = await keepAnswering(plan);
+      const sentences = numberSentences(facts, SENTENCE_END);
+      const raw = await this.backend.generate(planPrompt(a.brand, sentences), a.messages, 300).catch(() => "");
+      plan = parsePlan(raw, sentences) || plan;
     }
     noteTurn("plan", { points: plan.points.map((p) => `${p.ask} [${p.quotes.length}]`), advice: plan.advice, droppedQuotes: plan.dropped });
     const anyGap = !a.answered || !plan.points.length || plan.points.some((p) => !p.quotes.length);
@@ -1011,7 +1011,8 @@ ${whatToDo.map((b) => `- ${b}`).join("\n")}
     };
     let buf = "", shown = "", queue: Promise<void> = Promise.resolve();
     const emit = (t: string) => { shown += t; a.onToken(t); };
-    const gate = (sentence: string, sep: string) => { queue = queue.then(async () => { if (await sentenceOk(sentence)) emit(sentence + sep); else if (sep.includes("\n") && shown) emit(sep); }); };
+    // Checked in parallel as each sentence completes; shown in order.
+    const gate = (sentence: string, sep: string) => { const ok = sentenceOk(sentence); queue = queue.then(async () => { if (await ok) emit(sentence + sep); else if (sep.includes("\n") && shown) emit(sep); }); };
     const pump = (final: boolean) => {
       for (;;) {
         const m = SENTENCE_END.exec(buf);
