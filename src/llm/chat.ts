@@ -703,7 +703,10 @@ export class WebsiteChat {
     // A calculation: with the customer's own prices or quantities only -> straight to the calculation;
     // prices needed that we don't have -> said so, with a quote offer; otherwise the calculation with our prices.
     if (rt && rt.intent === "calculate" && agentEnabled()) {
-      const pure = rt.price < 0.5 || rt.ownPrices >= 0.5;
+      // A calculation needs figures in the conversation; "how much for a bathroom?" is a quote question.
+      const figures = /\d/.test(sanitizedMessages.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join(" "));
+      const pure = (rt.price < 0.5 || rt.ownPrices >= 0.5) && figures;
+      if (!figures) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0 });
       if (!pure && !(await this.hasPricesFor(question))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
       const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : undefined);
       if (r) { st.calcStarted = true; onToken(r.message); return r; }
@@ -770,11 +773,17 @@ export class WebsiteChat {
       // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer
       // to ask the team - the network only when nothing of ours is relevant (we may well do it).
       let partial = false;
+      let outOfScope = false; // our information is about something near it, not this
       if (answered && jevEnabled()) {
-        const f = await jevAsk({ conversation: convo, our_information: passages.join("\n\n").slice(0, 9000) }, { full: { type: "noul", instructions: "Does `our_information` contain everything needed to answer the customer's LATEST message in `conversation` (every part and detail asked)?" } }, 4000).catch(() => null);
+        const f = await jevAsk({ conversation: convo, our_information: passages.join("\n\n").slice(0, 40000) }, {
+          full: { type: "noul", instructions: "Does `our_information` contain everything needed to answer the customer's LATEST message in `conversation` (every part and detail asked)?" },
+          ours: { type: "noul", instructions: "Does `our_information` show that this business itself does, sells or rents what the customer asks for (not only related or neighbouring work)?" },
+        }, 5000).catch(() => null);
         partial = ((f?.full as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5;
+        outOfScope = ((f?.ours as JevNoulAnswer | undefined)?.noul ?? 1) < 0.35;
       }
-      if (!answered && net) {
+      // Nothing of ours answers it, or our information shows it isn't ours: the network may have it.
+      if ((!answered || outOfScope) && net) {
         const found = await Promise.race([net.matches, new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 3500))]);
         if (found.length) {
           const links = this.handoffLinks ? await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [{ role: "user", content: net.need }], net.need).catch(() => ({} as Record<string, string>)) : ({} as Record<string, string>);
@@ -793,8 +802,8 @@ export class WebsiteChat {
         const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
-      if (answered) behaviour.unshift(BEHAVIOUR.answer);
-      if (answered && partial) {
+      if (answered && !network) behaviour.unshift(BEHAVIOUR.answer);
+      if (answered && partial && !network) {
         behaviour.push(BEHAVIOUR.partial);
         const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
@@ -851,7 +860,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const problems: string[] = [];
       const statements = splitStatements(text);
       const [unsup, checks] = await Promise.all([
-        !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 6000)).catch(() => null) : Promise.resolve(null),
+        !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000)).catch(() => null) : Promise.resolve(null),
         jevEnabled() ? jevAsk({ conversation: convo, reply: text }, {
           offers: { type: "noul", instructions: "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
           denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },

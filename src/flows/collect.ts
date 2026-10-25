@@ -392,6 +392,16 @@ Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${s
       if (again?.message) out = again;
     }
   }
+  // Checked before it goes out (the form's replies were unchecked): before the customer confirms the
+  // summary nothing is sent, and the form produces no prices or results - a reply claiming either is
+  // written again ("przekazaliśmy Twoje zapytanie", "wycena pojawi się za kilka minut" were sent).
+  if (outcome !== "send" && out?.message) {
+    const c = await jevAsk({ reply: String(out.message) }, { claims: { type: "noul", instructions: "Does `reply` say that the order or request was already sent, passed on, booked or confirmed, or promise a price, quote or result (e.g. 'in a few minutes')?" } }, 3000).catch(() => null);
+    if (((c?.claims as { noul?: number } | undefined)?.noul ?? 0) >= 0.6) {
+      const again = parseJsonObject(await llm(`${replySystem} Your previous draft said something was already sent or promised a price or result - nothing is sent before the customer confirms, and this form gives no prices or results. Write it again without that.`, replyUser, 300));
+      if (again?.message) out = again;
+    }
+  }
   let reply = String(out?.message || "").trim().slice(0, 600);
   if (!reply) throw new Error("collect: empty reply");
   if (outcome === "cancel") return { reply, cancelled: true };

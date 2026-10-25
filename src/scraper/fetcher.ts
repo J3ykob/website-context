@@ -1,3 +1,4 @@
+import { normalizeHtml } from "./normalize.js";
 import { decodeResponse } from "./decode.js";
 import { chromium, Browser, Page } from "playwright";
 
@@ -25,16 +26,16 @@ export async function fetchPage(
   // browser (its thin body would otherwise look like a JS shell). 403 still gets the
   // browser, which sometimes passes bot protection.
   if ([404, 410, 429, 503].includes(staticResult.statusCode)) {
-    return { ...staticResult, renderMethod: "static" };
+    return { ...staticResult, html: normalizeHtml(staticResult.html), renderMethod: "static" };
   }
 
   if (hasSubstantialContent(staticResult.html)) {
-    return { ...staticResult, renderMethod: "static" };
+    return { ...staticResult, html: normalizeHtml(staticResult.html), renderMethod: "static" };
   }
 
   // Fall back to dynamic rendering if static HTML is minimal
   const dynamicResult = await fetchDynamic(url, { timeout, userAgent });
-  return { ...dynamicResult, renderMethod: "dynamic" };
+  return { ...dynamicResult, html: normalizeHtml(dynamicResult.html), renderMethod: "dynamic" };
 }
 
 async function fetchStatic(
