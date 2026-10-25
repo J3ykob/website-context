@@ -1225,7 +1225,7 @@ export class WebsiteChat {
         hitIds = new Set(hits.map((h) => String(h.metadata.id || "")).filter(Boolean));
         const scores = await scorePacks(convo, cands, hitIds);
         if (scores) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.5).sort((a, b) => b.s - a.s).slice(0, 4);
-        console.log(`[packs] ${this.context.tenantId}: ${cands.length} candidates -> ${scored.map((x) => `${x.p.title.slice(0, 40)}=${x.s.toFixed(2)}`).join(" | ") || "none"}`);
+        console.log(`[packs] ${this.context.tenantId}: ${hits.length} hits (${hits.filter((h) => byId.has(String(h.metadata.id || ""))).length} in catalog, ids e.g. ${hits.slice(0, 2).map((h) => String(h.metadata.id || "?").slice(0, 24)).join(",")}), ${cands.length} candidates [${cands.map((p) => p.title.slice(0, 30)).join("; ")}] scores ${scores?.map((x) => x.toFixed(2)).join(",")} -> ${scored.map((x) => `${x.p.title.slice(0, 40)}=${x.s.toFixed(2)}`).join(" | ") || "none"}`);
       } else {
         // No catalog: the passages themselves, judged as today.
         const rel = await jevPassageRelevance(question, hits.slice(0, 12).map((h) => (h.content || "").slice(0, 1500)));
