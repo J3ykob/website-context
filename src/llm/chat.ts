@@ -867,6 +867,10 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const prof = this.context.businessProfile;
     const ownContacts = [prof?.primaryPhone?.value, prof?.primaryEmail?.value, ...(prof?.alternatePhones || [])].filter(Boolean).map((c) => String(c).includes("@") ? String(c).toLowerCase() : String(c).replace(/\D/g, "").slice(-9)).filter((c) => c.length >= 6);
     const hasContact = (t: string) => { const digits = t.replace(/\D/g, ""), low = t.toLowerCase(); return ownContacts.some((c) => (c.includes("@") ? low : digits).includes(c)); };
+    // Any phone number or e-mail the reply gives that our information shows (a branch's line counts too).
+    const factsDigits = factsText.replace(/\D/g, ""), factsLow = factsText.toLowerCase();
+    const givesKnownContact = (t: string) => [...t.matchAll(/(?:\+?\d[\d\s().-]{7,}\d)/g)].some((m) => { const d = m[0].replace(/\D/g, "").slice(-9); return d.length >= 9 && factsDigits.includes(d); })
+      || [...t.matchAll(/[\w.+-]+@[\w-]+\.[\w.]+/g)].some((m) => factsLow.includes(m[0].toLowerCase().replace(/[.,;:]+$/, "")));
     const prevAssistant = messages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || "";
     const needContact = ownContacts.length > 0 && !network && behaviour.some((b) => b === BEHAVIOUR.noInfo || b === BEHAVIOUR.partial || b === BEHAVIOUR.quote) && !hasContact(prevAssistant);
     const check = async (text: string): Promise<{ problems: string[]; offers: number }> => {
@@ -880,7 +884,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
           denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
           contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)? Saying we have no information on something and recommending another business for it is NOT a contradiction." },
           callUs: { type: "noul", instructions: "Does `reply` tell the customer to call us, phone us, or e-mail us (or mention our phone number or e-mail as a way to reach us)?" },
-          promises: { type: "noul", instructions: "Does `reply` offer or promise that WE will do something for the customer in this chat or later - check availability or stock, calculate a cost, measure, book, reserve, call them back, send them something? (Offering to pass the question on to the team, or inviting them to contact us, does not count.)" },
+          promises: { type: "noul", instructions: "Does `reply` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call them back, send them something? (Offering to explain, describe or advise more in this chat, asking the customer for details, offering to pass the question on to the team, or inviting them to contact us does not count.)" },
           meta: { type: "noul", instructions: "Does `reply` refer to an internal resource it was given - 'in our information', 'w dostępnych informacjach', 'w naszych materiałach', 'in the information provided', 'according to the data/sources'? Plain statements like 'I don't have that information', 'nie mam tej informacji' or 'we don't list it on our website' are NOT this." },
           unanswered: { type: "noul", instructions: "Does the customer's latest message in `conversation` ask about several things, and does `reply` skip one of them without saying anything about it?" },
           claimsSent: { type: "noul", instructions: "Does `reply` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered (already done, not offered)?" },
@@ -897,7 +901,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (nl("meta") >= 0.6) problems.push("it talks about 'our information' / 'materials' / 'data' instead of speaking as the business");
       if (nl("unanswered") >= 0.6) problems.push("it skips a part of the customer's question - answer every part, or say for that part that you don't know");
       if (nl("claimsSent") >= 0.6) problems.push("it says the customer's request or details have been passed on or sent, but nothing has been sent - do not claim that");
-      if (needContact && !hasContact(text)) problems.push("it does not give our phone number or e-mail from the official info - give it so the customer can ask us directly");
+      if (needContact && !hasContact(text) && !givesKnownContact(text)) problems.push("it does not give our phone number or e-mail from the official info - give it so the customer can ask us directly");
       if (network && hasContact(text)) problems.push("it gives our own phone number or e-mail, as if it were a recommended business's - give each business only the contact shown for it");
       if (network && nl("vouches") >= 0.6) problems.push("it praises or vouches for another company - describe them only by what they offer");
       if (!network && nl("callUs") >= 0.6 && (!hasPhone || !hasEmail) && !/\d{3}[\s-]?\d{3}[\s-]?\d{3}|@/.test(text)) problems.push(`it suggests ${!hasPhone && !hasEmail ? "calling or e-mailing" : !hasPhone ? "calling" : "e-mailing"} us, but our information shows no ${!hasPhone && !hasEmail ? "phone number or e-mail" : !hasPhone ? "phone number" : "e-mail"} - point only to channels shown in our information (e.g. the contact form)`);
