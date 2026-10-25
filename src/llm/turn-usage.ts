@@ -8,7 +8,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean }
+export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean; variant?: string }
 export const turnUsage = new AsyncLocalStorage<TurnUsage>();
 export const newTurnUsage = (): Omit<TurnUsage, "at"> & { at: number } => ({ llmCalls: 0, llmIn: 0, llmOut: 0, jevCalls: 0, jevIn: 0, at: Date.now(), steps: [] });
 
@@ -22,6 +22,9 @@ export function countLlm(inTok = 0, outTok = 0, started?: number, detail = ""): 
 }
 /** Admin test of the no-Jev safe mode (header x-test-no-jev): Jev counts as unavailable for this request. */
 export const jevOffForTurn = (): boolean => !!turnUsage.getStore()?.noJev;
+
+/** A/B test of the reply pipeline (header x-test-variant, admins only): "packs" = dynamic context. */
+export const variantForTurn = (): string => turnUsage.getStore()?.variant || process.env.CHAT_VARIANT || "";
 
 export function countJev(inTok = 0, started?: number): void {
   const u = turnUsage.getStore();

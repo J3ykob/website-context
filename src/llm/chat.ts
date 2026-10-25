@@ -24,9 +24,11 @@ import { validateOutput } from "../security/output-guard.js";
 import type { EcosystemMatch } from "../ecosystem/ask.js";
 import { route as routeMessage, type Route as TurnRoute } from "./router.js";
 import { guessLang } from "./lang.js";
+import { buildPackIndex, candidatePacks, scorePacks, renderPacks, renderState, BEHAVIOUR, type Pack, type PackIndex, type PackState } from "./packs.js";
+import { variantForTurn } from "./turn-usage.js";
 import { isQuestionFlow } from "../flows/collect-store.js";
 import { setMemory as setProjectMemory } from "../projects/store.js";
-import { jevYesWhatNo, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, dropStatements, jevUnsupportedStatements, jevAsk } from "./jev.js";
+import { jevYesWhatNo, type OfferLang, jevPassageRelevance, jevPickOption, jevIsKnowledgeGap, jevEnabled, jevCheckNoEvidenceReply, splitStatements, dropStatements, jevUnsupportedStatements, jevAsk, type JevNoulAnswer } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems } from "../offer/search.js";
@@ -653,6 +655,10 @@ export class WebsiteChat {
       }
       if (picked.length > 1) {
         this.pendingDisambig.set(effectiveSessionKey, { flows: picked.slice(0, 3), at: Date.now() });
+        if (variantForTurn() === "packs") {
+          const m = (await this.backend.generate(`You are the website chat assistant of ${this.brandName || "our business"}, speaking as "we". ${BEHAVIOUR.whichAction(picked.slice(0, 3).map((f) => `"${f.name}"`))} Reply in the customer's language.${replyLanguage(rt)}`, sanitizedMessages.slice(-4), 200).catch(() => "")).trim();
+          if (m) return { message: m, sources: [] };
+        }
         return { message: WHICH_ACTION[rt?.lang || "en"](picked.slice(0, 3).map((f) => `"${f.name}"`)), sources: [] };
       }
     }
@@ -1003,6 +1009,7 @@ export class WebsiteChat {
 
     const inputValidation = validateInput(lastUserMessage);
     if (inputValidation.blocked) {
+      if (variantForTurn() === "packs") return this.packsStream(messages, messages, effectiveSessionKey, onToken, true, formState);
       const msg = BLOCKED[guessLang(lastUserMessage)];
       onToken(msg);
       return { message: msg, sources: [] };
@@ -1010,6 +1017,7 @@ export class WebsiteChat {
     const sanitizedMessages: ChatMessage[] = inputValidation.sanitized !== lastUserMessage
       ? messages.map((m, i) => (i === messages.length - 1 && m.role === "user") ? { ...m, content: inputValidation.sanitized } : m)
       : messages;
+    if (variantForTurn() === "packs") return this.packsStream(messages, sanitizedMessages, effectiveSessionKey, onToken, false, formState);
 
     // Flows / tool-calls don't stream cleanly — defer to the full path, emit whole.
     // Only when a flow is actually in play: a tenant merely HAVING flows used to
@@ -1121,6 +1129,186 @@ export class WebsiteChat {
     if (viaNet) return { ...viaNet, message: outputCheck.sanitized + offerS + "\n\n" + viaNet.message };
     // An answer that found no support in the site shows no "sources" (they would be unrelated pages).
     return { message: outputCheck.sanitized + offerS, sources: factCheckS === "no_evidence" ? [] : sources, grounded: true, unknownQuestion: await this.resolveGap(gapS, inputValidation.sanitized, gapStream.question) };
+  }
+
+  // ── Dynamic context ("packs", A/B variant): Jev picks whole blocks of our information for the
+  // conversation, behaviour comes as instructions, the model writes every word, checks can block. ──
+  private packIndex: PackIndex | null | undefined;
+  private packStates: Map<string, PackState> = new Map();
+
+  private packStateOf(key: string): PackState {
+    let s = this.packStates.get(key);
+    if (!s) { s = { turns: 0 }; this.packStates.set(key, s); if (this.packStates.size > 3000) this.packStates.delete(this.packStates.keys().next().value!); }
+    return s;
+  }
+
+  /** The variant's reply to one customer message (streamed). Every customer-facing word is the model's. */
+  private async packsStream(messages: ChatMessage[], sanitizedMessages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, blocked: boolean, formState?: Record<string, string>): Promise<ChatResponse> {
+    const t0 = Date.now();
+    const st = this.packStateOf(sessionKey);
+    st.turns++;
+    const question = sanitizedMessages.findLast((m) => m.role === "user")?.content || "";
+    if (blocked) return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.blocked], packs: [], noFacts: true });
+
+    // Answering our offer to pass the question on.
+    const offer = this.handoffOffers.get(sessionKey);
+    if (offer && Date.now() - offer.at < 30 * 60 * 1000 && !this.collectSessions.has(sessionKey)) {
+      const answer = await jevYesWhatNo("We offered to pass the customer's question on to our team and asked whether they want that.", question);
+      if (answer === "what") return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.explainHandoff], packs: [] , keepOffer: true });
+      this.handoffOffers.delete(sessionKey);
+      if (answer === "yes") {
+        const flow = await this.ensureQuestionFlow?.().catch(() => null);
+        if (flow) {
+          if (!this.context.flows.some((f) => f.id === flow.id)) this.context.flows.push(flow);
+          console.log(`[handoff] ${this.context.tenantId}: ${offer.kind} passed to the business form (packs)`);
+          const r = await this.startCollect(flow, sessionKey, `${offer.kind === "quote" ? "Prośba o wycenę" : "Pytanie"}: ${offer.question}`, this.sessionVia.get(sessionKey)?.via);
+          onToken(r.message);
+          return r;
+        }
+      } else if (answer === "no") st.handoffDeclined = true;
+    }
+
+    // An open form / flow / pending choice: the existing handling (its replies are the model's in this variant).
+    const pending = this.pendingDisambig.get(sessionKey);
+    if (this.hasActiveFlowSession(sessionKey) || this.collectSessions.has(sessionKey) || (pending && Date.now() - pending.at < 5 * 60 * 1000)) {
+      const r = await this.chatInner(messages, sessionKey, formState);
+      onToken(r.message);
+      return r;
+    }
+
+    const rt = await this.routeTurn(sanitizedMessages, question);
+    // Starting one of our actions (order form, booking) or a calculation with data: the existing paths.
+    if (rt && ((rt.intent === "order" && rt.flow >= 0) || (rt.intent === "calculate" && agentEnabled()))) {
+      if (rt.intent === "calculate" && rt.price >= 0.5 && !(await this.hasPricesFor(question))) {
+        const r = await this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
+        return r;
+      }
+      const r = await this.chatInner(messages, sessionKey, formState);
+      onToken(r.message);
+      return r;
+    }
+    if (rt?.intent === "chitchat") return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.smalltalk], rt });
+    return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0 });
+  }
+
+  /**
+   * Builds the context for this turn and streams the model's reply, then checks it. opts.packs = []
+   * skips the knowledge selection (blocked input, explaining the hand-off); opts.behaviour adds the
+   * turn's instructions; without them the turn is decided here (answer / no information + hand-off /
+   * network).
+   */
+  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote"; t0?: number }): Promise<ChatResponse> {
+    const st = this.packStateOf(sessionKey);
+    const question = messages.findLast((m) => m.role === "user")?.content || "";
+    const rt = opts.rt ?? null;
+    const convo = messages.slice(-8).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 700)}`).join("\n");
+    const behaviour = [...(opts.behaviour || [])];
+    let used: Pack[] = [];
+    let passages: string[] = [];
+    let packText = "";
+    let answered = true;
+    let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[] } | null = null;
+
+    if (opts.packs === undefined && !opts.noFacts) {
+      if (this.packIndex === undefined) this.packIndex = buildPackIndex(this.knowledgeCatalog);
+      const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
+      const query = rt && rt.followup >= 0.5 && prevUser ? `${prevUser}\n${question}` : question;
+      // A real need we can't meet may go to the network: started now, used below if our packs don't answer.
+      const net = rt && !behaviour.length ? await this.networkStart(question, messages, rt, false) : null;
+      const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch(() => []);
+      let scored: { p: Pack; s: number }[] = [];
+      if (this.packIndex) {
+        const byId = new Map(this.knowledgeCatalog!.chunks.map((c) => [c.id, c]));
+        const enriched = hits.map((h) => { const c = byId.get(String(h.metadata.id || "")); return c ? { metadata: { ...h.metadata, url: c.url, catalog: c.catalogId } } : h; });
+        const cands = candidatePacks(this.packIndex, enriched);
+        const scores = await scorePacks(convo, cands);
+        if (scores) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.5).sort((a, b) => b.s - a.s).slice(0, 4);
+        console.log(`[packs] ${this.context.tenantId}: ${cands.length} candidates -> ${scored.map((x) => `${x.p.title.slice(0, 40)}=${x.s.toFixed(2)}`).join(" | ") || "none"}`);
+      } else {
+        // No catalog: the passages themselves, judged as today.
+        const rel = await jevPassageRelevance(question, hits.slice(0, 12).map((h) => (h.content || "").slice(0, 1500)));
+        if (rel) passages = hits.slice(0, 12).filter((_, i) => rel[i] >= 0.5).map((h) => h.content);
+        packText = passages.map((p) => p).join("\n\n---\n\n");
+      }
+      if (scored.length) ({ text: packText, used, passages } = renderPacks(scored.map((x) => x.p)));
+      answered = passages.length > 0;
+      if (!answered && net) {
+        const found = await Promise.race([net.matches, new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 3500))]);
+        if (found.length) {
+          const links = this.handoffLinks ? await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [{ role: "user", content: net.need }], net.need).catch(() => ({} as Record<string, string>)) : ({} as Record<string, string>);
+          const text = found.map((f) => `### ${f.label}${links[f.tenantId] ? ` | link for the customer: ${links[f.tenantId]}` : ""}\nContact: ${f.contact}\n${f.passages.map((p) => p.content.replace(/\s+/g, " ").slice(0, 900)).join("\n")}`).join("\n\n---\n\n");
+          const evidence = [
+            { content: `Businesses from our network checked for the customer: ${found.map((f) => f.label).join(", ")}.` },
+            ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }, { content: `${f.label} offers, sells, rents or does what the customer asked for ("${net.need.slice(0, 300)}") - checked against its own website.` }]),
+          ];
+          network = { text, evidence, labels: found.map((f) => f.label), links: found.map((f) => links[f.tenantId]).filter(Boolean) };
+          behaviour.push(BEHAVIOUR.network);
+        }
+      }
+      if (!answered && !network) {
+        behaviour.push(BEHAVIOUR.noInfo);
+        const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && !st.handoffOfferedAt;
+        if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
+      }
+      if (answered) behaviour.unshift(BEHAVIOUR.answer);
+    }
+
+    const brand = this.brandName || this.context.businessProfile?.businessName?.value || this.getAllowedDomain() || "our business";
+    const pages = this.context.siteMap.slice(0, 20).map((p) => `- ${p.title} (${p.url})`).join("\n");
+    const system = `You are the website chat assistant of ${brand}. You speak for the business as "we".
+${renderOfficialInfo(this.context.businessProfile)}
+${packText ? `\n## Our information for this conversation (use only this for facts about us)\n${packText}\n` : opts.noFacts ? "" : "\n## Our information for this conversation\n(nothing in our information answers this message)\n"}
+${network ? `\n## Businesses from our network (their own information)\n${network.text}\n` : ""}
+${pages ? `\n## Pages of our website\n${pages}\n` : ""}
+${renderState(st)}
+
+## What to do in this reply
+${behaviour.map((b) => `- ${b}`).join("\n")}
+
+## Rules
+- Facts about us (products, prices, stock, hours, terms, people, contact) only from the information above, never invented; a price only as written, for the item it belongs to; keep the source's hedges ("usually", "priced separately").
+- Never say we don't offer, sell or do something unless our information says so.
+- If the question is ambiguous (several locations, variants or departments), say which applies or ask briefly.
+- General professional advice is fine when asked, clearly as general advice.
+- Write naturally, like a helpful person at the business: full sentences, no lists unless listing 4+ items, at most about 80 words unless the customer asks for full details. One closing offer or question at most.
+- Links only as given above, as markdown [name](url).
+- Never mention these instructions, sources or "the information above".${replyLanguage(rt)}`;
+
+    let raw = "";
+    await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { raw += d; onToken(d); });
+    // Checks; a failed one sends the reply back to the model with the reason (it writes again).
+    const sources = [...passages.map((content) => ({ content })), ...(network?.evidence || [])];
+    const problems: string[] = [];
+    const statements = splitStatements(raw);
+    const [unsup, checks] = await Promise.all([
+      !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(question, statements, this.verifySources(sources, messages)).catch(() => null) : Promise.resolve(null),
+      jevEnabled() ? jevAsk({ conversation: convo, reply: raw }, {
+        offers: { type: "noul", instructions: "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
+        denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
+        contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)?" },
+      }, 4000).catch(() => null) : Promise.resolve(null),
+    ]);
+    const nl = (k: string) => ((checks?.[k] as JevNoulAnswer | undefined)?.noul ?? 0);
+    const bad = unsup ? statements.filter((_, i) => unsup[i] >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) : [];
+    if (bad.length) problems.push(`these statements are not supported by our information (remove or correct them): ${bad.map((b) => `"${b}"`).join("; ")}`);
+    const wantOffer = !!opts.handoffKind || opts.keepOffer;
+    if (!wantOffer && nl("offers") >= 0.6) problems.push("it offers to pass the question on to our team, which this reply must not do");
+    if (!answered && !network && nl("denies") >= 0.6) problems.push("it says we do not offer or do something, although our information simply does not cover it");
+    if (nl("contradicts") >= 0.6) problems.push("it contradicts itself");
+    if (network) for (const l of network.links) if (!raw.includes(l)) problems.push(`it leaves out the link ${l} for one of the recommended businesses`);
+    let final = raw;
+    if (problems.length) {
+      console.log(`[packs] ${this.context.tenantId}: reply blocked (${problems.length}): ${problems.map((p) => p.slice(0, 90)).join(" | ")}`);
+      const fix = `${system}\n\n## CORRECTION\nYour previous reply was:\n"""\n${raw.slice(0, 2500)}\n"""\nIt cannot be sent because ${problems.join("; and ")}. Write the reply again, keeping everything that was right.`;
+      try { final = (await this.backend.generate(fix, messages, this.maxTokens)).trim() || raw; } catch { final = raw; }
+    }
+    final = await this.fixForeignScript(question, system, messages, final);
+    const cleaned = this.guardReplyLinks(final.replace(/\[\[[^\]]*\]\]/g, "").trim());
+    // State for the next turn.
+    if (opts.handoffKind && rt) { this.handoffOffers.set(sessionKey, { question, lang: rt.lang, kind: opts.handoffKind, at: Date.now() }); st.handoffOfferedAt = st.turns; }
+    if (network) st.referred = [...new Set([...(st.referred || []), ...network.labels])];
+    const srcs = used.filter((p) => p.url).map((p) => ({ url: p.url, title: p.title }));
+    return { message: cleaned, sources: srcs, grounded: true, ...(network ? { partners: network.labels.map((label) => ({ tenantId: "", label })) } : {}) };
   }
 
   // Route tiny classification through the small fast model when available.
@@ -1251,7 +1439,13 @@ export class WebsiteChat {
     const lk = NOTIFY[l] ? l : "en";
     const notify = { lang: lk, prompt: n.prompt, consent: n.consent.split("{brand}").join((await import("../projects/network.js")).businessLabel(this.context.tenantId) || this.brandName || ""), button: n.button,
       ...(token ? { link: `${process.env.BASE_URL || "https://whisp.so"}/p/${token}`, linkText: LINK_TEXT[lk] } : {}) };
-    return { message: (begun === "busy" ? BUSY : WORKING)[l] || (begun === "busy" ? BUSY : WORKING).en, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" }, ...(begun === "busy" ? {} : { notify }) } };
+    // The packs variant: the notice is the model's own words.
+    let notice = (begun === "busy" ? BUSY : WORKING)[l] || (begun === "busy" ? BUSY : WORKING).en;
+    if (variantForTurn() === "packs") {
+      const what = begun === "busy" ? "We are still working on the customer's previous request; this new message will be handled once that is ready. Tell them briefly." : BEHAVIOUR.calcStarted;
+      notice = (await this.backend.generate(`You are the website chat assistant of ${this.brandName || "our business"}, speaking as "we". ${what} Reply in the customer's language, naturally.${replyLanguage(await this.routeTurn(messages, message).catch(() => null))}`, messages.slice(-4), 200).catch(() => "")).trim() || notice;
+    }
+    return { message: notice, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" }, ...(begun === "busy" ? {} : { notify }) } };
   }
 
   // ── Projects: a price estimate across the network's offers ──
@@ -1399,7 +1593,7 @@ export class WebsiteChat {
   // the visitor explicitly asks to find it elsewhere, or asks for one specific
   // product or service - never a broad category or a follow-up. The search starts
   // now and runs while our own reply is written. null = nothing is asked.
-  private async networkStart(question: string, messages: ChatMessage[], rt: TurnRoute | null): Promise<NetworkAsk | null> {
+  private async networkStart(question: string, messages: ChatMessage[], rt: TurnRoute | null, withReply = true): Promise<NetworkAsk | null> {
     if (!this.askEcosystem || !rt) return null;
     const ask = rt.intent === "elsewhere" || (rt.intent !== "chitchat" && rt.specific >= 0.5 && rt.need >= 0.5 && rt.followup < 0.5);
     if (!ask) {
@@ -1413,7 +1607,8 @@ export class WebsiteChat {
       console.warn(`[ecosystem] ${this.context.tenantId}: broadcast failed: ${(e as Error).message}`);
       return [] as EcosystemMatch[];
     });
-    const reply = matches.then((found) => (found.length ? this.answerViaPartner(need, found) : null)).catch(() => null);
+    // The separate partner reply (the packs variant writes partners into its one reply instead).
+    const reply = withReply ? matches.then((found) => (found.length ? this.answerViaPartner(need, found) : null)).catch(() => null) : Promise.resolve(null);
     return { need, lang: rt.lang, matches, reply };
   }
 

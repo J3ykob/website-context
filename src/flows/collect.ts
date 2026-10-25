@@ -9,6 +9,7 @@
  */
 import type { FlowDefinition, FlowInput } from "../context/types.js";
 import { jevAsk } from "../llm/jev.js";
+import { variantForTurn } from "../llm/turn-usage.js";
 
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
 
@@ -303,8 +304,10 @@ export async function collectTurn(flow: FlowDefinition, s: CollectSession, messa
 
   // "Yes, send it" / "cancel": settled by one Jev question, answered with a fixed text in the
   // conversation's language - no model call. Anything else (details, corrections, "yes but…") is read below.
+  // The packs variant: every reply worded by the model (no fixed sentences); Jev still settles the intent.
+  const llmOnly = variantForTurn() === "packs";
   const quick = await quickAnswer(s, message, prior);
-  const fixed = quick ? fixedReply(quick, s.language) : null;
+  const fixed = quick && !llmOnly ? fixedReply(quick, s.language) : null;
   if (quick === "cancel" && fixed) { s.transcript.push(`Assistant: ${fixed}`); return { reply: fixed, cancelled: true }; }
   if (quick === "confirm" && fixed && s.stage === "confirming" && !missingRequired(flow, s).length) {
     s.transcript.push(`Assistant: ${fixed}`);
@@ -312,7 +315,7 @@ export async function collectTurn(flow: FlowDefinition, s: CollectSession, messa
   }
 
   const needLabels = !(s.language && labelCache.has(labelKey(flow, s.language)));
-  const read = parseJsonObject(await llm(
+  const read = quick && llmOnly ? ({ intent: quick, values: {} } as any) : parseJsonObject(await llm(
     `You read one customer message in an order / inquiry chat for the business ${brand || "(this business)"} and output only JSON.`,
     `Fields (key | label | hint):
 ${fields.map((f) => `${f.name} | ${f.label} | ${f.description || ""}`).join("\n")}
@@ -334,7 +337,7 @@ ${needLabels ? `- "labels": every field name above translated into the language 
     500,
   ));
   if (!read) throw new Error("collect: unparseable model reply");
-  const intent = ["confirm", "cancel", "change", "answer"].includes(read.intent) ? read.intent : "answer";
+  const intent = quick && llmOnly ? quick : ["confirm", "cancel", "change", "answer"].includes(read.intent) ? read.intent : "answer";
   // The conversation's language is set by the first message and changes only
   // when the customer clearly switches (a Polish address in an English message
   // is not a switch).
@@ -408,7 +411,7 @@ ${needLabels ? `- "labels": every field name above translated into the language 
   // fixed sentences and the translated field names: no model call.
   const fx = FIXED[langKey(s.language)];
   const tr = s.language ? labelCache.get(labelKey(flow, s.language)) : undefined;
-  if (fx && tr && !offerAsk && !offerNote && !asked && (outcome === "ask" || outcome === "summary")) {
+  if (!llmOnly && fx && tr && !offerAsk && !offerNote && !asked && (outcome === "ask" || outcome === "summary")) {
     const name = (f: FlowInput) => { const l = tr[f.name] || f.label; return fx.lower ? l.charAt(0).toLowerCase() + l.slice(1) : l; };
     let reply = outcome === "ask" ? fx.ask(missing.slice(0, 2).map(name)) : fx.check;
     if (outcome === "summary") { s.stage = "confirming"; reply = `${reply}\n\n${summary(flow, s, tr)}`; }
