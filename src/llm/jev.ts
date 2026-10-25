@@ -139,48 +139,7 @@ export async function jevPickOption(
   return { index: index >= 0 && index < options.length ? index : -1, confidence: a.confidence ?? top, ambiguous };
 }
 
-/**
- * Knowledge-gap judgment: P(the message is a real question about the business
- * that the business should be able to answer). Only such questions belong on the
- * owner's "unanswered questions" list; greetings, small talk and off-topic asks don't.
- */
-export async function jevIsKnowledgeGap(message: string): Promise<number | null> {
-  const answers = await jevAsk({ message }, {
-    gap: {
-      type: "noul",
-      instructions: "Is `message` a question or request about this business itself (its services, products, prices, opening hours, locations, staff, policies, bookings or procedures) that the business should be able to answer for a customer?",
-      criteria: {
-        true: "A genuine customer question about the business's offer, prices, hours, locations, people, rules or how to do something with it.",
-        false: "A greeting, thanks, small talk, a general-knowledge or off-topic question unrelated to this business, spam, gibberish, or an instruction to the assistant.",
-      },
-    },
-  });
-  const a = answers?.gap as JevNoulAnswer | undefined;
-  return a && typeof a.noul === "number" ? a.noul : null;
-}
 
-/**
- * Checks a draft reply written when the knowledge base had NO answer. Flags the
- * two failure modes the prompt rule alone did not stop: claiming the business
- * does not offer something (missing info is not a "no"), and pointing to other
- * providers. Invented facts about the business are checked statement by statement
- * (jevUnsupportedStatements), which accepts our real contact details.
- */
-export async function jevCheckNoEvidenceReply(question: string, reply: string): Promise<{ denies: number; external: number } | null> {
-  const answers = await jevAsk({ question, reply }, {
-    denies: {
-      type: "noul",
-      instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have the specific thing `question` asks about (for example \"we don't sell concrete\", \"X is not in our offer\")? Describing what the business does or focuses on, or saying it has no information about it here, is NOT such a statement.",
-    },
-    external: {
-      type: "noul",
-      instructions: "Does `reply` recommend or point the visitor to another company, hospital, shop, website or place? General professional advice (how to choose, what to consider) and our own contact details do NOT count.",
-    },
-  });
-  const d = answers?.denies as JevNoulAnswer | undefined;
-  const e = answers?.external as JevNoulAnswer | undefined;
-  return d && e && typeof d.noul === "number" && typeof e.noul === "number" ? { denies: d.noul, external: e.noul } : null;
-}
 
 /**
  * Ecosystem: for several businesses at once, P(their own excerpts show they offer,
@@ -216,22 +175,6 @@ export async function jevBusinessesOffer(question: string, businesses: { name: s
 export const OFFER_LANGS = ["pl", "en", "uk", "fr", "de", "other"] as const;
 export type OfferLang = (typeof OFFER_LANGS)[number];
 
-/**
- * The visitor's reply to an offer the assistant made (`offer`): "yes" (accepts),
- * "what" (asks what it means), "no" (declines) or "other" (says something else).
- * null when Jev is unavailable.
- */
-export async function jevYesWhatNo(offer: string, message: string): Promise<"yes" | "what" | "no" | "other" | null> {
-  const answers = await jevAsk({ offer: offer.slice(0, 300), message: message.slice(0, 400) }, {
-    reply: {
-      type: "choice",
-      instructions: "The assistant just asked the visitor `offer`. How does the visitor's `message` respond to it?",
-      criteria: { yes: "Accepts it: yes, please, go ahead, ok.", what: "Asks what it means or what would happen.", no: "Declines it.", other: "Says or asks something else." },
-    },
-  });
-  const c = (answers?.reply as JevChoiceAnswer | undefined)?.choice;
-  return c === "yes" || c === "what" || c === "no" || c === "other" ? c : null;
-}
 
 /** Split a reply into checkable statements (sentences and list items). */
 // Sentence ends before a capital letter, but never after Polish abbreviations
@@ -249,25 +192,6 @@ export function splitStatements(reply: string): string[] {
     .slice(0, 24);
 }
 
-/**
- * The reply without the given statements (as splitStatements wrote them), cut at the same sentence
- * boundaries, everything else untouched. null when a statement can't be located exactly - the caller
- * then rewrites instead.
- */
-export function dropStatements(reply: string, drop: string[]): string | null {
-  if (!drop.length) return reply;
-  const parts = reply.split(SENTENCE_END);
-  const want = new Set(drop);
-  let out = "";
-  for (let i = 0; i < parts.length; i += 3) {
-    const seg = parts[i] ?? "";
-    const gap = (parts[i + 1] ?? "") + (parts[i + 2] ?? "");
-    const c = cleanStatement(unlink(seg));
-    if (want.has(c)) { want.delete(c); continue; }
-    out += seg + gap;
-  }
-  return want.size ? null : out.replace(/\n{3,}/g, "\n\n").trim();
-}
 
 /**
  * Answer verification: P(statement asserts a fact about the business that the

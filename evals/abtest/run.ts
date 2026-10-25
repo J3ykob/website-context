@@ -1,6 +1,5 @@
 /**
- * A/B run of the reply pipeline on production: every case is played on both variants ("" = current,
- * "packs" = dynamic context, header x-test-variant), turn by turn like the widget (streamed), with
+ * Eval run of the reply pipeline on production: every case is played turn by turn like the widget (streamed), with
  * background calculation results awaited. Records replies, first-token / total times and the turn's
  * LLM/Jev usage. Judging is separate (blind, by independent reviewers).
  *
@@ -20,7 +19,8 @@ const DIR = arg("--cases")!;
 const OUT = arg("--out") || "ab-results.json";
 const PAR = Number(arg("--parallel") || 4);
 const ONLY = arg("--only")?.split(",");
-const VARIANTS = (arg("--variants") || ",packs").split(",");
+// Labels only (the server has one pipeline): run twice with different labels to compare before/after a change.
+const VARIANTS = (arg("--variants") || "current").split(",");
 const RUN = `reval-ab-${Date.now().toString(36)}`;
 if (!ADMIN || !DIR) { console.error("ADMIN_SECRET and --cases are required"); process.exit(1); }
 
@@ -31,7 +31,7 @@ const cases: Case[] = readdirSync(DIR).filter((f) => /^cases-.*\.json$/.test(f))
 async function streamTurn(variant: string, tenant: string, session: string, messages: { role: string; content: string }[]) {
   const t0 = Date.now();
   let first = 0, done: any = null;
-  const r = await fetch(`${BASE}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": ADMIN, "x-test-variant": variant || "base" }, body: JSON.stringify({ tenantId: tenant, sessionId: session, messages, stream: true }) }).catch(() => null);
+  const r = await fetch(`${BASE}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": ADMIN, }, body: JSON.stringify({ tenantId: tenant, sessionId: session, messages, stream: true }) }).catch(() => null);
   if (!r || !r.ok || !r.body) return { first: 0, total: Date.now() - t0, done: { error: `HTTP ${r?.status}`, message: "" } };
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
   for (;;) {

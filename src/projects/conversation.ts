@@ -425,12 +425,12 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
 }
 
 /**
- * A notice to the customer about their calculation. In the packs variant (recorded on the project when it
- * started) the model words it, once per run (kept in the project); otherwise the fixed text.
+ * A notice to the customer about their calculation, worded by the model once per run (kept in the
+ * project); the fixed text only if the model can't be reached.
  */
 async function wordNotice(projectId: string, runId: string, kind: string, lang: string, fixed: string, what: string): Promise<string> {
   const p = await getProject(projectId);
-  if (p?.memory.variant !== "packs") return fixed;
+  if (!p) return fixed;
   const key = `notice_${kind}`;
   const kept = p.memory[key] as { runId: string; text: string } | undefined;
   if (kept?.runId === runId && kept.text) return kept.text;
