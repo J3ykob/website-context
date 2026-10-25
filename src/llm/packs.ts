@@ -72,18 +72,21 @@ export function candidatePacks(index: PackIndex, hits: { metadata: Record<string
 
 // The pack's passages with the ones the search matched first: a long page (a price list of many
 // machines) is judged and sent by the part the conversation is about, not by its first lines.
-function ordered(p: Pack, hits?: Set<string>): CatalogChunk[] {
-  if (!hits?.size) return p.chunks;
-  return [...p.chunks.filter((c) => hits.has(c.id)), ...p.chunks.filter((c) => !hits.has(c.id))];
+// `hits` = matched passage ids in search rank order (best first).
+function ordered(p: Pack, hits?: string[]): CatalogChunk[] {
+  if (!hits?.length) return p.chunks;
+  const rank = new Map(hits.map((id, i) => [id, i]));
+  const matched = p.chunks.filter((c) => rank.has(c.id)).sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+  return [...matched, ...p.chunks.filter((c) => !rank.has(c.id))];
 }
-function preview(p: Pack, hits?: Set<string>, chars = 900): string {
+function preview(p: Pack, hits?: string[], chars = 900): string {
   let s = "";
   for (const c of ordered(p, hits)) { if (s.length >= chars) break; s += c.content.replace(/\s+/g, " ").slice(0, chars - s.length) + " … "; }
   return s;
 }
 
 /** Jev: how much each candidate pack helps with the customer's latest message, read with the conversation. */
-export async function scorePacks(conversation: string, packs: Pack[], hits?: Set<string>): Promise<number[] | null> {
+export async function scorePacks(conversation: string, packs: Pack[], hits?: string[]): Promise<number[] | null> {
   if (!packs.length) return [];
   const questions: Record<string, JevQuestion> = {};
   const state: Record<string, unknown> = { conversation };
@@ -101,7 +104,7 @@ export async function scorePacks(conversation: string, packs: Pack[], hits?: Set
 }
 
 /** The chosen packs as prompt text, within a budget: best pack first, each whole when it fits. */
-export function renderPacks(packs: Pack[], budget = 14000, hits?: Set<string>): { text: string; used: Pack[]; passages: string[] } {
+export function renderPacks(packs: Pack[], budget = 14000, hits?: string[]): { text: string; used: Pack[]; passages: string[] } {
   let left = budget;
   const blocks: string[] = [];
   const used: Pack[] = [];

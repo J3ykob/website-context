@@ -1217,12 +1217,12 @@ export class WebsiteChat {
       const net = rt && !behaviour.length ? await this.networkStart(question, messages, rt, false) : null;
       const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch(() => []);
       let scored: { p: Pack; s: number }[] = [];
-      let hitIds: Set<string> | undefined;
+      let hitIds: string[] | undefined;
       if (this.packIndex) {
         const byId = new Map(this.knowledgeCatalog!.chunks.map((c) => [c.id, c]));
         const enriched = hits.map((h) => { const c = byId.get(String(h.metadata.id || "")); return c ? { metadata: { ...h.metadata, url: c.url, catalog: c.catalogId } } : h; });
         const cands = candidatePacks(this.packIndex, enriched);
-        hitIds = new Set(hits.map((h) => String(h.metadata.id || "")).filter(Boolean));
+        hitIds = hits.map((h) => String(h.metadata.id || "")).filter(Boolean);
         const scores = await scorePacks(convo, cands, hitIds);
         if (scores) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.5).sort((a, b) => b.s - a.s).slice(0, 4);
         console.log(`[packs] ${this.context.tenantId}: ${hits.length} hits (${hits.filter((h) => byId.has(String(h.metadata.id || ""))).length} in catalog, ids e.g. ${hits.slice(0, 2).map((h) => String(h.metadata.id || "?").slice(0, 24)).join(",")}), ${cands.length} candidates [${cands.map((p) => p.title.slice(0, 30)).join("; ")}] scores ${scores?.map((x) => x.toFixed(2)).join(",")} -> ${scored.map((x) => `${x.p.title.slice(0, 40)}=${x.s.toFixed(2)}`).join(" | ") || "none"}`);
