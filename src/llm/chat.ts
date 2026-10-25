@@ -728,7 +728,7 @@ export class WebsiteChat {
     let passages: string[] = [];
     let packText = "";
     let answered = true;
-    let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[] } | null = null;
+    let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[]; partners: { tenantId: string; label: string }[] } | null = null;
 
     // The conversation's language: kept from the last message long enough to tell (a name, a phone
     // number or "ok" does not switch it); "other" = whatever language the customer writes in.
@@ -783,7 +783,7 @@ export class WebsiteChat {
             { content: `Businesses from our network checked for the customer: ${found.map((f) => f.label).join(", ")}.` },
             ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }, { content: `${f.label} offers, sells, rents or does what the customer asked for ("${net.need.slice(0, 300)}") - checked against its own website.` }]),
           ];
-          network = { text, evidence, labels: found.map((f) => f.label), links: found.map((f) => links[f.tenantId]).filter(Boolean) };
+          network = { text, evidence, labels: found.map((f) => f.label), links: found.map((f) => links[f.tenantId]).filter(Boolean), partners: found.map((f) => ({ tenantId: f.tenantId, label: f.label })) };
           behaviour.push(BEHAVIOUR.network);
         }
       }
@@ -905,7 +905,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const srcs = used.filter((p) => p.url).map((p) => ({ url: p.url, title: p.title }));
     // A question about us that our information doesn't answer goes to the owner's gap list (dashboard).
     const gap = !answered && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
-    return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network.labels.map((label) => ({ tenantId: "", label })) } : {}) };
+    return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network.partners } : {}) };
   }
 
   // Route tiny classification through the small fast model when available.
