@@ -2902,6 +2902,9 @@ app.post("/api/admin/project/:id/settle-waiting", async (req, res) => {
   if (!p) { res.status(404).json({ error: "not found" }); return; }
   const waiting = ((p.memory.subRequests as any[]) || []).filter((x) => x.status === "waiting");
   for (const w of waiting) await settle(w.id, "", "no_answer");
+  // A result that is already there goes out now (chat log + the customer's e-mail / SMS).
+  const { deliverNow } = await import("../src/projects/conversation.js");
+  await deliverNow(req.params.id).catch(() => {});
   res.json({ settled: waiting.map((w) => w.tenantId) });
 });
 app.post("/api/admin/network-status", (req, res) => {
