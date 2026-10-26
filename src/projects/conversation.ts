@@ -227,6 +227,15 @@ export const LINK_TEXT: Record<string, string> = {
   de: "Sie müssen nicht auf dieser Seite warten - das Ergebnis erscheint auch hier:",
 };
 
+/** The chat's button to the customer's status page (a new tab, live updates, the notification choice). */
+export const OPEN_STATUS: Record<string, { button: string; hint: string; names: Record<string, string> }> = {
+  pl: { button: "Otwórz status zapytania", hint: "Otworzy się w nowej karcie i będzie się aktualizować na bieżąco. Tam wybierzesz, jak mamy Cię powiadomić: {channels}.", names: { sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "e-mail" } },
+  en: { button: "Open the status of your request", hint: "It opens in a new tab and updates live. There you choose how we notify you: {channels}.", names: { sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "e-mail" } },
+  uk: { button: "Відкрити статус запиту", hint: "Відкриється в новій вкладці й оновлюватиметься наживо. Там ви оберете, як вас повідомити: {channels}.", names: { sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "e-mail" } },
+  fr: { button: "Ouvrir le suivi de votre demande", hint: "Il s'ouvre dans un nouvel onglet et se met à jour en direct. Vous y choisissez comment être prévenu : {channels}.", names: { sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "e-mail" } },
+  de: { button: "Status Ihrer Anfrage öffnen", hint: "Er öffnet sich in einem neuen Tab und aktualisiert sich live. Dort wählen Sie, wie wir Sie benachrichtigen: {channels}.", names: { sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-Mail" } },
+};
+
 export const NOTIFY: Record<string, { prompt: string; consent: string; button: string; saved: string; invalid: string }> = {
   pl: { prompt: "Nie musisz czekać - wyślę wynik na e-mail:", consent: "Zgadzam się, aby {brand} wysłał mi wynik tego zapytania na podany e-mail.", button: "Wyślij mi wynik", saved: "Dziękuję - wynik wyślę na {email}.", invalid: "Sprawdź adres e-mail." },
   en: { prompt: "No need to wait - I can email you the result:", consent: "I agree that {brand} emails me the result of this request.", button: "Email me the result", saved: "Thanks - I'll send the result to {email}.", invalid: "Please check the email address." },
@@ -237,9 +246,17 @@ export const NOTIFY: Record<string, { prompt: string; consent: string; button: s
 
 /** The customer's email for this project's result, with the consent they gave (recorded). */
 export async function setCustomerContact(projectId: string, tenantId: string, email: string, lang: string, consentText: string): Promise<void> {
+  await setCustomerChannel(projectId, tenantId, "email", email, lang, consentText);
+}
+
+/** One more way to reach the customer about this request (e-mail, SMS, WhatsApp, Telegram), with their consent recorded. */
+export async function setCustomerChannel(projectId: string, tenantId: string, channel: "email" | "sms" | "whatsapp" | "telegram", value: string, lang: string, consentText: string): Promise<void> {
   const { recordConsent } = await import("./store.js");
-  await recordConsent(projectId, { toTenantId: tenantId, fields: ["email"], text: consentText });
-  await setMemory(projectId, { customerContact: { email, lang, at: new Date().toISOString() } });
+  const key = channel === "sms" ? "phone" : channel === "telegram" ? "telegramChatId" : channel;
+  await recordConsent(projectId, { toTenantId: tenantId, fields: [key], text: consentText });
+  const p = await getProject(projectId);
+  const prev = (p?.memory.customerContact as Record<string, unknown> | undefined) || {};
+  await setMemory(projectId, { customerContact: { ...prev, [key]: value, lang, at: new Date().toISOString() } });
 }
 
 /**
@@ -254,8 +271,18 @@ export async function deliverNow(projectId: string): Promise<void> {
   await agentDelivery(projectId, async (message) => {
     await logMessage(p.initiatorTenantId, p.customerSession, "assistant", message, { flowInvoked: "project-agent" }).catch(() => {});
   }, async (message, files, status) => {
-    const contact = p.memory.customerContact as { email: string; lang: string } | undefined;
-    if (!contact?.email || status === "review") return;
+    const contact = p.memory.customerContact as (import("./notify-channels.js").CustomerContact) | undefined;
+    if (!contact || status === "review") return;
+    // SMS / WhatsApp / Telegram: a short "it's ready" with the status page link.
+    if (contact.phone || contact.whatsapp || contact.telegramChatId) {
+      const { getTenant } = await import("../multi-tenant/d1-registry.js");
+      const t = getTenant(p.initiatorTenantId);
+      const token = await customerLink(projectId).catch(() => "");
+      const { sendResultReady } = await import("./notify-channels.js");
+      const sent = await sendResultReady(contact, { brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "", link: token ? `${process.env.BASE_URL || "https://whisp.so"}/p/${token}` : "" }).catch((e) => ({ error: String((e as Error).message).slice(0, 200) }));
+      await addEvent(projectId, { kind: "result_messaged", actor: "system", data: sent }).catch(() => {});
+    }
+    if (!contact.email) return;
     // Any failure is recorded (a missing email key used to fail silently).
     let sendResultEmail: typeof import("../multi-tenant/email.js").sendResultEmail;
     try { ({ sendResultEmail } = await import("../multi-tenant/email.js")); }

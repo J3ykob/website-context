@@ -1088,6 +1088,19 @@
   // Under the "working on it" message: the customer may leave an email to get the result (with consent).
   function notifyForm(p) {
     var n = p.notify;
+    // The status page: a new tab with live updates, where the customer picks SMS / WhatsApp / Telegram / e-mail.
+    if (n.link && n.open) {
+      var card = document.createElement("div");
+      card.className = "wctx-msg wctx-msg-assistant wctx-notify";
+      card.style.cssText = "display:flex;flex-direction:column;gap:8px;font-size:13px";
+      var go = document.createElement("a"); go.href = n.link; go.target = "_blank"; go.rel = "noopener"; go.textContent = n.open;
+      go.style.cssText = "align-self:flex-start;padding:9px 16px;border-radius:10px;background:#3b82f6;color:#fff;text-decoration:none;font-weight:600";
+      card.appendChild(go);
+      var hint = document.createElement("div"); hint.textContent = n.openHint || ""; hint.style.cssText = "opacity:.85"; card.appendChild(hint);
+      els.msgs.appendChild(card);
+      els.msgs.scrollTop = els.msgs.scrollHeight;
+      return;
+    }
     var box = document.createElement("form");
     box.className = "wctx-msg wctx-msg-assistant wctx-notify";
     box.style.cssText = "display:flex;flex-direction:column;gap:8px;font-size:13px";

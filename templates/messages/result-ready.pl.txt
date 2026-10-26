@@ -1,0 +1,2 @@
+# {{brand}} business name · {{link}} the customer's status page
+{{brand}}: odpowiedź na Twoje zapytanie jest gotowa. Zobacz: {{link}}

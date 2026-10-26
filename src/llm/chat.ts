@@ -1045,15 +1045,20 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const { customerLink, LINK_TEXT } = await import("../projects/conversation.js");
     const token = await customerLink(projectId).catch(() => "");
     const lk = NOTIFY[l] ? l : "en";
+    const { OPEN_STATUS } = await import("../projects/conversation.js");
+    const { availableChannels } = await import("../projects/notify-channels.js");
+    const os = OPEN_STATUS[lk] || OPEN_STATUS.en;
+    const channels = availableChannels().map((c) => os.names[c]);
     const notify = { lang: lk, prompt: n.prompt, consent: n.consent.split("{brand}").join((await import("../projects/network.js")).businessLabel(this.context.tenantId) || this.brandName || ""), button: n.button,
-      ...(token ? { link: `${process.env.BASE_URL || "https://whisp.so"}/p/${token}`, linkText: LINK_TEXT[lk] } : {}) };
+      ...(token ? { link: `${process.env.BASE_URL || "https://whisp.so"}/p/${token}`, linkText: LINK_TEXT[lk], open: os.button, openHint: os.hint.split("{channels}").join(channels.join(", ")) } : {}) };
     // The notice is the model's own words (the fixed text only if the model can't be reached).
     let notice = (begun === "busy" ? BUSY : WORKING)[l] || (begun === "busy" ? BUSY : WORKING).en;
     {
       const { reviewMode } = await import("../projects/review.js");
       const what = begun === "busy" ? "We are still working on the customer's previous request; this new message will be handled once that is ready. Tell them briefly."
         : reviewMode(this.context.tenantId) === "approve" && !opts?.pureCalc ? BEHAVIOUR.calcReviewed : BEHAVIOUR.calcStarted;
-      notice = (await this.backend.generate(`You are the website chat assistant of ${this.brandName || "our business"}, speaking as "we". ${what} Reply in the customer's language, naturally.${replyLanguage(await this.routeTurn(messages, message).catch(() => null))}`, messages.slice(-4), 200).catch(() => "")).trim() || notice;
+      const follow = token && begun !== "busy" ? ` Then say plainly that this can take a while and that the button below opens the status of their request in a new tab with live updates, where they can also choose to be notified (${channels.join(", ")}) - so they don't have to wait here.` : "";
+      notice = (await this.backend.generate(`You are the website chat assistant of ${this.brandName || "our business"}, speaking as "we". ${what}${follow} Reply in the customer's language, naturally.${replyLanguage(await this.routeTurn(messages, message).catch(() => null))}`, messages.slice(-4), 200).catch(() => "")).trim() || notice;
     }
     return { message: notice, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" }, ...(begun === "busy" ? {} : { notify }) } };
   }

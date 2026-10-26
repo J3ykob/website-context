@@ -23,6 +23,11 @@
   .files a { display:inline-block; margin:4px 14px 0 0; }
   input[type=email] { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--text); font:inherit; }
   input[type=email]:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(59,130,246,.35); }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 10px; }
+  .tabs button { padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:transparent; color:var(--text); font:inherit; font-size:13px; cursor:pointer; }
+  .tabs button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  input[type=tel] { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--text); font:inherit; }
+  #tg-link { display:inline-block; margin:4px 0 10px; padding:9px 16px; border-radius:10px; background:#229ED9; color:#fff; text-decoration:none; }
   label.consent { display:flex; gap:8px; align-items:flex-start; font-size:13px; color:var(--muted); margin:10px 0; cursor:pointer; }
   button { font:inherit; border-radius:10px; padding:10px 16px; cursor:pointer; border:0; background:var(--accent); color:#fff; }
   @media (hover:hover) { button:hover { background:var(--accent-h); } }
@@ -59,8 +64,11 @@
 
   <div class="card hidden" id="notify-card">
     <p class="label" id="l-notify"></p>
+    <div class="tabs" id="tabs"></div>
+    <a class="hidden" id="tg-link" target="_blank" rel="noopener"></a>
     <form id="notify">
       <input type="email" id="email" required placeholder="e-mail" autocomplete="email">
+      <input type="tel" id="phone" class="hidden" placeholder="+48 600 000 000" autocomplete="tel">
       <label class="consent"><input type="checkbox" id="consent" required> <span id="consent-text"></span></label>
       <button type="submit" id="notify-btn"></button>
       <div class="err hidden" id="notify-err"></div>
@@ -84,6 +92,25 @@
   };
   var t = T.pl, lang = "pl", timer = null;
 
+  var CH = {
+    pl: { how: "Jak mamy Cię powiadomić, gdy będzie gotowe?", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-mail", tg: "Otwórz Telegram i kliknij Start", tgHint: "Bot napisze do Ciebie, gdy odpowiedź będzie gotowa." },
+    en: { how: "How should we tell you when it's ready?", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-mail", tg: "Open Telegram and press Start", tgHint: "The bot will message you when the answer is ready." },
+    uk: { how: "Як повідомити вас, коли буде готово?", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-mail", tg: "Відкрийте Telegram і натисніть Start", tgHint: "Бот напише вам, коли відповідь буде готова." },
+    fr: { how: "Comment vous prévenir quand ce sera prêt ?", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-mail", tg: "Ouvrir Telegram et appuyer sur Démarrer", tgHint: "Le bot vous écrira quand la réponse sera prête." },
+    de: { how: "Wie sollen wir Sie benachrichtigen, wenn es fertig ist?", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-Mail", tg: "Telegram öffnen und Start drücken", tgHint: "Der Bot schreibt Ihnen, wenn die Antwort fertig ist." },
+  };
+  var channel = "email", tabsDrawn = false;
+  function pick(c, d) {
+    channel = c; var ch = CH[lang] || CH.pl;
+    Array.prototype.forEach.call($("tabs").children, function (b) { b.classList.toggle("on", b.dataset.c === c); });
+    var tg = c === "telegram";
+    $("notify").classList.toggle("hidden", tg);
+    $("tg-link").classList.toggle("hidden", !tg);
+    if (tg) { $("tg-link").href = d.telegram; $("tg-link").textContent = ch.tg; $("tg-link").title = ch.tgHint; }
+    $("email").classList.toggle("hidden", c !== "email"); $("email").required = c === "email";
+    $("consent-text").textContent = c === "email" ? d.consent : ((d.consents || {})[c] || d.consent);
+    $("phone").classList.toggle("hidden", c !== "sms" && c !== "whatsapp"); $("phone").required = c === "sms" || c === "whatsapp";
+  }
   function render(d) {
     lang = T[d.lang] ? d.lang : "pl"; t = T[lang];
     document.documentElement.lang = lang;
@@ -95,7 +122,7 @@
     $("l-result").textContent = t.result; $("l-request").textContent = t.request; $("l-notify").textContent = t.notify;
     $("notify-btn").textContent = t.button; $("keep").textContent = t.keep;
     $("request").textContent = d.request;
-    $("consent-text").textContent = d.consent;
+    $("consent-text").textContent = channel === "email" ? d.consent : ((d.consents || {})[channel] || d.consent);
     if (d.message) {
       $("result").textContent = d.message; $("result-card").classList.remove("hidden");
       $("files").innerHTML = "";
@@ -112,6 +139,16 @@
     $("offers-card").classList.toggle("hidden", !(d.offers || []).length);
     var finished = d.status === "done" || d.status === "failed";
     $("notify-card").classList.toggle("hidden", finished || d.notified);
+    var ch = CH[lang] || CH.pl;
+    $("l-notify").textContent = (d.channels || []).length > 1 ? ch.how : t.notify;
+    if (!tabsDrawn && (d.channels || []).length > 1) {
+      tabsDrawn = true;
+      ["sms", "whatsapp", "telegram", "email"].filter(function (c) { return d.channels.indexOf(c) >= 0 && (c !== "telegram" || d.telegram); }).forEach(function (c) {
+        var b = document.createElement("button"); b.type = "button"; b.dataset.c = c; b.textContent = ch[c];
+        b.addEventListener("click", function () { pick(c, d); }); $("tabs").appendChild(b);
+      });
+      pick($("tabs").firstChild ? $("tabs").firstChild.dataset.c : "email", d);
+    }
     if (!finished) { clearTimeout(timer); timer = setTimeout(load, 10000); }
   }
 
@@ -125,7 +162,7 @@
   $("notify").addEventListener("submit", function (e) {
     e.preventDefault();
     $("notify-btn").disabled = true;
-    fetch(api + "/notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: $("email").value, consent: $("consent").checked, lang: lang }) })
+    fetch(api + "/notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channel: channel, email: $("email").value, phone: $("phone").value, consent: $("consent").checked, lang: lang }) })
       .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, x: x }; }); })
       .then(function (res) {
         if (!res.ok) { $("notify-btn").disabled = false; $("notify-err").textContent = res.x.error || ""; $("notify-err").classList.remove("hidden"); return; }

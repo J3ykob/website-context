@@ -352,6 +352,11 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
         message: d.status === "done" || d.status === "failed" ? d.message : "",
         files: d.status === "done" ? (d.files || []).map((path) => ({ name: path.split("/").pop(), url: `/api/p/${tok}/file?path=${encodeURIComponent(path)}` })) : [],
         notified: !!(p.memory.customerContact as any)?.email,
+        // Ways to be told when it's ready (only the configured ones) and which the customer already chose.
+        channels: (await import("./notify-channels.js")).availableChannels(),
+        chosen: Object.keys((p.memory.customerContact as any) || {}).filter((k) => ["email", "phone", "whatsapp", "telegramChatId"].includes(k)),
+        telegram: (await import("./notify-channels.js")).telegramLink(String(req.params.token)),
+        consents: Object.fromEntries((["sms", "whatsapp", "telegram"] as const).map((c) => [c, CHANNEL_TEXT[NOTIFY[lang] ? lang : "pl"].consent.split("{brand}").join(t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "").split("{channel}").join(c === "sms" ? "SMS" : c === "whatsapp" ? "WhatsApp" : "Telegram")])),
         // Offers businesses of the network sent afterwards (src/projects/lead.ts).
         offers: ((p.memory.businessOffers as any[]) || []).map((o) => ({ business: String(o.label || ""), text: String(o.text || ""), at: o.at })),
         consent: NOTIFY[NOTIFY[lang] ? lang : "pl"].consent.split("{brand}").join(t?.settings?.siteCard?.brand || t?.brandName || t?.domain || ""),
@@ -378,12 +383,53 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     const p = await linkProject(String(req.params.token)).catch(() => null);
     if (!p) { res.status(404).json({ error: "Not found" }); return; }
     const lang = NOTIFY[String(req.body?.lang)] ? String(req.body.lang) : "pl";
+    const brand = getTenant(p.initiatorTenantId)?.settings?.siteCard?.brand || getTenant(p.initiatorTenantId)?.brandName || getTenant(p.initiatorTenantId)?.domain || "";
+    // SMS / WhatsApp: a phone number with consent (only channels configured on this server).
+    const channel = String(req.body?.channel || "email");
+    if (channel === "sms" || channel === "whatsapp") {
+      const { availableChannels, normalizePhone } = await import("./notify-channels.js");
+      const phone = normalizePhone(String(req.body?.phone || ""));
+      if (!availableChannels().includes(channel) || !phone || req.body?.consent !== true) { res.status(400).json({ error: CHANNEL_TEXT[lang].invalidPhone }); return; }
+      const { setCustomerChannel } = await import("./conversation.js");
+      await setCustomerChannel(p.id, p.initiatorTenantId, channel, phone, lang, CHANNEL_TEXT[lang].consent.split("{brand}").join(brand).split("{channel}").join(channel === "sms" ? "SMS" : "WhatsApp"));
+      await deliverNow(p.id).catch(() => {});
+      res.json({ ok: true, message: CHANNEL_TEXT[lang].saved.split("{to}").join(phone) });
+      return;
+    }
     const email = String(req.body?.email || "").trim().slice(0, 200);
     const at = email.indexOf("@");
     if (at < 1 || email.indexOf(".", at) < at + 2 || email.endsWith(".") || email.includes(" ") || req.body?.consent !== true) { res.status(400).json({ error: NOTIFY[lang].invalid }); return; }
-    const brand = getTenant(p.initiatorTenantId)?.settings?.siteCard?.brand || getTenant(p.initiatorTenantId)?.brandName || getTenant(p.initiatorTenantId)?.domain || "";
     await setCustomerContact(p.id, p.initiatorTenantId, email, lang, NOTIFY[lang].consent.split("{brand}").join(brand));
     await deliverNow(p.id).catch(() => {});
     res.json({ ok: true, message: NOTIFY[lang].saved.split("{email}").join(email) });
   });
+
+  // Telegram: the customer opens t.me/<bot>?start=<token> from the status page; the bot links that chat to the request.
+  app.post("/api/telegram/webhook", async (req, res) => {
+    if (!process.env.TELEGRAM_WEBHOOK_SECRET || req.headers["x-telegram-bot-api-secret-token"] !== process.env.TELEGRAM_WEBHOOK_SECRET) { res.status(403).end(); return; }
+    res.json({ ok: true });
+    const msg = req.body?.message;
+    const m = String(msg?.text || "").match(/^\/start\s+(\S+)/);
+    if (!m || !msg?.chat?.id) return;
+    const p = await linkProject(m[1]).catch(() => null);
+    const { telegramSend } = await import("./notify-channels.js");
+    if (!p) { if (process.env.CUSTOMER_UPDATES_APPROVED === "1") await telegramSend(msg.chat.id, CHANNEL_TEXT.pl.telegramUnknown).catch(() => {}); return; }
+    const lang = ((p.memory.customerContact as any)?.lang) || ((p.memory.plan as any)?.language) || "pl";
+    const L = CHANNEL_TEXT[CHANNEL_TEXT[lang] ? lang : "pl"];
+    const t = getTenant(p.initiatorTenantId);
+    const brand = t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "";
+    const { setCustomerChannel } = await import("./conversation.js");
+    await setCustomerChannel(p.id, p.initiatorTenantId, "telegram", String(msg.chat.id), lang, L.consent.split("{brand}").join(brand).split("{channel}").join("Telegram"));
+    if (process.env.CUSTOMER_UPDATES_APPROVED === "1") await telegramSend(msg.chat.id, L.telegramLinked.split("{brand}").join(brand)).catch(() => {});
+    await deliverNow(p.id).catch(() => {});
+  });
 }
+
+// Status-page texts for SMS / WhatsApp / Telegram (UI labels and the bot's own confirmations, not chat replies).
+const CHANNEL_TEXT: Record<string, { consent: string; saved: string; invalidPhone: string; telegramLinked: string; telegramUnknown: string }> = {
+  pl: { consent: "Zgadzam się, aby {brand} powiadomił mnie przez {channel}, gdy wynik tego zapytania będzie gotowy.", saved: "Dziękujemy - powiadomimy Cię na {to}.", invalidPhone: "Sprawdź numer telefonu.", telegramLinked: "Gotowe - napiszemy tutaj, gdy odpowiedź od {brand} będzie gotowa.", telegramUnknown: "Ten link wygasł albo nie istnieje." },
+  en: { consent: "I agree that {brand} notifies me by {channel} when the result of this request is ready.", saved: "Thanks - we'll notify you at {to}.", invalidPhone: "Please check the phone number.", telegramLinked: "Done - we'll message you here when the answer from {brand} is ready.", telegramUnknown: "This link has expired or does not exist." },
+  uk: { consent: "Я погоджуюся, щоб {brand} повідомив мене через {channel}, коли результат цього запиту буде готовий.", saved: "Дякуємо - повідомимо вас на {to}.", invalidPhone: "Перевірте номер телефону.", telegramLinked: "Готово - напишемо тут, коли відповідь від {brand} буде готова.", telegramUnknown: "Посилання недійсне." },
+  fr: { consent: "J'accepte que {brand} me prévienne par {channel} quand le résultat de cette demande sera prêt.", saved: "Merci - nous vous préviendrons au {to}.", invalidPhone: "Vérifiez le numéro de téléphone.", telegramLinked: "C'est fait - nous vous écrirons ici quand la réponse de {brand} sera prête.", telegramUnknown: "Ce lien a expiré ou n'existe pas." },
+  de: { consent: "Ich bin einverstanden, dass {brand} mich per {channel} benachrichtigt, wenn das Ergebnis dieser Anfrage fertig ist.", saved: "Danke - wir benachrichtigen Sie unter {to}.", invalidPhone: "Bitte prüfen Sie die Telefonnummer.", telegramLinked: "Erledigt - wir schreiben Ihnen hier, wenn die Antwort von {brand} fertig ist.", telegramUnknown: "Dieser Link ist abgelaufen oder existiert nicht." },
+};
