@@ -29,6 +29,14 @@ function ensureSchema(): Promise<void> {
 
 interface Invite { tenant_id: string; project_id: string; token: string; created_at: string; unlocked_at: string | null; passed_at: string | null; replied_at: string | null }
 
+/** The invites sent for these sub-requests (by sub-request project id), for the customer's status page. */
+export async function invitesFor(projectIds: string[]): Promise<Record<string, Invite>> {
+  if (!projectIds.length) return {};
+  await ensureSchema();
+  const rows = (await d1Query(`SELECT * FROM network_invites WHERE project_id IN (${projectIds.map(() => "?").join(",")})`, projectIds).catch(() => [])) as Invite[];
+  return Object.fromEntries(rows.map((r) => [r.project_id, r]));
+}
+
 async function inviteByToken(token: string): Promise<Invite | null> {
   await ensureSchema();
   return ((await d1Query("SELECT * FROM network_invites WHERE token = ?", [token]))[0] as Invite) || null;
@@ -190,6 +198,15 @@ export async function replyToLead(token: string, offer: string): Promise<boolean
     await setMemory(parentId, { businessOffers: offers });
     const { logMessage } = await import("../storage/conversation-store.js");
     await logMessage(parent.initiatorTenantId, parent.customerSession, "assistant", `Oferta od firmy ${businessLabel(inv.tenant_id)}:\n\n${offer.slice(0, 4000)}`, { flowInvoked: "network-offer" }).catch(() => {});
+    // SMS / WhatsApp / Telegram if the customer chose them: a short "new offer" with their status page.
+    const ch = parent.memory.customerContact as import("./notify-channels.js").CustomerContact | undefined;
+    if (ch && (ch.phone || ch.whatsapp || ch.telegramChatId)) {
+      const { customerLink } = await import("./conversation.js");
+      const { sendNewOffer } = await import("./notify-channels.js");
+      const t = getTenant(parent.initiatorTenantId);
+      const sent = await sendNewOffer(ch, { brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "", business: businessLabel(inv.tenant_id), link: `${process.env.BASE_URL || "https://whisp.so"}/p/${await customerLink(parentId)}` }).catch((e) => ({ error: String((e as Error).message).slice(0, 200) }));
+      await addEvent(parentId, { kind: "offer_messaged", actor: "system", data: { business: inv.tenant_id, ...sent } }).catch(() => {});
+    }
     // The customer asked for the result by email: the offer goes there too, with their page (all answers).
     const contact = parent.memory.customerContact as { email?: string; lang?: string } | undefined;
     if (contact?.email) {

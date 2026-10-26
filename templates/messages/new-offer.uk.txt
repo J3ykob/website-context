@@ -1,0 +1,2 @@
+# {{business}} the business that sent the offer · {{brand}} where the customer asked · {{link}} status page
+Нова пропозиція від {{business}} на ваш запит ({{brand}}). Перегляньте: {{link}}

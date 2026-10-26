@@ -23,6 +23,10 @@
   .files a { display:inline-block; margin:4px 14px 0 0; }
   input[type=email] { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--text); font:inherit; }
   input[type=email]:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(59,130,246,.35); }
+  .asked-row { display:flex; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid var(--border); font-size:14px; }
+  .asked-row:last-child { border-bottom:0; }
+  .asked-row span:last-child { color:var(--muted); white-space:nowrap; }
+  .asked-row.offer span:last-child { color:#22c55e; }
   .tabs { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 10px; }
   .tabs button { padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:transparent; color:var(--text); font:inherit; font-size:13px; cursor:pointer; }
   .tabs button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
@@ -63,6 +67,11 @@
     <div class="pre" id="request" style="color:var(--muted)"></div>
   </div>
 
+  <div class="card hidden" id="asked-card">
+    <p class="label" id="l-asked"></p>
+    <div id="asked"></div>
+  </div>
+
   <div class="card hidden" id="notify-card">
     <p class="label" id="l-notify"></p>
     <div class="tabs" id="tabs"></div>
@@ -99,6 +108,13 @@
     uk: { how: "Як повідомити вас, коли буде готово?", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-mail", tg: "Відкрийте Telegram і натисніть Start", tgHint: "Бот напише вам, коли відповідь буде готова." },
     fr: { how: "Comment vous prévenir quand ce sera prêt ?", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-mail", tg: "Ouvrir Telegram et appuyer sur Démarrer", tgHint: "Le bot vous écrira quand la réponse sera prête." },
     de: { how: "Wie sollen wir Sie benachrichtigen, wenn es fertig ist?", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram", email: "E-Mail", tg: "Telegram öffnen und Start drücken", tgHint: "Der Bot schreibt Ihnen, wenn die Antwort fertig ist." },
+  };
+  var ASK = {
+    pl: { title: "Zapytane firmy", waiting: "czekamy na wycenę", offer: "przysłała ofertę", answered: "odpowiedziała", no_reply: "nie odpowiedziała" },
+    en: { title: "Businesses asked", waiting: "waiting for an estimate", offer: "sent an offer", answered: "answered", no_reply: "did not reply" },
+    uk: { title: "Запитані компанії", waiting: "чекаємо на оцінку", offer: "надіслала пропозицію", answered: "відповіла", no_reply: "не відповіла" },
+    fr: { title: "Entreprises sollicitées", waiting: "devis en attente", offer: "a envoyé une offre", answered: "a répondu", no_reply: "n'a pas répondu" },
+    de: { title: "Angefragte Unternehmen", waiting: "Angebot ausstehend", offer: "hat ein Angebot geschickt", answered: "hat geantwortet", no_reply: "hat nicht geantwortet" },
   };
   var channel = "email", tabsDrawn = false;
   function pick(c, d) {
@@ -138,8 +154,17 @@
       $("offers").appendChild(div);
     });
     $("offers-card").classList.toggle("hidden", !(d.offers || []).length);
+    var ak = ASK[lang] || ASK.pl;
+    $("l-asked").textContent = ak.title; $("asked").innerHTML = "";
+    (d.asked || []).forEach(function (a) {
+      var row = document.createElement("div"); row.className = "asked-row" + (a.state === "offer" ? " offer" : "");
+      var n = document.createElement("span"); n.textContent = a.business; var st = document.createElement("span"); st.textContent = ak[a.state] || "";
+      row.appendChild(n); row.appendChild(st); $("asked").appendChild(row);
+    });
+    $("asked-card").classList.toggle("hidden", !(d.asked || []).length);
+    var waitingOffers = (d.asked || []).some(function (a) { return a.state === "waiting"; });
     var finished = d.status === "done" || d.status === "failed";
-    $("notify-card").classList.toggle("hidden", finished || d.notified);
+    $("notify-card").classList.toggle("hidden", (finished && !waitingOffers) || (d.chosen || []).length > 0);
     var ch = CH[lang] || CH.pl;
     $("l-notify").textContent = (d.channels || []).length > 1 ? ch.how : t.notify;
     if (!tabsDrawn && (d.channels || []).length > 1) {
@@ -150,7 +175,7 @@
       });
       pick($("tabs").firstChild ? $("tabs").firstChild.dataset.c : "email", d);
     }
-    if (!finished) { clearTimeout(timer); timer = setTimeout(load, 10000); }
+    if (!finished || waitingOffers) { clearTimeout(timer); timer = setTimeout(load, finished ? 30000 : 10000); }
   }
 
   function load() {

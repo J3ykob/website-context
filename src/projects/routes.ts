@@ -352,6 +352,21 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
         message: d.status === "done" || d.status === "failed" ? d.message : "",
         files: d.status === "done" ? (d.files || []).map((path) => ({ name: path.split("/").pop(), url: `/api/p/${tok}/file?path=${encodeURIComponent(path)}` })) : [],
         notified: !!(p.memory.customerContact as any)?.email,
+        // The businesses asked for an estimate and where each stands (an offer, no reply in time, still waiting).
+        asked: await (async () => {
+          const subs = ((p.memory.subRequests as any[]) || []);
+          const { invitesFor } = await import("./lead.js");
+          const inv = await invitesFor(subs.map((s) => s.id)).catch(() => ({} as Record<string, any>));
+          const offers = ((p.memory.businessOffers as any[]) || []);
+          const window = (Number(process.env.LEAD_EXCLUSIVE_HOURS) || 24) * 3600_000;
+          return subs.map((s) => {
+            const i = inv[s.id];
+            const state = offers.some((o) => o.tenantId === s.tenantId) ? "offer"
+              : i ? (i.passed_at || Date.now() - Date.parse(i.created_at) > window ? "no_reply" : "waiting")
+              : s.status === "answered" ? "answered" : s.status === "no_answer" ? "no_reply" : "waiting";
+            return { business: String(s.label || s.tenantId), state };
+          });
+        })(),
         // Ways to be told when it's ready (only the configured ones) and which the customer already chose.
         channels: (await import("./notify-channels.js")).availableChannels(),
         chosen: Object.keys((p.memory.customerContact as any) || {}).filter((k) => ["email", "phone", "whatsapp", "telegramChatId"].includes(k)),

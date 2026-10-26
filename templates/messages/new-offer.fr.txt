@@ -1,0 +1,2 @@
+# {{business}} the business that sent the offer · {{brand}} where the customer asked · {{link}} status page
+Nouvelle offre de {{business}} pour votre demande ({{brand}}). Voir : {{link}}

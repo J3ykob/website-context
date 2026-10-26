@@ -32,9 +32,9 @@ export function normalizePhone(raw: string): string | null {
   return /^\+\d{8,15}$/.test(d) ? d : null;
 }
 
-function message(lang: string, vars: Record<string, string>): string | null {
+function message(lang: string, vars: Record<string, string>, name = "result-ready"): string | null {
   const dir = resolve("templates/messages");
-  const file = [`result-ready.${lang}.txt`, "result-ready.pl.txt"].map((f) => resolve(dir, f)).find((f) => existsSync(f));
+  const file = [`${name}.${lang}.txt`, `${name}.pl.txt`].map((f) => resolve(dir, f)).find((f) => existsSync(f));
   if (!file) return null;
   const text = readFileSync(file, "utf-8").split("\n").filter((l) => !l.startsWith("#")).join("\n").trim();
   return Object.entries(vars).reduce((t, [k, v]) => t.split(`{{${k}}}`).join(v), text);
@@ -63,16 +63,25 @@ export async function telegramSend(chatId: string | number, text: string): Promi
 export interface CustomerContact { email?: string; phone?: string; whatsapp?: string; telegramChatId?: string; lang: string; at: string }
 
 /** "Your result is ready" on every non-email channel the customer chose. Returns what was sent (or why not). */
-export async function sendResultReady(contact: CustomerContact, vars: { brand: string; link: string }): Promise<Record<string, string>> {
+export function sendResultReady(contact: CustomerContact, vars: { brand: string; link: string }): Promise<Record<string, string>> {
+  return sendUpdate(contact, "result-ready", vars, process.env.CUSTOMER_UPDATES_APPROVED === "1");
+}
+
+/** "A business sent an offer" (templates/messages/new-offer.<lang>.txt; its own approval: CUSTOMER_OFFER_UPDATES_APPROVED=1). */
+export function sendNewOffer(contact: CustomerContact, vars: { brand: string; business: string; link: string }): Promise<Record<string, string>> {
+  return sendUpdate(contact, "new-offer", vars, process.env.CUSTOMER_UPDATES_APPROVED === "1" && process.env.CUSTOMER_OFFER_UPDATES_APPROVED === "1");
+}
+
+async function sendUpdate(contact: CustomerContact, name: string, vars: Record<string, string>, approved: boolean): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   const chosen = (["sms", "whatsapp", "telegram"] as const).filter((c) => (c === "sms" ? contact.phone : c === "whatsapp" ? contact.whatsapp : contact.telegramChatId));
   if (!chosen.length) return out;
-  const text = message(contact.lang, vars);
+  const text = message(contact.lang, vars, name);
   for (const c of chosen) {
-    if (process.env.CUSTOMER_UPDATES_APPROVED !== "1") { out[c] = "not sent: message text not approved yet"; continue; }
+    if (!approved) { out[c] = "not sent: message text not approved yet"; continue; }
     if (!text) { out[c] = "not sent: no template"; continue; }
     const ok = c === "sms" ? await twilio(contact.phone!, process.env.TWILIO_FROM_NUMBER!, text)
-      : c === "whatsapp" ? await twilio(`whatsapp:${contact.whatsapp}`, `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`, text, process.env.TWILIO_WHATSAPP_TEMPLATE_SID ? { sid: process.env.TWILIO_WHATSAPP_TEMPLATE_SID, vars: { "1": vars.brand, "2": vars.link } } : undefined)
+      : c === "whatsapp" ? await twilio(`whatsapp:${contact.whatsapp}`, `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`, text, name === "result-ready" && process.env.TWILIO_WHATSAPP_TEMPLATE_SID ? { sid: process.env.TWILIO_WHATSAPP_TEMPLATE_SID, vars: { "1": vars.brand, "2": vars.link } } : undefined)
       : await telegramSend(contact.telegramChatId!, text);
     out[c] = ok ? "sent" : "failed";
   }
