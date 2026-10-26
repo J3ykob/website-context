@@ -1057,7 +1057,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const { reviewMode } = await import("../projects/review.js");
       const what = begun === "busy" ? "We are still working on the customer's previous request; this new message will be handled once that is ready. Tell them briefly."
         : reviewMode(this.context.tenantId) === "approve" && !opts?.pureCalc ? BEHAVIOUR.calcReviewed : BEHAVIOUR.calcStarted;
-      const follow = token && begun !== "busy" ? ` Then say plainly that this can take a while and that the button below opens the status of their request in a new tab with live updates, where they can also choose to be notified (${channels.join(", ")}) - so they don't have to wait here.` : "";
+      const follow = token && begun !== "busy" ? ` Then say plainly that this can take a while and that a button under your message (shown by the chat - don't write it or its label yourself) opens the status of their request in a new tab with live updates, where they can also choose to be notified (${channels.join(", ")}) - so they don't have to wait here.` : "";
       notice = (await this.backend.generate(`You are the website chat assistant of ${this.brandName || "our business"}, speaking as "we". ${what}${follow} Reply in the customer's language, naturally.${replyLanguage(await this.routeTurn(messages, message).catch(() => null))}`, messages.slice(-4), 200).catch(() => "")).trim() || notice;
     }
     return { message: notice, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" }, ...(begun === "busy" ? {} : { notify }) } };
