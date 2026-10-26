@@ -66,6 +66,9 @@ services:
       # Customer email about a network business's offer - approved 2026-10-21 (templates/emails/customer-offer.*.txt).
       - key: CUSTOMER_OFFER_EMAIL_APPROVED
         value: "1"
+      # Customer "your result is ready" by SMS / WhatsApp (templates/messages) - approved 2026-10-26.
+      - key: CUSTOMER_UPDATES_APPROVED
+        value: "1"
       - key: NETWORK_INVITE_PHONE
         value: "+48 729 086 795"
       - key: NETWORK_PLAN_PRICE_PLN

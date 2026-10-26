@@ -15,7 +15,7 @@ export function availableChannels(): Channel[] {
   // Offered only once their texts are approved: a channel the customer picks must really send.
   if (process.env.CUSTOMER_UPDATES_APPROVED !== "1") return out;
   if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM_NUMBER) out.push("sms");
-  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM) out.push("whatsapp");
+  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM && process.env.TWILIO_WHATSAPP_TEMPLATE_SID) out.push("whatsapp");
   if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_USERNAME) out.push("telegram");
   return out;
 }
@@ -40,12 +40,14 @@ function message(lang: string, vars: Record<string, string>): string | null {
   return Object.entries(vars).reduce((t, [k, v]) => t.split(`{{${k}}}`).join(v), text);
 }
 
-async function twilio(to: string, from: string, body: string): Promise<boolean> {
+async function twilio(to: string, from: string, body: string, template?: { sid: string; vars: Record<string, string> }): Promise<boolean> {
   const sid = process.env.TWILIO_ACCOUNT_SID!, auth = process.env.TWILIO_AUTH_TOKEN!;
+  // WhatsApp messages we start must use a Meta-approved template (ContentSid); free text only inside a 24 h reply window.
+  const params: Record<string, string> = template ? { To: to, From: from, ContentSid: template.sid, ContentVariables: JSON.stringify(template.vars) } : { To: to, From: from, Body: body };
   const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
     method: "POST",
     headers: { Authorization: `Basic ${Buffer.from(`${sid}:${auth}`).toString("base64")}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ To: to, From: from, Body: body }),
+    body: new URLSearchParams(params),
     signal: AbortSignal.timeout(15000),
   }).catch(() => null);
   return !!r && r.ok;
@@ -70,7 +72,7 @@ export async function sendResultReady(contact: CustomerContact, vars: { brand: s
     if (process.env.CUSTOMER_UPDATES_APPROVED !== "1") { out[c] = "not sent: message text not approved yet"; continue; }
     if (!text) { out[c] = "not sent: no template"; continue; }
     const ok = c === "sms" ? await twilio(contact.phone!, process.env.TWILIO_FROM_NUMBER!, text)
-      : c === "whatsapp" ? await twilio(`whatsapp:${contact.whatsapp}`, `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`, text)
+      : c === "whatsapp" ? await twilio(`whatsapp:${contact.whatsapp}`, `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`, text, process.env.TWILIO_WHATSAPP_TEMPLATE_SID ? { sid: process.env.TWILIO_WHATSAPP_TEMPLATE_SID, vars: { "1": vars.brand, "2": vars.link } } : undefined)
       : await telegramSend(contact.telegramChatId!, text);
     out[c] = ok ? "sent" : "failed";
   }
