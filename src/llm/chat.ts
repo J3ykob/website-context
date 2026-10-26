@@ -715,6 +715,13 @@ export class WebsiteChat {
       const pure = (rt.price < 0.5 || rt.ownPrices >= 0.5) && figures;
       if (!figures) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0 });
       if (!pure && !(await this.hasPricesFor(question))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
+      // Listed unit prices times the customer's quantities: answered here (the owner's decision 2026-10-26);
+      // anything more (measuring, unlisted work, discounts, many items) goes to the calculation and its approval.
+      if (!pure) {
+        const convoText = sanitizedMessages.slice(-6).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 500)}`).join("\n");
+        const s = await jevAsk({ conversation: convoText }, { simple: { type: "noul", instructions: "Can the customer's LATEST request in `conversation` be answered by multiplying (and adding) at most three unit prices the business lists by quantities the customer gave - with no measuring, design, discount, unlisted work or several options to compare?" } }, 3000).catch(() => null);
+        if (((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.6) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
+      }
       const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : undefined);
       if (r) { st.calcStarted = true; onToken(r.message); return r; }
     }
@@ -845,7 +852,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
 - Write naturally, like a helpful person at the business: full sentences, no lists unless listing 4+ items, at most about 80 words unless the customer asks for full details.
 - End with at most one question${opts.handoffKind || opts.keepOffer ? " (the offer to pass the question on, when instructed above)" : ""}. Never offer to do something yourself - send, check, calculate, measure, book, arrange or call back: this chat can only answer.
 - Links only as given above, as markdown [name](url).
-- Answer every part of the customer's message; for a part our information doesn't cover, say so for that part.
+- Answer every part of the customer's message. For a part our information doesn't answer directly but a sentence of it bears on (e.g. "we also serve towns bordering the capital" for a question about a nearby town), quote that sentence in quotation marks (translated into the customer's language if needed) instead of saying you don't know - and draw no conclusion from it. Only when there is no such sentence, say we don't state it.
 - For a specific location, branch or department, use the address, phone and hours shown for that one; the official info is the general contact.
 - If our information gives two different values for the same thing (two prices, two opening hours), don't pick one silently: give the one for the right item or place, or mention both.
 - Speak as the business, naturally: "nie mam tej informacji", "tego nie podajemy na stronie" - never "w naszych informacjach / materiałach / danych / źródłach" or "in the information provided".

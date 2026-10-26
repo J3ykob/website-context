@@ -201,5 +201,6 @@ export const BEHAVIOUR = {
   midForm: "The customer is in the middle of an order or inquiry form and asked a question. Answer it from our information (or say we don't have that information), then invite them in one short sentence to continue with the form. Do not offer to pass anything on.",
   calcStarted: "A calculation for the customer has just been started; its result will appear in this chat once it is ready (the business may check it first). Tell the customer that briefly in your own words (one or two sentences), without promising when; do not give any figures yourself.",
   whichAction: (names: string[]) => `The customer's message could start more than one of our actions: ${names.join("; ")}. Ask briefly which one they mean.`,
+  simpleCalc: "The customer asks for a total from our listed prices: calculate it - unit price x quantity, the sum, briefly shown. Say whether prices are net or gross as our information states; if VAT is to be added and our information gives no rate, give the net total and say VAT is added at the applicable rate.",
   smalltalk: "This is a greeting, thanks or small talk: reply naturally and briefly and offer help with our business. No offers to pass anything on.",
 };
