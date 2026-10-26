@@ -686,8 +686,9 @@ export class WebsiteChat {
     if (rt && rt.intent === "order" && rt.flow >= 0) {
       const flows = this.routableFlows();
       const picked = rt.flowAmbiguous.length > 1 ? rt.flowAmbiguous.slice(0, 2).map((i) => flows[i]).filter(Boolean) : [flows[rt.flow]].filter(Boolean);
-      const elsewhere = picked.length === 1 && picked[0].executionMode === "collect" && agentEnabled() && (await this.hasNetwork())
-        ? await this.notOfferedHere(question).catch(() => false) : false;
+      // An order form only for what the business clearly offers: "not clearly not offered" started a form
+      // for paving at a renovation firm (Jev: offered 0.02, unknown 0.57); otherwise it is answered.
+      const elsewhere = picked.length === 1 && picked[0].executionMode === "collect" ? !(await this.offeredForForm(question).catch(() => true)) : false;
       if (picked.length > 1) {
         this.pendingDisambig.set(sessionKey, { flows: picked.slice(0, 3), at: Date.now() });
         return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.whichAction(picked.map((f) => `"${f.name}"`))], packs: [], rt });
@@ -1055,18 +1056,17 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       : undefined;
   }
 
-  /**
-   * Nothing of the request is in this business's own offer: no offer item matches it, or its own
-   * information shows it offers something else. (Finer: the form itself hands over on its first turn
-   * when the product it read is not in the offer.)
-   */
-  private async notOfferedHere(message: string): Promise<boolean> {
+  /** Whether the business clearly offers what the request asks for (its offer items, or its own pages) - for starting an order form. */
+  private async offeredForForm(message: string): Promise<boolean> {
     const { offerMatches } = await import("../projects/network.js");
-    const own = await offerMatches(this.context.tenantId, this.offerItems, message);
-    if (own !== null && own.length === 0) return true;
+    const own = this.offerItems.length ? await offerMatches(this.context.tenantId, this.offerItems, message) : null;
+    if (own && own.length) return true;
+    // The site's own passages: by meaning (search) and by words, so "kostka brukowa" without its letters still finds pages.
     const knowledge = this.collectKnowledge();
-    const passages = knowledge ? (await knowledge(message)).slice(0, 6) : [];
-    return (await offeredHere(message, passages)) === "not_offered";
+    const lexical = knowledge ? (await knowledge(message)).slice(0, 4) : [];
+    const hits = await searchContext(message, this.embeddingProvider, this.store, { topK: 6 }).catch(() => []);
+    const passages = [...hits.map((h) => (h.content || "").slice(0, 1500)), ...lexical].slice(0, 10);
+    return (await offeredHere(message, passages, true)) === "ok";
   }
 
   private startCollect(flow: FlowDefinition, sessionKey: string, message: string, via?: CollectVia, context?: string): Promise<ChatResponse> {

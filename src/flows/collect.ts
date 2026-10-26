@@ -144,7 +144,11 @@ function nextDays(n = 14): string {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const noon = Date.parse(`${today}T12:00:00Z`);
   const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
-  return Array.from({ length: n }, (_, i) => fmt.format(new Date(noon + i * 86_400_000)).replace(/\//g, ".") + (i === 0 ? " (today)" : i === 1 ? " (tomorrow)" : "")).join("; ");
+  // Weeks run Monday to Sunday: said on a Sunday, "w przyszłym tygodniu" is the week starting tomorrow
+  // (the reader often took the week after it). Each day says which week it is in.
+  const dow = (new Date(noon).getUTCDay() + 6) % 7; // 0 = Monday
+  const week = (i: number) => { const w = Math.floor((dow + i) / 7); return w === 0 ? "this week" : w === 1 ? "next week" : "the week after next"; };
+  return Array.from({ length: n }, (_, i) => fmt.format(new Date(noon + i * 86_400_000)).replace(/\//g, ".") + ` (${[i === 0 ? "today" : i === 1 ? "tomorrow" : "", week(i)].filter(Boolean).join(", ")})`).join("; ");
 }
 function todayLine(): string {
   const d = new Date();

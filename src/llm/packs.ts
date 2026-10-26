@@ -109,22 +109,32 @@ function preview(p: Pack, hits?: string[], chars = 900): string {
 /** Jev: how much each candidate pack helps with the customer's latest message, read with the conversation. */
 export async function scorePacks(conversation: string, packs: Pack[], hits?: string[]): Promise<number[] | null> {
   if (!packs.length) return [];
-  const questions: Record<string, JevQuestion> = {};
-  const state: Record<string, unknown> = { conversation };
-  // Few candidates: Jev sees more of each (a small site's long passages); many: at least 900 characters.
-  const chars = Math.min(3000, Math.max(900, Math.floor(12000 / packs.length)));
-  packs.forEach((p, i) => {
-    state[`pack${i}`] = `${p.title}${p.url ? ` (${p.url})` : ""}: ${preview(p, hits, chars)}`;
-    questions[`p${i}`] = {
-      type: "noul",
-      instructions: `Is \`pack${i}\` (a block of the business's own information) relevant to the customer's LATEST message in \`conversation\` (read with the earlier messages: a follow-up refers to what was discussed) - does it cover the product, service, place or topic asked about, even if it lacks the exact detail (e.g. confirms we do the service but gives no price)? A pack about a different product category, place or topic is no.`,
-    };
-  });
-  const a = await jevAsk(state, questions, 6000).catch(() => null);
-  if (!a) return null;
-  const out = packs.map((_, i) => (a[`p${i}`] as JevNoulAnswer | undefined)?.noul);
-  return out.every((v) => typeof v === "number") ? (out as number[]) : null;
+  // Jev reads each page whole (up to PASSAGE_MAX): judged by its first 900-3000 characters, a page whose
+  // answer sat further down scored as irrelevant. One request takes about 80k characters (more is a 400),
+  // so the pages go in batches of that size, all at once.
+  const texts = packs.map((p) => `${p.title}${p.url ? ` (${p.url})` : ""}: ${preview(p, hits, PASSAGE_MAX)}`);
+  const batches: number[][] = [];
+  let size = Infinity;
+  texts.forEach((t, i) => { if (size + t.length > JEV_BATCH_CHARS) { batches.push([]); size = 0; } batches[batches.length - 1].push(i); size += t.length; });
+  const out: (number | undefined)[] = new Array(packs.length);
+  const ok = await Promise.all(batches.map(async (ids) => {
+    const questions: Record<string, JevQuestion> = {};
+    const state: Record<string, unknown> = { conversation };
+    for (const i of ids) {
+      state[`pack${i}`] = texts[i];
+      questions[`p${i}`] = {
+        type: "noul",
+        instructions: `Is \`pack${i}\` (a block of the business's own information) relevant to the customer's LATEST message in \`conversation\` (read with the earlier messages: a follow-up refers to what was discussed) - does it cover the product, service, place or topic asked about, even if it lacks the exact detail (e.g. confirms we do the service but gives no price)? A pack about a different product category, place or topic is no.`,
+      };
+    }
+    const a = await jevAsk(state, questions, 15000).catch(() => null);
+    if (!a) return false;
+    for (const i of ids) out[i] = (a[`p${i}`] as JevNoulAnswer | undefined)?.noul;
+    return true;
+  }));
+  return ok.every(Boolean) && out.every((v) => typeof v === "number") ? (out as number[]) : null;
 }
+const JEV_BATCH_CHARS = 80000;
 
 // A catalog passage starts with an LLM-written summary and keyword line ("… Keywords: dostawa na
 // terenie całego kraju, …") added for search. The keywords are not the business's text: they help
@@ -189,7 +199,7 @@ export const BEHAVIOUR = {
   calcReviewed: "A calculation for the customer has just been started; the business checks the result before it reaches the customer, so it may take a while. Tell that briefly in your own words (one or two sentences): it will appear in this chat once checked. Do not give any figures yourself.",
   partial: "Our information covers this topic but not every detail asked (e.g. we do the service but no price is given). Say what we know, say plainly which detail is not given here, and give our phone or e-mail for asking about it.",
   midForm: "The customer is in the middle of an order or inquiry form and asked a question. Answer it from our information (or say we don't have that information), then invite them in one short sentence to continue with the form. Do not offer to pass anything on.",
-  calcStarted: "A calculation for the customer has just been started and its result will appear in this chat in a minute or two. Tell the customer that briefly in your own words (one or two sentences); do not give any figures yourself.",
+  calcStarted: "A calculation for the customer has just been started; its result will appear in this chat once it is ready (the business may check it first). Tell the customer that briefly in your own words (one or two sentences), without promising when; do not give any figures yourself.",
   whichAction: (names: string[]) => `The customer's message could start more than one of our actions: ${names.join("; ")}. Ask briefly which one they mean.`,
   smalltalk: "This is a greeting, thanks or small talk: reply naturally and briefly and offer help with our business. No offers to pass anything on.",
 };

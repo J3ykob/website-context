@@ -148,6 +148,29 @@ export async function verifyOfficialInfo(info: OfficialBusinessInfo, pages: { ur
     fill("primaryEmail", "email", rank(all(emailCandidates), (v) => v)),
     fill("primaryAddress", "address", rank(all(addressCandidates), (v) => v.toLowerCase().replace(/\W/g, ""))),
   ]);
+  // 3. The main phone as the site's own labels present it: a footer's most frequent number can be one
+  // department's line (bostabeton.pl: "Wylewki Anhydrytowe: +48 606 ..." next to "Sprzedaż w Warszawie: +48 22 ...").
+  if (out.contactText) {
+    const lines = out.contactText.split("\n");
+    const found = new Map<string, string>();
+    lines.forEach((l, i) => { for (const m of l.matchAll(/(?:\+?\d[\d\s().-]{7,}\d)/g)) { const d = m[0].replace(/\D/g, "").slice(-9); if (d.length === 9 && !found.has(d)) found.set(d, [lines[i - 1] || "", l].join(" / ").slice(0, 200)); } });
+    if (found.size >= 2) {
+      const opts = [...found.entries()].slice(0, 8);
+      const criteria: Record<string, string> = {};
+      opts.forEach(([d, ctx], k) => { criteria[`n${k}`] = `${d} - shown as: ${ctx}`; });
+      criteria.unclear = "None of them, or it is unclear which one is the general line.";
+      const a = await jevAsk({ contact_text: out.contactText.slice(0, 4000) }, { main: { type: "choice", instructions: "Which number does `contact_text` present as the business's general contact for customers (main line, office, sales, reception) - not one department's, product's or person's line?", criteria } }, 6000).catch(() => null);
+      const c = a?.main as { choice?: string; probabilities?: Record<string, number> } | undefined;
+      const k = c?.choice && c.choice !== "unclear" && (c.probabilities?.[c.choice] ?? 0) >= 0.6 ? Number(c.choice.slice(1)) : -1;
+      const cur = (out.primaryPhone?.value || "").replace(/\D/g, "").slice(-9);
+      if (k >= 0 && opts[k][0] !== cur) {
+        const chosen = opts[k][1].match(/(?:\+?\d[\d\s().-]{7,}\d)/g)?.find((x) => x.replace(/\D/g, "").endsWith(opts[k][0])) || opts[k][0];
+        if (out.primaryPhone) out.alternatePhones = [out.primaryPhone.value, ...(out.alternatePhones || [])].slice(0, 6);
+        out.primaryPhone = { value: chosen.trim(), source: "contact-page", confidence: "medium", sourceUrl: out.primaryPhone?.sourceUrl || pages[0].url };
+        notes.push(`phone=the general line by the site's labels (was ${cur || "none"})`);
+      }
+    }
+  }
   if (notes.length) out.extractionBasis = `${info.extractionBasis}; verified: ${notes.join("; ")}`;
   return out;
 }

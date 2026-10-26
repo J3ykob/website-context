@@ -45,9 +45,10 @@ export async function extractFile(buffer: Buffer, filename: string, mime?: strin
 
   // ── PDF ──
   if (ext === "pdf" || m.includes("application/pdf")) {
-    const { getDocumentProxy, extractText } = await import("unpdf");
+    const { getDocumentProxy } = await import("unpdf");
+    const { pdfLayoutText } = await import("../scraper/pdf-text.js");
     const pdf = await getDocumentProxy(new Uint8Array(buffer));
-    const { text } = await extractText(pdf, { mergePages: true });
+    const text = await pdfLayoutText(pdf);
     const clean = (text || "").replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").trim();
     return { kind: "pdf", blocks: splitBlocks(clean), charCount: clean.length };
   }

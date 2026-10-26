@@ -44,9 +44,11 @@ export async function fetchPdfAsPage(
     const buf = new Uint8Array(await resp.arrayBuffer());
     if (buf.byteLength > MAX_PDF_BYTES) return null;
 
-    const { getDocumentProxy, extractText } = await import("unpdf");
+    const { getDocumentProxy } = await import("unpdf");
+    const { pdfLayoutText } = await import("./pdf-text.js");
     const pdf = await getDocumentProxy(buf);
-    const { totalPages, text } = await extractText(pdf, { mergePages: true });
+    const totalPages = pdf.numPages;
+    const text = await pdfLayoutText(pdf);
     const clean = (text || "").replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").trim();
     // Scanned/image-only PDFs extract to (almost) nothing — skip them.
     if (clean.length < 200) return null;

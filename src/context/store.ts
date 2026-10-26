@@ -43,12 +43,20 @@ function extractTelMailto(html: string): { phones: string[]; emails: string[] } 
 // <footer>, banner/contentinfo). These hold address, opening hours, company details
 // and nav structure. Captured ONCE and deduped (they repeat on every page) so the
 // info is available without flooding every page's chunks with the nav menu.
+// Lines that say when the business can be reached (opening hours, 24h service): kept word for word for
+// the official info, the model reads them (hours used to come only from structured data).
+const AVAILABILITY = /\b24\s*\/\s*7\b|\b24\s*h\b|całodob|24 godzin|przez całą dobę|na dobę|godziny otwarcia|godziny pracy|czynne w|czynne od|\b(pn|pon|poniedziałek)\.?\s*[-–]\s*(pt|piątek|sob|sobota)|\b\d{1,2}[:.]\d{2}\s*[-–]\s*\d{1,2}[:.]\d{2}\b|opening hours|office hours|Öffnungszeiten/i;
+
 function extractHeaderFooterText(html: string): string[] {
   try {
     const $ = cheerio.load(html);
     const blocks: string[] = [];
     $("footer, header, [role='contentinfo'], [role='banner']").each((_: any, el: any) => {
-      const t = $(el).text().replace(/\s+/g, " ").trim();
+      // Line structure kept: a label stays on the line of its number ("Sprzedaż w Warszawie: +48 ...").
+      const c = $(el).clone();
+      c.find("br").replaceWith("\n");
+      c.find("p,div,li,td,tr,h1,h2,h3,h4,h5,h6,section,address").each((_: any, e: any) => { $(e).append("\n"); });
+      const t = c.text().replace(/[ \t\u00a0]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n").trim();
       if (t.length >= 20 && t.length <= 1500) blocks.push(t);
     });
     return blocks;
@@ -73,6 +81,9 @@ export function createContextBuilder() {
   const headerFooterBlocks = new Set<string>();
   // Slim per-page digest fed to the canonical Official Business Info extractor.
   const profilePages: { url: string; html: string }[] = [];
+  // The site's own contact text: contact pages and lines saying when the business can be reached.
+  const contactPages: { url: string; text: string }[] = [];
+  const availability = new Map<string, string>();
   let firstUrl = "";
 
   async function addPage(scrapedPage: ScrapedPage): Promise<void> {
@@ -87,6 +98,14 @@ export function createContextBuilder() {
     }
     if (!firstUrl) firstUrl = scrapedPage.url;
     const markdown = htmlToMarkdown(fetchResult);
+    if (/\/(kontakt|contact|kontakty|contacts?-us|kontakt-z-nami)(\.\w+)?\/?$/i.test(new URL(scrapedPage.url).pathname) && contactPages.length < 2) contactPages.push({ url: scrapedPage.url, text: markdown.fullMarkdown.slice(0, 2500) });
+    for (const line of markdown.fullMarkdown.split("\n")) {
+      // Sentence by sentence (a 24h line is often one sentence of a long paragraph), table cells as text.
+      for (const sentence of line.replace(/\|/g, " ").replace(/^[#>*\s-]+/, "").split(/(?<=[.!?])\s+/)) {
+        const l = sentence.replace(/\s+/g, " ").trim();
+        if (l.length >= 6 && l.length <= 240 && AVAILABILITY.test(l) && availability.size < 12 && ![...availability.keys()].some((k) => k.includes(l) || l.includes(k))) availability.set(l, scrapedPage.title || scrapedPage.url);
+      }
+    }
     profilePages.push({ url: scrapedPage.url, html: slimForProfile(fetchResult.html) });
     // Harvest canonical contact data from this page's tel:/mailto: links.
     const ci = extractTelMailto(fetchResult.html);
@@ -181,7 +200,13 @@ export function createContextBuilder() {
     // tel:/mailto:) so the chat can answer "what's your main phone/email/address?" from one
     // always-injected block instead of losing to testimonial/listing chunks in retrieval.
     // Then checked against what the pages show, and gaps filled from their text (profile-verify.ts).
-    const businessProfile = await verifyOfficialInfo(extractOfficialInfo(profilePages, homeUrl || firstUrl), profilePages).catch(() => extractOfficialInfo(profilePages, homeUrl || firstUrl));
+    const contactText = [
+      ...contactPages.map((c) => `Contact page (${c.url}):\n${c.text}`),
+      ...[...headerFooterBlocks].sort((a, b) => b.length - a.length).slice(0, 2).map((b) => `Footer / header:\n${b}`),
+      availability.size ? `When we can be reached, as our pages say:\n${[...availability].map(([l, page]) => `- ${l} (${page})`).join("\n")}` : "",
+    ].filter(Boolean).join("\n\n").slice(0, 5000);
+    const extracted = { ...extractOfficialInfo(profilePages, homeUrl || firstUrl), ...(contactText ? { contactText } : {}) };
+    const businessProfile = await verifyOfficialInfo(extracted, profilePages).catch(() => extracted);
 
     return {
       tenantId: "", // set by caller

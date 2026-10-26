@@ -7,6 +7,7 @@ import { fetchPage, closeBrowser } from "../src/scraper/fetcher.js";
 import { htmlToMarkdown } from "../src/scraper/markdown.js";
 import { createContextBuilder } from "../src/context/store.js";
 import { extractPage } from "../src/scraper/extractor.js";
+import { fetchPdfAsPage } from "../src/scraper/pdf.js";
 
 afterAll(async () => { await closeBrowser(); });
 
@@ -34,5 +35,11 @@ describe("page text", () => {
   it("tells a blog post from a page on a Yoast site (og:type is 'article' on both)", async () => {
     expect(extractPage(await fetchPage("https://beton-lazy.pl/jak-szybko-wiaze-beton/")).metadata.isPost).toBe(true);
     expect(extractPage(await fetchPage("https://beton-lazy.pl/beton-z-mikrowloknem/")).metadata.isPost).toBe(false);
+  }, 60000);
+
+  it("keeps a PDF price table's rows together (ostap.pl trestle price list)", async () => {
+    const p = await fetchPdfAsPage("https://www.ostap.pl/pliki/cennik_kozly.pdf", { timeout: 20000, userAgent: "Mozilla/5.0" });
+    const text = p!.content.map((c) => c.content).join("\n");
+    expect(text).toMatch(/Kozioł B-S \|[^\n]*\| 520/);
   }, 60000);
 });

@@ -54,6 +54,9 @@ export interface OfficialBusinessInfo {
   // and so multi-contact sites can list options instead of guessing one.
   alternatePhones?: string[];
   alternateEmails?: string[];
+  /** The site's own contact text as shown (contact page, footer, availability lines): labels next to
+   *  numbers ("Sprzedaż w Warszawie: ...", "TEL ... 24h") that single fields lose. */
+  contactText?: string;
   extractedAt: string;
   extractionBasis: string; // human-readable provenance audit trail
 }
