@@ -720,7 +720,7 @@ export class WebsiteChat {
       {
         const convoText = sanitizedMessages.slice(-6).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 500)}`).join("\n");
         const s = await jevAsk({ conversation: convoText }, { simple: { type: "noul", instructions: "Is the customer's LATEST request in `conversation` a simple calculation: at most three unit prices (listed by the business or given by the customer) times quantities the customer gave, or a simple quantity from dimensions they gave - with no measuring on site, design, discount, unlisted work or options to compare?" } }, 3000).catch(() => null);
-        if (((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.6) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
+        if (((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.4) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
       }
       const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : undefined);
       if (r) { st.calcStarted = true; onToken(r.message); return r; }
