@@ -32,7 +32,8 @@ import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
-import { noteTurn, turnVariant } from "./turn-usage.js";
+import { noteTurn, turnVariant, turnUsage, newTurnUsage } from "./turn-usage.js";
+import { auditKnowledge, type AuditReport } from "../knowledge/audit.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -302,6 +303,8 @@ export function routeOf(r: ChatResponse): Route {
     : r.partners?.length ? "network" : r.grounded === false ? "refusal" : "knowledge";
 }
 
+const AUDIT_SESSION = "audit:";
+
 export class WebsiteChat {
   private backend: LLMBackend;
   private maxTokens: number;
@@ -440,6 +443,7 @@ export class WebsiteChat {
   }
 
   private recordConversationTurn(messages: ChatMessage[], sessionKey: string | undefined, r: ChatResponse): void {
+    if (sessionKey?.startsWith(AUDIT_SESSION)) return; // knowledge-audit test turns are not conversations
     const user = messages.findLast((m) => m.role === "user")?.content || "";
     const route = routeOf(r);
     void conversationProject(this.context.tenantId, sessionKey || "default", user).then((pid) => recordTurn(pid, { user, assistant: r.message, route, data: r.project ? { project: r.project } : undefined }));
@@ -944,6 +948,18 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       verdict = await check(final);
     }
     return finish(final, verdict.offers);
+  }
+
+  /** Knowledge audit (src/knowledge/audit.ts): the standard questions through this assistant, as test turns. */
+  async auditKnowledge(): Promise<AuditReport> {
+    const probe = async (question: string) => {
+      const u = newTurnUsage();
+      return turnUsage.run(u, async () => {
+        const r = await this.chatStream([{ role: "user", content: question }], `${AUDIT_SESSION}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, () => {});
+        return { reply: r.message || "", behaviour: (u.debug?.behaviour as string[] | undefined) || [], route: r.collect || r.flowSession ? "collect" : r.project ? "agent" : "knowledge" };
+      });
+    };
+    return auditKnowledge(this.context.tenantId, this.context, this.knowledgeCatalog, probe);
   }
 
   // Route tiny classification through the small fast model when available.

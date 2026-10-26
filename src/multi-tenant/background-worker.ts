@@ -50,6 +50,8 @@ async function forceCleanupBrowser(): Promise<void> {
 }
 
 export class ScrapeWorker {
+  /** Called once a scrape has completed with content (the server runs the knowledge audit then). */
+  onScraped?: (tenantId: string) => void;
   private queue: QueuedJob[] = [];
   private processing = false;
   private retryQueue: QueuedJob[] = [];
@@ -269,6 +271,7 @@ export class ScrapeWorker {
       `).run(result.pages, result.chunks, job.tenantId);
 
       console.log(`[worker] Done ${job.tenantId}: ${result.pages} pages, ${result.chunks} chunks`);
+      if (result.chunks > 0) { try { this.onScraped?.(job.tenantId); } catch {} }
 
       try {
         const tenant = getTenant(job.tenantId);

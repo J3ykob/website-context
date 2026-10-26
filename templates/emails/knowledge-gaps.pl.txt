@@ -1,0 +1,18 @@
+# DRAFT - not sent yet (needs the owner's approval: KNOWLEDGE_GAPS_EMAIL_APPROVED in render.yaml).
+# To the business after the knowledge audit, when its assistant can't answer common customer questions.
+# {{business}} business name · {{missing}} list of questions the assistant can't answer (one per line, "- ...")
+# {{site_issues}} problems found on the site itself (one per line, may be empty) · {{link}} dashboard: Wiedza / unanswered questions
+Temat: Państwa asystent nie zna odpowiedzi na kilka częstych pytań
+
+Dzień dobry,
+
+sprawdziliśmy, na jakie częste pytania klientów asystent na stronie {{business}} potrafi odpowiedzieć na podstawie Państwa strony internetowej. Na te pytania na stronie nie ma odpowiedzi:
+{{missing}}
+
+{{site_issues}}
+
+Wystarczy dopisać odpowiedzi w panelu - asystent zacznie z nich korzystać od razu:
+{{link}}
+
+Pozdrawiamy,
+Zespół Whisp

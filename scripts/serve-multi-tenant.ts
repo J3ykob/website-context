@@ -1764,6 +1764,35 @@ app.get("/api/dashboard/conversations", authMiddleware, async (req, res) => {
 });
 
 // Unknown questions (from D1 unknown_questions)
+// Knowledge audit (src/knowledge/audit.ts): what the assistant can't answer from the scraped site.
+// Saved per tenant; questions it can't answer go to the unanswered-questions list for the owner.
+async function runKnowledgeAudit(tenantId: string) {
+  const chat = await tenantManager.getChatForTenant(tenantId);
+  if (!chat) throw new Error("tenant not loaded");
+  const report = await chat.auditKnowledge();
+  const { uploadToR2 } = await import("../src/storage/r2.js");
+  await uploadToR2(`tenants/${tenantId}/knowledge-audit.json`, JSON.stringify(report), "application/json");
+  const known = new Set((await getUnknownQuestions(tenantId)).map((g: any) => String(g.question).trim().toLowerCase()));
+  for (const i of report.items) if (i.kind === "question" && i.status !== "ok" && i.question && !known.has(i.question.trim().toLowerCase())) await logUnknownQuestion(tenantId, i.question).catch(() => {});
+  console.log(`[audit] ${tenantId}: ${JSON.stringify(report.summary)}`);
+  return report;
+}
+// After every scrape: the audit on the fresh data (KNOWLEDGE_AUDIT_AFTER_SCRAPE=0 turns it off).
+worker.onScraped = (tenantId) => {
+  if (process.env.KNOWLEDGE_AUDIT_AFTER_SCRAPE === "0") return;
+  tenantManager.evictTenant(tenantId);
+  setTimeout(() => { runKnowledgeAudit(tenantId).catch((e) => console.warn(`[audit] ${tenantId} failed: ${(e as Error).message}`)); }, 10_000);
+};
+app.post("/api/admin/audit/:tenantId", async (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  try { res.json(await runKnowledgeAudit(req.params.tenantId)); } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+});
+app.get("/api/dashboard/knowledge-audit", authMiddleware, async (req, res) => {
+  const { downloadTenantFile } = await import("../src/storage/r2.js");
+  const buf = await downloadTenantFile((req as any).tenantId, "knowledge-audit.json").catch(() => null);
+  res.json(buf ? JSON.parse(buf.toString("utf-8")) : { items: [] });
+});
+
 app.get("/api/dashboard/unknown-questions", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   res.json(await getUnknownQuestions(tenantId));
