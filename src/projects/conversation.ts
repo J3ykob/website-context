@@ -206,8 +206,11 @@ export async function customerLink(projectId: string): Promise<string> {
   await d1Query("CREATE TABLE IF NOT EXISTS customer_links (token TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)");
   const found = (await d1Query("SELECT token FROM customer_links WHERE project_id = ?", [projectId]))[0];
   if (found) return found.token as string;
+  // Letters and digits only: a token ending in "_" or "-" lost that character in links (markdown, SMS
+  // apps and e-mail linkifiers treat it as trailing punctuation), so the page said the link had expired.
   const { randomBytes } = await import("crypto");
-  const token = randomBytes(18).toString("base64url");
+  const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const token = [...randomBytes(24)].map((b) => ALPHA[b % 62]).join("");
   await d1Query("INSERT OR IGNORE INTO customer_links (token, project_id, created_at) VALUES (?, ?, ?)", [token, projectId, new Date().toISOString()]);
   return ((await d1Query("SELECT token FROM customer_links WHERE project_id = ?", [projectId]))[0]?.token as string) || token;
 }
@@ -215,7 +218,8 @@ export async function customerLink(projectId: string): Promise<string> {
 export async function projectByLink(token: string): Promise<string | null> {
   if (!token || token.length > 64) return null;
   const { d1Query } = await import("../storage/conversation-store.js");
-  const r = (await d1Query("SELECT project_id FROM customer_links WHERE token = ?", [token]).catch(() => []))[0];
+  // Older tokens could end in "_" / "-", which links often drop: accept the link without it.
+  const r = (await d1Query("SELECT project_id FROM customer_links WHERE token IN (?, ?, ?) LIMIT 1", [token, `${token}_`, `${token}-`]).catch(() => []))[0];
   return r ? (r.project_id as string) : null;
 }
 
