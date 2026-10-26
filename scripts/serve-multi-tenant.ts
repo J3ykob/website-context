@@ -2892,6 +2892,18 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
 // Admin: a business's place in the network (src/projects/network.ts isListed, src/projects/invite.ts).
 // body: { tenantIds: [...], network?: "listed" | "member", inviteEmail?: string, networkOptOut?: boolean, clearBilling?: true }
 // "listed" = in the network from its public data, nobody runs it; "member" (default) = it has joined.
+// Admin (support / tests): close a request's wait for other businesses now - the ones still waiting
+// count as "no answer" (as at the 24 h deadline) and the customer's result is finished with what came in.
+app.post("/api/admin/project/:id/settle-waiting", async (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  const { getProject } = await import("../src/projects/store.js");
+  const { settle } = await import("../src/projects/network.js");
+  const p = await getProject(req.params.id).catch(() => null);
+  if (!p) { res.status(404).json({ error: "not found" }); return; }
+  const waiting = ((p.memory.subRequests as any[]) || []).filter((x) => x.status === "waiting");
+  for (const w of waiting) await settle(w.id, "", "no_answer");
+  res.json({ settled: waiting.map((w) => w.tenantId) });
+});
 app.post("/api/admin/network-status", (req, res) => {
   if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   const ids: string[] = Array.isArray(req.body?.tenantIds) ? req.body.tenantIds.map(String).slice(0, 1000) : [];
