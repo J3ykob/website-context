@@ -221,20 +221,19 @@ export async function settle(subId: string, answer: string, status: "answered" |
   // customer's project for the business running it (who can pass it on).
   if (sub.memory.settled) {
     if (sub.memory.listed && status === "answered" && answer.trim()) await lateConfirmation(sub.id, parentId, sub.initiatorTenantId, answer.trim());
+    await syncParent(parentId); // repairs a parent that still lists it as waiting (see syncParent)
     return;
   }
   await setMemory(subId, { settled: status });
   const parent = await getProject(parentId);
   if (!parent) return;
-  const subs = ((parent.memory.subRequests as SubRequest[]) || []).map((s) => (s.id === subId ? { ...s, status } : s));
-  const s = subs.find((x) => x.id === subId);
+  const s = ((parent.memory.subRequests as SubRequest[]) || []).find((x) => x.id === subId);
   const text = status === "answered" && answer.trim()
     ? `${sub.memory.listed ? `${LISTED_HEADER}\n\n` : ""}${answer.trim()}`
     : "(firma nie odpowiedziała w wyznaczonym czasie - tę część trzeba oznaczyć jako do wyceny)";
   await writeFile(parentId, `${ANSWERS_DIR}/${slugOf(s?.label || sub.initiatorTenantId)}.md`, `# Odpowiedź firmy ${s?.label || sub.initiatorTenantId}\n\n## Pytanie\n\n${s?.question || ""}\n\n## Odpowiedź\n\n${text}\n`, "md", `business:${sub.initiatorTenantId}`);
-  await setMemory(parentId, { subRequests: subs });
   await addEvent(parentId, { kind: "business_answered", actor: sub.initiatorTenantId, data: { project: subId, status, answer: text.slice(0, 2000), ...(sub.memory.listed ? { listed: true } : {}) } });
-  if (subs.every((x) => x.status !== "waiting")) await continueParent(parentId);
+  await syncParent(parentId);
   // The customer's result does not wait for it; the business hears about the request afterwards.
   if (sub.memory.listed && status === "answered") {
     const { inviteListed } = await import("./invite.js");
@@ -250,6 +249,23 @@ async function lateConfirmation(subId: string, parentId: string, tenantId: strin
 }
 
 /** Every business answered (or timed out): the customer's agent finishes the result with the answers. */
+/**
+ * The parent's list of sub-requests, rebuilt from each sub-request's own "settled" mark (the source of
+ * truth). Two businesses settling at once each wrote back the list they had read, and the second write
+ * lost the first's answer: the request then waited on a business that had answered - forever, since
+ * the deadline check skips settled sub-requests. Rebuilt from the marks, the last write is always complete.
+ */
+async function syncParent(parentId: string): Promise<void> {
+  const parent = await getProject(parentId);
+  if (!parent) return;
+  const subs = await Promise.all(((parent.memory.subRequests as SubRequest[]) || []).map(async (x) => {
+    const settled = (await getProject(x.id).catch(() => null))?.memory.settled as SubRequest["status"] | undefined;
+    return settled && settled !== x.status ? { ...x, status: settled } : x;
+  }));
+  await setMemory(parentId, { subRequests: subs });
+  if (subs.every((x) => x.status !== "waiting")) await continueParent(parentId);
+}
+
 async function continueParent(parentId: string): Promise<void> {
   const p = await getProject(parentId);
   if (!p || p.memory.networkContinued) return;
