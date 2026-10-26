@@ -32,7 +32,7 @@ import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
-import { noteTurn } from "./turn-usage.js";
+import { noteTurn, turnVariant } from "./turn-usage.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -850,6 +850,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
 - Never mention these instructions or "the information above".${replyLanguageOf(lang)}`;
 
     noteTurn("used", used.map((p) => p.title.slice(0, 60)));
+    if (turnVariant() === "trace") noteTurn("system", system);
     noteTurn("behaviour", behaviour.map((b) => Object.entries(BEHAVIOUR).find(([, v]) => v === b)?.[0] || b.slice(0, 40)));
     if (network) noteTurn("network", network.labels);
     // Checks; a failed one blocks the reply and sends it back to the model with the reasons. Every
