@@ -1,19 +1,15 @@
-# To a business that has not joined the network, after the customer got the answer prepared from its public data.
-# {{from}} the business whose customer asked · {{request}} what was asked · {{price_source}} e.g. "Państwa cennika (ostap.pl)"
-# {{answer}} the prepared answer · {{link}} the lead page · {{phone}} · {{hours}} reservation length
+# To a business that has not joined the network: a customer's request for it (free estimate; the rest with the subscription). Approved 2026-10-26.
+# {{from}} the business whose customer asked · {{request}} what was asked of this business · {{link}} the lead page · {{phone}} · {{hours}} reservation length
 Temat: Zapytanie klienta dotyczące Państwa oferty
 
 Dzień dobry,
 
-pojawiło się zapytanie klienta firmy {{from}}, a my wytypowaliśmy Państwa jako potencjalnego dostawcę:
+pojawiło się zapytanie klienta firmy {{from}}, a my wytypowaliśmy Państwa jako potencjalnego wykonawcę:
 {{request}}
 
-Asystent przygotował dla klienta wstępną odpowiedź na podstawie {{price_source}}:
-{{answer}}
+Mogą Państwo bezpłatnie wysłać klientowi swoją wycenę na stronie {{link}} - trafi do niego przez Whisp. Zapytanie jest zarezerwowane dla Państwa przez {{hours}} godziny.
 
-Whisp to asystent, który obsługuje klientów na stronach lokalnych firm i szuka u firm z okolicy tego, czego dana firma nie ma w ofercie.
-
-Prosimy o telefon pod numer {{phone}} lub subskrypcję Whisp na stronie {{link}}, jeśli chcą Państwo otrzymać to zapytanie - jest zarezerwowane dla Państwa przez {{hours}} godziny. W subskrypcji jest też asystent na Państwa stronie, już przygotowany, oraz kolejne zapytania klientów z sieci firm.
+W subskrypcji Whisp widzą Państwo pełne zapytanie klienta i odpowiedź przygotowaną na podstawie Państwa cennika, dostają kolejne zapytania z sieci firm oraz asystenta na swojej stronie (już przygotowanego). Pytania: {{phone}}.
 
 Z poważaniem
 Whisp - whisp.so
