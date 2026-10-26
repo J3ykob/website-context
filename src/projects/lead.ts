@@ -71,21 +71,13 @@ export async function subscribed(tenantId: string): Promise<boolean> {
 export interface LeadView {
   status: "open" | "unlocked" | "replied" | "passed";
   business: string; from: string; brand: string;
-  teaser: string;          // the visible part of the request
-  hiddenChars: number;     // how much is hidden (the page draws that much blurred filler)
-  request?: string; answer?: string; // only when unlocked
+  teaser: string;          // what was asked of this business (visible before paying - enough to give a price)
+  hiddenChars: number;     // how much of the customer's own request is hidden (the page draws that much blurred filler)
+  request?: string; answer?: string; // only when unlocked: the customer's whole request and the answer prepared from its price list
   expiresAt: string; pricePln: number; payments: boolean; phone: string;
   manage: boolean; // has a subscription it can manage or cancel
+  unlocked: boolean; // subscribed: sees the whole request
   demoUrl: string; // its own assistant, already prepared from its site
-}
-
-/** The part of a request shown before paying: its first sentence or so - enough to see what it is. */
-function teaserOf(text: string): string {
-  const t = text.trim();
-  const cut = Math.max(60, Math.floor(t.length * 0.35));
-  if (t.length <= cut) return t.slice(0, Math.ceil(t.length / 2));
-  const space = t.lastIndexOf(" ", cut);
-  return t.slice(0, space > 40 ? space : cut);
 }
 
 export async function leadView(token: string): Promise<LeadView | null> {
@@ -99,11 +91,14 @@ export async function leadView(token: string): Promise<LeadView | null> {
   if (unlocked && !inv.unlocked_at) await d1Query("UPDATE network_invites SET unlocked_at = ? WHERE token = ? AND unlocked_at IS NULL", [new Date().toISOString(), token]);
   const expires = Date.parse(inv.created_at) + EXCLUSIVE_MS();
   const status: LeadView["status"] = inv.replied_at ? "replied" : unlocked ? "unlocked" : inv.passed_at || Date.now() > expires ? "passed" : "open";
-  const teaser = teaserOf(question);
+  // Before paying it sees what was asked of it (to give a price for free); the customer's own request and
+  // the answer prepared from its price list unlock with the subscription (the owner's decision 2026-10-26).
+  const parentId = String(sub.memory.parentId || "");
+  const full = parentId ? ((await readFile(parentId, "request.txt").catch(() => null)) || "").trim() : "";
   return {
-    status, business: businessLabel(inv.tenant_id), from: businessLabel(String(sub.memory.fromTenant || "")), brand: "Whisp",
-    teaser, hiddenChars: Math.max(0, question.length - teaser.length),
-    ...(unlocked ? { request: question, answer: ((await readFile(sub.id, "odpowiedz.txt").catch(() => null)) || "").trim() } : {}),
+    status, unlocked, business: businessLabel(inv.tenant_id), from: businessLabel(String(sub.memory.fromTenant || "")), brand: "Whisp",
+    teaser: question, hiddenChars: Math.max(120, full.length),
+    ...(unlocked ? { request: full ? `${full}\n\n(Pytanie do Państwa: ${question})` : question, answer: ((await readFile(sub.id, "odpowiedz.txt").catch(() => null)) || "").trim() } : {}),
     expiresAt: new Date(expires).toISOString(), pricePln: PRICE_PLN(), payments: !!stripeKey(),
     phone: (process.env.NETWORK_INVITE_PHONE || "").trim(),
     manage: !!getTenant(inv.tenant_id)?.settings?.stripeCustomer && !!stripeKey(),
@@ -183,7 +178,8 @@ export async function portalUrl(token: string, base: string): Promise<string> {
 export async function replyToLead(token: string, offer: string): Promise<boolean> {
   const v = await leadView(token);
   const inv = await inviteByToken(token);
-  if (!v || !inv || (v.status !== "unlocked" && v.status !== "replied")) return false;
+  // Free to reply (the owner's decision 2026-10-26): anyone with the link, until the reservation passes.
+  if (!v || !inv || v.status === "passed") return false;
   const sub = await getProject(inv.project_id);
   const parentId = sub?.memory.parentId as string | undefined;
   if (!sub || !parentId) return false;

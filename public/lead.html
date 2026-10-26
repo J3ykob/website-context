@@ -50,11 +50,20 @@
     <div class="card locked">
       <p class="label" id="from"></p>
       <div class="pre" id="teaser"></div>
+      <p class="label" style="margin-top:18px">Pełne zapytanie klienta</p>
       <div class="blur" id="filler" aria-hidden="true"></div>
       <p class="label" style="margin-top:18px">Odpowiedź przygotowana na podstawie Państwa cennika</p>
       <div class="blur" id="filler2" aria-hidden="true"></div>
       <div class="fade"></div>
     </div>
+    <!-- Free: an estimate for what was asked, sent to the customer through Whisp. -->
+    <div class="card" id="reply-open">
+      <p class="label">Państwa wycena dla klienta - bezpłatnie, trafi do niego przez Whisp</p>
+      <textarea id="offer-open" placeholder="Np. cena za całość lub za m², termin, co obejmuje"></textarea>
+      <div style="margin-top:12px"><button id="send-open" type="button">Wyślij wycenę klientowi</button></div>
+      <div class="err hidden" id="send-open-err"></div>
+    </div>
+    <div class="card hidden" id="sent-open"><p class="ok" style="margin:0">Wycena wysłana do klienta. Pełne zapytanie i kolejne zapytania - w subskrypcji poniżej.</p></div>
     <div class="card wall">
       <p class="label">To zapytanie jest zarezerwowane dla Państwa jeszcze</p>
       <div class="timer" id="timer" role="timer" aria-live="off">--:--:--</div>
@@ -127,9 +136,10 @@
     $("title").textContent = "Zapytanie klienta dla firmy " + d.business;
     var phone = d.phone ? "Albo prosimy o telefon: " + d.phone : "";
     ["open", "passed", "unlocked"].forEach(function (id) { show(id, false); });
-    if (d.status === "open") {
-      $("from").textContent = "Klient firmy " + d.from + " szuka";
-      $("teaser").textContent = d.teaser + "…";
+    if (d.status === "open" || (d.status === "replied" && !d.unlocked)) {
+      show("reply-open", d.status === "open"); show("sent-open", d.status === "replied");
+      $("from").textContent = "Klient firmy " + d.from + " prosi Państwa o";
+      $("teaser").textContent = d.teaser;
       $("filler").textContent = filler(Math.max(120, d.hiddenChars));
       $("filler2").textContent = filler(260);
       $("price").textContent = d.payments ? d.pricePln + " zł miesięcznie, rezygnacja w każdej chwili." : "Płatności online wkrótce.";
@@ -169,6 +179,15 @@
       if (res.ok && res.x.url) { location.href = res.x.url; return; }
       $("unlock").disabled = false; $("pay-err").textContent = res.x.error || "Płatność niedostępna."; show("pay-err", true);
     }).catch(function () { $("unlock").disabled = false; });
+  });
+  $("send-open").addEventListener("click", function () {
+    if (!$("offer-open").value.trim()) return;
+    $("send-open").disabled = true; show("send-open-err", false);
+    fetch(api + "/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ offer: $("offer-open").value }) })
+      .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, x: x }; }); }).then(function (res) {
+        if (res.ok) { show("reply-open", false); show("sent-open", true); return; }
+        $("send-open").disabled = false; $("send-open-err").textContent = res.x.error || ""; show("send-open-err", true);
+      }).catch(function () { $("send-open").disabled = false; });
   });
   $("send").addEventListener("click", function () {
     $("send").disabled = true; show("send-err", false);
