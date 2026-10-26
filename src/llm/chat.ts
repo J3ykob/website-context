@@ -717,9 +717,9 @@ export class WebsiteChat {
       if (!pure && !(await this.hasPricesFor(question))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
       // Listed unit prices times the customer's quantities: answered here (the owner's decision 2026-10-26);
       // anything more (measuring, unlisted work, discounts, many items) goes to the calculation and its approval.
-      if (!pure) {
+      {
         const convoText = sanitizedMessages.slice(-6).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 500)}`).join("\n");
-        const s = await jevAsk({ conversation: convoText }, { simple: { type: "noul", instructions: "Can the customer's LATEST request in `conversation` be answered by multiplying (and adding) at most three unit prices the business lists by quantities the customer gave - with no measuring, design, discount, unlisted work or several options to compare?" } }, 3000).catch(() => null);
+        const s = await jevAsk({ conversation: convoText }, { simple: { type: "noul", instructions: "Is the customer's LATEST request in `conversation` a simple calculation: at most three unit prices (listed by the business or given by the customer) times quantities the customer gave, or a simple quantity from dimensions they gave - with no measuring on site, design, discount, unlisted work or options to compare?" } }, 3000).catch(() => null);
         if (((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.6) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
       }
       const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : undefined);
