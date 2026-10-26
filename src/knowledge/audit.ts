@@ -54,21 +54,29 @@ export function dataChecks(context: WebsiteContext, catalog: KnowledgeCatalog | 
   return items;
 }
 
-/** The standard questions through the assistant itself. */
+/** The standard questions through the assistant itself (three at a time). */
 export async function questionChecks(probe: (q: string) => Promise<ProbeResult>, language: "pl" | "en"): Promise<AuditItem[]> {
-  const results = await Promise.all(QUESTIONS.map(async (q) => {
+  const one = async (q: (typeof QUESTIONS)[number]): Promise<AuditItem> => {
     const question = q[language];
-    const r = await probe(question).catch(() => null);
-    if (!r) return { kind: "question" as const, topic: q.topic, status: "missing" as AuditStatus, detail: "the test question failed to run", question };
-    let status: AuditStatus = r.behaviour.includes("noInfo") || r.behaviour.includes("network") ? "missing" : r.behaviour.includes("partial") ? "partial" : "ok";
-    // An "answer" must give the information, not only point to contact or a hand-off.
-    if (status === "ok" && r.route !== "collect") {
-      const a = await jevAsk({ question, reply: r.reply }, { gives: { type: "noul", instructions: "Does `reply` actually give the information `question` asks for (concrete facts about the business), rather than only saying it is not available, asking for details, or pointing to contact / passing the question on?" } }, 4000).catch(() => null);
-      if (((a?.gives as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5) status = "partial";
-    }
-    return { kind: "question" as const, topic: q.topic, status, detail: status === "ok" ? "answered" : status === "partial" ? "only partly answered from the site" : "not answered from the site", question, reply: r.reply.slice(0, 600) };
-  }));
-  return results;
+    let r: ProbeResult | null = null, error = "";
+    for (let attempt = 0; attempt < 2 && !r; attempt++) r = await probe(question).catch((e) => { error = (e as Error).message; return null; });
+    if (!r) return { kind: "question", topic: q.topic, status: "missing", detail: `the test question failed to run: ${error.slice(0, 160)}`, question };
+    if (r.route === "collect") return { kind: "question", topic: q.topic, status: "ok", detail: "started the order / inquiry form", question, reply: r.reply.slice(0, 600) };
+    // By what the reply gives: the facts asked (ok), some of them (partial), or none (missing).
+    const a = await jevAsk({ question, reply: r.reply }, {
+      gives: { type: "noul", instructions: "Does `reply` give the information `question` asks for - concrete facts about the business that answer it (not only that it is not available, a request for details, or a pointer to contact the business)?" },
+      some: { type: "noul", instructions: "Does `reply` give at least some concrete facts about the business that bear on `question`, even if not everything asked?" },
+    }, 4000).catch(() => null);
+    const nl = (k: string) => ((a?.[k] as JevNoulAnswer | undefined)?.noul ?? NaN);
+    const status: AuditStatus = Number.isNaN(nl("gives"))
+      ? (r.behaviour.includes("noInfo") || r.behaviour.includes("network") ? "missing" : r.behaviour.includes("partial") ? "partial" : "ok")
+      : nl("gives") >= 0.5 ? "ok" : nl("some") >= 0.5 ? "partial" : "missing";
+    return { kind: "question", topic: q.topic, status, detail: status === "ok" ? "answered" : status === "partial" ? "only partly answered from the site" : "not answered from the site", question, reply: r.reply.slice(0, 600) };
+  };
+  const out: AuditItem[] = new Array(QUESTIONS.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: 3 }, async () => { while (next < QUESTIONS.length) { const k = next++; out[k] = await one(QUESTIONS[k]); } }));
+  return out;
 }
 
 export async function auditKnowledge(tenantId: string, context: WebsiteContext, catalog: KnowledgeCatalog | null, probe: (q: string) => Promise<ProbeResult>): Promise<AuditReport> {
