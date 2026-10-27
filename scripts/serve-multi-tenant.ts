@@ -1783,6 +1783,20 @@ worker.onScraped = (tenantId) => {
   tenantManager.evictTenant(tenantId);
   setTimeout(() => { runKnowledgeAudit(tenantId).catch((e) => console.warn(`[audit] ${tenantId} failed: ${(e as Error).message}`)); }, 10_000);
 };
+// Key facts index for a tenant scraped before it existed (built after every scrape from now on).
+app.post("/api/admin/facts/:tenantId", async (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  try {
+    const { downloadTenantFile } = await import("../src/storage/r2.js");
+    const buf = await downloadTenantFile(req.params.tenantId, "knowledge-catalog.json");
+    if (!buf) { res.status(404).json({ error: "no catalog" }); return; }
+    const { buildFactIndex } = await import("../src/knowledge/facts.js");
+    const { BGEEmbeddingProvider } = await import("../src/embeddings/bge-provider.js");
+    const t0 = Date.now();
+    const n = await buildFactIndex(req.params.tenantId, JSON.parse(buf.toString("utf-8")), new BGEEmbeddingProvider());
+    res.json({ sentences: n, ms: Date.now() - t0 });
+  } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+});
 app.post("/api/admin/audit/:tenantId", async (req, res) => {
   if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   try { res.json(await runKnowledgeAudit(req.params.tenantId)); } catch (e) { res.status(500).json({ error: (e as Error).message }); }

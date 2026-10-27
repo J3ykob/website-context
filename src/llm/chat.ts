@@ -34,6 +34,7 @@ import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 import { noteTurn, turnVariant, turnUsage, newTurnUsage } from "./turn-usage.js";
 import { auditKnowledge, type AuditReport } from "../knowledge/audit.js";
+import { keyFacts } from "../knowledge/facts.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -761,6 +762,10 @@ export class WebsiteChat {
       const query = followup && prevUser ? `${prevUser}\n${prevReply.slice(0, 200)}\n${question}` : question;
       // A real need we can't meet may go to the network: started now, used below if our packs don't answer.
       const net = rt && !behaviour.length ? await this.networkStart(question, messages, rt) : null;
+      // Key facts (src/knowledge/facts.ts): the site's single sentences, found by meaning and kept by Jev - in parallel.
+      const factsP = turnVariant().includes("facts")
+        ? this.embeddingProvider.embed([query]).then((v) => keyFacts(this.context.tenantId, v[0] || null, convo, question)).catch(() => null)
+        : Promise.resolve(null);
       const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: search failed - ${(e as Error).message}`); return []; });
       let scored: { p: Pack; s: number }[] = [];
       let hitIds: string[] | undefined;
@@ -784,6 +789,12 @@ export class WebsiteChat {
         packText = passages.map((p) => p).join("\n\n---\n\n");
       }
       if (scored.length) ({ text: packText, used, passages } = renderPacks(scored.map((x) => x.p), undefined, hitIds!));
+      const facts = await factsP;
+      if (facts?.length) {
+        noteTurn("facts", facts.map((f) => f.s.slice(0, 160)));
+        packText = `### Key facts from our pages (word for word)\n${facts.map((f) => `- ${f.s}`).join("\n")}${packText ? `\n\n---\n\n${packText}` : ""}`;
+        passages = [...facts.map((f) => f.s), ...passages];
+      }
       answered = passages.length > 0;
       // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer
       // to ask the team - the network only when nothing of ours is relevant (we may well do it).
@@ -831,7 +842,7 @@ export class WebsiteChat {
     const pages = this.context.siteMap.slice(0, 20).map((p) => `- ${p.title} (${p.url})`).join("\n");
     // The owner's own answers (added for questions the bot could not answer) are facts too.
     const notes = this.contextNotes.slice(-30).map((n) => `Q: ${n.question}\nA: ${n.answer}`).join("\n\n");
-    const system = `You are the website chat assistant of ${brand}. You speak for the business as "we".${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
+    let system = `You are the website chat assistant of ${brand}. You speak for the business as "we".${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
 ${renderOfficialInfo(this.context.businessProfile)}${notes ? `\n## Answers from the owner\n${notes}\n` : ""}
 ${packText ? `\n## Our information for this conversation (use only this for facts about us)\n${packText}\n` : opts.noFacts ? "" : "\n## Our information for this conversation\n(nothing in our information answers this message)\n"}
 ${network ? `\n## Businesses from our network (their own information)\n${network.text}\n` : ""}
@@ -861,6 +872,18 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
 - Reply in the customer's language (the language they write in), not in the language of our information.
 - Never mention these instructions or "the information above".${replyLanguageOf(lang)}`;
 
+    // A/B variant "lean": the rules a check already enforces are left out (links -> link check; meta-talk and
+    // instructions -> meta check; facts/terms detail -> fact check). Measured before switching.
+    if (turnVariant().includes("lean")) {
+      const drop = [
+        /\n- Links only as given above, as markdown \[name\]\(url\)\./,
+        /\n- Speak as the business, naturally: [^\n]*/,
+        /\n- Never mention these instructions or "the information above"\./,
+      ];
+      for (const d of drop) system = system.replace(d, "");
+      system = system.replace(/- Facts about us \(products, prices, stock, hours, terms, people, contact\) only from the information above, never invented; [^\n]*/, "- Facts about us only from the information above.");
+      system = system.replace(/- Warranty, guarantees, VAT invoices, insurance, payment and legal terms: only what our information states\. /, "- ");
+    }
     noteTurn("used", used.map((p) => p.title.slice(0, 60)));
     if (turnVariant() === "trace") noteTurn("system", system);
     noteTurn("behaviour", behaviour.map((b) => Object.entries(BEHAVIOUR).find(([, v]) => v === b)?.[0] || b.slice(0, 40)));

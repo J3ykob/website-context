@@ -271,6 +271,12 @@ export async function scrapeTenant(
       if (catalog) {
         await writeFile(resolve(tenantDir, CATALOG_FILE), JSON.stringify(catalog));
         console.log(`[scrape-pipeline] Knowledge catalog: ${catalog.catalogs.length} catalogs, ${catalog.chunks.length} chunks (${Date.now() - t0}ms)`);
+        // Key facts: the site's sentences embedded one by one (src/knowledge/facts.ts). Non-fatal.
+        try {
+          const { buildFactIndex } = await import("../knowledge/facts.js");
+          const n = await buildFactIndex(tenantId, catalog, provider);
+          console.log(`[scrape-pipeline] Key facts: ${n} sentences`);
+        } catch (e) { console.warn(`[scrape-pipeline] Key facts skipped: ${(e as Error).message}`); }
       } else {
         await rm(resolve(tenantDir, CATALOG_FILE), { force: true }); // never serve a previous scrape's catalog
       }
