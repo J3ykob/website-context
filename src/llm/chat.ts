@@ -904,12 +904,15 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const offerOk = !network && rt && this.ensureQuestionFlow && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
       if (offerOk) opts.handoffKind = "question";
       const next = network ? [BEHAVIOUR.networkFound] : [BEHAVIOUR.networkNone, ...(offerOk ? [BEHAVIOUR.handoff] : [])];
-      system = system.replace(/## What to do in this reply\n[\s\S]*?\n\n## Rules/, `## What to do in this reply\nYour reply so far (already shown to the customer): \"\"\"${raw.trim()}\"\"\"\nContinue it - don't repeat or greet again:\n${next.map((b) => `- ${b}`).join("\n")}\n\n## Rules`);
+      system = system.replace(/## What to do in this reply\n[\s\S]*?\n\n## Rules/, `## What to do in this reply\nContinue your last message (already shown to the customer) - only the new part, nothing from it repeated:\n${next.map((b) => `- ${b}`).join("\n")}\n\n## Rules`);
       if (network) system = system.replace("\n## Now\n", `\n## Businesses from our network (their own information)\n${network.text}\n\n## Now\n`);
       noteTurn("networkSearch", { found: network?.labels || [] });
       onToken("\n\n");
       let more = "";
-      await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { more += d; onToken(d); });
+      // The shown start goes in as our message (the model allows no prefill): with it only in the prompt
+      // the model answered the question again from the top (3 of 4 tries, 2026-10-27).
+      const cont: ChatMessage[] = [...messages, { role: "assistant", content: raw.trim() }, { role: "user", content: "(Internal note, not from the customer: the network check has finished. Continue your message above - write only the new part, it is appended right after it.)" }];
+      await this.backend.generateStream!(system, cont, this.maxTokens, (d) => { more += d; onToken(d); });
       raw = `${raw.trim()}\n\n${more.trim()}`;
     }
     // Checks; a failed one blocks the reply and sends it back to the model with the reasons. Every
