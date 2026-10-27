@@ -10,13 +10,17 @@ import type { KnowledgeCatalog } from "./catalog.js";
 import { SENTENCE_END, jevAsk, type JevNoulAnswer } from "../llm/jev.js";
 
 const MAX_SENTENCES = 4000;
+const PDF = /\.pdf($|[?#])/i;
 const ARTICLE = /\/(blog|aktualnosci|news|poradnik|porady|artykul|artykuly|wpis)(\/|$|-)/i;
 
 export interface FactIndex { sentences: { s: string; url: string }[]; dim: number; vecs: Int8Array; scales: Float32Array }
 
 /** The site's sentences, each with its page title; offer pages before blog posts; duplicates dropped. */
 export function factSentences(catalog: KnowledgeCatalog): { s: string; url: string }[] {
-  const chunks = [...catalog.chunks].sort((a, b) => Number(ARTICLE.test(a.url)) - Number(ARTICLE.test(b.url)));
+  // The site's own pages first, then blog posts, then PDFs (manuals and catalogues: thousands of sentences
+  // that crowded out the homepage line answering the question - ostap.pl 3561 of 4000).
+  const rank = (u: string) => (PDF.test(u) ? 2 : ARTICLE.test(u) ? 1 : 0);
+  const chunks = [...catalog.chunks].sort((a, b) => rank(a.url) - rank(b.url));
   const out: { s: string; url: string }[] = [];
   const seen = new Set<string>();
   for (const ch of chunks) {
@@ -96,7 +100,11 @@ export async function keyFacts(tenantId: string, queryVec: number[] | null, conv
     for (let k = 0; k < idx.dim; k++) dot += idx.vecs[off + k] * queryVec[k];
     scores[i] = (dot * idx.scales[i]) / qn;
   }
-  const top = [...scores.keys()].sort((a, b) => scores[b] - scores[a]).slice(0, 25).map((i) => idx.sentences[i]);
+  // 25 nearest: at most 5 of them from PDFs, so the site's own pages keep their places.
+  const order = [...scores.keys()].sort((a, b) => scores[b] - scores[a]);
+  const fromPdf = order.filter((i) => PDF.test(idx.sentences[i].url)).slice(0, 5);
+  const fromPages = order.filter((i) => !PDF.test(idx.sentences[i].url)).slice(0, 25 - fromPdf.length);
+  const top = [...fromPages, ...fromPdf].map((i) => idx.sentences[i]);
   const state: Record<string, string> = { conversation, question };
   const qs: Record<string, any> = {};
   top.forEach((x, i) => { state[`s${i}`] = x.s; qs[`k${i}`] = { type: "noul", instructions: `Does \`s${i}\` (a sentence from the business's website) state something that answers the customer's latest message (\`question\`, read with \`conversation\`) or part of it, or bears directly on it?` }; });
