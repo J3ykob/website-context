@@ -305,6 +305,8 @@ export function routeOf(r: ChatResponse): Route {
 }
 
 const AUDIT_SESSION = "audit:";
+// The widget's status line while the network is searched (interface text, like the typing dots - the reply itself is the model's).
+const NETWORK_SEARCH: Record<string, string> = { pl: "Sprawdzam firmy w sieci Whisp…", en: "Checking businesses in the Whisp network…", uk: "Перевіряю компанії в мережі Whisp…", fr: "Je consulte les entreprises du réseau Whisp…", de: "Ich prüfe Unternehmen im Whisp-Netzwerk…" };
 
 export class WebsiteChat {
   private backend: LLMBackend;
@@ -609,9 +611,10 @@ export class WebsiteChat {
     return r;
   }
 
-  private async chatStreamInner(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void, formState?: Record<string, string>, _onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse> {
+  private async chatStreamInner(messages: ChatMessage[], sessionKey: string | undefined, onToken: (delta: string) => void, formState?: Record<string, string>, onStatus?: (status: { kind: string; text: string }) => void): Promise<ChatResponse> {
     const lastUserMessage = messages.findLast((m) => m.role === "user")?.content || "";
     const key = sessionKey || "default";
+    if (onStatus) this.statusOf.set(key, onStatus); else this.statusOf.delete(key);
     const v = validateInput(lastUserMessage);
     if (v.blocked) return this.packsStream(messages, messages, key, onToken, true, formState);
     const sanitized: ChatMessage[] = v.sanitized !== lastUserMessage
@@ -623,6 +626,8 @@ export class WebsiteChat {
   // ── Dynamic context ("packs"): Jev picks whole blocks of our information for the
   // conversation, behaviour comes as instructions, the model writes every word, checks can block. ──
   private packIndex: PackIndex | null | undefined;
+  // The streaming widget's status line for a session (e.g. "checking the Whisp network").
+  private statusOf: Map<string, (status: { kind: string; text: string }) => void> = new Map();
   private packStates: Map<string, PackState> = new Map();
 
   private packStateOf(key: string): PackState {
@@ -747,6 +752,7 @@ export class WebsiteChat {
     let packText = "";
     let answered = true;
     let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[]; partners: { tenantId: string; label: string }[] } | null = null;
+    let searching: { matches: Promise<EcosystemMatch[]>; need: string } | null = null;
 
     // The conversation's language: kept from the last message long enough to tell (a name, a phone
     // number or "ok" does not switch it); "other" = whatever language the customer writes in.
@@ -811,26 +817,25 @@ export class WebsiteChat {
       }
       // Nothing of ours answers it, or our information shows it isn't ours: the network may have it.
       if ((!answered || outOfScope) && net) {
-        const found = await Promise.race([net.matches, new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 3500))]);
-        if (found.length) {
-          const links = this.handoffLinks ? await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [{ role: "user", content: net.need }], net.need).catch(() => ({} as Record<string, string>)) : ({} as Record<string, string>);
-          const text = found.map((f) => `### ${f.label}${links[f.tenantId] ? ` | link for the customer: ${links[f.tenantId]}` : ""}\nContact: ${f.contact || "no phone or e-mail known - only the link"}\n${f.passages.map((p) => p.content.replace(/\s+/g, " ").slice(0, 900)).join("\n")}`).join("\n\n---\n\n");
-          const evidence = [
-            { content: `Businesses from our network checked for the customer: ${found.map((f) => f.label).join(", ")}.` },
-            ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }, { content: `${f.label} offers, sells, rents or does what the customer asked for ("${net.need.slice(0, 300)}") - checked against its own website.` }]),
-          ];
-          network = { text, evidence, labels: found.map((f) => f.label), links: found.map((f) => links[f.tenantId]).filter(Boolean), partners: found.map((f) => ({ tenantId: f.tenantId, label: f.label })) };
+        // Matches already there: one reply. Still searching and the widget can show it: say so now, show the
+        // search, continue the message when the matches come (the owner's wish 2026-10-27, like Gemini's search).
+        const quick = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), this.statusOf.has(sessionKey) ? 400 : 3500))]);
+        if (quick === null && this.statusOf.has(sessionKey)) {
+          searching = { matches: net.matches, need: net.need };
+          behaviour.push(BEHAVIOUR.networkCheck);
+        } else if (quick?.length) {
+          network = await this.networkBlock(quick, net.need);
           behaviour.push(BEHAVIOUR.network);
         }
       }
-      if (!answered && !network) {
+      if (!answered && !network && !searching) {
         behaviour.push(BEHAVIOUR.noInfo);
         // Offered at most once per question: again only for a new question two or more turns later, never after a decline.
         const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
-      if (answered && !network) behaviour.unshift(BEHAVIOUR.answer);
-      if (answered && partial && !network) {
+      if (answered && !network && !searching) behaviour.unshift(BEHAVIOUR.answer);
+      if (answered && partial && !network && !searching) {
         behaviour.push(BEHAVIOUR.partial);
         const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
@@ -888,6 +893,25 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     if (turnVariant() === "trace") noteTurn("system", system);
     noteTurn("behaviour", behaviour.map((b) => Object.entries(BEHAVIOUR).find(([, v]) => v === b)?.[0] || b.slice(0, 40)));
     if (network) noteTurn("network", network.labels);
+    let raw = "";
+    await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { raw += d; onToken(d); });
+    // Searching the network: the status line while it runs, then the same message continues with what was found.
+    if (searching) {
+      this.statusOf.get(sessionKey)?.({ kind: "network", text: (NETWORK_SEARCH[lang] || NETWORK_SEARCH.en) });
+      const found = await Promise.race([searching.matches, new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 12000))]).catch(() => [] as EcosystemMatch[]);
+      if (found.length) network = await this.networkBlock(found, searching.need);
+      else behaviour.push(BEHAVIOUR.noInfo); // nothing found: the contact check applies as for "no information"
+      const offerOk = !network && rt && this.ensureQuestionFlow && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
+      if (offerOk) opts.handoffKind = "question";
+      const next = network ? [BEHAVIOUR.networkFound] : [BEHAVIOUR.networkNone, ...(offerOk ? [BEHAVIOUR.handoff] : [])];
+      system = system.replace(/## What to do in this reply\n[\s\S]*?\n\n## Rules/, `## What to do in this reply\nYour reply so far (already shown to the customer): \"\"\"${raw.trim()}\"\"\"\nContinue it - don't repeat or greet again:\n${next.map((b) => `- ${b}`).join("\n")}\n\n## Rules`);
+      if (network) system = system.replace("\n## Now\n", `\n## Businesses from our network (their own information)\n${network.text}\n\n## Now\n`);
+      noteTurn("networkSearch", { found: network?.labels || [] });
+      onToken("\n\n");
+      let more = "";
+      await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { more += d; onToken(d); });
+      raw = `${raw.trim()}\n\n${more.trim()}`;
+    }
     // Checks; a failed one blocks the reply and sends it back to the model with the reasons. Every
     // rewrite is checked again (twice at most); the last one is sent.
     const sources = [...passages.map((content) => ({ content })), ...(network?.evidence || [])];
@@ -918,8 +942,6 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const gap = !answered && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
       return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network!.partners } : {}) };
     };
-    let raw = "";
-    await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { raw += d; onToken(d); });
     const check = async (text: string): Promise<{ problems: string[]; offers: number }> => {
       const problems: string[] = [];
       if (!text.trim()) return { problems: ["it is empty - write the reply"], offers: 0 };
@@ -990,6 +1012,17 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       });
     };
     return auditKnowledge(this.context.tenantId, this.context, this.knowledgeCatalog, probe);
+  }
+
+  /** The network businesses found for a need, as prompt text + fact-check evidence + links. */
+  private async networkBlock(found: EcosystemMatch[], need: string) {
+    const links = this.handoffLinks ? await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [{ role: "user", content: need }], need).catch(() => ({} as Record<string, string>)) : ({} as Record<string, string>);
+    const text = found.map((f) => `### ${f.label}${links[f.tenantId] ? ` | link for the customer: ${links[f.tenantId]}` : ""}\nContact: ${f.contact || "no phone or e-mail known - only the link"}\n${f.passages.map((p) => p.content.replace(/\s+/g, " ").slice(0, 900)).join("\n")}`).join("\n\n---\n\n");
+    const evidence = [
+      { content: `Businesses from our network checked for the customer: ${found.map((f) => f.label).join(", ")}.` },
+      ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }, { content: `${f.label} offers, sells, rents or does what the customer asked for ("${need.slice(0, 300)}") - checked against its own website.` }]),
+    ];
+    return { text, evidence, labels: found.map((f) => f.label), links: found.map((f) => links[f.tenantId]).filter(Boolean), partners: found.map((f) => ({ tenantId: f.tenantId, label: f.label })) };
   }
 
   // Route tiny classification through the small fast model when available.

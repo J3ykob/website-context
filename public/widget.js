@@ -602,14 +602,21 @@
     var raw = "";
     streamChat({
       onStatus: function(status) { streamDiv.innerHTML = statusHtml(status); barMsgs.scrollTop = barMsgs.scrollHeight; },
+      onLiveStatus: function(status) {
+        var old = document.getElementById("wctx-bar-live"); if (old) old.remove();
+        var l = document.createElement("div"); l.id = "wctx-bar-live"; l.className = "wctx-live-status"; l.innerHTML = statusHtml(status);
+        barMsgs.appendChild(l); barMsgs.scrollTop = barMsgs.scrollHeight;
+      },
       onFirst: function() { raw = ""; streamDiv.innerHTML = ""; },
       onDelta: function(delta) {
         raw += delta;
+        if (delta.trim()) { var lv = document.getElementById("wctx-bar-live"); if (lv) lv.remove(); }
         streamDiv.innerHTML = md(raw);
         barMsgs.scrollTop = barMsgs.scrollHeight;
       },
       onDone: function(data) {
         var t = document.getElementById("wctx-bar-thinking"); if (t) t.remove();
+        var lv0 = document.getElementById("wctx-bar-live"); if (lv0) lv0.remove();
         messages.push({ role: "assistant", content: data.message }); persistMessages();
         appendMsg("assistant", data.message, data.sources);
         syncBarMessages(); // re-render the bar properly (links, sources, last-4 window)
@@ -1218,7 +1225,11 @@
         try { data = JSON.parse(payload); } catch (e) { return; }
         if (data.error) { finished = true; if (cbs.onError) cbs.onError(data.message); return; }
         if (data.done) { finished = true; if (cbs.onDone) cbs.onDone(data); return; }
-        if (data.status && !started) { if (cbs.onStatus) cbs.onStatus(data.status); return; }
+        if (data.status) {
+          // Before the answer: the waiting line; during it (e.g. "checking the Whisp network"): a live line under the text.
+          if (!started) { if (cbs.onStatus) cbs.onStatus(data.status); } else if (cbs.onLiveStatus) cbs.onLiveStatus(data.status);
+          return;
+        }
         if (typeof data.delta === "string") {
           if (!started) { started = true; if (cbs.onFirst) cbs.onFirst(); }
           if (cbs.onDelta) cbs.onDelta(data.delta);
@@ -1267,9 +1278,15 @@
   // The bot's answer to the conversation as it stands (last message: the visitor's).
   function runAssistantTurn() {
     setLoading(true);
-    var bubble = null, raw = "";
+    var bubble = null, raw = "", live = null;
+    function dropLive() { if (live) { live.remove(); live = null; } }
     streamChat({
       onStatus: function(status) { showStatus(status); },
+      onLiveStatus: function(status) {
+        dropLive();
+        live = document.createElement("div"); live.className = "wctx-live-status"; live.setAttribute("role", "status");
+        live.innerHTML = statusHtml(status); els.msgs.appendChild(live); els.msgs.scrollTop = els.msgs.scrollHeight;
+      },
       onFirst: function() {
         setLoading(false); // swap the typing dots for the live answer bubble
         bubble = document.createElement("div");
@@ -1278,9 +1295,11 @@
       },
       onDelta: function(delta) {
         raw += delta;
+        if (live && delta.trim()) dropLive();
         if (bubble) { bubble.innerHTML = md(raw); els.msgs.scrollTop = els.msgs.scrollHeight; }
       },
       onDone: function(data) {
+        dropLive();
         setLoading(false);
         // Replace the live (raw) bubble with the canonical cleaned render + links + sources.
         if (bubble) { bubble.remove(); bubble = null; }
@@ -2066,6 +2085,9 @@
 .wctx-typing-dot:nth-child(3) { animation-delay:0.4s; }\
 @keyframes wctx-dot-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }\
 .wctx-typing.wctx-status { max-width:none; gap:10px; animation:wctx-status-in .25s ease-out; }\
+.wctx-live-status { display:flex; align-items:center; gap:10px; padding:4px 2px 8px; font-size:13px; animation:wctx-status-in .25s ease-out; }\
+.wctx-live-status .wctx-status-text { background:linear-gradient(90deg, rgba(100,116,139,.95) 0%, #3b82f6 45%, rgba(100,116,139,.95) 90%); background-size:220% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:wctx-shimmer 1.6s linear infinite; }\
+@keyframes wctx-shimmer { from { background-position:120% 0; } to { background-position:-100% 0; } }\
 .wctx-eco { position:relative; display:inline-block; width:20px; height:20px; flex:none; vertical-align:middle; }\
 .wctx-eco::before { content:""; position:absolute; left:7px; top:7px; width:6px; height:6px; border-radius:50%; background:#3b82f6; box-shadow:0 0 0 0 rgba(59,130,246,0.45); animation:wctx-eco-pulse 1.6s ease-out infinite; }\
 .wctx-eco i { position:absolute; left:8px; top:8px; width:4px; height:4px; border-radius:50%; background:#3b82f6; opacity:.75; animation:wctx-eco-orbit 1.8s linear infinite; }\
