@@ -59,6 +59,7 @@ export async function crawlSite(
 
   // Large sites: candidates wait in `pending` until a Jev batch says they are worth reading (triage.ts).
   let triageOn = !!options.triage && !!options.forceTriage;
+  const ownPages = new Set<string>(); // declared in the site's page/post sitemaps: read without triage
   const pending: { url: string; depth: number; parent?: string; text: string }[] = [];
   const pendingSeen = new Set<string>();
   let triaging: Promise<void> | null = null;
@@ -82,7 +83,7 @@ export async function crawlSite(
     // word segment twice is skipped.
     const segs = path.split("/").filter((x) => x.length >= 3 && !/^\d+$/.test(x));
     if (new Set(segs).size < segs.length) return;
-    if (triageOn && !KEY_PAGE_PATTERN.test(path) && next.depth > 0) {
+    if (triageOn && !KEY_PAGE_PATTERN.test(path) && next.depth > 0 && !ownPages.has(n)) {
       if (!pendingSeen.has(n)) { pendingSeen.add(n); pending.push({ ...next, text: next.text || "" }); }
       return;
     }
@@ -99,7 +100,7 @@ export async function crawlSite(
   // Sitemap-first discovery: every URL the site declares, not only what is
   // reachable within a few link hops from the homepage.
   if (opts.useSitemap) {
-    const sitemapUrls = await fetchSitemapUrls(baseUrl.origin, robots.sitemaps, opts.userAgent);
+    const sitemapUrls = await fetchSitemapUrls(baseUrl.origin, robots.sitemaps, opts.userAgent, ownPages);
     if (options.triage && sitemapUrls.length >= (Number(process.env.TRIAGE_MIN_URLS) || 300)) triageOn = true;
     let added = 0;
     for (const u of sitemapUrls) {
@@ -283,7 +284,7 @@ const MAX_SITEMAPS = 25;
 const MAX_SITEMAP_URLS = 5000;
 
 /** URLs from robots.txt Sitemap: lines, /sitemap.xml and /sitemap_index.xml, following sitemap indexes. */
-export async function fetchSitemapUrls(origin: string, declared: string[], userAgent: string): Promise<string[]> {
+export async function fetchSitemapUrls(origin: string, declared: string[], userAgent: string, ownPages?: Set<string>): Promise<string[]> {
   const toVisit = [...new Set([...declared, `${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`, `${origin}/wp-sitemap.xml`])];
   const seenMaps = new Set<string>();
   const urls = new Set<string>();
@@ -298,7 +299,12 @@ export async function fetchSitemapUrls(origin: string, declared: string[], userA
       if (!/<(urlset|sitemapindex)\b/i.test(xml)) continue;
       const locs = [...xml.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)\s*(?:\]\]>)?\s*<\/loc>/gi)].map((m) => m[1].replace(/&amp;/g, "&"));
       if (/<sitemapindex\b/i.test(xml)) toVisit.push(...locs);
-      else for (const u of locs) { if (urls.size >= MAX_SITEMAP_URLS) break; urls.add(u); }
+      else for (const u of locs) {
+        if (urls.size >= MAX_SITEMAP_URLS) break;
+        urls.add(u);
+        // The site's own pages and posts (page-sitemap.xml, post-sitemap.xml, sitemap-pages.xml...): always read.
+        if (ownPages && /(^|[\/_-])(page|pages|post|posts)([_-]?sitemap|[_-]?\d*\.xml)|sitemap[_-]?(page|pages|post|posts)\b/i.test(sm)) ownPages.add(normalizeUrl(u));
+      }
     } catch {}
   }
   return [...urls];
