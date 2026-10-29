@@ -1573,7 +1573,8 @@ setInterval(async () => {
     const today = warsaw.toISOString().slice(0, 10);
     if (warsaw.getHours() === 8 && abuseSummaryDay !== today) {
       abuseSummaryDay = today;
-      // Retention (privacy policy): abuse events 90 days, daily counters 30 days.
+      // Retention (privacy policy): chats, expired projects (src/security/retention.ts), abuse events 90 days, daily counters 30 days.
+      await (await import("../src/security/retention.js")).runRetention().catch((e) => console.warn(`[retention] ${e?.message || e}`));
       const { d1Query } = await import("../src/storage/conversation-store.js");
       await d1Query("DELETE FROM abuse_events WHERE at < ?", [new Date(Date.now() - 90 * 86_400_000).toISOString()]).catch(() => {});
       await d1Query("DELETE FROM usage_quota WHERE day < ?", [new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)]).catch(() => {});

@@ -14,7 +14,8 @@
   p, li { color: var(--text); }
   .muted { color: var(--muted); font-size: 14px; }
   a { color: var(--accent); }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; display: block; overflow-x: auto; }
+  td, th { min-width: 110px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 600; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
@@ -61,7 +62,7 @@
   <h2>4. Jak długo przechowujemy dane</h2>
   <ul>
     <li>Rozmowy z czatu: {{CHAT_RETENTION}}.</li>
-    <li>Zapytania i ich pliki (projekty): 30 dni od ostatniej aktywności.</li>
+    <li>Zapytania i ich pliki (projekty): usuwane po 30 dniach od utworzenia i od ostatniej aktywności.</li>
     <li>Dane konta firmy: przez czas korzystania z usługi, potem do upływu okresów wymaganych przepisami (np. księgowymi).</li>
     <li>Zdarzenia bezpieczeństwa (limity, nadużycia): do 90 dni.</li>
   </ul>
