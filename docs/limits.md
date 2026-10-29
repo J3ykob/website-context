@@ -49,8 +49,9 @@ The tables below show each limit as audited; these rows were then changed:
 | Records per business | 150 (MAX_RECORDS) | capability-index.ts | one business must not fill the 100 nearest records; enough for every page's first chunk on most sites |
 | Offer items with their own record | 80 (ITEM_LIMIT); larger offers 60 category records (CATEGORY_LIMIT) | capability-index.ts | kh-bud's items alone filled all 150 and crowded out its page content; a 2,347-product shop summarised by category |
 | Nearest records per search | 100 (QUERY_TOP) | capability-index.ts | Vectorize maximum with indexed-only metadata |
-| Shortlist | chat 16 (2 x CANDIDATES), agent 12 (NETWORK_SHORTLIST), broadcast 6 per part (NETWORK_SHORTLIST_PART) | ask.ts, network.ts, broadcast.ts | measured: Warsaw 10/10 expected businesses in the top 6 (9 at rank 1); fleet of 1,067: 96% in the top 12, 92% top 6 |
-| Use the index from | 0 members (NETWORK_INDEX_FROM) | ask.ts, network.ts, broadcast.ts | the index matched the old per-business path on Warsaw; a network without records keeps the old path |
+| Shortlist | 6 per need part (NETWORK_SHORTLIST_PART), one search for chat and agent (src/network/find.ts) | find.ts | measured: Warsaw 10/10 expected businesses in the top 6 (9 at rank 1); fleet of 1,067: 96% in the top 12, 92% top 6 |
+| Network wait without a live status line | 10 s (was 3.5 s) | chat.ts packsReply | the one search splits the need into parts first: 3-8 s; API calls without the widget missed the network |
+| A priced network offer | a price on one of the 2 best-scored matched items | find.ts | a loose match (grey laminate for grey vinyl) is not a quote |
 | Shortlist cache | 60 min (NETWORK_SEARCH_CACHE_MIN) | capability-index.ts | the same need in the same network; records change only at scrape / offer edit |
 | Record text | 900 chars (chunk excerpt 500) | capability-index.ts | one idea per record keeps similarity sharp |
 

@@ -37,6 +37,15 @@ export async function findOfferItems(question: string, items: OfferItem[], limit
   return (await matchOfferItems(question, items, limit, minScore)) ?? [];
 }
 
+/** Like matchOfferItems, with each item's score (best first) - to order matches from several batches. */
+export async function matchOfferItemsScored(question: string, items: OfferItem[], minScore = ITEM_MIN): Promise<{ item: OfferItem; score: number }[] | null> {
+  if (!items.length || !question.trim()) return [];
+  const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}${i.source === "shop" && i.description.startsWith("SKU: ") ? ` [${i.description.slice(0, i.description.indexOf(".") > 0 ? i.description.indexOf(".") : 40)}]` : ""}`;
+  const scores = await judge(question, items.map(label), "items");
+  if (!scores) return null;
+  return items.map((item, k) => ({ item, score: scores[k] })).filter((r) => r.score >= minScore).sort((a, b) => b.score - a.score);
+}
+
 /** Like findOfferItems, but null when the items could not be judged (Jev down), [] when none match. */
 export async function matchOfferItems(question: string, items: OfferItem[], limit = 8, minScore = ITEM_MIN): Promise<OfferItem[] | null> {
   if (!items.length || !question.trim()) return [];

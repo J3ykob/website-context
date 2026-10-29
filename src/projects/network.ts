@@ -94,9 +94,12 @@ export async function offerMatches(tenantId: string, items: OfferItem[], need: s
   const pool = [...new Set([...near, ...lexical])];
   const batches: OfferItem[][] = [];
   for (let k = 0; k < pool.length; k += JUDGE_BATCH) batches.push(pool.slice(k, k + JUDGE_BATCH));
-  const judged = await Promise.all(batches.map((b) => matchOfferItems(need, b, b.length, 0.4)));
+  // Scored, so matches from different batches are ordered by score (batch order put a grey laminate
+  // ahead of the grey vinyl asked for - 2026-10-29).
+  const { matchOfferItemsScored } = await import("../offer/search.js");
+  const judged = await Promise.all(batches.map((b) => matchOfferItemsScored(need, b, 0.4)));
   if (judged.some((x) => x === null)) return null;
-  const matched = judged.flatMap((x) => x!);
+  const matched = judged.flatMap((x) => x!).sort((a, b) => b.score - a.score).map((x) => x.item);
   // The same product in many sizes would fill the list: at most two of one name.
   const seen = new Map<string, number>();
   return matched.filter((i) => { const key = i.name.toLowerCase().slice(0, 40); const n = (seen.get(key) || 0) + 1; seen.set(key, n); return n <= 2; }).slice(0, ADVERT_ITEMS);
@@ -111,14 +114,6 @@ export async function offerMatches(tenantId: string, items: OfferItem[], need: s
  */
 export async function advertise(need: string, tenantIds: string[]): Promise<Advert[]> {
   const { loadOffer } = await import("../offer/store.js");
-  // The capability index picks the businesses worth judging (one query, any network size); only those are
-  // judged item by item below. Without the index (or below NETWORK_INDEX_FROM members): all of them.
-  if (tenantIds.length >= (Number(process.env.NETWORK_INDEX_FROM) || 0) && tenantIds.length > 1) {
-    const eco = getTenant(tenantIds[0])?.settings?.ecosystem;
-    const { searchNetwork } = await import("../network/capability-index.js");
-    const short = typeof eco === "string" ? await searchNetwork(eco, need, { limit: Number(process.env.NETWORK_SHORTLIST) || 12 }).catch((e) => { console.warn(`[network] index: ${(e as Error).message}`); return null; }) : null;
-    if (short) { const ids = new Set(short.map((s) => s.tenant)); tenantIds = tenantIds.filter((id) => ids.has(id)); }
-  }
   const { jevAsk } = await import("../llm/jev.js");
   const members = new Map((await networkMembers(tenantIds[0]).catch(() => [])).map((m) => [m.tenantId, m]));
   const described = tenantIds.filter((id) => members.get(id)?.about);

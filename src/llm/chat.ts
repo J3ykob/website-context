@@ -865,7 +865,7 @@ export class WebsiteChat {
       if ((!answered || outOfScope) && net) {
         // Matches already there: one reply. Still searching and the widget can show it: say so now, show the
         // search, continue the message when the matches come (the owner's wish 2026-10-27, like Gemini's search).
-        const quick = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), this.statusOf.has(sessionKey) ? 400 : 3500))]);
+        const quick = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), this.statusOf.has(sessionKey) ? 400 : 10000))]); // no live status (API / tests): wait for the network search (3-8 s since it splits the need into parts)
         if (quick === null && this.statusOf.has(sessionKey)) {
           searching = { matches: net.matches, need: net.need };
           behaviour.push(BEHAVIOUR.networkCheck);
