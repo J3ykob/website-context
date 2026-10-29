@@ -21,15 +21,13 @@ export async function embedChunks(
 
   const MAX_RETRIES = 3;
 
-  for (let i = 0; i < chunks.length; i += batchSize) {
-    const batch = chunks.slice(i, i + batchSize);
-    const texts = batch.map((chunk) => prepareChunkForEmbedding(chunk));
-    let success = false;
-
+  // One batch: retried with backoff; if it still fails, split in halves so one bad chunk (or a batch the
+  // embedding service rejects, "8008: Internal server error") doesn't lose the other 49 (empro.pro,
+  // 2026-10-29: 3 batches of 50 lost in a row).
+  const runBatch = async (batch: ContentChunk[], label: string): Promise<void> => {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const embeddings = await provider.embed(texts);
-
+        const embeddings = await provider.embed(batch.map((chunk) => prepareChunkForEmbedding(chunk)));
         const entries: VectorEntry[] = batch.map((chunk, idx) => ({
           id: chunk.id,
           vector: embeddings[idx],
@@ -42,25 +40,40 @@ export async function embedChunks(
             headingHierarchy: chunk.metadata.headingHierarchy,
           },
         }));
-
         await store.upsert(entries);
         embeddedCount += batch.length;
-        success = true;
-        break;
+        return;
       } catch (error) {
         if (attempt < MAX_RETRIES) {
           const delay = attempt * 2000;
-          console.warn(`Embed batch ${i} failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${delay}ms...`);
+          console.warn(`Embed batch ${label} failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${delay}ms...`);
           await new Promise((r) => setTimeout(r, delay));
+        } else if (batch.length > 1) {
+          console.warn(`Embed batch ${label} failed ${MAX_RETRIES} times - splitting it`);
+          const half = Math.ceil(batch.length / 2);
+          await runBatch(batch.slice(0, half), `${label}a`);
+          await runBatch(batch.slice(half), `${label}b`);
         } else {
-          console.error(`Failed to embed batch starting at index ${i} after ${MAX_RETRIES} attempts:`, error);
-          failedCount += batch.length;
+          console.error(`Failed to embed chunk ${label} (${batch[0].metadata.url}) after ${MAX_RETRIES} attempts:`, error);
+          failedCount += 1;
         }
       }
     }
+  };
 
-    onProgress?.(Math.min(i + batchSize, chunks.length), chunks.length);
-  }
+  // A few batches at a time (EMBED_CONCURRENCY, default 4): one at a time took ~20 min for a 3k-chunk shop.
+  const starts: number[] = [];
+  for (let i = 0; i < chunks.length; i += batchSize) starts.push(i);
+  let next = 0, done = 0;
+  const lane = async () => {
+    while (next < starts.length) {
+      const i = starts[next++];
+      await runBatch(chunks.slice(i, i + batchSize), String(i));
+      done += Math.min(batchSize, chunks.length - i);
+      onProgress?.(done, chunks.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Number(process.env.EMBED_CONCURRENCY) || 4) }, lane));
 
   return {
     totalChunks: chunks.length,
