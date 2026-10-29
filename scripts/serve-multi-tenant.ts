@@ -1068,12 +1068,6 @@ app.post("/api/onboard-demo", async (req, res) => {
 // The owner is interviewed and their answers become the KB — no scrape. Public
 // (a brand-new business has no password yet); IP rate-limited like signup. The
 // client holds the transcript and sends it each turn (server stays stateless).
-// Admin: the proxy headers as received (calibrating clientIp / TRUSTED_PROXY_HOPS).
-app.get("/api/admin/echo-ip", (req, res) => {
-  if (!adminOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
-  res.json({ clientIp: clientIp(req), xff: req.headers["x-forwarded-for"] || null, cf: req.headers["cf-connecting-ip"] || null, trueClient: req.headers["true-client-ip"] || null, xRealIp: req.headers["x-real-ip"] || null, remote: req.socket.remoteAddress, host: req.headers.host });
-});
-
 app.post("/api/interview/start", async (req, res) => {
   const ip = clientIp(req);
   if (!checkSignupRate(ip)) { res.status(429).json({ error: "Za dużo prób. Spróbuj za chwilę." }); return; }
