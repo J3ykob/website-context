@@ -131,6 +131,22 @@ export async function broadcastNeed(need: string, tenantIds: string[], ownFirst?
   const { loadOffer } = await import("../offer/store.js");
   const { offerMatches, networkMembers, businessLabel } = await import("./network.js");
   const members = new Map((await networkMembers(tenantIds[0]).catch(() => [])).map((m) => [m.tenantId, m]));
+  // The capability index: per part, one query names the businesses worth asking (any network size); only
+  // they (and the business running the project) are judged and answer below. Without the index, or below
+  // NETWORK_INDEX_FROM members, every member is asked as before (docs/limits.md).
+  if (tenantIds.length >= (Number(process.env.NETWORK_INDEX_FROM) || 0) && tenantIds.length > 1) {
+    const { getTenant } = await import("../multi-tenant/d1-registry.js");
+    const eco = getTenant(ownFirst || tenantIds[0])?.settings?.ecosystem;
+    if (typeof eco === "string" && eco) {
+      const { searchNetwork } = await import("../network/capability-index.js");
+      const per = await Promise.all(parts.map((p) => searchNetwork(eco, p, { limit: Number(process.env.NETWORK_SHORTLIST_PART) || 6 }).catch(() => null)));
+      if (per.every((x) => x !== null)) {
+        const keep = new Set([...(ownFirst ? [ownFirst] : []), ...per.flatMap((x) => x!.map((c) => c.tenant))]);
+        console.log(`[broadcast] network index: ${tenantIds.length} members -> ${keep.size} asked (${parts.length} parts)`);
+        tenantIds = tenantIds.filter((id) => keep.has(id));
+      }
+    }
+  }
   const query = parts.join("\n");
   const offers = new Map(await Promise.all(tenantIds.map(async (id) => [id, (await loadOffer(id).catch(() => null))?.items || []] as const)));
   const answersOf = async (ids: string[]): Promise<NetworkOffer[]> => {

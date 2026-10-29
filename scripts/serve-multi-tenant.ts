@@ -86,6 +86,7 @@ import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
 import { mintRelayToken } from "../src/voice/relay-token.js";
 import { jevAsk, jevHealth } from "../src/llm/jev.js";
 import { clientIp } from "../src/security/client-ip.js";
+import { ecosystemOf } from "../src/ecosystem/ask.js";
 import { verifiedHistory, signAssistant } from "../src/security/history-sig.js";
 import { budgetBefore, budgetAfter, setBudgetAlert } from "../src/security/budget.js";
 import { logAbuse } from "../src/security/quota.js";
@@ -1210,7 +1211,19 @@ let lastChatError: { tenantId: string; cause: string; msg: string; at: string } 
 
 // Goal-driven ("agent") flows: one Jev-decided step per call (src/agent/routes.ts).
 registerAgentRoutes(app, { auth: authMiddleware, onFlowsChanged: (id) => tenantManager.evictTenant(id) });
-registerOfferRoutes(app, { auth: authMiddleware, onChanged: (id) => tenantManager.evictTenant(id) });
+registerOfferRoutes(app, { auth: authMiddleware, onChanged: (id) => { tenantManager.evictTenant(id); reindexNetwork(id); } });
+
+// Admin: rebuild the network capability index for one business or a whole network (?ecosystem=).
+app.post("/api/admin/network-index", async (req, res) => {
+  if (!adminOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
+  const eco = String(req.query.ecosystem || ""), one = String(req.query.tenantId || "");
+  const ids = one ? [one] : listTenants().filter((t: any) => t.status === "active" && ecosystemOf(t) === eco).map((t: any) => t.id);
+  if (!ids.length) { res.status(400).json({ error: "tenantId or ecosystem with active members required" }); return; }
+  const { indexBusiness } = await import("../src/network/capability-index.js");
+  const out: Record<string, number | string> = {};
+  for (const id of ids) out[id] = await indexBusiness(id).catch((e) => `error: ${(e as Error).message.slice(0, 120)}`);
+  res.json({ ok: true, indexed: out });
+});
 registerProjectRoutes(app, { auth: authMiddleware });
 
 /**
@@ -1907,7 +1920,16 @@ async function runKnowledgeAudit(tenantId: string) {
   return report;
 }
 // After every scrape: the audit on the fresh data (KNOWLEDGE_AUDIT_AFTER_SCRAPE=0 turns it off).
+// A business in a network: its capability records are rebuilt after each scrape and offer change
+// (src/network/capability-index.ts), so network search always sees what it offers now.
+function reindexNetwork(tenantId: string): void {
+  if (!ecosystemOf(getTenant(tenantId))) return;
+  void import("../src/network/capability-index.js").then((m) => m.indexBusiness(tenantId))
+    .then((n) => console.log(`[network-index] ${tenantId}: ${n} records`))
+    .catch((e) => console.warn(`[network-index] ${tenantId}: ${(e as Error).message}`));
+}
 worker.onScraped = (tenantId) => {
+  reindexNetwork(tenantId);
   if (process.env.KNOWLEDGE_AUDIT_AFTER_SCRAPE === "0") return;
   tenantManager.evictTenant(tenantId);
   setTimeout(() => { runKnowledgeAudit(tenantId).catch((e) => console.warn(`[audit] ${tenantId} failed: ${(e as Error).message}`)); }, 10_000);

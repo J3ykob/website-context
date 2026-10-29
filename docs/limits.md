@@ -42,6 +42,18 @@ The tables below show each limit as audited; these rows were then changed:
 | turnKind (conversation.ts), MUST_ASK_MAX duplicate | dead code / hard-coded 4 | removed / one constant | unused since 2026-10-22 |
 | tests/self-hosted.test.ts | tested the GPU box + Qdrant | removed | infrastructure gone |
 
+### Network capability index (src/network/capability-index.ts, added 2026-10-29)
+
+| Limit | Value | Where | Why (trace) |
+|---|---|---|---|
+| Records per business | 150 (MAX_RECORDS) | capability-index.ts | one business must not fill the 100 nearest records; enough for every page's first chunk on most sites |
+| Offer items with their own record | 80 (ITEM_LIMIT); larger offers 60 category records (CATEGORY_LIMIT) | capability-index.ts | kh-bud's items alone filled all 150 and crowded out its page content; a 2,347-product shop summarised by category |
+| Nearest records per search | 100 (QUERY_TOP) | capability-index.ts | Vectorize maximum with indexed-only metadata |
+| Shortlist | chat 16 (2 x CANDIDATES), agent 12 (NETWORK_SHORTLIST), broadcast 6 per part (NETWORK_SHORTLIST_PART) | ask.ts, network.ts, broadcast.ts | measured: Warsaw 10/10 expected businesses in the top 6 (9 at rank 1); fleet of 1,067: 96% in the top 12, 92% top 6 |
+| Use the index from | 0 members (NETWORK_INDEX_FROM) | ask.ts, network.ts, broadcast.ts | the index matched the old per-business path on Warsaw; a network without records keeps the old path |
+| Shortlist cache | 60 min (NETWORK_SEARCH_CACHE_MIN) | capability-index.ts | the same need in the same network; records change only at scrape / offer edit |
+| Record text | 900 chars (chunk excerpt 500) | capability-index.ts | one idea per record keeps similarity sharp |
+
 Spend caps (budget.ts) stay: $1 per conversation, $10 per business, $80 overall per day. Measured on 2026-10-29:
 OpenRouter $3.22 that day (heavy testing), $9.82 that week, $57 that month - $80/day is ~8x the busiest day, a stop
 against runaway loops only.

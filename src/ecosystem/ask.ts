@@ -98,9 +98,17 @@ export async function askEcosystem(
   onStart?.();
   const t0 = Date.now();
 
-  // 1. Each member's own closest chunks.
+  // 1. Each candidate's own closest chunks. A network with the capability index: one query there picks
+  // the candidates first (constant cost at any size - src/network/capability-index.ts); without it (or
+  // below NETWORK_INDEX_FROM members), every member is queried as before.
   const [vector] = await deps.embed([question]);
-  const found = await mapLimited(members, QUERY_PARALLEL, async (m) => {
+  let pool = members;
+  if (members.length >= (Number(process.env.NETWORK_INDEX_FROM) || 0)) {
+    const { searchNetwork } = await import("../network/capability-index.js");
+    const short = await searchNetwork(ecosystem, question, { exclude: [fromTenantId], limit: CANDIDATES * 2, vector }).catch((e) => { console.warn(`[ecosystem] network index: ${(e as Error).message}`); return null; });
+    if (short) { const ids = new Set(short.map((s) => s.tenant)); pool = members.filter((m) => ids.has(m.id)); }
+  }
+  const found = await mapLimited(pool, QUERY_PARALLEL, async (m) => {
     try {
       const hits = await new CloudflareVectorizeStore({ tenantId: m.id }).search(vector, PASSAGES);
       return { m, hits: hits.filter((h) => h.content.trim()), best: hits[0]?.score ?? 0 };

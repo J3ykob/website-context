@@ -111,6 +111,14 @@ export async function offerMatches(tenantId: string, items: OfferItem[], need: s
  */
 export async function advertise(need: string, tenantIds: string[]): Promise<Advert[]> {
   const { loadOffer } = await import("../offer/store.js");
+  // The capability index picks the businesses worth judging (one query, any network size); only those are
+  // judged item by item below. Without the index (or below NETWORK_INDEX_FROM members): all of them.
+  if (tenantIds.length >= (Number(process.env.NETWORK_INDEX_FROM) || 0) && tenantIds.length > 1) {
+    const eco = getTenant(tenantIds[0])?.settings?.ecosystem;
+    const { searchNetwork } = await import("../network/capability-index.js");
+    const short = typeof eco === "string" ? await searchNetwork(eco, need, { limit: Number(process.env.NETWORK_SHORTLIST) || 12 }).catch((e) => { console.warn(`[network] index: ${(e as Error).message}`); return null; }) : null;
+    if (short) { const ids = new Set(short.map((s) => s.tenant)); tenantIds = tenantIds.filter((id) => ids.has(id)); }
+  }
   const { jevAsk } = await import("../llm/jev.js");
   const members = new Map((await networkMembers(tenantIds[0]).catch(() => [])).map((m) => [m.tenantId, m]));
   const described = tenantIds.filter((id) => members.get(id)?.about);
