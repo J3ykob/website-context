@@ -88,6 +88,9 @@ services:
       # Customer "your result is ready" by SMS / WhatsApp (templates/messages) - approved 2026-10-26.
       - key: CUSTOMER_UPDATES_APPROVED
         value: "1"
+      # "New offer" SMS/WhatsApp/Telegram to the customer (templates/messages/new-offer.*, with our phone) - approved 2026-10-29.
+      - key: CUSTOMER_OFFER_UPDATES_APPROVED
+        value: "1"
       - key: NETWORK_INVITE_PHONE
         value: "+48 729 086 795"
       - key: NETWORK_PLAN_PRICE_PLN

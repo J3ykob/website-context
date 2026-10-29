@@ -1,2 +1,4 @@
-# {{business}} the business that sent the offer · {{brand}} where the customer asked · {{link}} status page
+# Approved 2026-10-29. {{business}} the business that sent the offer · {{brand}} where the customer asked · {{link}} status page · {{phone}} our number (calls forward to Whisp)
 New offer from {{business}} for your request ({{brand}}). See: {{link}}
+
+You can also call us: {{phone}} - we'll give you the offer and all the details.

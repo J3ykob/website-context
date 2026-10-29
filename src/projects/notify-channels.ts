@@ -69,7 +69,9 @@ export function sendResultReady(contact: CustomerContact, vars: { brand: string;
 
 /** "A business sent an offer" (templates/messages/new-offer.<lang>.txt; its own approval: CUSTOMER_OFFER_UPDATES_APPROVED=1). */
 export function sendNewOffer(contact: CustomerContact, vars: { brand: string; business: string; link: string }): Promise<Record<string, string>> {
-  return sendUpdate(contact, "new-offer", vars, process.env.CUSTOMER_UPDATES_APPROVED === "1" && process.env.CUSTOMER_OFFER_UPDATES_APPROVED === "1");
+  // Our number for "call us" (calls to it forward to Whisp - /api/voice/incoming).
+  const phone = process.env.CUSTOMER_UPDATES_PHONE || process.env.NETWORK_INVITE_PHONE || "+48 729 086 795";
+  return sendUpdate(contact, "new-offer", { ...vars, phone }, process.env.CUSTOMER_UPDATES_APPROVED === "1" && process.env.CUSTOMER_OFFER_UPDATES_APPROVED === "1");
 }
 
 async function sendUpdate(contact: CustomerContact, name: string, vars: Record<string, string>, approved: boolean): Promise<Record<string, string>> {
