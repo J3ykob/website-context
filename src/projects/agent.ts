@@ -765,12 +765,18 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
     const { isListed } = await import("./network.js");
     const later = (((proj?.memory.subRequests as any[]) || []).filter((x) => x.status === "answered" && (x.ownerAsked || isListed(x.tenantId)))).map((x) => String(x.label));
     const arranged = later.length ? `Businesses ${later.join(", ")} were asked for a quote; their offers will appear on the customer's status page and the customer is notified when they come.` : "(nothing)";
-    const cq = await jevAsk({ text_for_customer: reply.slice(0, 3000), arranged }, {
+    // A total built on quantities nobody gave (scaffolding priced per element per day, the customer gave only
+    // the house size: the agent took one of each element - chain test C5, 2026-10-30).
+    await req("sys-agent-given-quantities", "Every total in the reply uses only quantities the customer gave or the data states (no assumed piece counts).", "jev");
+    const cq = await jevAsk({ text_for_customer: reply.slice(0, 3000), arranged, customer_request: customer.slice(0, 2000) }, {
+      q: { type: "noul", instructions: "Does `text_for_customer` state a total (or a sum for a period) computed with a quantity that neither `customer_request` nor the prices themselves give - for example one piece of each element or a guessed number of items, when the customer gave only an area, a size or a duration? Totals from quantities the customer gave, or from a fixed price, do not count; rates shown per unit without a total do not count." },
       b: { type: "noul", instructions: "Does `text_for_customer` contain anything meant for the business rather than the customer: a question to the business or its staff, a request that the business confirms or checks something, an internal note about assumptions the business should verify, or instructions for the business? Telling the customer what is unknown or still to be agreed with the business is fine and does not count." },
       p: { type: "noul", instructions: "Does `text_for_customer` promise a later action that is NOT described in `arranged` (the follow-ups that are really set up): that the assistant will update, complete or send something later, or that the business will contact the customer, get back to them or send something? A promise matching `arranged` does not count, nor does saying what the customer can do (e.g. ask the business)." },
     }, 8000);
     const pb = (cq?.b as any)?.noul as number | undefined;
     results.push({ reqId: "sys-agent-customer-only", status: pb === undefined ? "open" : pb < 0.5 ? "met" : "failed", evidence: `P(content for the business) = ${pb?.toFixed(2) ?? "n/a"}` });
+    const pq = (cq?.q as any)?.noul as number | undefined;
+    results.push({ reqId: "sys-agent-given-quantities", status: pq === undefined ? "open" : pq < 0.5 ? "met" : "failed", evidence: `P(total from assumed quantities) = ${pq?.toFixed(2) ?? "n/a"}` });
     const pp = (cq?.p as any)?.noul as number | undefined;
     results.push({ reqId: "sys-agent-no-promise", status: pp === undefined ? "open" : pp < 0.5 ? "met" : "failed", evidence: `P(promises a follow-up) = ${pp?.toFixed(2) ?? "n/a"}` });
     if (totals.length) {
