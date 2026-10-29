@@ -38,7 +38,8 @@ export interface ScrapePipelineResult {
 export async function scrapeTenant(
   tenantId: string,
   siteUrl: string,
-  maxPages: number
+  maxPages: number,
+  signal?: AbortSignal,
 ): Promise<ScrapePipelineResult> {
   const provider = new BGEEmbeddingProvider({
     host: process.env.BGE_HOST,
@@ -67,7 +68,7 @@ export async function scrapeTenant(
   // Products & services index: JSON-LD + each page's readable text, taken
   // before the context builder drops the page's HTML.
   const offerIndexer = createOfferIndexer();
-  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, onPage: (page) => {
+  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, onPage: (page) => {
     if (page.fetch?.html) offerIndexer.addPage(page.fetch.html, page.url);
     return builder.addPage(page);
   } });

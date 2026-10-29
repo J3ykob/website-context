@@ -5,7 +5,7 @@ import { fetchPdfAsPage } from "./pdf.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
 import { createHash } from "crypto";
 
-const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage">> = {
+const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal">> = {
   maxPages: 500,
   maxDepth: 10,
   respectRobotsTxt: true,
@@ -63,6 +63,12 @@ export async function crawlSite(
     if (visited.has(n)) return;
     let path = "";
     try { path = new URL(n).pathname; } catch { return; }
+    // Crawler trap: relative links (href="kategoria-produktu/x") resolved on a nested page nest deeper
+    // forever, and many CMSs serve any such path (empro.pro, 2026-10-29: 30 min of
+    // /kategoria-produktu/a/kategoria-produktu/b/kategoria-produktu/c...). A path naming the same
+    // word segment twice is skipped.
+    const segs = path.split("/").filter((x) => x.length >= 3 && !/^\d+$/.test(x));
+    if (new Set(segs).size < segs.length) return;
     if (KEY_PAGE_PATTERN.test(path)) {
       const firstNonKey = queue.findIndex((q) => { try { return !KEY_PAGE_PATTERN.test(new URL(q.url).pathname); } catch { return true; } });
       queue.splice(firstNonKey < 0 ? queue.length : firstNonKey, 0, next);
@@ -154,6 +160,18 @@ export async function crawlSite(
     }
 
     const page = extractPage(fetchResult);
+    // The page names its real address (rel=canonical): an alias of a page we have, or will fetch, is not
+    // fetched twice - and its links (resolved against the alias) are not followed.
+    const canonicalRaw = page.metadata?.canonical;
+    if (canonicalRaw) {
+      let canonical = "";
+      try { canonical = normalizeUrl(new URL(canonicalRaw, normalizedUrl).toString()); } catch {}
+      if (canonical && canonical !== normalizedUrl && allowedHosts.has(new URL(canonical).hostname)) {
+        if (visited.has(canonical)) { console.log(`  [DUP] alias of ${canonical}: ${normalizedUrl}`); return; }
+        visited.add(canonical);
+        page.url = canonical; // sources and links point at the real address
+      }
+    }
     // Same text under a different URL (query variants, print views, aliases): skip.
     const hash = contentHash(page);
     if (hash && contentHashes.has(hash)) { console.log(`  [DUP] same content as an earlier page: ${normalizedUrl}`); return; }
@@ -177,6 +195,7 @@ export async function crawlSite(
   const worker = async (): Promise<void> => {
     while (true) {
       if (pages.length + inFlight >= opts.maxPages) return;
+      if (options.signal?.aborted) return; // the job timed out: stop, don't run on beside the retry
       const item = queue.shift();
       if (!item) {
         if (inFlight === 0) return;
@@ -294,7 +313,7 @@ async function fetchRobotsTxt(origin: string, userAgent: string): Promise<{ disa
 function isAllowedUrl(
   url: string,
   allowedHosts: Set<string>,
-  opts: Required<Omit<CrawlOptions, "onPage">>,
+  opts: Required<Omit<CrawlOptions, "onPage" | "signal">>,
   disallowedPaths: string[]
 ): boolean {
   try {

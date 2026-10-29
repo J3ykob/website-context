@@ -226,11 +226,13 @@ export class ScrapeWorker {
 
       console.log(`[worker] Starting ${job.tenantId} (attempt ${job.attempt}/${MAX_RETRIES})`);
 
+      // On timeout the crawl is told to stop too (it ran on beside the retry until 2026-10-29).
+      const stop = new AbortController();
       const result = await withTimeout(
-        scrapeTenant(job.tenantId, job.siteUrl, job.maxPages),
+        scrapeTenant(job.tenantId, job.siteUrl, job.maxPages, stop.signal),
         JOB_TIMEOUT_MS,
         `scrape ${job.tenantId}`,
-      );
+      ).catch((e) => { stop.abort(); throw e; });
 
       await forceCleanupBrowser();
 

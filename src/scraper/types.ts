@@ -104,4 +104,6 @@ export interface CrawlOptions {
   // A consumer that processes pages here keeps memory flat: the crawl no longer
   // holds every page's HTML until the end.
   onPage?: (page: ScrapedPage) => Promise<void> | void;
+  /** Aborted (the job timed out): no new pages are started. */
+  signal?: AbortSignal;
 }
