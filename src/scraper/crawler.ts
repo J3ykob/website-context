@@ -5,7 +5,7 @@ import { fetchPdfAsPage } from "./pdf.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
 import { createHash } from "crypto";
 
-const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip">> = {
+const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip" | "triage" | "forceTriage">> = {
   maxPages: 500,
   maxDepth: 10,
   respectRobotsTxt: true,
@@ -57,8 +57,20 @@ export async function crawlSite(
   let dynamicCount = 0;
   let inFlight = 0;
 
+  // Large sites: candidates wait in `pending` until a Jev batch says they are worth reading (triage.ts).
+  let triageOn = !!options.triage && !!options.forceTriage;
+  const pending: { url: string; depth: number; parent?: string; text: string }[] = [];
+  const pendingSeen = new Set<string>();
+  let triaging: Promise<void> | null = null;
+  let skippedByTriage = 0;
+  const runTriage = async (): Promise<void> => {
+    const batch = pending.splice(0, 60); // smaller batches: each address gets attention
+    if (!batch.length) return;
+    const keep = await options.triage!(batch.map((b) => ({ url: b.url, text: b.text }))).catch(() => null);
+    batch.forEach((b, i) => { if (!keep || keep[i]) queue.push(b); else skippedByTriage++; });
+  };
   // Key pages (contact, pricing, hours...) jump the queue so they are fetched early.
-  const enqueue = (next: { url: string; depth: number; parent?: string }) => {
+  const enqueue = (next: { url: string; depth: number; parent?: string; text?: string }) => {
     const n = normalizeUrl(next.url);
     if (visited.has(n)) return;
     if (options.skip?.(n)) return;
@@ -70,6 +82,10 @@ export async function crawlSite(
     // word segment twice is skipped.
     const segs = path.split("/").filter((x) => x.length >= 3 && !/^\d+$/.test(x));
     if (new Set(segs).size < segs.length) return;
+    if (triageOn && !KEY_PAGE_PATTERN.test(path) && next.depth > 0) {
+      if (!pendingSeen.has(n)) { pendingSeen.add(n); pending.push({ ...next, text: next.text || "" }); }
+      return;
+    }
     if (KEY_PAGE_PATTERN.test(path)) {
       const firstNonKey = queue.findIndex((q) => { try { return !KEY_PAGE_PATTERN.test(new URL(q.url).pathname); } catch { return true; } });
       queue.splice(firstNonKey < 0 ? queue.length : firstNonKey, 0, next);
@@ -84,6 +100,7 @@ export async function crawlSite(
   // reachable within a few link hops from the homepage.
   if (opts.useSitemap) {
     const sitemapUrls = await fetchSitemapUrls(baseUrl.origin, robots.sitemaps, opts.userAgent);
+    if (options.triage && sitemapUrls.length >= (Number(process.env.TRIAGE_MIN_URLS) || 300)) triageOn = true;
     let added = 0;
     for (const u of sitemapUrls) {
       try { if (!allowedHosts.has(new URL(u).hostname)) continue; } catch { continue; }
@@ -190,7 +207,7 @@ export async function crawlSite(
     for (const link of page.links) {
       let linkHost = "";
       try { linkHost = new URL(link.href).hostname; } catch { continue; }
-      if (allowedHosts.has(linkHost)) enqueue({ url: link.href, depth: item.depth + 1, parent: normalizedUrl });
+      if (allowedHosts.has(linkHost)) enqueue({ url: link.href, depth: item.depth + 1, parent: normalizedUrl, text: (link.text || "").slice(0, 80) });
     }
     // A consumer already processed the page: keep only what the site map needs.
     if (options.onPage) { page.content = []; page.links = []; page.forms = []; page.structuredData = []; }
@@ -200,9 +217,14 @@ export async function crawlSite(
     while (true) {
       if (pages.length + inFlight >= opts.maxPages) return;
       if (options.signal?.aborted) return; // the job timed out: stop, don't run on beside the retry
+      if (!queue.length && pending.length) {
+        if (!triaging) triaging = runTriage().finally(() => { triaging = null; });
+        await triaging;
+        continue;
+      }
       const item = queue.shift();
       if (!item) {
-        if (inFlight === 0) return;
+        if (inFlight === 0 && !pending.length && !triaging) return;
         await sleep(100); // another worker may still add links
         continue;
       }
@@ -230,6 +252,7 @@ export async function crawlSite(
 
   await closeBrowser();
 
+  if (triageOn) console.log(`  [triage] ${skippedByTriage} page(s) judged not worth reading, ${pending.length} left unjudged`);
   const stats: CrawlStats = {
     totalPages: visited.size,
     successPages: pages.length,
@@ -317,7 +340,7 @@ async function fetchRobotsTxt(origin: string, userAgent: string): Promise<{ disa
 function isAllowedUrl(
   url: string,
   allowedHosts: Set<string>,
-  opts: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip">>,
+  opts: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip" | "triage" | "forceTriage">>,
   disallowedPaths: string[]
 ): boolean {
   try {

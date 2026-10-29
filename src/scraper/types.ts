@@ -108,4 +108,10 @@ export interface CrawlOptions {
   signal?: AbortSignal;
   /** Pages not to crawl (a shop's product pages, read from its catalogue instead - catalogue.ts). */
   skip?: (url: string) => boolean;
+  /**
+   * Large sites: which candidate pages are worth reading (address + link text, judged in batches - see
+   * scraper/triage.ts). Applied when the sitemap declares TRIAGE_MIN_URLS+ addresses or forceTriage is set.
+   */
+  triage?: (cands: { url: string; text: string }[]) => Promise<boolean[] | null>;
+  forceTriage?: boolean;
 }

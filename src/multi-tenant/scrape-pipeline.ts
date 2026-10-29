@@ -73,7 +73,9 @@ export async function scrapeTenant(
   const { readCatalogue, coveredByCatalogue } = await import("../scraper/catalogue.js");
   const catalogue = await readCatalogue(siteUrl).catch((e) => { console.warn(`[scrape-pipeline] catalogue: ${(e as Error).message}`); return null; });
   if (catalogue) console.log(`[scrape-pipeline] Catalogue (${catalogue.source}): ${catalogue.items.length} products for ${tenantId}; their pages (${catalogue.productPrefixes.join(", ") || "listed URLs"}) are not crawled`);
-  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, skip: catalogue ? (u) => coveredByCatalogue(catalogue, u) : undefined, onPage: (page) => {
+  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, skip: catalogue ? (u) => coveredByCatalogue(catalogue, u) : undefined,
+    // Large sites: Jev picks the pages worth reading by address and link text (scraper/triage.ts).
+    triage: (await import("../scraper/triage.js")).makeTriage(catalogue ? "This is a shop whose products are read from its catalogue separately, so category and product listings are not needed." : ""), forceTriage: !!catalogue, onPage: (page) => {
     if (page.fetch?.html) offerIndexer.addPage(page.fetch.html, page.url);
     return builder.addPage(page);
   } });
