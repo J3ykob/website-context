@@ -48,7 +48,7 @@ function* walk(node: any): Generator<any> {
 }
 
 /** Items a page declares in JSON-LD - exact, no model. */
-function fromJsonLd($: cheerio.CheerioAPI, url: string): OfferItem[] {
+export function fromJsonLd($: cheerio.CheerioAPI, url: string): OfferItem[] {
   const out: OfferItem[] = [];
   $('script[type="application/ld+json"]').each((_: any, el: any) => {
     let data: any;

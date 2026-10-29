@@ -5,7 +5,7 @@ import { fetchPdfAsPage } from "./pdf.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
 import { createHash } from "crypto";
 
-const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal">> = {
+const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip">> = {
   maxPages: 500,
   maxDepth: 10,
   respectRobotsTxt: true,
@@ -61,6 +61,7 @@ export async function crawlSite(
   const enqueue = (next: { url: string; depth: number; parent?: string }) => {
     const n = normalizeUrl(next.url);
     if (visited.has(n)) return;
+    if (options.skip?.(n)) return;
     let path = "";
     try { path = new URL(n).pathname; } catch { return; }
     // Crawler trap: relative links (href="kategoria-produktu/x") resolved on a nested page nest deeper
@@ -166,7 +167,10 @@ export async function crawlSite(
     if (canonicalRaw) {
       let canonical = "";
       try { canonical = normalizeUrl(new URL(canonicalRaw, normalizedUrl).toString()); } catch {}
-      if (canonical && canonical !== normalizedUrl && allowedHosts.has(new URL(canonical).hostname)) {
+      let finalNorm = normalizedUrl;
+      try { finalNorm = normalizeUrl(fetchResult.finalUrl || normalizedUrl); } catch {}
+      // Its own address after a redirect (vitejs.dev -> vite.dev) is not an alias of another page.
+      if (canonical && canonical !== normalizedUrl && canonical !== finalNorm && allowedHosts.has(new URL(canonical).hostname)) {
         if (visited.has(canonical)) { console.log(`  [DUP] alias of ${canonical}: ${normalizedUrl}`); return; }
         visited.add(canonical);
         page.url = canonical; // sources and links point at the real address
@@ -313,7 +317,7 @@ async function fetchRobotsTxt(origin: string, userAgent: string): Promise<{ disa
 function isAllowedUrl(
   url: string,
   allowedHosts: Set<string>,
-  opts: Required<Omit<CrawlOptions, "onPage" | "signal">>,
+  opts: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip">>,
   disallowedPaths: string[]
 ): boolean {
   try {

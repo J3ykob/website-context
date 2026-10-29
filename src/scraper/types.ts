@@ -106,4 +106,6 @@ export interface CrawlOptions {
   onPage?: (page: ScrapedPage) => Promise<void> | void;
   /** Aborted (the job timed out): no new pages are started. */
   signal?: AbortSignal;
+  /** Pages not to crawl (a shop's product pages, read from its catalogue instead - catalogue.ts). */
+  skip?: (url: string) => boolean;
 }

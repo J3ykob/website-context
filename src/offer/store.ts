@@ -22,7 +22,7 @@ export interface OfferItem {
   price_max: number | null;      // upper bound for "range"
   currency: string;              // "PLN" unless stated otherwise
   components: PriceComponent[];  // a price made of several parts
-  source: "manual" | "file" | "website" | "sheet";
+  source: "manual" | "file" | "website" | "sheet" | "shop"; // shop = the store's own catalogue (src/scraper/catalogue.ts)
   owner_set: FieldId[];          // fields the owner set (a re-scrape keeps them)
   url: string;                   // where it was found (website items)
   updatedAt: string;
@@ -36,7 +36,7 @@ export interface Offer {
 }
 
 const KEY = (tenantId: string) => `tenants/${tenantId}/offer.json`;
-const MAX_ITEMS = 5000;
+const MAX_ITEMS = 12000; // a shop catalogue (src/scraper/catalogue.ts) can be large; beyond it the chat searches the shop live
 const cache = new Map<string, { offer: Offer; at: number }>();
 
 export function emptyOffer(): Offer {
@@ -135,7 +135,7 @@ export function clean(raw: any, source?: OfferItem["source"]): OfferItem | null 
     price_max: num(raw?.price_max),
     currency: str(raw?.currency, 8).toUpperCase() || "PLN",
     components: (Array.isArray(raw?.components) ? raw.components : []).slice(0, 20).map(cleanComponent).filter(Boolean) as PriceComponent[],
-    source: source || (["file", "website", "sheet"].includes(raw?.source) ? raw.source : "manual"),
+    source: source || (["file", "website", "sheet", "shop"].includes(raw?.source) ? raw.source : "manual"),
     owner_set: (Array.isArray(raw?.owner_set) ? raw.owner_set : []).filter((f: string) => f in FIELDS),
     url: str(raw?.url, 500),
     updatedAt: str(raw?.updatedAt, 40) || new Date().toISOString(),

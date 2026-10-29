@@ -180,6 +180,7 @@ export class TenantManager {
       brandName: getTenant(tenantId)?.brandName || new URL(meta.siteUrl).hostname.replace(/^www\./, ""),
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
       offerItems: (await loadOffer(tenantId).catch(() => null))?.items || [],
+      catalogue: getTenant(tenantId)?.settings?.catalogue || null,
       networkOffers: () => networkOffers(tenantId),
       // The best-ranked businesses of this tenant's ecosystem answer what its own site can't.
       askEcosystem: ecosystemOf(getTenant(tenantId))

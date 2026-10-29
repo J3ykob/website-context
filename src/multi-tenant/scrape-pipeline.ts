@@ -68,7 +68,12 @@ export async function scrapeTenant(
   // Products & services index: JSON-LD + each page's readable text, taken
   // before the context builder drops the page's HTML.
   const offerIndexer = createOfferIndexer();
-  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, onPage: (page) => {
+  // A large shop: its products come from its own catalogue (store API / product data), their pages are
+  // not crawled; every other page is (src/scraper/catalogue.ts). Not a shop, or a small one: null.
+  const { readCatalogue, coveredByCatalogue } = await import("../scraper/catalogue.js");
+  const catalogue = await readCatalogue(siteUrl).catch((e) => { console.warn(`[scrape-pipeline] catalogue: ${(e as Error).message}`); return null; });
+  if (catalogue) console.log(`[scrape-pipeline] Catalogue (${catalogue.source}): ${catalogue.items.length} products for ${tenantId}; their pages (${catalogue.productPrefixes.join(", ") || "listed URLs"}) are not crawled`);
+  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, skip: catalogue ? (u) => coveredByCatalogue(catalogue, u) : undefined, onPage: (page) => {
     if (page.fetch?.html) offerIndexer.addPage(page.fetch.html, page.url);
     return builder.addPage(page);
   } });
@@ -293,7 +298,8 @@ export async function scrapeTenant(
 
   // Products & services index (LLM reads the offer pages, code checks it). It
   // updates the offer: values the owner set are kept. Non-fatal.
-  if (offerIndexer.size > 0) {
+  // A shop with a catalogue: its products come from the catalogue below, not from the model reading pages.
+  if (offerIndexer.size > 0 && !catalogue) {
     try {
       const or = new OpenRouterProvider({ maxTokens: 3000, temperature: 0 });
       const llm = async (system: string, user: string, maxTokens = 3000) => (await or.chat([{ role: "system", content: system }, { role: "user", content: user }], { maxTokens })).content;
@@ -312,6 +318,31 @@ export async function scrapeTenant(
     } catch (err) {
       console.warn(`[scrape-pipeline] Offer index skipped: ${(err as Error).message}`);
     }
+  }
+
+  // The catalogue's products into the offer (replacing the previous catalogue; items the owner touched are
+  // kept), the tenant marked as a shop (the chat then searches products), and the product vectors built
+  // now - not on the first customer question.
+  if (catalogue) {
+    try {
+      const prev = await loadOffer(tenantId);
+      const kept = prev.items.filter((i) => (i.source !== "shop" && i.source !== "website") || i.owner_set.length > 0); // the catalogue replaces items read from pages
+      await saveOffer(tenantId, mergeItems(kept, catalogue.items));
+      const { getTenant, updateTenant } = await import("./d1-registry.js");
+      const t = getTenant(tenantId);
+      if (t) updateTenant(tenantId, { settings: { ...(t.settings || {}), catalogue: { source: catalogue.source, products: catalogue.items.length, siteUrl, at: new Date().toISOString() } } });
+      const { nearestItems } = await import("../offer/vectors.js");
+      const all = (await loadOffer(tenantId)).items;
+      await nearestItems(tenantId, all, "warm-up", 1);
+      console.log(`[scrape-pipeline] Catalogue saved: ${catalogue.items.length} products, ${all.length} offer items, vectors ready`);
+    } catch (err) {
+      console.warn(`[scrape-pipeline] Catalogue save failed: ${(err as Error).message}`);
+    }
+  } else {
+    // No longer a (large) shop: the chat stops treating it as one.
+    const { getTenant, updateTenant } = await import("./d1-registry.js");
+    const t = getTenant(tenantId);
+    if (t?.settings?.catalogue) { const { catalogue: _c, ...rest } = t.settings; updateTenant(tenantId, { settings: rest }); }
   }
 
   // Auto-extract business info and save as context notes + gap report

@@ -62,6 +62,8 @@ export interface ChatConfig {
   // The owner's structured offer (products & services) - authoritative for
   // "do you have X / how much is Y", and for the offer check in chat forms.
   offerItems?: OfferItem[];
+  /** A large shop whose products come from its catalogue (src/scraper/catalogue.ts): products are searched per question. */
+  catalogue?: { source: "woocommerce" | "shopify" | "sitemap"; products: number; siteUrl: string } | null;
   // The businesses of our network (this one included) that have a structured
   // offer - for "what would this list / job cost?" projects (compare_offers@1).
   networkOffers?: () => Promise<Business[]>;
@@ -336,6 +338,7 @@ export class WebsiteChat {
   private sessionVia: Map<string, { via: CollectVia; at: number }> = new Map();
   private brandName = "";
   private offerItems: OfferItem[] = [];
+  private catalogue: ChatConfig["catalogue"] = null;
   private networkOffers?: () => Promise<Business[]>;
   private onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
 
@@ -354,6 +357,7 @@ export class WebsiteChat {
     this.knowledgeCatalog = config.knowledgeCatalog || null;
     this.brandName = config.brandName || "";
     this.offerItems = config.offerItems || [];
+    this.catalogue = config.catalogue || null;
     this.networkOffers = config.networkOffers;
     this.onInquiry = config.onInquiry;
     this.askEcosystem = config.askEcosystem;
@@ -759,6 +763,7 @@ export class WebsiteChat {
     let answered = true;
     let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[]; partners: { tenantId: string; label: string }[] } | null = null;
     let searching: { matches: Promise<EcosystemMatch[]>; need: string } | null = null;
+    let productLinks: string[] = [];
 
     // The conversation's language: kept from the last message long enough to tell (a name, a phone
     // number or "ok" does not switch it); "other" = whatever language the customer writes in.
@@ -776,6 +781,7 @@ export class WebsiteChat {
       // Over a spend cap or from a site the business does not own: no network search (src/security/budget.ts).
       const net = rt && !behaviour.length && !turnCheap() ? await this.networkStart(question, messages, rt) : null;
       // Key facts (src/knowledge/facts.ts): the site's single sentences, found by meaning and kept by Jev - in parallel.
+      const productsP = this.catalogue ? this.shopProducts(query, question, rt).catch(() => [] as OfferItem[]) : Promise.resolve([] as OfferItem[]);
       const factsP = turnVariant().includes("facts")
         ? this.embeddingProvider.embed([query]).then((v) => keyFacts(this.context.tenantId, v[0] || null, convo, question)).catch(() => null)
         : Promise.resolve(null);
@@ -807,6 +813,15 @@ export class WebsiteChat {
         noteTurn("facts", facts.map((f) => f.s.slice(0, 160)));
         packText = `### Key facts from our pages (word for word)\n${facts.map((f) => `- ${f.s}`).join("\n")}${packText ? `\n\n---\n\n${packText}` : ""}`;
         passages = [...facts.map((f) => f.s), ...passages];
+      }
+      // A shop: the products this message is about, from the catalogue (or the shop's live search).
+      const products = await productsP;
+      if (products.length) {
+        noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
+        const lines = products.map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
+        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Products in our shop (from our catalogue)\n${lines.join("\n")}`;
+        passages = [...passages, ...lines];
+        productLinks = products.map((p) => p.url).filter(Boolean);
       }
       answered = passages.length > 0;
       // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer
@@ -927,7 +942,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const sources = [...passages.map((content) => ({ content })), ...(network?.evidence || [])];
     const factsText = `${renderOfficialInfo(this.context.businessProfile)}\n${passages.join("\n")}`;
     const hasPhone = /(?:\+?\d[\d\s().-]{7,}\d)/.test(factsText.replace(/\d{2}-\d{3}/g, "")), hasEmail = /[\w.+-]+@[\w-]+\.[\w.]+/.test(factsText);
-    const allowedLinks = new Set([...(network?.links || []), ...this.context.siteMap.map((p) => p.url), ...used.map((p) => p.url)].filter(Boolean));
+    const allowedLinks = new Set([...(network?.links || []), ...this.context.siteMap.map((p) => p.url), ...used.map((p) => p.url), ...productLinks].filter(Boolean));
     const siteHost = (() => { try { return new URL(this.context.siteMap[0]?.url || `https://${this.getAllowedDomain()}`).hostname.replace(/^www\./, ""); } catch { return ""; } })();
     const customerText = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
     const wantOffer = !!opts.handoffKind || !!opts.keepOffer;
@@ -1029,6 +1044,34 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       });
     };
     return auditKnowledge(this.context.tenantId, this.context, this.knowledgeCatalog, probe);
+  }
+
+  /**
+   * A shop's products for this message (src/scraper/catalogue.ts): the catalogue items closest by meaning
+   * (vectors) plus those sharing a word or SKU with it, judged by Jev; none of ours -> the shop's own live
+   * search (a catalogue larger than our index, or a product added since the last scrape).
+   */
+  private async shopProducts(query: string, question: string, rt: TurnRoute | null): Promise<OfferItem[]> {
+    if (!this.catalogue || (rt && rt.intent === "chitchat")) return [];
+    const items = this.offerItems.filter((i) => i.source === "shop");
+    const { nearestItems } = await import("../offer/vectors.js");
+    const { matchOfferItems, words } = await import("../offer/search.js");
+    let found: OfferItem[] = [];
+    if (items.length) {
+      const near = (await nearestItems(this.context.tenantId, items, query, 40)) || [];
+      const stems = new Set(words(question).map((w) => w.slice(0, 5)));
+      const lexical = items.map((i) => ({ i, n: words(`${i.name} ${i.description.slice(0, 60)}`).filter((w) => stems.has(w.slice(0, 5))).length }))
+        .filter((x) => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 25).map((x) => x.i);
+      const pool = [...new Set([...lexical, ...near])].slice(0, 70);
+      // A follow-up ("and the second one?") is judged with the previous turn (query), a new question alone.
+      found = (await matchOfferItems(query, pool, 6)) || [];
+    }
+    if (!found.length && this.catalogue.source !== "sitemap") {
+      const { searchShop } = await import("../scraper/catalogue.js");
+      const live = await searchShop(this.catalogue.siteUrl, this.catalogue.source, question, 10).catch(() => [] as OfferItem[]);
+      if (live.length) { noteTurn("productsLive", live.length); found = (await matchOfferItems(query, live, 6)) || []; }
+    }
+    return found;
   }
 
   /** The network businesses found for a need, as prompt text + fact-check evidence + links. */
