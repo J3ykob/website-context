@@ -40,7 +40,8 @@ export async function findOfferItems(question: string, items: OfferItem[], limit
 /** Like findOfferItems, but null when the items could not be judged (Jev down), [] when none match. */
 export async function matchOfferItems(question: string, items: OfferItem[], limit = 8, minScore = ITEM_MIN): Promise<OfferItem[] | null> {
   if (!items.length || !question.trim()) return [];
-  const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}`;
+  // A shop's products carry their SKU: a customer may ask by catalogue number ("2200968").
+  const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}${i.source === "shop" && i.description.startsWith("SKU: ") ? ` [${i.description.slice(0, i.description.indexOf(".") > 0 ? i.description.indexOf(".") : 40)}]` : ""}`;
   let pool = items;
   if (items.length > DIRECT_MAX) {
     const cats = [...new Set(items.map((i) => i.category).filter(Boolean))].slice(0, 150);
