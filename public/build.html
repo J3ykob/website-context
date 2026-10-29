@@ -123,7 +123,7 @@
 
 <script>
   var API = "";
-  var tenantId = null;
+  var tenantId = null, interviewToken = null;
   var transcript = []; // [{role:'assistant'|'user', content}]
 
   function show(id){ ["start","chat","done"].forEach(function(s){ document.getElementById(s).classList.toggle("hidden", s!==id); }); }
@@ -155,7 +155,7 @@
       var r = await fetch(API + "/api/interview/start", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ businessName: biz, email: mail }) });
       var d = await r.json();
       if (!r.ok){ err.textContent = d.error || "Nie udało się zacząć."; btn.disabled=false; btn.textContent="Zacznij rozmowę"; return; }
-      tenantId = d.tenantId;
+      tenantId = d.tenantId; interviewToken = d.token;
       document.getElementById("chat-name").textContent = d.businessName || biz;
       document.getElementById("chat-initial").textContent = (biz[0]||"W").toUpperCase();
       show("chat");
@@ -176,7 +176,7 @@
     transcript.push({ role:"user", content: text });
     send.disabled = true; typing(true);
     try {
-      var r = await fetch(API + "/api/interview/message", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ tenantId: tenantId, transcript: transcript }) });
+      var r = await fetch(API + "/api/interview/message", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ tenantId: tenantId, token: interviewToken, transcript: transcript }) });
       var d = await r.json();
       typing(false); send.disabled = false;
       if (!r.ok){ cerr.textContent = d.error || "Coś poszło nie tak."; return; }

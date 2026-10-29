@@ -8,6 +8,7 @@
  * worse than a gap the owner can fill via the dashboard.
  */
 
+import { safeFetch } from "./safe-url.js";
 import type { ScrapedPage } from "./types.js";
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
@@ -35,7 +36,7 @@ export async function fetchPdfAsPage(
   opts: { timeout: number; userAgent: string }
 ): Promise<ScrapedPage | null> {
   try {
-    const resp = await fetch(url, {
+    const resp = await safeFetch(url, {
       headers: { "User-Agent": opts.userAgent },
       signal: AbortSignal.timeout(opts.timeout * 2),
     });

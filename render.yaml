@@ -64,6 +64,12 @@ services:
       - key: NETWORK_INVITE_EMAIL_APPROVED
         value: "1"
       # Customer email about a network business's offer - approved 2026-10-21 (templates/emails/customer-offer.*.txt).
+      # Resend webhook signing secret (Svix) - set in the dashboard/API, never in this file.
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
+      # Meta (WhatsApp/Messenger) app secret for X-Hub-Signature-256 - unset = Meta webhooks refused.
+      - key: META_APP_SECRET
+        sync: false
       - key: CUSTOMER_OFFER_EMAIL_APPROVED
         value: "1"
       # Owner asked for the price its assistant left out of a network request - approved 2026-10-29 (templates/emails/owner-quote.txt).

@@ -15,6 +15,7 @@
  * Env: VOICE_LLM_MODEL, OPENROUTER_API_KEY, TWILIO_* (for the SMS), VOICE_DEMO_SMS,
  * VOICE_FILLER (llm | instant | off, default llm), JEV_API_KEY.
  */
+import { verifyRelayToken } from "./relay-token.js";
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { classifyTurn, confirmAction, pickNeutralFiller, smsAcceptedWithoutTag, warmJev, type TurnIntent } from "./turn-classifier.js";
@@ -291,10 +292,14 @@ export function attachVoiceRelayWS(server: Server, _tenantManager?: any): void {
     ws.on("message", (raw: any) => {
       let msg: any;
       try { msg = JSON.parse(raw.toString()); } catch { return; }
+      if (msg.type !== "setup" && !session.callSid) return; // nothing before a verified setup
 
       if (msg.type === "setup") {
-        session.callSid = msg.callSid || "";
-        session.prospect = String(msg.customParameters?.prospect || msg.to || "").trim();
+        // Only a call we placed: the TwiML's signed key (it holds the number we dialed).
+        const dialed = verifyRelayToken(String(msg.customParameters?.relayToken || ""));
+        if (dialed === null) { console.warn("[voice-relay] setup without a valid key - closed"); ws.close(); return; }
+        session.callSid = msg.callSid || "unknown";
+        session.prospect = dialed;
         // The TwiML greeting is spoken by Twilio, not us - put it in history so the model
         // knows the call is already open and does not greet a second time.
         const greeting = String(msg.customParameters?.greeting || "").trim();

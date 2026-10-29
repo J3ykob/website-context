@@ -1,3 +1,4 @@
+import { safeFetch } from "./safe-url.js";
 import { fetchPage, closeBrowser } from "./fetcher.js";
 import { extractPage } from "./extractor.js";
 import { fetchPdfAsPage } from "./pdf.js";
@@ -245,7 +246,7 @@ export async function fetchSitemapUrls(origin: string, declared: string[], userA
     if (seenMaps.has(sm) || /\.gz(\?|$)/i.test(sm)) continue;
     seenMaps.add(sm);
     try {
-      const r = await fetch(sm, { headers: { "User-Agent": userAgent }, signal: AbortSignal.timeout(10000), redirect: "follow" });
+      const r = await safeFetch(sm, { headers: { "User-Agent": userAgent }, signal: AbortSignal.timeout(10000) });
       if (!r.ok) continue;
       const xml = await r.text();
       if (!/<(urlset|sitemapindex)\b/i.test(xml)) continue;
@@ -259,7 +260,7 @@ export async function fetchSitemapUrls(origin: string, declared: string[], userA
 
 async function fetchRobotsTxt(origin: string, userAgent: string): Promise<{ disallowed: string[]; sitemaps: string[] }> {
   try {
-    const response = await fetch(`${origin}/robots.txt`, {
+    const response = await safeFetch(`${origin}/robots.txt`, {
       headers: { "User-Agent": userAgent },
       signal: AbortSignal.timeout(5000),
     });

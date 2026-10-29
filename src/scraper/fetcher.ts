@@ -1,4 +1,5 @@
 import { normalizeHtml } from "./normalize.js";
+import { assertPublicUrl } from "./safe-url.js";
 import { decodeResponse } from "./decode.js";
 import { chromium, Browser, Page } from "playwright";
 
@@ -49,19 +50,29 @@ async function fetchStatic(
       "Accept-Language": "en-US,en;q=0.5",
     },
     signal: AbortSignal.timeout(options.timeout),
-    redirect: "follow" as const,
+    redirect: "manual" as const,
   };
 
+  // Redirects followed by hand, each hop checked to be on the public internet (src/scraper/safe-url.ts).
+  const get = async (target: string): Promise<Response> => {
+    for (let hop = 0; ; hop++) {
+      await assertPublicUrl(target);
+      const r = await fetch(target, fetchOpts);
+      const loc = r.status >= 300 && r.status < 400 ? r.headers.get("location") : null;
+      if (!loc || hop >= 8) return r;
+      target = new URL(loc, target).toString();
+    }
+  };
   let response: Response;
   try {
-    response = await fetch(url, fetchOpts);
+    response = await get(url);
   } catch (err: any) {
     const code = err?.cause?.code;
     if (code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" || code === "CERT_HAS_EXPIRED" || code === "DEPTH_ZERO_SELF_SIGNED_CERT") {
       const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
       try {
-        response = await fetch(url, fetchOpts);
+        response = await get(url);
       } finally {
         if (prev === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
         else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
@@ -139,9 +150,12 @@ async function fetchDynamic(
   url: string,
   options: { timeout: number; userAgent: string }
 ): Promise<Omit<FetchResult, "renderMethod">> {
+  await assertPublicUrl(url);
   await acquireDynamic();
   try {
-    return await fetchDynamicInner(url, options);
+    const r = await fetchDynamicInner(url, options);
+    if (r.finalUrl && r.finalUrl !== url) await assertPublicUrl(r.finalUrl); // redirected inside the browser
+    return r;
   } finally {
     releaseDynamic();
   }

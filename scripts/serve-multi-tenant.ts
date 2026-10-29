@@ -83,6 +83,7 @@ import {
 } from "../src/channels/index.js";
 import type { MetaChannelConfig } from "../src/channels/index.js";
 import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
+import { mintRelayToken } from "../src/voice/relay-token.js";
 import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-llm.js";
 import { registerAgentRoutes } from "../src/agent/routes.js";
 import { registerOfferRoutes } from "../src/offer/routes.js";
@@ -162,7 +163,8 @@ const channelSessions = new ChannelSessionStore();
 // Express app
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+// The raw body is kept for webhook signatures (Meta, Resend).
+app.use(express.json({ limit: "5mb", verify: (req: any, _res, buf) => { req.rawBody = buf; } }));
 // Twilio webhooks POST application/x-www-form-urlencoded bodies — needed for /api/voice/* routes.
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 // Baseline security headers (safe for the cross-origin widget — no framing/CSP changes here).
@@ -176,6 +178,19 @@ app.use((_req, res, next) => {
 // --- Rate limiting ---
 const signupRateMap = new Map<string, { count: number; resetAt: number }>();
 const chatRateMap = new Map<string, { mc: number; ms: number; hc: number; hs: number }>();
+
+/**
+ * The visitor's IP as our proxies saw it. X-Forwarded-For's first entry is whatever the client sent
+ * (spoofable); the proxies append, so the client is TRUSTED_PROXY_HOPS entries from the right
+ * (Cloudflare's CF-Connecting-IP when present - Cloudflare overwrites it).
+ */
+function clientIp(req: express.Request): string {
+  const cf = String(req.headers["cf-connecting-ip"] || "").trim();
+  if (cf) return cf;
+  const xff = String(req.headers["x-forwarded-for"] || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const hops = Number(process.env.TRUSTED_PROXY_HOPS ?? 1);
+  return xff.length ? xff[Math.max(0, xff.length - hops)] : (req.socket.remoteAddress || req.ip || "unknown");
+}
 
 function checkSignupRate(ip: string): boolean {
   const now = Date.now();
@@ -1059,6 +1074,12 @@ app.post("/api/onboard-demo", async (req, res) => {
 // The owner is interviewed and their answers become the KB — no scrape. Public
 // (a brand-new business has no password yet); IP rate-limited like signup. The
 // client holds the transcript and sends it each turn (server stays stateless).
+// Admin: the proxy headers as received (calibrating clientIp / TRUSTED_PROXY_HOPS).
+app.get("/api/admin/echo-ip", (req, res) => {
+  if (!adminOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
+  res.json({ clientIp: clientIp(req), xff: req.headers["x-forwarded-for"] || null, cf: req.headers["cf-connecting-ip"] || null, trueClient: req.headers["true-client-ip"] || null, xRealIp: req.headers["x-real-ip"] || null, remote: req.socket.remoteAddress, host: req.headers.host });
+});
+
 app.post("/api/interview/start", async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
   if (!checkSignupRate(ip)) { res.status(429).json({ error: "Za dużo prób. Spróbuj za chwilę." }); return; }
@@ -1068,16 +1089,25 @@ app.post("/api/interview/start", async (req, res) => {
   try {
     const tenant = createManualTenant(email, businessName);
     const step = await nextInterviewQuestion(businessName, []);
-    res.status(201).json({ tenantId: tenant.id, businessName: tenant.brandName, question: step.question || "Czym zajmuje się Twoja firma i co oferujecie klientom?" });
+    // The interview's key: only whoever started it can feed (and so overwrite) this tenant's knowledge.
+    res.status(201).json({ tenantId: tenant.id, token: mintEditToken(tenant.id), businessName: tenant.brandName, question: step.question || "Czym zajmuje się Twoja firma i co oferujecie klientom?" });
   } catch (e: any) {
     console.error(`[interview/start] ${e?.message}`);
     res.status(500).json({ error: "Nie udało się rozpocząć onboardingu." });
   }
 });
 
+const interviewRate = new Map<string, { count: number; resetAt: number }>();
 app.post("/api/interview/message", async (req, res) => {
-  const tenant = getTenant(String(req.body?.tenantId || ""));
-  if (!tenant) { res.status(404).json({ error: "Nie znaleziono sesji onboardingu." }); return; }
+  // Only the interview's own key (from /api/interview/start) - without it anyone could overwrite any
+  // business's knowledge and site card (open until 2026-10-29).
+  const tenantId = validateEditToken(String(req.body?.token || req.get("x-edit-token") || ""));
+  const tenant = tenantId && tenantId === String(req.body?.tenantId || "") ? getTenant(tenantId) : null;
+  if (!tenant) { res.status(403).json({ error: "Nie znaleziono sesji onboardingu." }); return; }
+  const ip = clientIp(req), now = Date.now();
+  const r = interviewRate.get(ip);
+  if (!r || now > r.resetAt) interviewRate.set(ip, { count: 1, resetAt: now + 3600_000 });
+  else if (++r.count > 60) { res.status(429).json({ error: "Za dużo prób. Spróbuj za chwilę." }); return; }
   const rawTurns: any[] = Array.isArray(req.body?.transcript) ? req.body.transcript : [];
   const transcript: InterviewTurn[] = rawTurns
     .filter((m) => m && (m.role === "assistant" || m.role === "user") && typeof m.content === "string")
@@ -1649,7 +1679,8 @@ app.post("/api/auth/login", async (req, res) => {
 // Requires ADMIN_SECRET — not a public backdoor. ?redirect=1 stores the token and
 // opens the dashboard directly; otherwise returns { token, tenantId } as JSON.
 app.get("/api/admin/login-as", async (req, res) => {
-  if (!ADMIN_SECRET || (req.query.secret as string) !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
+  // Constant-time and fail-closed like every admin route (was a plain !== on the query secret).
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenantId = ((req.query.tenantId as string) || "").trim();
   if (!tenantId) { res.status(400).json({ error: "tenantId required" }); return; }
   if (!getTenant(tenantId)) { res.status(404).json({ error: "Tenant not found" }); return; }
@@ -2663,6 +2694,12 @@ app.get("/api/webhooks/meta/:tenantId", (req, res) => {
 // POST — Receive messages from WhatsApp/Messenger/Instagram
 app.post("/api/webhooks/meta/:tenantId", (req, res) => {
   const tenantId = req.params.tenantId;
+  // Meta signs each event with the app secret (X-Hub-Signature-256); unsigned or forged events could
+  // make the bot reply to anyone (accepted unchecked until 2026-10-29). No secret configured = refused.
+  const appSecret = process.env.META_APP_SECRET || "";
+  const sig = String(req.get("x-hub-signature-256") || "");
+  const expected = appSecret ? "sha256=" + createHmac("sha256", appSecret).update((req as any).rawBody || Buffer.alloc(0)).digest("hex") : "";
+  if (!expected || !safeStrEq(sig, expected)) { console.warn(`[meta-webhook:${tenantId}] rejected: bad or missing signature`); res.status(401).send("bad signature"); return; }
 
   // Always respond 200 immediately — Meta requires a response within 5 seconds
   res.status(200).send("EVENT_RECEIVED");
@@ -3030,7 +3067,19 @@ app.post("/api/admin/upload-file/:tenantId/:filename", (req, res) => {
 });
 
 // Resend webhook (delivery, open, click, bounce events)
+function resendSignatureOk(req: express.Request): boolean {
+  const secret = process.env.RESEND_WEBHOOK_SECRET || "";
+  const id = String(req.get("svix-id") || ""), ts = String(req.get("svix-timestamp") || ""), sigs = String(req.get("svix-signature") || "");
+  if (!secret || !id || !ts || !sigs || Math.abs(Date.now() / 1000 - Number(ts)) > 600) return false;
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const expected = createHmac("sha256", key).update(`${id}.${ts}.${((req as any).rawBody || Buffer.alloc(0)).toString("utf8")}`).digest("base64");
+  return sigs.split(" ").some((p) => safeStrEq(p.split(",")[1] || "", expected));
+}
+
 app.post("/api/webhooks/resend", async (req, res) => {
+  // Resend signs with Svix (svix-id / svix-timestamp / svix-signature, secret RESEND_WEBHOOK_SECRET):
+  // forged bounce/complaint events could unsubscribe anyone (accepted unchecked until 2026-10-29).
+  if (!resendSignatureOk(req)) { console.warn("[resend-webhook] rejected: bad or missing signature"); res.status(401).send("bad signature"); return; }
   const { type, data } = req.body || {};
   const email = data?.to?.[0] || data?.email;
   if (email && type) {
@@ -3136,7 +3185,7 @@ app.all("/api/voice/relay-twiml", (req, res) => {
   // end-of-speech gap (down from a fixed 800); reportInputDuringAgentSpeech=speech is KEPT
   // so a reply spoken over the greeting still lands; events=speaker-events gives us
   // agentSpeaking/clientSpeaking transitions to actually measure turn latency.
-  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" language="pl-PL" transcriptionProvider="Deepgram" speechModel="nova-3-general" speechTimeout="${speechTimeout}" reportInputDuringAgentSpeech="${reportInput}" interruptible="any" interruptSensitivity="${sensitivity}" ignoreBackchannel="${backchannel}" events="speaker-events" dtmfDetection="true" hints="Whisp,Wisp,tak,nie,ok,zgoda,potwierdzam,anuluj,przyszły tydzień,jutro,pojutrze,poniedziałek,wtorek,środa,czwartek,piątek,sobota,po południu,rano,szesnasta,termin" ttsProvider="${xmlEscape(ttsProvider)}"${voiceAttr} elevenlabsTextNormalization="on">\n      <Parameter name="tenantId" value="${xmlEscape(tenantId)}"/>\n      <Parameter name="prospect" value="${xmlEscape(prospect)}"/>\n      <Parameter name="greeting" value="${xmlEscape(greeting)}"/>\n      <Parameter name="company" value="${xmlEscape(company)}"/>\n      <Parameter name="business" value="${xmlEscape(business)}"/>\n    </ConversationRelay>\n  </Connect>\n</Response>`);
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" language="pl-PL" transcriptionProvider="Deepgram" speechModel="nova-3-general" speechTimeout="${speechTimeout}" reportInputDuringAgentSpeech="${reportInput}" interruptible="any" interruptSensitivity="${sensitivity}" ignoreBackchannel="${backchannel}" events="speaker-events" dtmfDetection="true" hints="Whisp,Wisp,tak,nie,ok,zgoda,potwierdzam,anuluj,przyszły tydzień,jutro,pojutrze,poniedziałek,wtorek,środa,czwartek,piątek,sobota,po południu,rano,szesnasta,termin" ttsProvider="${xmlEscape(ttsProvider)}"${voiceAttr} elevenlabsTextNormalization="on">\n      <Parameter name="tenantId" value="${xmlEscape(tenantId)}"/>\n      <Parameter name="prospect" value="${xmlEscape(prospect)}"/>\n      <Parameter name="relayToken" value="${xmlEscape(mintRelayToken(prospect))}"/>\n      <Parameter name="greeting" value="${xmlEscape(greeting)}"/>\n      <Parameter name="company" value="${xmlEscape(company)}"/>\n      <Parameter name="business" value="${xmlEscape(business)}"/>\n    </ConversationRelay>\n  </Connect>\n</Response>`);
 });
 
 // ElevenLabs Agents path (experimental, alongside ConversationRelay): ElevenLabs does STT,
