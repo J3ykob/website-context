@@ -24,7 +24,7 @@ const MAX_REQUESTS = 6;
 const deadlineMs = () => Number(process.env.NETWORK_ANSWER_DEADLINE_MS) || 24 * 3600_000;
 
 export interface NetworkMember { tenantId: string; label: string; about: string }
-export interface SubRequest { id: string; tenantId: string; label: string; question: string; status: "waiting" | "answered" | "no_answer"; at: string }
+export interface SubRequest { id: string; tenantId: string; label: string; question: string; status: "waiting" | "answered" | "no_answer"; at: string; ownerAsked?: boolean }
 
 // Passages from a business's own site for a query (registered by the server's TenantManager).
 let knowledgeProvider: ((tenantId: string, query: string) => Promise<string[]>) | null = null;
@@ -221,6 +221,12 @@ export async function settle(subId: string, answer: string, status: "answered" |
   // customer's project for the business running it (who can pass it on).
   if (sub.memory.settled) {
     if (sub.memory.listed && status === "answered" && answer.trim()) await lateConfirmation(sub.id, parentId, sub.initiatorTenantId, answer.trim());
+    // The owner's own price for what its assistant left unpriced: a new offer for the customer.
+    else if (sub.memory.ownerQuote === "asked" && status === "answered" && answer.trim()) {
+      await setMemory(subId, { ownerQuote: "answered" });
+      await addEvent(parentId, { kind: "business_confirmed", actor: sub.initiatorTenantId, data: { project: subId, answer: answer.trim().slice(0, 2000), ownerQuote: true } });
+      await deliverBusinessOffer(parentId, sub.initiatorTenantId, answer.trim());
+    }
     await syncParent(parentId); // repairs a parent that still lists it as waiting (see syncParent)
     return;
   }
@@ -273,8 +279,10 @@ async function continueParent(parentId: string): Promise<void> {
   const base = String(p.memory.baseInstruction || "");
   // Businesses that have not joined: their parts come from public data, and the customer is told so.
   const listed = ((p.memory.subRequests as SubRequest[]) || []).filter((x) => x.status === "answered" && isListed(x.tenantId)).map((x) => x.label);
+  // Businesses whose owner was asked for the price its assistant could not give.
+  const owners = ((p.memory.subRequests as SubRequest[]) || []).filter((x) => x.ownerAsked && !isListed(x.tenantId)).map((x) => x.label);
   const { planAndRun } = await import("./plan.js");
-  const r = await planAndRun(parentId, base, "system", `Firmy z sieci odpowiedziały na zapytania - odpowiedzi są w ${ANSWERS_DIR}/ (dodaj je do danych wejściowych). Wynik dla klienta ma je uwzględnić: ceny i warunki podane przez firmy traktować jak dane z cennika (z nazwą firmy); części bez odpowiedzi lub bez ceny - do wyceny. Gdy część prac nie ma ceny, nie podawaj kwoty ani widełek dla całości - tylko ceny pozycji, które je mają, i wprost, że reszta czeka na wyceny. Nie podstawiaj innych produktów lub usług zamiast tych, o które pytał klient.${listed.length ? ` Odpowiedzi firm ${listed.join(", ")} przygotowano z ich publicznych danych, a same firmy poprosiliśmy o wycenę: z tych odpowiedzi weź tylko ceny, które firma faktycznie publikuje (przy nich napisz, że to cena z publicznego cennika firmy, niepotwierdzona przez nią), a nie opisuj, czego w jej danych brakuje. Napisz klientowi wprost, że poprosiliśmy firmy ${listed.join(", ")} o wycenę i że ich oferty pojawią się na stronie statusu zapytania, a klient dostanie powiadomienie, gdy przyjdą (odpowiedzi innych firm są od firm).` : ""} Bez nowych zapytań do firm (bez pliku ${REQUESTS_FILE}).`);
+  const r = await planAndRun(parentId, base, "system", `Firmy z sieci odpowiedziały na zapytania - odpowiedzi są w ${ANSWERS_DIR}/ (dodaj je do danych wejściowych). Wynik dla klienta ma je uwzględnić: ceny i warunki podane przez firmy traktować jak dane z cennika (z nazwą firmy); części bez odpowiedzi lub bez ceny - do wyceny. Gdy część prac nie ma ceny, nie podawaj kwoty ani widełek dla całości - tylko ceny pozycji, które je mają, i wprost, że reszta czeka na wyceny. Nie podstawiaj innych produktów lub usług zamiast tych, o które pytał klient.${listed.length ? ` Odpowiedzi firm ${listed.join(", ")} przygotowano z ich publicznych danych, a same firmy poprosiliśmy o wycenę: z tych odpowiedzi weź tylko ceny, które firma faktycznie publikuje (przy nich napisz, że to cena z publicznego cennika firmy, niepotwierdzona przez nią), a nie opisuj, czego w jej danych brakuje. Napisz klientowi wprost, że poprosiliśmy firmy ${listed.join(", ")} o wycenę i że ich oferty pojawią się na stronie statusu zapytania, a klient dostanie powiadomienie, gdy przyjdą (odpowiedzi innych firm są od firm).` : ""}${owners.length ? ` Firmy ${owners.join(", ")} nie podały w odpowiedzi ceny części prac: poprosiliśmy ich właścicieli o wycenę. Napisz klientowi wprost, że ich ceny pojawią się na stronie statusu zapytania, a klient dostanie powiadomienie, gdy przyjdą.` : ""} Bez nowych zapytań do firm (bez pliku ${REQUESTS_FILE}).`);
   if ("error" in r) console.warn(`[network] ${parentId}: could not continue: ${r.error}`);
 }
 
@@ -302,4 +310,78 @@ function slugOf(label: string): string {
   }
   while (out.endsWith("_")) out = out.slice(0, -1);
   return out.slice(0, 40) || "firma";
+}
+
+/**
+ * Does a business's answer leave part of what was asked without a price ("needs an individual quote",
+ * "no price in our data")? Then its owner is asked for one (askOwnerForQuote) - the customer's result
+ * says the rest waits for quotes, and someone has to give them.
+ */
+export async function leavesUnpriced(question: string, answer: string): Promise<boolean> {
+  const { jevAsk } = await import("../llm/jev.js");
+  const a = await jevAsk({ request: question.slice(0, 3000), answer: answer.slice(0, 6000) }, {
+    unpriced: { type: "noul", instructions: "`request` asks a business for prices or a quote, and `answer` is that business's reply. Does `answer` leave any priced part of `request` without a concrete price or amount (says it needs an individual quote, is to be agreed, or isn't in the price list)?" },
+  }, 8000).catch(() => null);
+  return (((a as any)?.unpriced?.noul as number) ?? 0) >= 0.5;
+}
+
+/**
+ * The owner of a business that has joined is asked for the price its assistant left out: the review
+ * page (with the request and the assistant's answer) by email. The customer's result does not wait;
+ * the owner's reply reaches the customer as a new offer (settle -> deliverBusinessOffer).
+ */
+export async function askOwnerForQuote(subId: string, runId: string, answer: string): Promise<void> {
+  const sub = await getProject(subId);
+  const parentId = sub?.memory.parentId as string | undefined;
+  if (!sub || !parentId) return;
+  const { openReview, reviewForRun } = await import("./review.js");
+  const rv = (await reviewForRun(subId, runId)) || (await openReview(subId, sub.initiatorTenantId, runId, answer, [], false));
+  await setMemory(subId, { ownerQuote: "asked" });
+  const parent = await getProject(parentId);
+  if (parent) await setMemory(parentId, { subRequests: ((parent.memory.subRequests as SubRequest[]) || []).map((x) => (x.id === subId ? { ...x, ownerAsked: true } : x)) });
+  const t = getTenant(sub.initiatorTenantId);
+  let base = (process.env.BASE_URL || "").trim();
+  if (!base.startsWith("http")) base = "https://whisp.so";
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  const { sendOwnerQuoteEmail } = await import("../multi-tenant/email.js");
+  const emailed = t?.email ? await sendOwnerQuoteEmail(t.email, {
+    from: businessLabel(String(sub.memory.fromTenant || "")), request: String(sub.memory.question || "").slice(0, 1500), answer: answer.slice(0, 2000), link: `${base}/review/${rv.token}`,
+  }).catch(() => false) : false;
+  await addEvent(subId, { kind: "owner_quote_asked", actor: "system", data: { emailed } });
+  await addEvent(parentId, { kind: "owner_quote_asked", actor: "system", data: { business: sub.initiatorTenantId, project: subId, emailed } });
+}
+
+/**
+ * A business's own offer after the customer's result: on the customer's status page, in their chat log,
+ * and by the channels the customer chose (SMS / WhatsApp / Telegram, e-mail).
+ */
+export async function deliverBusinessOffer(parentId: string, tenantId: string, offer: string): Promise<void> {
+  const parent = await getProject(parentId);
+  if (!parent) return;
+  const offers = [...((parent.memory.businessOffers as any[]) || []), { tenantId, label: businessLabel(tenantId), text: offer.slice(0, 4000), at: new Date().toISOString() }];
+  await setMemory(parentId, { businessOffers: offers });
+  const { logMessage } = await import("../storage/conversation-store.js");
+  await logMessage(parent.initiatorTenantId, parent.customerSession, "assistant", `Oferta od firmy ${businessLabel(tenantId)}:\n\n${offer.slice(0, 4000)}`, { flowInvoked: "network-offer" }).catch(() => {});
+  const { customerLink } = await import("./conversation.js");
+  let base = (process.env.BASE_URL || "").trim();
+  if (!base.startsWith("http")) base = "https://whisp.so";
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  const link = `${base}/p/${await customerLink(parentId)}`;
+  const t = getTenant(parent.initiatorTenantId);
+  const brand = t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "";
+  // SMS / WhatsApp / Telegram if the customer chose them: a short "new offer" with their status page.
+  const ch = parent.memory.customerContact as import("./notify-channels.js").CustomerContact | undefined;
+  if (ch && (ch.phone || ch.whatsapp || ch.telegramChatId)) {
+    const { sendNewOffer } = await import("./notify-channels.js");
+    const sent = await sendNewOffer(ch, { brand, business: businessLabel(tenantId), link }).catch((e) => ({ error: String((e as Error).message).slice(0, 200) }));
+    await addEvent(parentId, { kind: "offer_messaged", actor: "system", data: { business: tenantId, ...sent } }).catch(() => {});
+  }
+  // The customer asked for the result by email: the offer goes there too, with their page (all answers).
+  if (ch?.email) {
+    try {
+      const { sendCustomerOfferEmail } = await import("../multi-tenant/email.js");
+      const sent = await sendCustomerOfferEmail(ch.email, { lang: ch.lang || "pl", brand, business: businessLabel(tenantId), offer: offer.slice(0, 4000), link, replyTo: t?.email || "" });
+      await addEvent(parentId, { kind: "offer_emailed", actor: "system", data: { business: tenantId, sent } });
+    } catch (e) { await addEvent(parentId, { kind: "offer_emailed", actor: "system", data: { business: tenantId, sent: false, error: String((e as Error).message).slice(0, 200) } }).catch(() => {}); }
+  }
 }

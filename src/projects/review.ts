@@ -158,6 +158,11 @@ export async function remindLateReviews(): Promise<number> {
   for (const r of late) {
     const claimed = await d1Query("UPDATE project_reviews SET reminded_at = ? WHERE token = ? AND reminded_at IS NULL RETURNING token", [new Date().toISOString(), r.token]);
     if (!claimed.length) continue; // another instance took it
+    // Not a result the customer waits for: an invite's page (a business that has not joined - its own
+    // email and lead page) or an owner asked for a price after the customer's result. The "awaiting
+    // approval" reminder would be wrong there (it went to listed businesses' invite reviews until 2026-10-29).
+    const pm = (await getProject(r.projectId).catch(() => null))?.memory;
+    if ((pm?.listed && !pm.ownerLoop) || pm?.ownerQuote) continue;
     await addEvent(r.projectId, { kind: "review_late", actor: "system", data: { runId: r.runId, waitedMin: Math.round((Date.now() - Date.parse(r.createdAt)) / 60_000) } }).catch(() => {});
     await emailOwner(r.projectId, r.tenantId, r.runId, r.draft, [], r.token);
     const { deliverNow } = await import("./conversation.js");

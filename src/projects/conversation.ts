@@ -387,7 +387,13 @@ export async function onRunFinished(projectId: string): Promise<void> {
     return;
   }
   // A business answering another business's request without review: the answer goes straight back.
-  if (p.type === net.BUSINESS_REQUEST) await net.settle(projectId, draft, draft ? "answered" : "no_answer");
+  // Part of it left without a price: the owner (of a business that has joined) is asked for one too.
+  if (p.type === net.BUSINESS_REQUEST) {
+    if (draft && !p.memory.listed && !p.memory.ownerQuote && (await net.leavesUnpriced(String(p.memory.question || ""), draft))) {
+      await net.askOwnerForQuote(projectId, s.runId, draft).catch((e) => console.warn(`[network] ${projectId}: owner not asked for a quote: ${(e as Error).message}`));
+    }
+    await net.settle(projectId, draft, draft ? "answered" : "no_answer");
+  }
   // The customer's result, also when nobody is on the page.
   else await deliverNow(projectId).catch((e) => console.warn(`[conversation] ${projectId}: delivery: ${(e as Error).message}`));
 }

@@ -186,6 +186,28 @@ export async function sendNetworkInviteEmail(email: string, mail: { subject: str
   }
 }
 
+// The owner of a business that has joined: its assistant left part of a network request unpriced
+// (src/projects/network.ts askOwnerForQuote). Text: templates/emails/owner-quote.txt.
+// New template: until the user approves it (OWNER_QUOTE_EMAIL_APPROVED=1), only to the Whisp owner.
+export async function sendOwnerQuoteEmail(email: string, r: { from: string; request: string; answer: string; link: string }): Promise<boolean> {
+  if (process.env.OWNER_QUOTE_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
+    console.log(`[email] owner quote email to ${email} not sent - template awaiting approval`);
+    return false;
+  }
+  const { renderTemplate } = await import("./templates.js");
+  const t = renderTemplate("owner-quote", r);
+  if (!t) { console.error("[email] templates/emails/owner-quote.txt is missing"); return false; }
+  try {
+    const { error } = await resend.emails.send({ from: FROM, to: email, replyTo: "jakub@whisp.so", subject: t.subject, text: t.text });
+    if (error) { console.error(`[email] owner quote email to ${email} failed:`, error.message); return false; }
+    console.log(`[email] Owner quote email sent to ${email}`);
+    return true;
+  } catch (e: any) {
+    console.error(`[email] owner quote email to ${email} failed:`, e.message);
+    return false;
+  }
+}
+
 // A business of the network sent its offer for the customer's request (src/projects/lead.ts); the
 // customer asked for the result by email. Text: templates/emails/customer-offer.<lang>.txt.
 // New template: until the user approves it (CUSTOMER_OFFER_EMAIL_APPROVED=1), only to the Whisp owner.

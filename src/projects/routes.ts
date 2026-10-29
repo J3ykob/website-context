@@ -363,7 +363,7 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
             const i = inv[s.id];
             const state = offers.some((o) => o.tenantId === s.tenantId) ? "offer"
               : i ? (i.passed_at || Date.now() - Date.parse(i.created_at) > window ? "no_reply" : "waiting")
-              : s.status === "answered" ? "answered" : s.status === "no_answer" ? "no_reply" : "waiting";
+              : s.status === "answered" ? (s.ownerAsked ? "waiting" : "answered") : s.status === "no_answer" ? "no_reply" : "waiting";
             return { business: String(s.label || s.tenantId), state };
           });
         })(),

@@ -756,9 +756,15 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
     // The reply is final for the customer: questions and notes for the business go to the business.
     await req("sys-agent-customer-only", `The text for the customer has no questions or notes meant for the business (those belong in ${BUSINESS_QUESTIONS}).`, "jev");
     await req("sys-agent-no-promise", "The text for the customer promises no follow-up that nothing guarantees (\"I'll update it when...\", \"the business will get back to you\").", "jev");
-    const cq = await jevAsk({ text_for_customer: reply.slice(0, 3000) }, {
+    // Follow-ups that really are set up: businesses asked for a quote after this result (a listed business
+    // invited, or a member's owner asked for the price its assistant left out) - their offers reach the
+    // customer's status page, and the customer is notified.
+    const { isListed } = await import("./network.js");
+    const later = (((proj?.memory.subRequests as any[]) || []).filter((x) => x.status === "answered" && (x.ownerAsked || isListed(x.tenantId)))).map((x) => String(x.label));
+    const arranged = later.length ? `Businesses ${later.join(", ")} were asked for a quote; their offers will appear on the customer's status page and the customer is notified when they come.` : "(nothing)";
+    const cq = await jevAsk({ text_for_customer: reply.slice(0, 3000), arranged }, {
       b: { type: "noul", instructions: "Does `text_for_customer` contain anything meant for the business rather than the customer: a question to the business or its staff, a request that the business confirms or checks something, an internal note about assumptions the business should verify, or instructions for the business? Telling the customer what is unknown or still to be agreed with the business is fine and does not count." },
-      p: { type: "noul", instructions: "Does `text_for_customer` promise a later action: that the assistant will update, complete or send something later, or that the business will contact the customer, get back to them or send something? Saying what the customer can do (e.g. ask the business) is fine and does not count." },
+      p: { type: "noul", instructions: "Does `text_for_customer` promise a later action that is NOT described in `arranged` (the follow-ups that are really set up): that the assistant will update, complete or send something later, or that the business will contact the customer, get back to them or send something? A promise matching `arranged` does not count, nor does saying what the customer can do (e.g. ask the business)." },
     }, 8000);
     const pb = (cq?.b as any)?.noul as number | undefined;
     results.push({ reqId: "sys-agent-customer-only", status: pb === undefined ? "open" : pb < 0.5 ? "met" : "failed", evidence: `P(content for the business) = ${pb?.toFixed(2) ?? "n/a"}` });

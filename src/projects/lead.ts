@@ -183,44 +183,12 @@ export async function replyToLead(token: string, offer: string): Promise<boolean
   const sub = await getProject(inv.project_id);
   const parentId = sub?.memory.parentId as string | undefined;
   if (!sub || !parentId) return false;
-  const { settle, businessLabel } = await import("./network.js");
+  const { settle, deliverBusinessOffer } = await import("./network.js");
   // Recorded as the business's own answer after the customer's result: never a new round (no re-run of
   // the customer's project, no new invite) - so the request counts as settled first.
   if (!sub.memory.settled) await setMemory(sub.id, { settled: "answered" });
   await settle(sub.id, offer, "answered");
-  const parent = await getProject(parentId);
-  if (parent) {
-    const offers = [...((parent.memory.businessOffers as any[]) || []), { tenantId: inv.tenant_id, label: businessLabel(inv.tenant_id), text: offer.slice(0, 4000), at: new Date().toISOString() }];
-    await setMemory(parentId, { businessOffers: offers });
-    const { logMessage } = await import("../storage/conversation-store.js");
-    await logMessage(parent.initiatorTenantId, parent.customerSession, "assistant", `Oferta od firmy ${businessLabel(inv.tenant_id)}:\n\n${offer.slice(0, 4000)}`, { flowInvoked: "network-offer" }).catch(() => {});
-    // SMS / WhatsApp / Telegram if the customer chose them: a short "new offer" with their status page.
-    const ch = parent.memory.customerContact as import("./notify-channels.js").CustomerContact | undefined;
-    if (ch && (ch.phone || ch.whatsapp || ch.telegramChatId)) {
-      const { customerLink } = await import("./conversation.js");
-      const { sendNewOffer } = await import("./notify-channels.js");
-      const t = getTenant(parent.initiatorTenantId);
-      const sent = await sendNewOffer(ch, { brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "", business: businessLabel(inv.tenant_id), link: `${process.env.BASE_URL || "https://whisp.so"}/p/${await customerLink(parentId)}` }).catch((e) => ({ error: String((e as Error).message).slice(0, 200) }));
-      await addEvent(parentId, { kind: "offer_messaged", actor: "system", data: { business: inv.tenant_id, ...sent } }).catch(() => {});
-    }
-    // The customer asked for the result by email: the offer goes there too, with their page (all answers).
-    const contact = parent.memory.customerContact as { email?: string; lang?: string } | undefined;
-    if (contact?.email) {
-      try {
-        const { customerLink } = await import("./conversation.js");
-        const { sendCustomerOfferEmail } = await import("../multi-tenant/email.js");
-        const t = getTenant(parent.initiatorTenantId);
-        let base = (process.env.BASE_URL || "").trim();
-        if (!base.startsWith("http")) base = "https://whisp.so";
-        while (base.endsWith("/")) base = base.slice(0, -1);
-        const sent = await sendCustomerOfferEmail(contact.email, {
-          lang: contact.lang || "pl", brand: t?.settings?.siteCard?.brand || t?.brandName || t?.domain || "",
-          business: businessLabel(inv.tenant_id), offer: offer.slice(0, 4000), link: `${base}/p/${await customerLink(parentId)}`, replyTo: t?.email || "",
-        });
-        await addEvent(parentId, { kind: "offer_emailed", actor: "system", data: { business: inv.tenant_id, sent } });
-      } catch (e) { await addEvent(parentId, { kind: "offer_emailed", actor: "system", data: { business: inv.tenant_id, sent: false, error: String((e as Error).message).slice(0, 200) } }).catch(() => {}); }
-    }
-  }
+  await deliverBusinessOffer(parentId, inv.tenant_id, offer);
   await d1Query("UPDATE network_invites SET replied_at = ? WHERE token = ?", [new Date().toISOString(), token]);
   return true;
 }
