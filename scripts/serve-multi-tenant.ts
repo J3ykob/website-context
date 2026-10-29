@@ -84,6 +84,11 @@ import {
 import type { MetaChannelConfig } from "../src/channels/index.js";
 import { attachVoiceRelayWS } from "../src/voice/conversation-relay.js";
 import { mintRelayToken } from "../src/voice/relay-token.js";
+import { jevAsk, jevHealth } from "../src/llm/jev.js";
+import { clientIp } from "../src/security/client-ip.js";
+import { verifiedHistory, signAssistant } from "../src/security/history-sig.js";
+import { budgetBefore, budgetAfter, setBudgetAlert } from "../src/security/budget.js";
+import { logAbuse } from "../src/security/quota.js";
 import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-llm.js";
 import { registerAgentRoutes } from "../src/agent/routes.js";
 import { registerOfferRoutes } from "../src/offer/routes.js";
@@ -178,19 +183,6 @@ app.use((_req, res, next) => {
 // --- Rate limiting ---
 const signupRateMap = new Map<string, { count: number; resetAt: number }>();
 const chatRateMap = new Map<string, { mc: number; ms: number; hc: number; hs: number }>();
-
-/**
- * The visitor's IP as our proxies saw it. X-Forwarded-For's first entry is whatever the client sent
- * (spoofable); the proxies append, so the client is TRUSTED_PROXY_HOPS entries from the right
- * (Cloudflare's CF-Connecting-IP when present - Cloudflare overwrites it).
- */
-function clientIp(req: express.Request): string {
-  const cf = String(req.headers["cf-connecting-ip"] || "").trim();
-  if (cf) return cf;
-  const xff = String(req.headers["x-forwarded-for"] || "").split(",").map((x) => x.trim()).filter(Boolean);
-  const hops = Number(process.env.TRUSTED_PROXY_HOPS ?? 1);
-  return xff.length ? xff[Math.max(0, xff.length - hops)] : (req.socket.remoteAddress || req.ip || "unknown");
-}
 
 function checkSignupRate(ip: string): boolean {
   const now = Date.now();
@@ -709,14 +701,14 @@ app.get("/demo/:tenantId", async (req, res) => {
     ts: new Date().toISOString(),
     tenantId: tenant.id,
     domain: tenant.domain,
-    ip: (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim(),
+    ip: clientIp(req),
     ref: (req.headers["referer"] || req.headers["referrer"] || "") as string,
     ua: (req.headers["user-agent"] || "").slice(0, 120),
   });
   if (DEMO_VISITS.length > DEMO_VISITS_MAX) DEMO_VISITS.shift();
   demoVisitsDirty = true;
-  console.log(`[demo-visit] ${tenant.domain} from ${(req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim()}`);
-  const visitIp = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+  console.log(`[demo-visit] ${tenant.domain} from ${clientIp(req)}`);
+  const visitIp = clientIp(req);
   // Filter scanner IPs (AWS, Azure, Google Cloud) and internal IPs
   const isScanner = /^(18\.|52\.|54\.|35\.|4\.|13\.|34\.|20\.|40\.|48\.|72\.14[45]|85\.210|135\.225|155\.117|164\.132|172\.186|217\.182)/.test(visitIp);
   const isInternal = !!req.headers["x-whisp-probe"] || (req.query as any)?.probe === "1" || visitIp === "79.184.118.71" || visitIp === "176.9.1.133" || visitIp.startsWith("127.");
@@ -732,7 +724,7 @@ app.get("/demo/:tenantId", async (req, res) => {
   const brand = tenant.brandName || tenant.domain;
 
   // A/B experiment: widget start state
-  const visitorIp = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+  const visitorIp = clientIp(req);
   const visitorId = `${visitorIp}_${tenant.id}`;
   let startExpanded = true;
   try {
@@ -948,7 +940,7 @@ app.get("/site/:tenantId", (req, res) => {
 app.post("/api/tenants", (req, res) => {
   const isAdmin = adminOk(req);
   if (!isAdmin) {
-    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    const ip = clientIp(req);
     if (!checkSignupRate(ip)) {
       res.status(429).json({ error: "Too many signups. Try again later." });
       return;
@@ -1026,7 +1018,7 @@ app.post("/api/tenants", (req, res) => {
 // Self-serve demo onboarding: a visitor claims a not-yet-live site. We create the tenant,
 // queue an on-demand scrape, and the worker emails them when the bot is ready (sendBotReadyEmail).
 app.post("/api/onboard-demo", async (req, res) => {
-  const ip = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+  const ip = clientIp(req);
   if (!adminOk(req) && !checkSignupRate(ip)) {
     res.status(429).json({ error: "Too many requests - please try again in a few minutes." });
     return;
@@ -1040,7 +1032,9 @@ app.post("/api/onboard-demo", async (req, res) => {
   catch { res.status(400).json({ error: "Please enter a valid website URL (https://...)." }); return; }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) { res.status(400).json({ error: "Please enter a valid email address." }); return; }
 
-  const MAX_PAGES = 15; // bounded on-demand scrape (keeps Render memory/time/cost in check)
+  // Anyone can onboard any domain: until the owner sets a password the crawl stops at ONBOARD_MAX_PAGES
+  // (150); setting it starts the full crawl (setup-password).
+  const MAX_PAGES = Number(process.env.ONBOARD_MAX_PAGES) || 150;
   try {
     const existing = getTenantByDomain(domain);
     if (existing) {
@@ -1081,7 +1075,7 @@ app.get("/api/admin/echo-ip", (req, res) => {
 });
 
 app.post("/api/interview/start", async (req, res) => {
-  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const ip = clientIp(req);
   if (!checkSignupRate(ip)) { res.status(429).json({ error: "Za dużo prób. Spróbuj za chwilę." }); return; }
   const businessName = String(req.body?.businessName || "").trim();
   const email = String(req.body?.email || "").trim();
@@ -1224,9 +1218,25 @@ registerAgentRoutes(app, { auth: authMiddleware, onFlowsChanged: (id) => tenantM
 registerOfferRoutes(app, { auth: authMiddleware, onChanged: (id) => tenantManager.evictTenant(id) });
 registerProjectRoutes(app, { auth: authMiddleware });
 
+/**
+ * Is the widget on a site of this business? Its domain (and subdomains), its site URL, whisp.so (demo
+ * pages, site cards, the dashboard) and settings.allowedOrigins. Anything else - another site, a script
+ * without an Origin - still gets answers, without the costly extras.
+ */
+function originAllowed(origin: string, tenant: any): boolean {
+  let host = "";
+  try { host = new URL(origin).hostname.toLowerCase(); } catch { return false; }
+  const bare = (h: string) => h.toLowerCase().replace(/^www\./, "");
+  const own = [tenant.domain, (() => { try { return new URL(tenant.siteUrl || tenant.site_url || "").hostname; } catch { return ""; } })(), "whisp.so", "localhost", "127.0.0.1", ...(((tenant.settings || {}).allowedOrigins as string[]) || [])]
+    .filter(Boolean).map((d: string) => bare(String(d).replace(/^https?:\/\//, "").split("/")[0]));
+  const h = bare(host);
+  return own.some((d) => h === d || h.endsWith(`.${d}`)) || host.endsWith(".onrender.com");
+}
+
 app.post("/api/chat", async (req, res) => {
   try {
-    const { messages, sessionId, tenantId, formState } = req.body;
+    const { sessionId, tenantId, formState } = req.body;
+    let messages = req.body.messages;
     if (!messages || !Array.isArray(messages)) {
       res.status(400).json({ error: "messages required" });
       return;
@@ -1265,10 +1275,10 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const sessionKey = sessionId || `${tenantId}_default`;
-    const clientIp = ((req.headers["x-forwarded-for"] as string) || req.ip || "").split(",")[0].trim();
+    const visitorIp = clientIp(req);
     const rc = checkChatRate(sessionKey);
     // Admin-authenticated test traffic (routing / A-B evals from one machine) skips the per-IP backstop.
-    const iprc = clientIp && !adminOk(req) ? checkIpChatRate(clientIp) : { ok: true as boolean, retry: undefined as number | undefined };
+    const iprc = visitorIp && !adminOk(req) ? checkIpChatRate(visitorIp) : { ok: true as boolean, retry: undefined as number | undefined };
     if (!rc.ok || !iprc.ok) {
       res.status(429).json({
         error: "Rate limited",
@@ -1278,6 +1288,19 @@ app.post("/api/chat", async (req, res) => {
       return;
     }
 
+    // Abuse guards (2026-10-29), admin test traffic exempt:
+    // - history: assistant turns we did not write are dropped (src/security/history-sig.ts);
+    // - spend caps: over the conversation's or business's cap no costly extras, over the total the chat stops;
+    // - origin: a widget on a site the business does not own (or a script) gets no costly extras either.
+    const admin = adminOk(req);
+    if (!admin) messages = await verifiedHistory(tenant.id, sessionKey, messages);
+    if (!messages.length || messages[messages.length - 1]?.role !== "user") { res.status(400).json({ error: "messages required" }); return; }
+    messages = messages.map((m: any) => ({ role: m.role, content: m.content })); // the signature stays here
+    const spend = admin ? "ok" : budgetBefore(tenant.id, sessionKey);
+    if (spend === "stop") { res.status(503).json({ error: "backend_unavailable", message: BACKEND_DOWN[guessLang(lastUserText(req))] }); return; }
+    const foreign = !admin && !originAllowed(req.get("origin") || "", tenant);
+    if (foreign) logAbuse("foreign_origin", req.get("origin") || "(none)", tenant.id, visitorIp);
+
     const chat = await tenantManager.getChatForTenant(tenantId);
     // A conversation handed over from another business's bot (whisp.so/h/<token>):
     // an order placed in this session is recorded as referred by that business.
@@ -1285,10 +1308,11 @@ app.post("/api/chat", async (req, res) => {
       const h = await getHandoff(req.body.handoff).catch(() => null);
       if (h && h.toTenant === tenantId) (chat as any).setSessionVia?.(sessionKey, { tenantId: h.fromTenant, brand: h.fromLabel, sessionKey: h.token });
     }
-    console.log(`[chat:${tenantId}] "${(messages[messages.length - 1]?.content || "").slice(0, 60)}"`);
+    // No message text in the logs (personal data); its length is enough to follow a turn.
+    console.log(`[chat:${tenantId}] message (${String(messages[messages.length - 1]?.content || "").length} chars)`);
 
     const lastUserContent = messages[messages.length - 1]?.content || "";
-    const chatIpRaw = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+    const chatIpRaw = clientIp(req);
     // Internal/probe traffic must NEVER touch prospect analytics. Two signals:
     // (1) self-test IPs, (2) an explicit X-Whisp-Probe header / ?probe=1 marker that
     // the fleet health-check + dev test scripts set (robust regardless of origin IP —
@@ -1328,6 +1352,9 @@ app.post("/api/chat", async (req, res) => {
     // What answering this message took (LLM / Jev calls, time, route) - for admins
     // only (routing evals): X-Admin-Secret header.
     const usage = newTurnUsage();
+    Object.assign(usage, { ip: visitorIp, tenantId: tenant.id, sessionKey, cheap: spend === "cheap" || foreign });
+    // The turn's cost, once it is done (admin tests are not counted against the caps).
+    res.on("finish", () => { if (!admin) budgetAfter(tenant.id, sessionKey, usage.usd || 0, usage.jevIn); });
     // Admin test of the safe mode without Jev (routing evals): Jev unavailable for this request only.
     if (adminOk(req) && req.headers["x-test-no-jev"] === "1") (usage as any).noJev = true;
     if (adminOk(req) && typeof req.headers["x-test-variant"] === "string") (usage as any).variant = req.headers["x-test-variant"];
@@ -1346,7 +1373,7 @@ app.post("/api/chat", async (req, res) => {
         }, formState && typeof formState === "object" ? formState : undefined, (status) => {
           res.write(`data: ${JSON.stringify({ status })}\n\n`);
         }));
-        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null, partners: full.partners || null, project: full.project || null, collect: full.collect || null, ...traceFor(full) })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true, message: full.message, sig: signAssistant(sessionKey, full.message || ""), sources: full.sources || [], grounded: full.grounded, navigateTo: (full as any).navigateTo || null, flowSession: (full as any).flowSession || null, partners: full.partners || null, project: full.project || null, collect: full.collect || null, ...traceFor(full) })}\n\n`);
         res.end();
         logResponse(full);
       } catch (error: any) {
@@ -1364,7 +1391,7 @@ app.post("/api/chat", async (req, res) => {
     {
       const response = await turnUsage.run(usage, () => chat.chat(messages, sessionKey, formState && typeof formState === "object" ? formState : undefined));
       logResponse(response);
-      res.json({ ...response, ...traceFor(response) });
+      res.json({ ...response, sig: signAssistant(sessionKey, response.message || ""), ...traceFor(response) });
     }
   } catch (error: any) {
     const msg = String(error?.message || "");
@@ -1464,7 +1491,13 @@ async function runDeepHealthChecks(): Promise<{ ok: boolean; lowBalance: boolean
   }
 
   // Serving-critical health (Browserless excluded — live chat doesn't use it).
-  const ok = !!(checks.bge?.ok && checks.vectorize?.ok && checks.llm?.ok && checks.r2?.ok);
+  // Jev (the chat's checks and routing): from the last 5 minutes of real calls; with none, one tiny probe.
+  // Out of credits or mostly failing = replies go out in safe mode (contact details only).
+  if (process.env.JEV_API_KEY) {
+    if (jevHealth().calls === 0) await jevAsk({ text: "health check" }, { q: { type: "noul", instructions: "Is `text` a health check?" } }, 4000).catch(() => null);
+    checks.jev = jevHealth();
+  }
+  const ok = !!(checks.bge?.ok && checks.vectorize?.ok && checks.llm?.ok && checks.r2?.ok && (checks.jev?.ok ?? true));
   return { ok, lowBalance, checks, lastChatError, at: new Date().toISOString() };
 }
 
@@ -1504,6 +1537,31 @@ async function sendOpsAlert(subject: string, text: string): Promise<void> {
     console.log(`[monitor] ops alert emailed: ${subject}`);
   } catch (e: any) { console.error(`[monitor] alert email failed: ${e?.message || e}`); }
 }
+
+setBudgetAlert((subject, text) => { void sendOpsAlert(subject, text); });
+
+// Abuse monitor: a spike of limit hits / blocked attempts in 10 minutes alerts at once; a summary of the
+// last 24 h goes out daily (~8:00 Warsaw). Unverified history turns are counted but don't alert alone
+// (old cached widgets send unsigned turns for a while).
+let abuseAlertedAt = 0, abuseSummaryDay = "";
+setInterval(async () => {
+  try {
+    const { abuseSummary } = await import("../src/security/quota.js");
+    const spike = (await abuseSummary(new Date(Date.now() - 10 * 60_000).toISOString())).filter((r) => r.kind !== "history_unverified");
+    const total = spike.reduce((n, r) => n + Number(r.n), 0);
+    if (total >= (Number(process.env.ABUSE_SPIKE_ALERT) || 60) && Date.now() - abuseAlertedAt > 60 * 60_000) {
+      abuseAlertedAt = Date.now();
+      await sendOpsAlert(`Whisp abuse spike: ${total} events in 10 min`, spike.map((r) => `${r.kind}: ${r.n} (${r.keys} sources; businesses: ${r.tenants || "-"})`).join("\n"));
+    }
+    const warsaw = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
+    const today = warsaw.toISOString().slice(0, 10);
+    if (warsaw.getHours() === 8 && abuseSummaryDay !== today) {
+      abuseSummaryDay = today;
+      const day = await abuseSummary(new Date(Date.now() - 24 * 3600_000).toISOString());
+      if (day.length) await sendOpsAlert("Whisp abuse summary (last 24 h)", day.map((r) => `${r.kind}: ${r.n} (${r.keys} sources; businesses: ${r.tenants || "-"})`).join("\n"));
+    }
+  } catch (e: any) { console.warn(`[abuse-monitor] ${e?.message || e}`); }
+}, 5 * 60_000).unref();
 
 let lastAlertSig = "";
 let lastAlertAt = 0;
@@ -1745,6 +1803,9 @@ app.post("/api/auth/setup-password", async (req, res) => {
   const hash = hashPassword(password);
   // Clear setup token after use
   updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null });
+  // The owner has claimed it: a crawl stopped at the onboarding cap now covers the whole site.
+  const onboardCap = Number(process.env.ONBOARD_MAX_PAGES) || 150;
+  if (tenant.siteUrl && (tenant.pagesCount || 0) >= onboardCap && tenant.status !== "scraping") worker.enqueue(tenant.id, tenant.siteUrl, Number(process.env.SCRAPE_MAX_PAGES) || 500);
 
   const sessionToken = await createSession(tenantId);
   res.json({ token: sessionToken, tenantId });
@@ -2325,10 +2386,12 @@ app.post("/api/dashboard/chunks", authMiddleware, async (req, res) => {
 // Extracts text, splits into blocks, embeds each, and stores them as "manual_"
 // chunks (immune to rescrape cleanup, like typed manual entries). Raw binary
 // body; filename via ?filename= (Content-Type is a hint).
-app.post("/api/dashboard/knowledge-file", authMiddleware, (req, res) => {
+app.post("/api/dashboard/knowledge-file", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   const filename = String(req.query.filename || (req.headers["x-filename"] as string) || "upload").slice(0, 200);
   const MAX_UPLOAD = 15 * 1024 * 1024; // 15MB
+  // Each upload costs reading (vision / embeddings): UPLOADS_PER_DAY per business (default 100).
+  if (!(await (await import("../src/security/quota.js")).bump(`upload:${(req as any).tenantId}`, Number(process.env.UPLOADS_PER_DAY) || 100))) { res.status(429).json({ error: "Too many uploads today - try again tomorrow." }); return; }
   const parts: Buffer[] = [];
   let size = 0, tooBig = false;
   req.on("data", (c: Buffer) => {

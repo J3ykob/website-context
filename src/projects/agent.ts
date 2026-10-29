@@ -447,6 +447,8 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
   }
   await writeFile(id, "agent/raport.md", report(state, result), "md", "system").catch(() => {});
   await addUsage(id, { llmCalls: result.usage.steps, costUsd: result.usage.costUsd }).catch(() => {});
+  // The agent's cost counts against its business's daily cap and the total (src/security/budget.ts).
+  { const pj = await getProject(id).catch(() => null); if (pj) (await import("../security/budget.js")).budgetAfter(pj.initiatorTenantId, `project:${id}`, result.usage.costUsd || 0); }
   await addEvent(id, { kind: "agent_finished", actor: author, data: { runId: result.runId, state: result.state, stopReason: result.stopReason, files: written, usage: result.usage, piiMasked: result.piiMasked, timing: (result as any).timing } });
   // Release the runner's copy (result and mapping are gone afterwards).
   await runner(`/projects/${encodeURIComponent(id)}/run`, { method: "DELETE" }, 30_000).catch(() => {});

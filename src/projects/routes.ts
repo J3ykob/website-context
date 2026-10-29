@@ -421,7 +421,8 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
 
   // Telegram: the customer opens t.me/<bot>?start=<token> from the status page; the bot links that chat to the request.
   app.post("/api/telegram/webhook", async (req, res) => {
-    if (!process.env.TELEGRAM_WEBHOOK_SECRET || req.headers["x-telegram-bot-api-secret-token"] !== process.env.TELEGRAM_WEBHOOK_SECRET) { res.status(403).end(); return; }
+    const given = Buffer.from(String(req.headers["x-telegram-bot-api-secret-token"] || "")), want = Buffer.from(process.env.TELEGRAM_WEBHOOK_SECRET || "");
+    if (!want.length || given.length !== want.length || !(await import("crypto")).timingSafeEqual(given, want)) { res.status(403).end(); return; }
     res.json({ ok: true });
     const msg = req.body?.message;
     const m = String(msg?.text || "").match(/^\/start\s+(\S+)/);

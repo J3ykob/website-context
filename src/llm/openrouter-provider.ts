@@ -99,6 +99,7 @@ export class OpenRouterProvider {
         max_tokens: overrides?.maxTokens ?? this.maxTokens,
         ...REASONING,
         temperature: overrides?.temperature ?? this.temperature,
+        usage: { include: true }, // the call's cost in USD (spend caps, src/security/budget.ts)
         // The fastest of the model's providers (a visitor is waiting); OPENROUTER_PROVIDER_SORT=price to change.
         provider,
       }),
@@ -111,11 +112,11 @@ export class OpenRouterProvider {
 
     const data = await response.json() as {
       choices: { message: { content: string } }[];
-      usage: { prompt_tokens: number; completion_tokens: number };
+      usage: { prompt_tokens: number; completion_tokens: number; cost?: number };
       provider?: string;
     };
 
-    countLlm(data.usage?.prompt_tokens || 0, data.usage?.completion_tokens || 0, t0, `${data.provider || "?"} out=${data.usage?.completion_tokens || 0}`);
+    countLlm(data.usage?.prompt_tokens || 0, data.usage?.completion_tokens || 0, t0, `${data.provider || "?"} out=${data.usage?.completion_tokens || 0}`, Number(data.usage?.cost) || 0);
     noteSpeed(data.provider, Date.now() - t0, data.usage?.completion_tokens || 0);
     return {
       content: data.choices[0]?.message?.content || "",
@@ -145,6 +146,7 @@ export class OpenRouterProvider {
         temperature: this.temperature,
         stream: true,
         provider,
+        usage: { include: true },
         ...REASONING,
       }),
     }));
@@ -158,6 +160,7 @@ export class OpenRouterProvider {
     const decoder = new TextDecoder();
     let buffer = "";
     let content = "";
+    let usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number } | null = null;
     while (true) {
       const { done, value } = await reader.read();
       // The last line may come without a newline (Anthropic models' streams): read it too, or the reply's end is lost.
@@ -173,12 +176,13 @@ export class OpenRouterProvider {
           const json = JSON.parse(payload);
           const delta = json.choices?.[0]?.delta?.content;
           if (json.provider) servedBy = json.provider;
+          if (json.usage) usage = json.usage;
           if (delta) { if (!first) first = Date.now() - t0; content += delta; onToken(delta); }
         } catch { /* partial JSON across chunks — ignored, completes next read */ }
       }
       if (done) break;
     }
-    countLlm(0, 0, t0, `stream ${servedBy} first=${(first / 1000).toFixed(1)}s chars=${content.length}`);
+    countLlm(usage?.prompt_tokens || 0, usage?.completion_tokens || 0, t0, `stream ${servedBy} first=${(first / 1000).toFixed(1)}s chars=${content.length}`, Number(usage?.cost) || 0);
     if (first) noteSpeed(servedBy, Date.now() - t0, 0, first);
     return { content };
   }

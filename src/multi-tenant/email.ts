@@ -10,6 +10,16 @@ const FROM = process.env.EMAIL_FROM || "Jakub <jakub@whisp.so>";
 /**
  * Send welcome email with password setup link.
  */
+// Customer e-mails per address per day (MSG_PER_DAY_EMAIL, default 6): anyone can start requests and
+// type someone else's address.
+async function withinEmailCap(email: string): Promise<boolean> {
+  if ((process.env.MSG_CAP_EXEMPT || "kubalol7982@gmail.com").split(",").includes(email.trim().toLowerCase())) return true; // our own tests
+  const { bump, logAbuse } = await import("../security/quota.js");
+  const ok = await bump(`msg:email:${email.trim().toLowerCase()}`, Number(process.env.MSG_PER_DAY_EMAIL) || 6);
+  if (!ok) logAbuse("message_cap", `email:${email}`);
+  return ok;
+}
+
 export async function sendWelcomeEmail(
   email: string,
   tenantId: string,
@@ -215,6 +225,7 @@ export async function sendCustomerOfferEmail(
   email: string,
   r: { lang: string; brand: string; business: string; offer: string; link: string; replyTo: string },
 ): Promise<boolean> {
+  if (!(await withinEmailCap(email))) return false;
   if (process.env.CUSTOMER_OFFER_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
     console.log(`[email] offer email to ${email} not sent - template awaiting approval`);
     return false;
@@ -248,6 +259,7 @@ export async function sendResultEmail(
   email: string,
   r: { brand: string; replyTo: string; lang: string; message: string; files: { name: string; content: Buffer }[]; site: string },
 ): Promise<boolean> {
+  if (!(await withinEmailCap(email))) return false;
   if (process.env.CUSTOMER_RESULT_EMAIL_APPROVED !== "1" && email.toLowerCase() !== "kubalol7982@gmail.com") {
     console.log(`[email] result email to ${email} not sent - template awaiting approval`);
     return false;

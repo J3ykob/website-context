@@ -4,6 +4,7 @@
  * tenant's stored flow definition, so this endpoint cannot be used as a
  * general-purpose browsing agent. Rate-limited per IP.
  */
+import { clientIp } from "../security/client-ip.js";
 import type { Express, Request, RequestHandler } from "express";
 import { getFlow, getFlows, saveFlow } from "../flows/flow-store.js";
 import { getTenant } from "../multi-tenant/tenant-registry.js";
@@ -16,7 +17,7 @@ import { decideStep, type AgentSnapshot, type AgentHistoryItem } from "./step.js
 
 const hits = new Map<string, { n: number; t: number }>();
 function rateOk(req: Request): boolean {
-  const ip = String(req.headers["x-forwarded-for"] || req.ip || "").split(",")[0].trim();
+  const ip = clientIp(req);
   const now = Date.now();
   const e = hits.get(ip);
   if (!e || now - e.t > 60000) { hits.set(ip, { n: 1, t: now }); return true; }

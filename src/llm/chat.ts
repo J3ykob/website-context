@@ -32,7 +32,7 @@ import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
-import { noteTurn, turnVariant, turnUsage, newTurnUsage } from "./turn-usage.js";
+import { noteTurn, turnVariant, turnUsage, newTurnUsage, turnCheap, turnIp } from "./turn-usage.js";
 import { auditKnowledge, type AuditReport } from "../knowledge/audit.js";
 import { keyFacts } from "../knowledge/facts.js";
 
@@ -692,6 +692,12 @@ export class WebsiteChat {
     if (next) { onToken(next.message); return next; }
 
     const rt = await this.routeTurn(sanitizedMessages, question);
+    // An attempt on the assistant itself (any language, Jev): answered as a blocked message - no facts, no tools.
+    if (rt && rt.injection >= (Number(process.env.JEV_INJECTION_MIN) || 0.8)) {
+      noteTurn("injection", rt.injection);
+      (await import("../security/quota.js")).logAbuse("injection", sessionKey, this.context.tenantId, question.slice(0, 200));
+      return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.blocked], packs: [], noFacts: true });
+    }
     // Starting one of our actions: decided here, so nothing falls back to the other path's texts.
     if (rt && rt.intent === "order" && rt.flow >= 0) {
       const flows = this.routableFlows();
@@ -767,7 +773,8 @@ export class WebsiteChat {
       const followup = (rt && rt.followup >= 0.5) || question.length < 40;
       const query = followup && prevUser ? `${prevUser}\n${prevReply.slice(0, 200)}\n${question}` : question;
       // A real need we can't meet may go to the network: started now, used below if our packs don't answer.
-      const net = rt && !behaviour.length ? await this.networkStart(question, messages, rt) : null;
+      // Over a spend cap or from a site the business does not own: no network search (src/security/budget.ts).
+      const net = rt && !behaviour.length && !turnCheap() ? await this.networkStart(question, messages, rt) : null;
       // Key facts (src/knowledge/facts.ts): the site's single sentences, found by meaning and kept by Jev - in parallel.
       const factsP = turnVariant().includes("facts")
         ? this.embeddingProvider.embed([query]).then((v) => keyFacts(this.context.tenantId, v[0] || null, convo, question)).catch(() => null)
@@ -945,6 +952,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const gap = !answered && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
       return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network!.partners } : {}) };
     };
+    let safeRewrite = false; // set once the fact check was found unavailable (one safe rewrite, not a loop)
     const check = async (text: string): Promise<{ problems: string[]; offers: number }> => {
       const problems: string[] = [];
       if (!text.trim()) return { problems: ["it is empty - write the reply"], offers: 0 };
@@ -965,7 +973,13 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       ]);
       const nl = (k: string) => ((checks?.[k] as JevNoulAnswer | undefined)?.noul ?? 0);
       const bad = unsup ? statements.filter((_, i) => unsup[i] >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) : [];
-      if (!opts.noFacts && statements.length && jevEnabled() && !unsup) noteTurn("factCheckUnavailable", true);
+      // Fact check unavailable (Jev down or out of credits): no unchecked facts go out - the reply is
+      // rewritten once to state only the official contact details (fail closed; was sent unchecked).
+      if (!opts.noFacts && statements.length && !unsup && (jevEnabled() || !!process.env.JEV_API_KEY) && !safeRewrite) {
+        noteTurn("factCheckUnavailable", true);
+        safeRewrite = true;
+        problems.push("our fact check is unavailable right now, so it cannot be sent as it is: keep only the business's name, phone, e-mail, address and opening hours exactly as in the official info, say briefly that you can't confirm other details in the chat at the moment, and give our phone or e-mail for the rest");
+      }
       if (bad.length) problems.push(`these statements are not supported by our information (remove or correct them): ${bad.map((b) => `"${b}"`).join("; ")}`);
       if (!wantOffer && nl("offers") >= 0.6) problems.push("it offers to pass the question on to our team, which this reply must not do");
       if (!network && !answered && nl("denies") >= 0.6) problems.push("it says we do not offer or do something, although our information simply does not cover it");
@@ -1089,6 +1103,16 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
    * down): the turn falls back to the knowledge answer.
    */
   private async agentTurn(messages: ChatMessage[], message: string, sessionKey: string, opts?: { pureCalc?: boolean }): Promise<ChatResponse | null> {
+    // Costly background work is rationed (2026-10-29): none over a spend cap or from a foreign site, and
+    // per day at most AGENT_RUNS_SESSION per conversation (3), AGENT_RUNS_IP per visitor IP (6) and
+    // AGENT_RUNS_TENANT per business (60). Over it the turn is answered from the pages instead (null).
+    if (turnCheap()) { noteTurn("agentLimit", "cheap"); return null; }
+    const { bump, logAbuse } = await import("../security/quota.js");
+    const ip = turnIp();
+    const within = (await bump(`agent:s:${sessionKey}`, Number(process.env.AGENT_RUNS_SESSION) || 3))
+      && (!ip || (await bump(`agent:ip:${ip}`, Number(process.env.AGENT_RUNS_IP) || 6)))
+      && (await bump(`agent:t:${this.context.tenantId}`, Number(process.env.AGENT_RUNS_TENANT) || 60));
+    if (!within) { noteTurn("agentLimit", "quota"); logAbuse("agent_quota", ip || sessionKey, this.context.tenantId); return null; }
     const projectId = await conversationProject(this.context.tenantId, sessionKey, message);
     if (!projectId) return null;
     // Quantities only (no prices, no commitments): delivered without the owner's approval.

@@ -12,7 +12,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { countJev, jevOffForTurn } from "./turn-usage.js";
+import { countJev, jevOffForTurn, jevTurnCount, noteJevCapped } from "./turn-usage.js";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 
@@ -43,6 +43,9 @@ export function jevEnabled(): boolean {
 export async function jevAsk(state: unknown, questions: Record<string, JevQuestion>, timeoutMs?: number): Promise<Record<string, JevAnswer> | null> {
   const key = process.env.JEV_API_KEY;
   if (!key || jevOffForTurn()) return null;
+  // Per-turn cap: a turn normally needs 6-12 calls; a runaway loop or a crafted conversation must not
+  // spend without bound (JEV_TURN_MAX, default 30). Over it Jev counts as unavailable for the turn.
+  if (jevTurnCount() >= (Number(process.env.JEV_TURN_MAX) || 30)) { noteJevCapped(); return null; }
   const t0 = Date.now();
   const budget = timeoutMs ?? (Number(process.env.JEV_TIMEOUT_MS) || 2500);
   const schedule = (process.env.JEV_HEDGE_SCHEDULE || "300,800,1600,3000").split(",").map(Number).filter((n) => n > 0 && n < budget);
@@ -52,13 +55,14 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     const c = new AbortController();
     controllers.push(c);
     const r = await fetch(ENDPOINT, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body, signal: c.signal });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) { jevOutcome(false, r.status); throw new Error(`HTTP ${r.status}`); }
     const json = (await r.json()) as any;
     const answers = json?.answers;
     if (!answers || typeof answers !== "object") throw new Error("no answers");
     const u = jevUsage.getStore();
     if (u) { u.inputTokens += Number(json?.usage?.input_tokens) || 0; u.calls++; }
     countJev(Number(json?.usage?.input_tokens) || 0, t0);
+    jevOutcome(true);
     return answers;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -67,7 +71,9 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), budget); });
     // First success wins; a failed attempt only loses once every attempt
     // (including the ones still scheduled) has failed.
-    const total = budget >= 2000 ? 1 + schedule.length : 1;
+    // Backups only for quick decisions (2-6 s budgets: router, checks); a big batch (page scoring) is
+    // not sent five times over.
+    const total = budget >= 2000 && budget <= 6000 ? 1 + schedule.length : 1;
     const firstOk = new Promise<Record<string, JevAnswer>>((resolve, reject) => {
       let failed = 0;
       const run = () => attempt().then(resolve, (e) => { if (++failed === total) reject(e); });
@@ -77,6 +83,7 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     return await Promise.race([firstOk, timeout]);
   } catch (e: any) {
     console.warn(`[jev] ${e?.message || e} after ${Date.now() - t0}ms`);
+    if (String(e?.message || e) === "timeout") jevOutcome(false, 0);
     return null;
   } finally {
     if (timer) clearTimeout(timer);
@@ -214,4 +221,24 @@ export async function jevUnsupportedStatements(question: string, statements: str
   if (!answers) return null;
   const out = statements.map((_, i) => (answers[`s${i}`] as JevNoulAnswer | undefined)?.noul);
   return out.every((v) => typeof v === "number") ? (out as number[]) : null;
+}
+
+/**
+ * Jev's health from real traffic: the last 5 minutes of outcomes. Out of credits (402) or mostly failing
+ * means the chat runs without its checks - the deep health check alerts on it (it once ran out of
+ * credits unnoticed).
+ */
+const outcomes: { at: number; ok: boolean; status: number }[] = [];
+let last402At = 0;
+function jevOutcome(ok: boolean, status = 0): void {
+  const now = Date.now();
+  outcomes.push({ at: now, ok, status });
+  if (status === 402) last402At = now;
+  while (outcomes.length && (outcomes[0].at < now - 5 * 60_000 || outcomes.length > 2000)) outcomes.shift();
+}
+export function jevHealth(): { ok: boolean; calls: number; failed: number; outOfCredits: boolean; lastStatus: number | null } {
+  const failed = outcomes.filter((o) => !o.ok).length;
+  const outOfCredits = Date.now() - last402At < 10 * 60_000;
+  const lastStatus = outcomes.length ? outcomes[outcomes.length - 1].status || (outcomes[outcomes.length - 1].ok ? 200 : 0) : null;
+  return { ok: !outOfCredits && !(outcomes.length >= 5 && failed / outcomes.length > 0.5), calls: outcomes.length, failed, outOfCredits, lastStatus };
 }

@@ -55,7 +55,11 @@ export async function scrapeTenant(
   // Crawl the WHOLE site: sitemap + links, 6 pages in parallel. Callers' small
   // page caps (15/20, from when the crawl was sequential) no longer limit it;
   // SCRAPE_MAX_PAGES is only a safety ceiling for huge sites.
-  const pageBudget = Math.max(maxPages, Number(process.env.SCRAPE_MAX_PAGES) || 500);
+  // The ceiling is hard (a client-sent maxPages of 1e6 meant an unbounded crawl until 2026-10-29). Old
+  // small caps (<50) still mean "whole site"; a cap of 50+ is a real limit (onboarding before the owner
+  // has claimed the business: ONBOARD_MAX_PAGES).
+  const ceiling = Number(process.env.SCRAPE_MAX_PAGES) || 500;
+  const pageBudget = maxPages >= 50 ? Math.min(maxPages, ceiling) : ceiling;
   console.log(`[scrape-pipeline] Crawling ${siteUrl} (full site, ceiling ${pageBudget} pages) for tenant ${tenantId}`);
   // Pages are converted to chunks as they arrive (their HTML dropped at once),
   // so memory stays flat however large the site is.

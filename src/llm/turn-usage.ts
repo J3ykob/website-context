@@ -8,16 +8,16 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export interface TurnUsage { llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean; variant?: string; debug?: Record<string, unknown> }
+export interface TurnUsage { usd?: number; ip?: string; tenantId?: string; sessionKey?: string; cheap?: boolean; llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean; variant?: string; debug?: Record<string, unknown> }
 export const turnUsage = new AsyncLocalStorage<TurnUsage>();
 export const newTurnUsage = (): Omit<TurnUsage, "at"> & { at: number } => ({ llmCalls: 0, llmIn: 0, llmOut: 0, jevCalls: 0, jevIn: 0, at: Date.now(), steps: [] });
 
 const sec = (ms: number) => (ms / 1000).toFixed(1);
 /** One LLM call; `started` (Date.now() before the request) adds it to the turn's timeline. */
-export function countLlm(inTok = 0, outTok = 0, started?: number, detail = ""): void {
+export function countLlm(inTok = 0, outTok = 0, started?: number, detail = "", usd = 0): void {
   const u = turnUsage.getStore();
   if (!u) return;
-  u.llmCalls++; u.llmIn += inTok; u.llmOut += outTok;
+  u.llmCalls++; u.llmIn += inTok; u.llmOut += outTok; u.usd = (u.usd || 0) + usd;
   if (started) u.steps.push(`llm @${sec(started - u.at)}s ${sec(Date.now() - started)}s${detail ? ` ${detail}` : ""}`);
 }
 /** Admin test of the no-Jev safe mode (header x-test-no-jev): Jev counts as unavailable for this request. */
@@ -37,3 +37,10 @@ export function countJev(inTok = 0, started?: number): void {
   u.jevCalls++; u.jevIn += inTok;
   if (started) u.steps.push(`jev @${sec(started - u.at)}s ${sec(Date.now() - started)}s`);
 }
+/** Jev calls made so far in this turn (the per-turn cap in jev.ts). */
+export const jevTurnCount = (): number => turnUsage.getStore()?.jevCalls || 0;
+export function noteJevCapped(): void { const u = turnUsage.getStore(); if (u) (u.debug ||= {}).jevCapped = true; }
+/** The turn runs over a spend cap: no network search, no project agent (src/security/budget.ts). */
+export const turnCheap = (): boolean => !!turnUsage.getStore()?.cheap;
+/** Who is asking (set by the server for /api/chat): the IP for per-IP quotas. */
+export const turnIp = (): string => turnUsage.getStore()?.ip || "";

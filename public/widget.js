@@ -617,7 +617,7 @@
       onDone: function(data) {
         var t = document.getElementById("wctx-bar-thinking"); if (t) t.remove();
         var lv0 = document.getElementById("wctx-bar-live"); if (lv0) lv0.remove();
-        messages.push({ role: "assistant", content: data.message }); persistMessages();
+        messages.push({ role: "assistant", content: data.message, sig: data.sig }); persistMessages();
         appendMsg("assistant", data.message, data.sources);
         syncBarMessages(); // re-render the bar properly (links, sources, last-4 window)
         if (data.navigateTo) {
@@ -1303,7 +1303,7 @@
         setLoading(false);
         // Replace the live (raw) bubble with the canonical cleaned render + links + sources.
         if (bubble) { bubble.remove(); bubble = null; }
-        messages.push({ role: "assistant", content: data.message }); persistMessages();
+        messages.push({ role: "assistant", content: data.message, sig: data.sig }); persistMessages();
         appendMsg("assistant", data.message, data.sources);
 
         if (data.navigateTo) {
