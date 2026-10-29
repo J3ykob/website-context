@@ -49,6 +49,7 @@ The tables below show each limit as audited; these rows were then changed:
 | Records per business | 150 (MAX_RECORDS) | capability-index.ts | one business must not fill the 100 nearest records; enough for every page's first chunk on most sites |
 | Offer items with their own record | 80 (ITEM_LIMIT); larger offers 60 category records (CATEGORY_LIMIT) | capability-index.ts | kh-bud's items alone filled all 150 and crowded out its page content; a 2,347-product shop summarised by category |
 | Nearest records per search | 100 (QUERY_TOP) | capability-index.ts | Vectorize maximum with indexed-only metadata |
+| Queries per search for diversity | up to 4, businesses already found excluded ($nin) | capability-index.ts | a 150-record catalogue filled the 100 nearest records - shortlists of 1-2 businesses, chain test 11/2/7 (2026-10-30) |
 | Shortlist | 6 per need part (NETWORK_SHORTLIST_PART), one search for chat and agent (src/network/find.ts) | find.ts | measured: Warsaw 10/10 expected businesses in the top 6 (9 at rank 1); fleet of 1,067: 96% in the top 12, 92% top 6 |
 | Network wait without a live status line | 10 s (was 3.5 s) | chat.ts packsReply | the one search splits the need into parts first: 3-8 s; API calls without the widget missed the network |
 | A priced network offer | a price on one of the 2 best-scored matched items | find.ts | a loose match (grey laminate for grey vinyl) is not a quote |

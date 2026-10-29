@@ -156,23 +156,34 @@ export async function searchNetwork(ecosystem: string, need: string, opts: { exc
 
 async function searchNetworkUncached(ecosystem: string, need: string, opts: { exclude?: string[]; limit?: number; region?: string; vector?: number[]; withLines?: boolean }): Promise<NetworkCandidate[] | null> {
   const vector = opts.vector || (await embed([need.slice(0, 2000)]))[0];
-  const filter: Record<string, unknown> = { ecosystem };
-  if (opts.region) filter.region = opts.region;
-  const res = await cf("/query", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vector, topK: QUERY_TOP, returnValues: false, returnMetadata: "indexed", filter }) });
-  const matches: { id: string; score: number; metadata?: { tenant?: string } }[] = res?.matches || [];
-  if (!matches.length) return null;
-  const exclude = new Set(opts.exclude || []);
+  const want = opts.limit || 12;
+  // Diversity: one query returns the 100 nearest RECORDS, and a big catalogue (150 records) can take most of
+  // them - the shortlist then held 1-2 businesses (chain test 2026-10-30). Businesses already found (and the
+  // excluded ones) are left out of the next query ($nin), up to 4 queries, until `want` businesses are found.
   const byTenant = new Map<string, { score: number; hits: number; ids: string[] }>();
-  for (const m of matches) {
-    const t = m.metadata?.tenant;
-    if (!t || exclude.has(t)) continue;
-    const e = byTenant.get(t) || { score: 0, hits: 0, ids: [] };
-    e.score = Math.max(e.score, m.score); e.hits++; if (e.ids.length < 3) e.ids.push(m.id);
-    byTenant.set(t, e);
+  const skip = new Set(opts.exclude || []);
+  let any = false;
+  for (let round = 0; round < 4 && byTenant.size < want; round++) {
+    const filter: Record<string, unknown> = { ecosystem };
+    if (opts.region) filter.region = opts.region;
+    const nin = [...skip, ...byTenant.keys()];
+    if (nin.length) filter.tenant = { $nin: nin.slice(0, 200) };
+    const res = await cf("/query", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vector, topK: QUERY_TOP, returnValues: false, returnMetadata: "indexed", filter }) });
+    const matches: { id: string; score: number; metadata?: { tenant?: string } }[] = res?.matches || [];
+    if (!matches.length) break;
+    any = true;
+    for (const m of matches) {
+      const t = m.metadata?.tenant;
+      if (!t || skip.has(t)) continue;
+      const e = byTenant.get(t) || { score: 0, hits: 0, ids: [] };
+      e.score = Math.max(e.score, m.score); e.hits++; if (e.ids.length < 3) e.ids.push(m.id);
+      byTenant.set(t, e);
+    }
   }
+  if (!any) return null;
   // Best record first; several matching records lift a business a little (it offers more of the need).
   const ranked = [...byTenant.entries()].map(([tenant, e]) => ({ tenant, score: e.score + Math.min(0.03, 0.01 * (e.hits - 1)), hits: e.hits, ids: e.ids }))
-    .sort((a, b) => b.score - a.score).slice(0, opts.limit || 12);
+    .sort((a, b) => b.score - a.score).slice(0, want);
   // The matching lines themselves (evaluation and logs only - the callers judge with their own data).
   const ids = opts.withLines ? ranked.flatMap((r) => r.ids) : [];
   const text = new Map<string, string>();
