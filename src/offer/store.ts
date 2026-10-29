@@ -148,16 +148,20 @@ export function clean(raw: any, source?: OfferItem["source"]): OfferItem | null 
  * (manual / sheet).
  */
 export function mergeItems(existing: OfferItem[], incoming: OfferItem[]): OfferItem[] {
-  const byName = new Map(existing.map((i) => [i.name.toLowerCase(), i]));
+  // A shop's products are told apart by their own page: variants share a name ("Frezy do wręgowania" in
+  // several sizes) - merged by name, 113 of empro.pro's 2,347 products were lost (2026-10-29).
+  const keyOf = (i: OfferItem) => (i.source === "shop" && i.url ? `url:${i.url.toLowerCase()}` : i.name.toLowerCase());
+  const byName = new Map(existing.map((i) => [keyOf(i), i]));
   for (const it of incoming) {
-    const prev = byName.get(it.name.toLowerCase());
-    if (!prev) { byName.set(it.name.toLowerCase(), it); continue; }
+    const k = keyOf(it);
+    const prev = byName.get(k);
+    if (!prev) { byName.set(k, it); continue; }
     const fromOwner = it.source === "manual" || it.source === "sheet";
-    if (fromOwner) { byName.set(it.name.toLowerCase(), { ...it, id: prev.id, owner_set: [...new Set([...prev.owner_set, ...it.owner_set])] }); continue; }
+    if (fromOwner) { byName.set(k, { ...it, id: prev.id, owner_set: [...new Set([...prev.owner_set, ...it.owner_set])] }); continue; }
     const fields: ItemFields = { ...it.fields };
     for (const f of prev.owner_set) if (prev.fields[f]) fields[f] = prev.fields[f];
     const keepPrice = prev.owner_set.includes("price_type");
-    byName.set(it.name.toLowerCase(), {
+    byName.set(k, {
       ...it, id: prev.id, fields, owner_set: prev.owner_set,
       price_value: keepPrice ? prev.price_value : it.price_value,
       price_max: keepPrice ? prev.price_max : it.price_max,
