@@ -173,7 +173,7 @@ export class TenantManager {
       llmProvider: "openrouter",
       openRouter: {
         apiKey: process.env.OPENROUTER_API_KEY!,
-        model: process.env.OPENROUTER_MODEL || "qwen/qwen3-235b-a22b-2507",
+        model: process.env.OPENROUTER_MODEL || "anthropic/claude-haiku-5.5",
         siteUrl: meta.siteUrl,
       },
       systemPromptExtra,

@@ -154,7 +154,8 @@ export class ScrapeWorker {
     const MAX_BOOT_ENQUEUE = 25;
     const pending = listTenants().filter((t) => t.status === "pending" && t.siteUrl);
     for (const tenant of pending.slice(0, MAX_BOOT_ENQUEUE)) {
-      this.enqueue(tenant.id, tenant.siteUrl!, 15);
+      // An unclaimed onboarding keeps its onboarding cap; a claimed one crawls the whole site (0).
+      this.enqueue(tenant.id, tenant.siteUrl!, tenant.ownerPasswordHash ? 0 : Number(process.env.ONBOARD_MAX_PAGES) || 150);
     }
     if (pending.length > MAX_BOOT_ENQUEUE) {
       console.warn(`[worker] ${pending.length} pending tenant(s) exceeds boot cap ${MAX_BOOT_ENQUEUE} — enqueued the first ${MAX_BOOT_ENQUEUE}, remainder needs manual triage`);

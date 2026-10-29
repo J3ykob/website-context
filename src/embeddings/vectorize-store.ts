@@ -10,7 +10,8 @@ import { getCfToken, refreshCfToken } from "../storage/cf-auth.js";
 
 const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
 // Must match EMBED_MODEL (bge-large-en-v1.5 -> whisp-vectors, bge-m3 -> whisp-vectors-m3).
-const INDEX_NAME = process.env.VECTORIZE_INDEX || (process.env.EMBED_MODEL === "bge-m3" ? "whisp-vectors-m3" : "whisp-vectors");
+// Follows the embedding model's default (bge-m3 -> whisp-vectors-m3; bge-provider.ts).
+const INDEX_NAME = process.env.VECTORIZE_INDEX || (process.env.EMBED_MODEL === "bge-large-en-v1.5" ? "whisp-vectors" : "whisp-vectors-m3");
 const BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/vectorize/v2/indexes/${INDEX_NAME}`;
 
 const headers = () => ({

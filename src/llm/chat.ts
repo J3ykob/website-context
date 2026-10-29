@@ -166,7 +166,8 @@ class OpenRouterBackend implements LLMBackend {
       { role: "system" as const, content: system },
       ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     ];
-    const result = await this.provider.chat(orMessages);
+    // The caller's limit is honoured (it was dropped until 2026-10-29: every call ran at the default 1024).
+    const result = await this.provider.chat(orMessages, maxTokens ? { maxTokens } : undefined);
     return result.content;
   }
 
@@ -175,7 +176,7 @@ class OpenRouterBackend implements LLMBackend {
       { role: "system" as const, content: system },
       ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     ];
-    const result = await this.provider.chatStream(orMessages, onToken);
+    const result = await this.provider.chatStream(orMessages, onToken, maxTokens);
     return result.content;
   }
 
@@ -713,6 +714,12 @@ export class WebsiteChat {
         this.pendingDisambig.set(sessionKey, { flows: picked.slice(0, 3), at: Date.now() });
         return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.whichAction(picked.map((f) => `"${f.name}"`))], packs: [], rt });
       }
+      // Not ours to take: the order goes to the network businesses that have it (agent), as the form's
+      // hand-over did before 2026-10-26 (since then such orders were only answered).
+      if (elsewhere && agentEnabled() && (await this.hasNetwork().catch(() => false))) {
+        const r = await this.agentTurn(messages, question, sessionKey);
+        if (r) { st.calcStarted = true; onToken(r.message); return r; }
+      }
       if (picked.length === 1 && !elsewhere) {
         let r: ChatResponse;
         if (picked[0].executionMode === "agent") r = await this.startAgentFlow(picked[0], question);
@@ -730,13 +737,30 @@ export class WebsiteChat {
       const figures = /\d/.test(sanitizedMessages.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join(" "));
       const pure = (rt.price < 0.5 || rt.ownPrices >= 0.5) && figures;
       if (!figures) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0 });
-      if (!pure && !(await this.hasPricesFor(question))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
+      // No prices of ours for it: with a network the businesses are asked for their estimates (the agent's
+      // network requests - the owner's wish 2026-10-26: reach out to the companies); without one, a quote offer.
+      // (Until 2026-10-29 it was always the quote offer, so mixed orders never reached the network.)
+      if (!pure && !(await this.hasPricesFor(question))) {
+        if (await this.hasNetwork().catch(() => false)) {
+          const r = await this.agentTurn(messages, question, sessionKey);
+          if (r) { st.calcStarted = true; onToken(r.message); return r; }
+        }
+        return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
+      }
       // Listed unit prices times the customer's quantities: answered here (the owner's decision 2026-10-26);
       // anything more (measuring, unlisted work, discounts, many items) goes to the calculation and its approval.
       {
         const convoText = sanitizedMessages.slice(-6).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 500)}`).join("\n");
-        const s = await jevAsk({ conversation: convoText }, { simple: { type: "noul", instructions: "Is the customer's LATEST request in `conversation` a simple calculation: at most three unit prices (listed by the business or given by the customer) times quantities the customer gave, or a simple quantity from dimensions they gave - with no measuring on site, design, discount, unlisted work or options to compare?" } }, 3000).catch(() => null);
-        if (((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.4) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
+        // Simple AND every item priced by us: a mixed order (concrete from another business + our rental)
+        // passed the first question alone and never reached the network (chain test 2026-10-29).
+        const ours = (await this.knowledgePassages(question, 8).catch(() => [] as string[])).join("\n\n").slice(0, 20000);
+        const s = await jevAsk({ conversation: convoText, our_information: ours }, {
+          simple: { type: "noul", instructions: "Is the customer's LATEST request in `conversation` a simple calculation: at most three unit prices (listed by the business or given by the customer) times quantities the customer gave, or a simple quantity from dimensions they gave - with no measuring on site, design, discount, unlisted work or options to compare?" },
+          allOurs: { type: "noul", instructions: "Does `our_information` (this business's own offer and prices) give a unit price for EVERY product or service the customer's LATEST request in `conversation` asks to price (or did the customer give the prices themselves)?" },
+        }, 4000).catch(() => null);
+        const simple = ((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.4, allOurs = ((s?.allOurs as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.5;
+        noteTurn("simpleCalc", { simple: (s?.simple as JevNoulAnswer | undefined)?.noul, allOurs: (s?.allOurs as JevNoulAnswer | undefined)?.noul });
+        if (simple && (allOurs || !(await this.hasNetwork().catch(() => false)))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
       }
       const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : undefined);
       if (r) { st.calcStarted = true; onToken(r.message); return r; }
@@ -868,7 +892,10 @@ export class WebsiteChat {
     const brand = this.brandName || this.context.businessProfile?.businessName?.value || this.getAllowedDomain() || "our business";
     const pages = this.context.siteMap.slice(0, 20).map((p) => `- ${p.title} (${p.url})`).join("\n");
     // The owner's own answers (added for questions the bot could not answer) are facts too.
-    const notes = this.contextNotes.slice(-30).map((n) => `Q: ${n.question}\nA: ${n.answer}`).join("\n\n");
+    // Every owner answer (newest first) up to ~12k chars - the old "last 30" had no reason and silently
+    // dropped older answers the fact check still trusted (docs/limits.md).
+    let notesLen = 0;
+    const notes = [...this.contextNotes].reverse().map((n) => `Q: ${n.question}\nA: ${n.answer}`).filter((t) => (notesLen += t.length + 2) <= 12000).join("\n\n");
     let system = `You are the website chat assistant of ${brand}. You speak for the business as "we".${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
 ${renderOfficialInfo(this.context.businessProfile)}${notes ? `\n## Answers from the owner\n${notes}\n` : ""}
 ${packText ? `\n## Our information for this conversation (use only this for facts about us)\n${packText}\n` : opts.noFacts ? "" : "\n## Our information for this conversation\n(nothing in our information answers this message)\n"}
@@ -1146,16 +1173,16 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
    * down): the turn falls back to the knowledge answer.
    */
   private async agentTurn(messages: ChatMessage[], message: string, sessionKey: string, opts?: { pureCalc?: boolean }): Promise<ChatResponse | null> {
-    // Costly background work is rationed (2026-10-29): none over a spend cap or from a foreign site, and
-    // per day at most AGENT_RUNS_SESSION per conversation (3), AGENT_RUNS_IP per visitor IP (6) and
-    // AGENT_RUNS_TENANT per business (60). Over it the turn is answered from the pages instead (null).
+    // Costly background work is rationed against scripted abuse (2026-10-29; docs/limits.md): none over a
+    // spend cap or from a foreign site, and per day at most AGENT_RUNS_SESSION per conversation (10),
+    // AGENT_RUNS_IP per visitor IP (30 - offices and mobile carriers share IPs) and AGENT_RUNS_TENANT per
+    // business (300). Counted only for runs that start. Over it the turn is answered from the pages (null).
     if (turnCheap()) { noteTurn("agentLimit", "cheap"); return null; }
-    const { bump, logAbuse } = await import("../security/quota.js");
+    const { bump, peek, logAbuse } = await import("../security/quota.js");
     const ip = turnIp();
-    const within = turnExempt() || (await bump(`agent:s:${sessionKey}`, Number(process.env.AGENT_RUNS_SESSION) || 3))
-      && (!ip || (await bump(`agent:ip:${ip}`, Number(process.env.AGENT_RUNS_IP) || 6)))
-      && (await bump(`agent:t:${this.context.tenantId}`, Number(process.env.AGENT_RUNS_TENANT) || 60));
-    if (!within) { noteTurn("agentLimit", "quota"); logAbuse("agent_quota", ip || sessionKey, this.context.tenantId); return null; }
+    const caps: [string, number][] = [[`agent:s:${sessionKey}`, Number(process.env.AGENT_RUNS_SESSION) || 10], ...(ip ? [[`agent:ip:${ip}`, Number(process.env.AGENT_RUNS_IP) || 30] as [string, number]] : []), [`agent:t:${this.context.tenantId}`, Number(process.env.AGENT_RUNS_TENANT) || 300]];
+    if (!turnExempt()) for (const [k, cap] of caps) if ((await peek(k)) >= cap) { noteTurn("agentLimit", "quota"); logAbuse("agent_quota", k, this.context.tenantId); return null; }
+    const countRun = () => { if (!turnExempt()) for (const [k, cap] of caps) void bump(k, cap); };
     const projectId = await conversationProject(this.context.tenantId, sessionKey, message);
     if (!projectId) return null;
     // Quantities only (no prices, no commitments): delivered without the owner's approval.
@@ -1166,6 +1193,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       jevAsk({ message }, { lang: { type: "choice", instructions: "In which language is `message` written?", criteria: { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German", other: "Another language" } } }, 3000),
     ]);
     const l = ((lang?.lang as any)?.choice as string) || "en";
+    if (begun === "started") countRun();
     console.log(`[conversation] ${this.context.tenantId}: ${projectId} agent ${begun}`);
     const n = NOTIFY[l] || NOTIFY.en;
     const { customerLink, LINK_TEXT } = await import("../projects/conversation.js");
@@ -1184,7 +1212,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const what = begun === "busy" ? "We are still working on the customer's previous request; this new message will be handled once that is ready. Tell them briefly."
         : reviewMode(this.context.tenantId) === "approve" && !opts?.pureCalc ? BEHAVIOUR.calcReviewed : BEHAVIOUR.calcStarted;
       const follow = token && begun !== "busy" ? ` Then say plainly that this can take a while and that a button under your message (shown by the chat - don't write it or its label yourself) opens the status of their request in a new tab with live updates, where they can also choose to be notified (${channels.join(", ")}) - so they don't have to wait here.` : "";
-      notice = (await this.backend.generate(`You are the website chat assistant of ${this.brandName || "our business"}, speaking as "we". ${what}${follow} Reply in the customer's language, naturally.${replyLanguage(await this.routeTurn(messages, message).catch(() => null))}`, messages.slice(-4), 200).catch(() => "")).trim() || notice;
+      notice = (await this.backend.generate(`You are the website chat assistant of ${this.brandName || "our business"}, speaking as "we". ${what}${follow} Reply in the customer's language, naturally.${replyLanguage(await this.routeTurn(messages, message).catch(() => null))}`, messages.slice(-4), 500).catch(() => "")).trim() || notice;
     }
     return { message: notice, sources: [], grounded: true, project: { id: projectId, type: CONVERSATION, agent: { status: "running" }, ...(begun === "busy" ? {} : { notify }) } };
   }

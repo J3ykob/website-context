@@ -72,7 +72,7 @@ export class OpenRouterProvider {
 
   constructor(config: OpenRouterConfig = {}) {
     this.apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
-    this.model = config.model || process.env.OPENROUTER_MODEL || "qwen/qwen3-235b-a22b-2507";
+    this.model = config.model || process.env.OPENROUTER_MODEL || "anthropic/claude-haiku-5.5"; // the production model (render.yaml); qwen until 2026-10-29
     this.maxTokens = config.maxTokens || 1024;
     // 0.3 since 2026-10-25: at 0.7 the replies had typos, garbled words and small invented details.
     this.temperature = config.temperature ?? (Number(process.env.OPENROUTER_TEMPERATURE) || 0.3);
@@ -126,7 +126,7 @@ export class OpenRouterProvider {
 
   // Streaming variant — calls onToken(delta) as tokens arrive, returns the full text.
   // Lets the chat surface a response token-by-token (first token ~1s vs ~3.5s full).
-  async chatStream(messages: OpenRouterMessage[], onToken: (delta: string) => void): Promise<{ content: string }> {
+  async chatStream(messages: OpenRouterMessage[], onToken: (delta: string) => void, maxTokens?: number): Promise<{ content: string }> {
     const t0 = Date.now();
     let first = 0;
     let servedBy = "?";
@@ -142,7 +142,7 @@ export class OpenRouterProvider {
       body: JSON.stringify({
         model: testModel() || this.model,
         messages,
-        max_tokens: this.maxTokens,
+        max_tokens: maxTokens || this.maxTokens,
         temperature: this.temperature,
         stream: true,
         provider,

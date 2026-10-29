@@ -43,7 +43,7 @@ const INTENTS: Record<Intent, string> = {
 };
 
 export async function route(previousUser: string, previousReply: string, message: string, flows: { name: string; description?: string }[]): Promise<Route | null> {
-  const state = { previous_visitor_message: previousUser.slice(0, 600), previous_reply: previousReply.slice(0, 1200), message: message.slice(0, 800) };
+  const state = { previous_visitor_message: previousUser.slice(0, 600), previous_reply: previousReply.slice(0, 1200), message: message.slice(0, 2500) }; // the whole message (input guard allows 4000; 800 hid the end of long inquiries)
   const questions: Record<string, JevQuestion> = {
     intent: { type: "choice", instructions: "A visitor writes to a business's website chat. What does the visitor's latest `message` want (read with the previous exchange)?", criteria: INTENTS },
     price: { type: "noul", instructions: "Does `message` ask what something costs (a price, a total, a quote)?" },

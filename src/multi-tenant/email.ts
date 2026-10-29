@@ -10,12 +10,12 @@ const FROM = process.env.EMAIL_FROM || "Jakub <jakub@whisp.so>";
 /**
  * Send welcome email with password setup link.
  */
-// Customer e-mails per address per day (MSG_PER_DAY_EMAIL, default 6): anyone can start requests and
+// Customer e-mails per address per day (MSG_PER_DAY_EMAIL, default 20: result + one offer per business asked): anyone can start requests and
 // type someone else's address.
 async function withinEmailCap(email: string): Promise<boolean> {
   if ((process.env.MSG_CAP_EXEMPT || "kubalol7982@gmail.com").split(",").includes(email.trim().toLowerCase())) return true; // our own tests
   const { bump, logAbuse } = await import("../security/quota.js");
-  const ok = await bump(`msg:email:${email.trim().toLowerCase()}`, Number(process.env.MSG_PER_DAY_EMAIL) || 6);
+  const ok = await bump(`msg:email:${email.trim().toLowerCase()}`, Number(process.env.MSG_PER_DAY_EMAIL) || 20);
   if (!ok) logAbuse("message_cap", `email:${email}`);
   return ok;
 }

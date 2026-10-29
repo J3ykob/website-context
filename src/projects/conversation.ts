@@ -54,36 +54,6 @@ export function recordTurn(projectId: string | null, turn: { user: string; assis
     .catch((e) => console.warn(`[conversation] ${projectId}: turn not recorded (${(e as Error).message})`));
 }
 
-export type TurnKind = "estimate" | "work" | "other";
-const kindMemo = new Map<string, { at: number; kind: TurnKind }>();
-/**
- * How the latest message should be handled, in one Jev choice: pricing a given list (the fast estimate
- * path), work on data (the project agent), or anything else (knowledge). `estimateAvailable` /
- * `agentAvailable`: what this business has; an unavailable kind is never chosen. Memoized per message.
- */
-export async function turnKind(message: string, previousReply: string, estimateAvailable: boolean, agentAvailable = agentEnabled()): Promise<TurnKind> {
-  if ((!estimateAvailable && !agentAvailable) || message.trim().length < 8) return "other";
-  const key = `${estimateAvailable}${agentAvailable}\n${previousReply.slice(-300)}\n${message}`;
-  const hit = kindMemo.get(key);
-  if (hit && Date.now() - hit.at < 60_000) return hit.kind;
-  const criteria: Record<string, string> = {
-    estimate: "It asks what a specific set of products or services it names would cost - each item with its quantity, rental period or job size: pricing exactly what the customer listed.",
-    work: "It asks for work with data beyond pricing a list it names: choosing the best option under conditions (budget, dates, size, weight), comparing alternatives, working out how much or how many is needed, planning or scheduling, or preparing a list, table, plan or document.",
-    other: "Anything else: a question that one fact or one passage of the business's information answers (prices of one item, opening hours, what is offered, how something works), a greeting, or small talk.",
-  };
-  if (!estimateAvailable) delete criteria.estimate;
-  if (!agentAvailable) delete criteria.work;
-  const a = await jevAsk({ previous_assistant_reply: previousReply.slice(-1500), message }, {
-    kind: { type: "choice", instructions: "Which kind of request is `message` (the customer's latest message in a chat with a business)?", criteria },
-  }, 4000);
-  const ans = a?.kind as { choice?: string; probabilities?: Record<string, number> } | undefined;
-  // A clear decision only; when unsure, the ordinary answer.
-  const kind = (ans?.choice && (ans.probabilities?.[ans.choice] ?? 0) >= 0.6 ? ans.choice : "other") as TurnKind;
-  if (kindMemo.size > 500) kindMemo.clear();
-  kindMemo.set(key, { at: Date.now(), kind });
-  return kind;
-}
-
 const INSTRUCTION = `Klient w tej rozmowie (rozmowa.md; jego ostatnia wiadomość: request.txt) prosi o coś, co wymaga pracy na danych.
 Wykonaj to na podstawie danych projektu: oferty firm w cenniki/, informacje z witryny firmy w ${KNOWLEDGE_DIR}/, wcześniejsze pliki projektu.
 Odpowiedź dla klienta zapisz w odpowiedz.txt - w języku klienta, jako wiadomość w czacie (bez nagłówków e-maila i podpisu).

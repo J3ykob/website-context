@@ -18,6 +18,7 @@ import { getProject, setMemory, addEvent, addUsage, listParticipants, claimAgent
 import { listFiles, readFile, writeFile, writeBinaryFile, addRequirement, listRequirements, recordVerification, toCsv, type FileKind, type ReqStatus } from "./repo.js";
 import { loadOffer, priceText, type OfferItem } from "../offer/store.js";
 import type { Advert } from "./network.js";
+import { MUST_ASK_MAX } from "./network.js";
 import type { NetworkOffer } from "./broadcast.js";
 import { FIELDS } from "../offer/schema.js";
 import { jevAsk } from "../llm/jev.js";
@@ -300,7 +301,7 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
       const vague = mine.find((o) => !o.precise && o.tenantId !== project.initiatorTenantId);
       if (vague && (!mine.some((o) => o.precise) || mine[0] === vague)) ask.push(vague.tenantId);
     }
-    mustAsk = project.memory.networkAsked ? [] : [...new Set(ask)].slice(0, 4);
+    mustAsk = project.memory.networkAsked ? [] : [...new Set(ask)].slice(0, MUST_ASK_MAX);
   }
   const offers = await priceLists(project, adverts, mustAsk);
   if (networkOffers.length) {

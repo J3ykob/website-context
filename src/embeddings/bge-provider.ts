@@ -14,7 +14,10 @@ export interface BGEProviderConfig {
 export function bgeBaseUrl(config: BGEProviderConfig = {}): string {
   const url = config.url || process.env.BGE_URL;
   if (url) return url.replace(/\/+$/, "");
-  const host = config.host || process.env.BGE_HOST || "176.9.1.133";
+  // The embedding service is the Workers AI worker (render.yaml BGE_URL); the self-hosted GPU box this used
+  // to default to (176.9.1.133) is gone since 2026-07.
+  if (!config.host && !process.env.BGE_HOST) return "https://bge-embed.kubalol7982.workers.dev";
+  const host = config.host || process.env.BGE_HOST;
   const port = config.port || parseInt(process.env.BGE_PORT || "7900");
   return `http://${host}:${port}`;
 }
@@ -28,11 +31,12 @@ export class BGEEmbeddingProvider implements EmbeddingProvider {
 
   constructor(config: BGEProviderConfig = {}) {
     this.baseUrl = bgeBaseUrl(config);
-    this.batchSize = config.batchSize || 256;
+    this.batchSize = config.batchSize || 96; // 256 was sized for the GPU box; the Workers AI worker takes ~100
     this.apiKey = config.apiKey || process.env.BGE_API_KEY || "";
     // EMBED_MODEL picks the embedding space; it must match VECTORIZE_INDEX
-    // (bge-large-en-v1.5 -> whisp-vectors, bge-m3 -> whisp-vectors-m3).
-    this.modelName = config.model || (process.env.EMBED_MODEL as BGEProviderConfig["model"]) || "bge-large-en-v1.5";
+    // (bge-large-en-v1.5 -> whisp-vectors, bge-m3 -> whisp-vectors-m3). Default bge-m3 (multilingual, production
+    // since 2026-09-27); the English-only default silently mixed spaces when EMBED_MODEL was missing.
+    this.modelName = config.model || (process.env.EMBED_MODEL as BGEProviderConfig["model"]) || "bge-m3";
     this.dimensions = this.modelName === "bge-m3" ? 1024 : 1024;
   }
 

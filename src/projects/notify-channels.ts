@@ -83,11 +83,12 @@ async function sendUpdate(contact: CustomerContact, name: string, vars: Record<s
   for (const c of chosen) {
     if (!approved) { out[c] = "not sent: message text not approved yet"; continue; }
     if (!text) { out[c] = "not sent: no template"; continue; }
-    // Per recipient per day (anyone can start requests and give someone else's number): MSG_PER_DAY_SMS 3,
-    // MSG_PER_DAY_WHATSAPP 5, MSG_PER_DAY_TELEGRAM 10.
+    // Per recipient per day (anyone can start requests and give someone else's number): MSG_PER_DAY_SMS 10,
+    // MSG_PER_DAY_WHATSAPP 10, MSG_PER_DAY_TELEGRAM 20 - a real request gets "result ready" plus an offer per
+    // business asked (MAX_REQUESTS 6), so 3 cut real updates (docs/limits.md).
     const dest = c === "sms" ? contact.phone! : c === "whatsapp" ? contact.whatsapp! : contact.telegramChatId!;
-    const cap = Number(process.env[`MSG_PER_DAY_${c.toUpperCase()}`]) || (c === "sms" ? 3 : c === "whatsapp" ? 5 : 10);
-    const exempt = (process.env.MSG_CAP_EXEMPT || "").split(",").map((x) => x.trim()).filter(Boolean).includes(dest);
+    const cap = Number(process.env[`MSG_PER_DAY_${c.toUpperCase()}`]) || (c === "sms" ? 10 : c === "whatsapp" ? 10 : 20);
+    const exempt = (process.env.MSG_CAP_EXEMPT || "kubalol7982@gmail.com").split(",").map((x) => x.trim()).filter(Boolean).includes(dest);
     if (!exempt && !(await bump(`msg:${c}:${dest}`, cap))) { out[c] = "not sent: daily limit for this recipient"; logAbuse("message_cap", `${c}:${dest}`); continue; }
     const ok = c === "sms" ? await twilio(contact.phone!, process.env.TWILIO_FROM_NUMBER!, text)
       : c === "whatsapp" ? await twilio(`whatsapp:${contact.whatsapp}`, `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`, text, name === "result-ready" && process.env.TWILIO_WHATSAPP_TEMPLATE_SID ? { sid: process.env.TWILIO_WHATSAPP_TEMPLATE_SID, vars: { "1": vars.brand, "2": vars.link } } : undefined)

@@ -191,7 +191,8 @@ function checkSignupRate(ip: string): boolean {
     entry = { count: 0, resetAt: now + 3600000 };
     signupRateMap.set(ip, entry);
   }
-  if (entry.count >= 5) return false;
+  // 20/h per IP (was 5 - one office or a trade fair trying a few sites locked out for an hour; docs/limits.md).
+  if (entry.count >= (Number(process.env.SIGNUP_PER_HOUR) || 20)) return false;
   entry.count++;
   return true;
 }
@@ -711,7 +712,7 @@ app.get("/demo/:tenantId", async (req, res) => {
   const visitIp = clientIp(req);
   // Filter scanner IPs (AWS, Azure, Google Cloud) and internal IPs
   const isScanner = /^(18\.|52\.|54\.|35\.|4\.|13\.|34\.|20\.|40\.|48\.|72\.14[45]|85\.210|135\.225|155\.117|164\.132|172\.186|217\.182)/.test(visitIp);
-  const isInternal = !!req.headers["x-whisp-probe"] || (req.query as any)?.probe === "1" || visitIp === "79.184.118.71" || visitIp === "176.9.1.133" || visitIp.startsWith("127.");
+  const isInternal = !!req.headers["x-whisp-probe"] || (req.query as any)?.probe === "1" || (process.env.QUOTA_EXEMPT_IPS || "79.184.118.71").split(",").map((x) => x.trim()).includes(visitIp) || visitIp.startsWith("127.");
   if (!isScanner && !isInternal) {
     getEmailForTenant(tenant.id).then(email => {
       if (email) recordEvent(email, "demo_visit", { ip: visitIp });
@@ -1302,13 +1303,15 @@ app.post("/api/chat", async (req, res) => {
     const admin = adminOk(req);
     // Demos: the owner's demo pass (cookie from /api/admin/demo-pass) or an IP in QUOTA_EXEMPT_IPS skips
     // quotas and spend caps (never the history check - a forged turn is a forged turn).
-    const exempt = admin || demoPassOk(req) || (process.env.QUOTA_EXEMPT_IPS || "79.184.118.71,176.9.1.133").split(",").map((x) => x.trim()).includes(visitorIp);
+    const exempt = admin || demoPassOk(req) || (process.env.QUOTA_EXEMPT_IPS || "79.184.118.71").split(",").map((x) => x.trim()).includes(visitorIp);
     if (!admin) messages = await verifiedHistory(tenant.id, sessionKey, messages);
     if (!messages.length || messages[messages.length - 1]?.role !== "user") { res.status(400).json({ error: "messages required" }); return; }
     messages = messages.map((m: any) => ({ role: m.role, content: m.content })); // the signature stays here
     const spend = exempt ? "ok" : budgetBefore(tenant.id, sessionKey);
     if (spend === "stop") { res.status(503).json({ error: "backend_unavailable", message: BACKEND_DOWN[guessLang(lastUserText(req))] }); return; }
-    const foreign = !admin && !originAllowed(req.get("origin") || "", tenant);
+    // Foreign = a browser on a site the business does not own (an Origin header naming it). No Origin at all
+    // (server-side integrations, scripts) is not foreign - it lost the agent and the network until 2026-10-29.
+    const foreign = !admin && !!req.get("origin") && !originAllowed(req.get("origin") || "", tenant);
     if (foreign) logAbuse("foreign_origin", req.get("origin") || "(none)", tenant.id, visitorIp);
 
     const chat = await tenantManager.getChatForTenant(tenantId);
@@ -1328,7 +1331,7 @@ app.post("/api/chat", async (req, res) => {
     // the fleet health-check + dev test scripts set (robust regardless of origin IP —
     // the health-check pings every demo and otherwise inflates chat_start/sessions).
     const isProbe = !!req.headers["x-whisp-probe"] || (req.query as any)?.probe === "1";
-    const isSelfChat = isProbe || chatIpRaw === "79.184.118.71" || chatIpRaw === "176.9.1.133" || chatIpRaw.startsWith("127.");
+    const isSelfChat = isProbe || (process.env.QUOTA_EXEMPT_IPS || "79.184.118.71").split(",").map((x) => x.trim()).includes(chatIpRaw) || chatIpRaw.startsWith("127.");
     // Shared fire-and-forget logging for both the streaming and non-streaming paths.
     const logResponse = (response: any) => {
       // Single D1 writer for chat messages (logMessage -> chat_messages). Skip
@@ -1587,10 +1590,10 @@ async function healthMonitorTick(): Promise<void> {
   try {
     const h = await runDeepHealthChecks();
     healthDeepCache = { at: Date.now(), body: h }; // warm the endpoint cache too
-    // Exclude browserless from alert triggers — serving doesn't use it (VPS scrapes
-    // with local Playwright), and it's already excluded from h.ok.
-    const failing = Object.entries(h.checks).filter(([k, v]: any) => k !== "browserless" && v && v.ok === false).map(([k]) => k);
-    const problem = !h.ok || h.lowBalance;
+    // Browserless counts too: the VPS that scraped with local Playwright is gone (2026-07); onboarding on
+    // Render renders JS pages through browserless, so its outage breaks new bots (docs/limits.md).
+    const failing = Object.entries(h.checks).filter(([, v]: any) => v && v.ok === false).map(([k]) => k);
+    const problem = !h.ok || h.lowBalance || failing.includes("browserless");
     // Require TWO consecutive bad ticks (~8 min) before alerting, so a single transient
     // probe timeout (a cold check, a momentary network blip) never fires a false
     // "DOWN" email. A real outage persists and alerts on the 2nd tick.
@@ -1682,7 +1685,9 @@ app.post("/api/admin/rescrape-all", (req, res) => {
   if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenants = listTenants();
   const targets = tenants.filter(t => t.status === "pending" || t.status === "error" || (t.status === "active" && t.pagesCount === 0));
-  const maxPages = Math.min(parseInt(req.query.maxPages as string) || 10, 50);
+  // No page cap here: the pipeline crawls the whole site (ceiling SCRAPE_MAX_PAGES) - the old "10, max 50"
+  // (sequential-crawl era) meant a real 50-page limit once caps of 50+ became real (docs/limits.md).
+  const maxPages = parseInt(req.query.maxPages as string) || 0;
   let queued = 0;
   for (const t of targets) {
     worker.enqueue(t.id, t.siteUrl, maxPages);

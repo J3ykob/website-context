@@ -14,7 +14,7 @@ export interface InputValidationResult {
   reason?: string;
 }
 
-const DEFAULT_MAX_LENGTH = 2000;
+const DEFAULT_MAX_LENGTH = 4000; // a long pasted inquiry (list of items, site details) fits; the request cap is 32k (docs/limits.md)
 
 // Injection patterns — case-insensitive, fuzzy matching
 const INJECTION_PATTERNS: { pattern: RegExp; label: string }[] = [

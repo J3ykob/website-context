@@ -43,10 +43,10 @@ export function jevEnabled(): boolean {
 export async function jevAsk(state: unknown, questions: Record<string, JevQuestion>, timeoutMs?: number): Promise<Record<string, JevAnswer> | null> {
   const key = process.env.JEV_API_KEY;
   if (!key || jevOffForTurn()) return null;
-  // Per-turn cap: a runaway loop or a crafted conversation must not spend without bound (JEV_TURN_MAX,
-  // default 100). A network question legitimately needs ~30 (one judgement per business in the network -
-  // 31 for 16 businesses; the first cap of 30 broke it on 2026-10-29). Over it Jev counts as unavailable.
-  if (jevTurnCount() >= (Number(process.env.JEV_TURN_MAX) || 100)) { noteJevCapped(); return null; }
+  // Per-turn cap: only against a runaway loop (JEV_TURN_MAX, default 400). A network question needs ~2 calls
+  // per business in the network (31 for 16 businesses); the Warsaw base has 168 firms - 400 leaves room.
+  // Jev costs ~$0.0001 per call, so the cap is about loops, not money (docs/limits.md).
+  if (jevTurnCount() >= (Number(process.env.JEV_TURN_MAX) || 400)) { noteJevCapped(); return null; }
   const t0 = Date.now();
   const budget = timeoutMs ?? (Number(process.env.JEV_TIMEOUT_MS) || 2500);
   const schedule = (process.env.JEV_HEDGE_SCHEDULE || "300,800,1600,3000").split(",").map(Number).filter((n) => n > 0 && n < budget);

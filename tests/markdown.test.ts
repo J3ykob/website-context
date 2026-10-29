@@ -11,7 +11,7 @@ describe("HTML to LLM-ready Markdown", () => {
     const fetchResult = await fetchPage("https://example.com");
     const md = htmlToMarkdown(fetchResult);
 
-    expect(md.fullMarkdown).toContain("Example Domain");
+    expect(md.fullMarkdown).toContain("documentation examples"); // example.com is one paragraph since 2026-10 (no h1, no links)
     expect(md.fullMarkdown.length).toBeGreaterThan(50);
     // Should not contain HTML tags
     expect(md.fullMarkdown).not.toMatch(/<[a-z][^>]*>/i);
