@@ -1242,7 +1242,16 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
   private async offeredForForm(message: string): Promise<boolean> {
     const { offerMatches } = await import("../projects/network.js");
     const own = this.offerItems.length ? await offerMatches(this.context.tenantId, this.offerItems, message) : null;
-    if (own && own.length) return true;
+    if (own && own.length) {
+      // Every part ours? One matching part ("wiertnica" in "wiertnica + korona", a floor tool for "vinyl
+      // floor + primer") opened our form and the rest never reached the network (chain test 2026-10-29).
+      const a = await jevAsk({ customer_message: message, our_items: own.slice(0, 15).map((i) => `${i.name}${i.category ? ` (${i.category})` : ""}`) }, {
+        all: { type: "noul", instructions: "Do `our_items` (this business's offer) cover EVERY product or service the customer wants in `customer_message` (not only one part of it)?" },
+      }, 4000).catch(() => null);
+      const all = ((a?.all as JevNoulAnswer | undefined)?.noul ?? 1) >= 0.5;
+      noteTurn("formOffered", { ownItems: own.length, all: (a?.all as JevNoulAnswer | undefined)?.noul });
+      return all;
+    }
     // The site's own passages: by meaning (search) and by words, so "kostka brukowa" without its letters still finds pages.
     const knowledge = this.collectKnowledge();
     const lexical = knowledge ? (await knowledge(message)).slice(0, 4) : [];
