@@ -32,7 +32,7 @@ import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
-import { noteTurn, turnVariant, turnUsage, newTurnUsage, turnCheap, turnIp } from "./turn-usage.js";
+import { noteTurn, turnVariant, turnUsage, newTurnUsage, turnCheap, turnIp, turnExempt } from "./turn-usage.js";
 import { auditKnowledge, type AuditReport } from "../knowledge/audit.js";
 import { keyFacts } from "../knowledge/facts.js";
 
@@ -1109,7 +1109,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     if (turnCheap()) { noteTurn("agentLimit", "cheap"); return null; }
     const { bump, logAbuse } = await import("../security/quota.js");
     const ip = turnIp();
-    const within = (await bump(`agent:s:${sessionKey}`, Number(process.env.AGENT_RUNS_SESSION) || 3))
+    const within = turnExempt() || (await bump(`agent:s:${sessionKey}`, Number(process.env.AGENT_RUNS_SESSION) || 3))
       && (!ip || (await bump(`agent:ip:${ip}`, Number(process.env.AGENT_RUNS_IP) || 6)))
       && (await bump(`agent:t:${this.context.tenantId}`, Number(process.env.AGENT_RUNS_TENANT) || 60));
     if (!within) { noteTurn("agentLimit", "quota"); logAbuse("agent_quota", ip || sessionKey, this.context.tenantId); return null; }

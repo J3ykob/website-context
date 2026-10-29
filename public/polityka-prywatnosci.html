@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polityka prywatności · Whisp</title>
+<style>
+  :root { --bg: #0b1220; --card: #111a2e; --text: #e6ebf5; --muted: #9aa6bf; --line: #1f2a44; --accent: #3b82f6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 780px; margin: 0 auto; padding: 48px 16px 80px; }
+  h1 { font-size: 30px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 34px 0 8px; }
+  p, li { color: var(--text); }
+  .muted { color: var(--muted); font-size: 14px; }
+  a { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Polityka prywatności</h1>
+  <p class="muted">Obowiązuje od {{EFFECTIVE_DATE}} · <a href="/">whisp.so</a></p>
+
+  <h2>1. Kto jest administratorem danych</h2>
+  <div class="card">
+    <p><strong>{{COMPANY_NAME}}</strong><br>{{COMPANY_ADDRESS}}<br>NIP {{COMPANY_NIP}}{{COMPANY_REGISTRY}}</p>
+    <p>Kontakt w sprawie danych osobowych: <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a></p>
+  </div>
+  <p>Whisp to asystent (czat) na stronach internetowych firm. Dla danych osób, które piszą na czacie na stronie firmy-klienta, administratorem jest ta firma, a my przetwarzamy je w jej imieniu (jako podmiot przetwarzający). Dla danych na stronie whisp.so, w naszym czacie i w panelu klienta administratorem jesteśmy my.</p>
+
+  <h2>2. Jakie dane, w jakim celu i na jakiej podstawie</h2>
+  <table>
+    <tr><th>Kogo dotyczy</th><th>Dane</th><th>Cel</th><th>Podstawa (RODO)</th></tr>
+    <tr><td>Firmy korzystające z Whisp</td><td>e-mail, nazwa firmy, adres strony, hasło (zaszyfrowane), treści ze strony firmy, dane płatności (obsługuje Stripe)</td><td>świadczenie usługi, rozliczenia, kontakt w sprawie usługi</td><td>art. 6 ust. 1 lit. b (umowa), lit. c (obowiązki księgowe)</td></tr>
+    <tr><td>Osoby piszące na czacie</td><td>treść rozmowy, identyfikator sesji, adres IP; jeśli ktoś je poda: imię, e-mail, numer telefonu</td><td>odpowiedź na pytania, przekazanie zapytania firmie, powiadomienia o odpowiedzi (e-mail, SMS) - tylko po zgodzie wyrażonej w czacie</td><td>art. 6 ust. 1 lit. b i a (zgoda na powiadomienia); w imieniu firmy-klienta</td></tr>
+    <tr><td>Wszyscy użytkownicy</td><td>adres IP, liczba zapytań, zdarzenia techniczne</td><td>bezpieczeństwo i ochrona przed nadużyciami (limity, wykrywanie ataków)</td><td>art. 6 ust. 1 lit. f (prawnie uzasadniony interes)</td></tr>
+    <tr><td>Firmy z sieci Whisp</td><td>publiczne dane ze strony firmy (nazwa, oferta, kontakt)</td><td>przekazywanie zapytań klientów do firm, które mogą je zrealizować, zaproszenie do sieci</td><td>art. 6 ust. 1 lit. f</td></tr>
+    <tr><td>Rozmowy telefoniczne z firmami</td><td>numer telefonu firmy, przebieg rozmowy</td><td>przedstawienie usługi, wysłanie SMS z linkiem na prośbę rozmówcy</td><td>art. 6 ust. 1 lit. f</td></tr>
+  </table>
+
+  <h2>3. Komu przekazujemy dane</h2>
+  <p>Korzystamy z dostawców, którzy przetwarzają dane w naszym imieniu:</p>
+  <table>
+    <tr><th>Dostawca</th><th>Do czego</th><th>Gdzie</th></tr>
+    <tr><td>Render</td><td>serwery aplikacji</td><td>USA</td></tr>
+    <tr><td>Cloudflare</td><td>baza danych, pliki, wyszukiwanie, modele AI do wyszukiwania</td><td>UE / globalnie</td></tr>
+    <tr><td>OpenRouter i dostawcy modeli AI (m.in. Anthropic)</td><td>pisanie odpowiedzi czatu</td><td>USA</td></tr>
+    <tr><td>TypeSafe</td><td>model sprawdzający odpowiedzi i kierujący rozmową</td><td>{{TYPESAFE_LOCATION}}</td></tr>
+    <tr><td>Resend</td><td>wysyłka e-maili</td><td>USA</td></tr>
+    <tr><td>Twilio</td><td>SMS, rozmowy telefoniczne</td><td>USA</td></tr>
+    <tr><td>Stripe</td><td>płatności</td><td>USA / UE</td></tr>
+    <tr><td>ElevenLabs</td><td>głos w rozmowach telefonicznych</td><td>USA</td></tr>
+    <tr><td>Browserless</td><td>odczyt stron internetowych firm</td><td>USA</td></tr>
+  </table>
+  <p>Przekazanie danych poza Europejski Obszar Gospodarczy odbywa się na podstawie mechanizmów przewidzianych w RODO: decyzji Komisji Europejskiej (Ramy ochrony danych UE-USA) lub standardowych klauzul umownych.</p>
+
+  <h2>4. Jak długo przechowujemy dane</h2>
+  <ul>
+    <li>Rozmowy z czatu: {{CHAT_RETENTION}}.</li>
+    <li>Zapytania i ich pliki (projekty): 30 dni od ostatniej aktywności.</li>
+    <li>Dane konta firmy: przez czas korzystania z usługi, potem do upływu okresów wymaganych przepisami (np. księgowymi).</li>
+    <li>Zdarzenia bezpieczeństwa (limity, nadużycia): do 90 dni.</li>
+  </ul>
+
+  <h2>5. Twoje prawa</h2>
+  <p>Masz prawo dostępu do swoich danych, ich sprostowania, usunięcia, ograniczenia przetwarzania, przeniesienia, sprzeciwu wobec przetwarzania opartego na prawnie uzasadnionym interesie oraz cofnięcia zgody w dowolnym momencie (bez wpływu na wcześniejsze przetwarzanie). Napisz na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>. Jeśli rozmawiałeś z czatem na stronie innej firmy, możesz zwrócić się do niej lub do nas - przekażemy sprawę.</p>
+  <p>Przysługuje Ci też skarga do Prezesa Urzędu Ochrony Danych Osobowych (ul. Stawki 2, 00-193 Warszawa, uodo.gov.pl).</p>
+
+  <h2>6. Automatyczne odpowiedzi</h2>
+  <p>Odpowiedzi czatu pisze model AI na podstawie informacji firmy. Nie podejmujemy wobec Ciebie decyzji wywołujących skutki prawne wyłącznie automatycznie; wyceny i zamówienia potwierdza firma.</p>
+
+  <h2>7. Pliki cookies i pamięć przeglądarki</h2>
+  <p>Czat zapisuje w pamięci Twojej przeglądarki historię rozmowy i identyfikator sesji, aby rozmowa nie znikała po odświeżeniu strony. Nie używamy cookies reklamowych.</p>
+</main>
+</body>
+</html>

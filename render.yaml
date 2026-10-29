@@ -64,6 +64,16 @@ services:
       - key: NETWORK_INVITE_EMAIL_APPROVED
         value: "1"
       # Customer email about a network business's offer - approved 2026-10-21 (templates/emails/customer-offer.*.txt).
+      # Your own e-mail/phone: never hit the per-recipient message caps (tests, demos) - set on Render.
+      - key: MSG_CAP_EXEMPT
+        sync: false
+      # Privacy policy page (/polityka-prywatnosci) is served only when these are set - set on Render.
+      - key: COMPANY_NAME
+        sync: false
+      - key: COMPANY_ADDRESS
+        sync: false
+      - key: COMPANY_NIP
+        sync: false
       # Resend webhook signing secret (Svix) - set in the dashboard/API, never in this file.
       - key: RESEND_WEBHOOK_SECRET
         sync: false

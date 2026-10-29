@@ -22,7 +22,7 @@ import { BGEEmbeddingProvider, bgeBaseUrl } from "../src/embeddings/bge-provider
 import { fetchPage } from "../src/scraper/fetcher.js";
 import { extractPage } from "../src/scraper/extractor.js";
 import { createHash } from "crypto";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import express from "express";
 import cors from "cors";
 import { recordEvent, getEmailForTenant, getTemplateStats, getCountryBreakdown, getIndustryBreakdown, getFunnel, getDailyStats, recordEmailEvent, assignVariant, recordExperimentEvent, getExperimentResults, getConversationSummary, getConversation } from "../src/analytics/d1.js";
@@ -1233,6 +1233,19 @@ function originAllowed(origin: string, tenant: any): boolean {
   return own.some((d) => h === d || h.endsWith(`.${d}`)) || host.endsWith(".onrender.com");
 }
 
+// The owner's demo pass: GET /api/admin/demo-pass?secret=<ADMIN_SECRET> sets a 90-day cookie on this
+// browser (whisp.so pages: demos, site cards); its chats skip quotas and spend caps.
+function demoPassToken(): string { return createHmac("sha256", ADMIN_SECRET).update("demo-pass").digest("base64url").slice(0, 32); }
+function demoPassOk(req: express.Request): boolean {
+  const m = String(req.headers.cookie || "").match(/(?:^|;\s*)wdemo=([A-Za-z0-9_-]+)/);
+  return !!m && ADMIN_SECRET_OK && safeStrEq(m[1], demoPassToken());
+}
+app.get("/api/admin/demo-pass", (req, res) => {
+  if (!adminOk(req)) { res.status(403).send("Forbidden"); return; }
+  res.setHeader("Set-Cookie", `wdemo=${demoPassToken()}; Path=/; Max-Age=${90 * 86400}; HttpOnly; Secure; SameSite=Lax`);
+  res.type("html").send('<!DOCTYPE html><meta charset="utf-8"><title>Demo pass</title><p style="font:16px sans-serif;padding:24px">Demo pass set on this browser for 90 days: chats from here skip quotas and spend caps. <a href="/">whisp.so</a></p>');
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { sessionId, tenantId, formState } = req.body;
@@ -1293,10 +1306,13 @@ app.post("/api/chat", async (req, res) => {
     // - spend caps: over the conversation's or business's cap no costly extras, over the total the chat stops;
     // - origin: a widget on a site the business does not own (or a script) gets no costly extras either.
     const admin = adminOk(req);
+    // Demos: the owner's demo pass (cookie from /api/admin/demo-pass) or an IP in QUOTA_EXEMPT_IPS skips
+    // quotas and spend caps (never the history check - a forged turn is a forged turn).
+    const exempt = admin || demoPassOk(req) || (process.env.QUOTA_EXEMPT_IPS || "79.184.118.71,176.9.1.133").split(",").map((x) => x.trim()).includes(visitorIp);
     if (!admin) messages = await verifiedHistory(tenant.id, sessionKey, messages);
     if (!messages.length || messages[messages.length - 1]?.role !== "user") { res.status(400).json({ error: "messages required" }); return; }
     messages = messages.map((m: any) => ({ role: m.role, content: m.content })); // the signature stays here
-    const spend = admin ? "ok" : budgetBefore(tenant.id, sessionKey);
+    const spend = exempt ? "ok" : budgetBefore(tenant.id, sessionKey);
     if (spend === "stop") { res.status(503).json({ error: "backend_unavailable", message: BACKEND_DOWN[guessLang(lastUserText(req))] }); return; }
     const foreign = !admin && !originAllowed(req.get("origin") || "", tenant);
     if (foreign) logAbuse("foreign_origin", req.get("origin") || "(none)", tenant.id, visitorIp);
@@ -1352,9 +1368,9 @@ app.post("/api/chat", async (req, res) => {
     // What answering this message took (LLM / Jev calls, time, route) - for admins
     // only (routing evals): X-Admin-Secret header.
     const usage = newTurnUsage();
-    Object.assign(usage, { ip: visitorIp, tenantId: tenant.id, sessionKey, cheap: spend === "cheap" || foreign });
+    Object.assign(usage, { ip: visitorIp, tenantId: tenant.id, sessionKey, cheap: spend === "cheap" || (foreign && !exempt), exempt });
     // The turn's cost, once it is done (admin tests are not counted against the caps).
-    res.on("finish", () => { if (!admin) budgetAfter(tenant.id, sessionKey, usage.usd || 0, usage.jevIn); });
+    res.on("finish", () => { if (!exempt) budgetAfter(tenant.id, sessionKey, usage.usd || 0, usage.jevIn); });
     // Admin test of the safe mode without Jev (routing evals): Jev unavailable for this request only.
     if (adminOk(req) && req.headers["x-test-no-jev"] === "1") (usage as any).noJev = true;
     if (adminOk(req) && typeof req.headers["x-test-variant"] === "string") (usage as any).variant = req.headers["x-test-variant"];
@@ -1557,6 +1573,11 @@ setInterval(async () => {
     const today = warsaw.toISOString().slice(0, 10);
     if (warsaw.getHours() === 8 && abuseSummaryDay !== today) {
       abuseSummaryDay = today;
+      // Retention (privacy policy): abuse events 90 days, daily counters 30 days.
+      const { d1Query } = await import("../src/storage/conversation-store.js");
+      await d1Query("DELETE FROM abuse_events WHERE at < ?", [new Date(Date.now() - 90 * 86_400_000).toISOString()]).catch(() => {});
+      await d1Query("DELETE FROM usage_quota WHERE day < ?", [new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)]).catch(() => {});
+      await d1Query("DELETE FROM spend_daily WHERE day < ?", [new Date(Date.now() - 400 * 86_400_000).toISOString().slice(0, 10)]).catch(() => {});
       const day = await abuseSummary(new Date(Date.now() - 24 * 3600_000).toISOString());
       if (day.length) await sendOpsAlert("Whisp abuse summary (last 24 h)", day.map((r) => `${r.kind}: ${r.n} (${r.keys} sources; businesses: ${r.tenants || "-"})`).join("\n"));
     }
@@ -1812,6 +1833,22 @@ app.post("/api/auth/setup-password", async (req, res) => {
 });
 
 // --- Auth pages ---
+// Privacy policy: served once the company's details are set (COMPANY_NAME, COMPANY_ADDRESS, COMPANY_NIP;
+// optional COMPANY_REGISTRY, PRIVACY_EMAIL, CHAT_RETENTION, PRIVACY_EFFECTIVE_DATE) - never with blanks.
+app.get(["/polityka-prywatnosci", "/privacy"], (_req, res) => {
+  const e = process.env;
+  if (!e.COMPANY_NAME || !e.COMPANY_ADDRESS || !e.COMPANY_NIP) { res.status(404).send("Not found"); return; }
+  const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  const vars: Record<string, string> = {
+    COMPANY_NAME: e.COMPANY_NAME, COMPANY_ADDRESS: e.COMPANY_ADDRESS, COMPANY_NIP: e.COMPANY_NIP,
+    COMPANY_REGISTRY: e.COMPANY_REGISTRY ? `<br>${e.COMPANY_REGISTRY}` : "", PRIVACY_EMAIL: e.PRIVACY_EMAIL || "jakub@whisp.so",
+    CHAT_RETENTION: e.CHAT_RETENTION || "12 miesięcy od ostatniej wiadomości", EFFECTIVE_DATE: e.PRIVACY_EFFECTIVE_DATE || new Date().toISOString().slice(0, 10),
+    TYPESAFE_LOCATION: e.TYPESAFE_LOCATION || "USA",
+  };
+  const html = readFileSync(resolve(__dirname, "../public/polityka-prywatnosci.html"), "utf8").replace(/\{\{([A-Z_]+)\}\}/g, (_m, k) => (k === "COMPANY_REGISTRY" ? vars[k] : esc(vars[k] ?? "")));
+  res.type("html").send(html);
+});
+
 app.get("/auth/login", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/auth/login.html"));
 });

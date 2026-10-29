@@ -8,7 +8,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export interface TurnUsage { usd?: number; ip?: string; tenantId?: string; sessionKey?: string; cheap?: boolean; llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean; variant?: string; debug?: Record<string, unknown> }
+export interface TurnUsage { exempt?: boolean; usd?: number; ip?: string; tenantId?: string; sessionKey?: string; cheap?: boolean; llmCalls: number; llmIn: number; llmOut: number; jevCalls: number; jevIn: number; at: number; steps: string[]; noJev?: boolean; variant?: string; debug?: Record<string, unknown> }
 export const turnUsage = new AsyncLocalStorage<TurnUsage>();
 export const newTurnUsage = (): Omit<TurnUsage, "at"> & { at: number } => ({ llmCalls: 0, llmIn: 0, llmOut: 0, jevCalls: 0, jevIn: 0, at: Date.now(), steps: [] });
 
@@ -44,3 +44,5 @@ export function noteJevCapped(): void { const u = turnUsage.getStore(); if (u) (
 export const turnCheap = (): boolean => !!turnUsage.getStore()?.cheap;
 /** Who is asking (set by the server for /api/chat): the IP for per-IP quotas. */
 export const turnIp = (): string => turnUsage.getStore()?.ip || "";
+/** Admin demo pass or our own IP: quotas and spend caps don't apply (demos must never hit them). */
+export const turnExempt = (): boolean => !!turnUsage.getStore()?.exempt;
