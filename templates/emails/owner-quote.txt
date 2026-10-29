@@ -1,4 +1,4 @@
-# To the owner of a business that has joined: its assistant answered another business's request but left part of it without a price. DRAFT - not approved (OWNER_QUOTE_EMAIL_APPROVED).
+# To the owner of a business that has joined: its assistant answered another business's request but left part of it without a price. Approved 2026-10-29 (OWNER_QUOTE_EMAIL_APPROVED).
 # {{from}} the business whose customer asked · {{request}} what was asked · {{answer}} what the assistant answered · {{link}} the review page
 Temat: Klient czeka na Państwa cenę
 
