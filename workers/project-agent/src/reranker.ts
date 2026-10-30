@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import type { Env } from "./env";
 
+const SIZES = ["standard-4", "standard-3", "standard-2"] as const;
 const PORT = 8080;
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1_000;
 const READY_TIMEOUT_MS = 90_000;
@@ -50,11 +51,16 @@ export class Reranker extends DurableObject<Env> {
     return r.json();
   }
 
+  // Cloudflare may have no capacity for a size ("There is no container instance that can be provided"):
+  // the next smaller one is started instead (the int8 model needs ~2 GB; smaller = slower scoring).
+  #size = 0;
+
   async #ensureRunning(): Promise<void> {
-    if (!this.#container.running) {
-      this.#container.start({ image: this.#container.images.reranker, instance: "standard-4", enableInternet: false });
+    const start = async () => {
+      this.#container.start({ image: this.#container.images.reranker, instance: SIZES[this.#size], enableInternet: false });
       await this.#container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS);
-    }
+    };
+    if (!this.#container.running) await start();
     // The model takes a few seconds to load after a start.
     const deadline = Date.now() + READY_TIMEOUT_MS;
     let last = "";
@@ -65,6 +71,12 @@ export class Reranker extends DurableObject<Env> {
         last = `health ${r.status}`;
       } catch (e) {
         last = e instanceof Error ? e.message : String(e);
+      }
+      if (/no container instance/i.test(last) && this.#size < SIZES.length - 1 && !this.#container.running) {
+        this.#size++;
+        console.warn(`[reranker] no capacity, trying ${SIZES[this.#size]}`);
+        await start();
+        continue;
       }
       if (Date.now() > deadline) {
         const info = await this.#container.inspect().catch((e) => `inspect failed: ${e}`);
