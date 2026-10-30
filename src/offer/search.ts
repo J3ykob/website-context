@@ -19,6 +19,8 @@ const DIRECT_MAX = 80; // up to this many items go to the model as they are
 const SHORTLIST = 40; // larger offers: the nearest by meaning
 const PER_PART = 30; // and for a request of several parts, the nearest to each part
 const POOL_MAX = 100; // items the model sees at most
+const CAT_FROM = 8; // the nearest items whose whole category joins the list
+const PER_CATEGORY = 25; // items of one category at most
 const TIMEOUT_MS = 8000;
 
 /** Lower-case words of 3+ letters (split on anything that is not a letter or digit). */
@@ -82,7 +84,12 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
     ]);
     if (!whole) return null;
     const perPart = parts.length > 1 ? await Promise.all(parts.slice(0, 4).map((p) => near(p, PER_PART))) : [];
-    pool = [...new Set([...perPart.flatMap((x) => (x || []).slice(0, PER_PART)), ...whole])].slice(0, POOL_MAX);
+    const nearest = [...new Set([...perPart.flatMap((x) => (x || []).slice(0, PER_PART)), ...whole])];
+    // Vectors miss a job's tool ("ubić podjazd" finds the rammers, not one plate compactor: "Zagęszczarka
+    // 90 kg, silnik Honda" reads nothing like it), so the categories of the nearest items come whole.
+    const cats = [...new Set(nearest.slice(0, CAT_FROM).map((i) => i.category).filter(Boolean))];
+    const siblings = cats.flatMap((c) => items.filter((i) => i.category === c).slice(0, PER_CATEGORY));
+    pool = [...new Set([...nearest.slice(0, CAT_FROM), ...siblings, ...nearest])].slice(0, POOL_MAX);
   }
   const { INPUT_HELP, inputsOf } = await import("./quantities.js");
   const inputs = opts.quantities ? pool.map(inputsOf) : [];
