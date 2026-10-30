@@ -13,10 +13,10 @@ import { getProject, setMemory, addEvent } from "./store.js";
 import { readFile } from "./repo.js";
 import { d1Query } from "../storage/conversation-store.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
+import { stripe, stripeKey, subscribed, forgetSubscription, planForm, PRICE_PLN, portal } from "../billing/plan.js";
+export { subscribed } from "../billing/plan.js";
 
 const EXCLUSIVE_MS = () => (Number(process.env.LEAD_EXCLUSIVE_HOURS) || 24) * 3600_000;
-const PRICE_PLN = () => Number(process.env.NETWORK_PLAN_PRICE_PLN) || 149;
-const STRIPE = "https://api.stripe.com/v1";
 
 let ready: Promise<void> | null = null;
 function ensureSchema(): Promise<void> {
@@ -40,32 +40,6 @@ export async function invitesFor(projectIds: string[]): Promise<Record<string, I
 async function inviteByToken(token: string): Promise<Invite | null> {
   await ensureSchema();
   return ((await d1Query("SELECT * FROM network_invites WHERE token = ?", [token]))[0] as Invite) || null;
-}
-
-const stripeKey = () => (process.env.STRIPE_SECRET_KEY || "").trim();
-async function stripe(path: string, init?: { method?: string; form?: Record<string, string> }): Promise<any> {
-  const r = await fetch(`${STRIPE}${path}`, {
-    method: init?.method || "GET",
-    headers: { Authorization: `Bearer ${stripeKey()}`, ...(init?.form ? { "Content-Type": "application/x-www-form-urlencoded" } : {}) },
-    body: init?.form ? new URLSearchParams(init.form).toString() : undefined,
-    signal: AbortSignal.timeout(20_000),
-  });
-  const j: any = await r.json();
-  if (!r.ok) throw new Error(`stripe ${r.status}: ${j?.error?.message || "error"}`);
-  return j;
-}
-
-// Subscription status per business, checked with Stripe at most every 10 minutes.
-const subCache = new Map<string, { active: boolean; at: number }>();
-export async function subscribed(tenantId: string): Promise<boolean> {
-  const id = getTenant(tenantId)?.settings?.stripeSubscription as string | undefined;
-  if (!id || !stripeKey()) return false;
-  const hit = subCache.get(tenantId);
-  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.active;
-  const s = await stripe(`/subscriptions/${encodeURIComponent(id)}`).catch(() => null);
-  const active = !!s && ["active", "trialing"].includes(String(s.status));
-  subCache.set(tenantId, { active, at: Date.now() });
-  return active;
 }
 
 export interface LeadView {
@@ -114,22 +88,10 @@ export async function startCheckout(token: string, base: string): Promise<string
   const { businessLabel } = await import("./network.js");
   const back = `${base}/lead/${encodeURIComponent(token)}`;
   const s = await stripe("/checkout/sessions", { method: "POST", form: {
-    mode: "subscription", locale: "pl",
-    "line_items[0][quantity]": "1",
-    // The plan created in Stripe (STRIPE_PRICE_ID); without it the same price inline.
-    ...(process.env.STRIPE_PRICE_ID ? { "line_items[0][price]": String(process.env.STRIPE_PRICE_ID) } : {
-      "line_items[0][price_data][currency]": "pln",
-      "line_items[0][price_data][unit_amount]": String(Math.round(PRICE_PLN() * 100)),
-      "line_items[0][price_data][recurring][interval]": "month",
-      "line_items[0][price_data][product_data][name]": "Whisp - asystent i sieć firm",
-    }),
-    allow_promotion_codes: "true",
+    ...planForm(inv.tenant_id, businessLabel(inv.tenant_id)),
     success_url: `${back}?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: back,
-    client_reference_id: inv.tenant_id,
-    "metadata[token]": token, "metadata[tenantId]": inv.tenant_id,
-    "subscription_data[metadata][tenantId]": inv.tenant_id,
-    "subscription_data[description]": `Whisp: ${businessLabel(inv.tenant_id)}`,
+    "metadata[token]": token,
   } });
   return String(s.url);
 }
@@ -148,7 +110,7 @@ export async function confirmCheckout(token: string, sessionId: string): Promise
     const payer = String(s.customer_details?.email || "").trim();
     updateTenant(t.id, { settings, ...(payer.includes("@") ? { email: payer } : {}) });
   }
-  subCache.delete(inv.tenant_id);
+  forgetSubscription(inv.tenant_id);
   await d1Query("UPDATE network_invites SET unlocked_at = COALESCE(unlocked_at, ?) WHERE token = ?", [new Date().toISOString(), token]);
   await addEvent(inv.project_id, { kind: "lead_unlocked", actor: inv.tenant_id, data: { session: sessionId, subscription: s.subscription || null } });
   return true;
@@ -165,10 +127,8 @@ export async function dashboardSession(token: string): Promise<{ token: string; 
 /** Stripe's customer portal (manage or cancel the subscription), back to the lead page. */
 export async function portalUrl(token: string, base: string): Promise<string> {
   const inv = await inviteByToken(token);
-  const customer = inv ? String(getTenant(inv.tenant_id)?.settings?.stripeCustomer || "") : "";
-  if (!inv || !customer || !stripeKey()) throw new Error("no subscription");
-  const s = await stripe("/billing_portal/sessions", { method: "POST", form: { customer, return_url: `${base}/lead/${encodeURIComponent(token)}`, locale: "pl" } });
-  return String(s.url);
+  if (!inv) throw new Error("no subscription");
+  return portal(inv.tenant_id, `${base}/lead/${encodeURIComponent(token)}`);
 }
 
 /**

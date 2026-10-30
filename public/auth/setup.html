@@ -178,7 +178,10 @@
       body { padding: 16px; }
       .auth-card { padding: 36px 24px; }
     }
-  </style>
+    .terms { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; color: #94a3b8; margin: 4px 0 18px; cursor: pointer; }
+  .terms input { margin-top: 3px; flex: none; }
+  .terms a { color: #f1f5f9; }
+</style>
 </head>
 <body>
   <div class="glow"></div>
@@ -199,6 +202,10 @@
         <label for="confirm">Confirm password</label>
         <input type="password" id="confirm" placeholder="Type it again" required minlength="8" autocomplete="new-password">
       </div>
+      <label class="terms">
+        <input type="checkbox" id="terms" required>
+        <span>On behalf of my business I accept the <a href="/regulamin" target="_blank">Terms</a> and the <a href="/umowa-powierzenia" target="_blank">data processing agreement</a>.</span>
+      </label>
       <button type="submit" class="btn" id="submit-btn">Set password</button>
     </form>
 
@@ -247,7 +254,7 @@
         var res = await fetch("/api/auth/setup-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: token, tenantId: tenantId, password: pw })
+          body: JSON.stringify({ token: token, tenantId: tenantId, password: pw, termsAccepted: document.getElementById("terms").checked })
         });
 
         var data = await res.json();

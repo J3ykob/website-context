@@ -39,9 +39,9 @@ export function generateApiKey(): string {
   return randomBytes(16).toString("hex");
 }
 
-/** Create a 7-day session for a tenant; stored in D1. */
-export async function createSession(tenantId: string): Promise<string> {
-  const token = randomBytes(32).toString("hex");
+/** Create a 7-day session for a tenant; stored in D1. An admin's session (support) is marked "adm-". */
+export async function createSession(tenantId: string, opts: { admin?: boolean } = {}): Promise<string> {
+  const token = `${opts.admin ? "adm-" : ""}${randomBytes(32).toString("hex")}`;
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   await query("INSERT INTO sessions (token, tenant_id, expires_at) VALUES (?, ?, ?)", [token, tenantId, expiresAt]);
   return token;

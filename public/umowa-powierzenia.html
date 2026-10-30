@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Umowa powierzenia · Whisp</title>
+<style>
+  :root { --bg: #0b1220; --card: #111a2e; --text: #e6ebf5; --muted: #9aa6bf; --line: #1f2a44; --accent: #3b82f6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 780px; margin: 0 auto; padding: 48px 16px 80px; }
+  h1 { font-size: 30px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 34px 0 8px; }
+  ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  a { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; display: block; overflow-x: auto; }
+  td, th { min-width: 110px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Umowa powierzenia przetwarzania danych osobowych</h1>
+  <p class="muted">Załącznik nr 1 do <a href="/regulamin">Regulaminu</a> · obowiązuje od {{EFFECTIVE_DATE}} · <a href="/">whisp.so</a></p>
+
+  <h2>§ 1. Strony i przedmiot</h2>
+  <ol>
+    <li>Umowę zawierają Klient (<strong>Administrator</strong>) i {{COMPANY_NAME}}, {{COMPANY_ADDRESS}}{{COMPANY_IDS}} (<strong>Przetwarzający</strong>), z chwilą akceptacji Regulaminu.</li>
+    <li>Administrator powierza Przetwarzającemu przetwarzanie danych osobowych Użytkowników w zakresie i celu potrzebnym do świadczenia usług z Regulaminu (art. 28 RODO).</li>
+  </ol>
+
+  <h2>§ 2. Zakres powierzenia</h2>
+  <ol>
+    <li><strong>Kategorie osób:</strong> osoby piszące z Asystentem na stronie Administratora (klienci i potencjalni klienci Administratora).</li>
+    <li><strong>Rodzaje danych:</strong> treść rozmów i przesłanych zapytań; identyfikator sesji; adres IP; dane, które Użytkownik sam poda - zwykle imię, adres e-mail, numer telefonu, miejscowość lub adres realizacji, opis potrzeby. Usługa nie jest przeznaczona do szczególnych kategorii danych (art. 9 RODO), a Administrator nie kieruje Asystenta do ich zbierania.</li>
+    <li><strong>Charakter i cel:</strong> przechowywanie rozmów; tworzenie odpowiedzi przez modele sztucznej inteligencji; przyjmowanie zapytań i przekazywanie ich Administratorowi; powiadomienia e-mail i SMS do Użytkownika, gdy wyrazi na nie zgodę w czacie; przygotowywanie wycen i zestawień; ulepszanie dopasowania zapytań do oferty w usłudze świadczonej Administratorowi; zabezpieczenie usługi przed nadużyciami.</li>
+    <li><strong>Sieć Whisp:</strong> zapytanie Użytkownika, którego Administrator nie realizuje, może zostać przekazane innym firmom z Sieci - bez danych kontaktowych Użytkownika. Firma widzi opis zapytania (pełną treść, gdy ma Abonament), a jej odpowiedź trafia do Użytkownika przez stronę statusu zapytania. Treść zapytania może zawierać dane, które Użytkownik sam w nim napisał.</li>
+    <li><strong>Czas:</strong> przez czas trwania umowy oraz do usunięcia danych zgodnie z § 8.</li>
+  </ol>
+
+  <h2>§ 3. Obowiązki Przetwarzającego</h2>
+  <ol>
+    <li>Przetwarza dane wyłącznie na udokumentowane polecenie Administratora - poleceniem jest Regulamin, ta umowa i ustawienia wybrane przez Administratora - także w zakresie przekazywania danych do państwa trzeciego, chyba że obowiązek wynika z prawa; wtedy informuje o nim Administratora, o ile prawo tego nie zabrania.</li>
+    <li>Zapewnia, że osoby upoważnione do przetwarzania danych zobowiązały się do zachowania poufności.</li>
+    <li>Stosuje środki bezpieczeństwa z § 4.</li>
+    <li>Korzysta z dalszych podmiotów przetwarzających na zasadach § 5.</li>
+    <li>Pomaga Administratorowi wykonywać obowiązki wobec osób, których dane dotyczą (dostęp, sprostowanie, usunięcie, ograniczenie, przeniesienie, sprzeciw), m.in. przez wgląd w rozmowy i usunięcie rozmowy na żądanie Administratora.</li>
+    <li>Pomaga Administratorowi w obowiązkach z art. 32-36 RODO, uwzględniając charakter przetwarzania i dostępne informacje.</li>
+    <li>Udostępnia informacje potrzebne do wykazania spełnienia obowiązków i umożliwia kontrolę (§ 7).</li>
+    <li>Niezwłocznie informuje Administratora, jeśli jego polecenie narusza w ocenie Przetwarzającego przepisy o ochronie danych.</li>
+  </ol>
+
+  <h2>§ 4. Środki bezpieczeństwa (art. 32 RODO)</h2>
+  <ol>
+    <li>Szyfrowanie połączeń (HTTPS/TLS) między przeglądarką, serwerami i dostawcami; szyfrowanie danych w spoczynku po stronie dostawców infrastruktury.</li>
+    <li>Kontrola dostępu: hasła Klientów przechowywane wyłącznie jako skrót kryptograficzny; dostęp administracyjny tylko z tajnym kluczem; Klient widzi wyłącznie swoje dane.</li>
+    <li>Rozdzielenie danych Klientów w bazie i magazynie plików.</li>
+    <li>Maskowanie danych osobowych przed przekazaniem zapytania do modelu, który przygotowuje wyceny i zestawienia.</li>
+    <li>Limity zapytań, limity kosztów i rejestr nadużyć chroniące przed atakami i nadmiernym obciążeniem.</li>
+    <li>Automatyczne, codzienne usuwanie danych po upływie okresów z § 8.</li>
+    <li>Dostęp personelu Przetwarzającego do danych tylko w zakresie potrzebnym do obsługi usługi, zgłoszeń i bezpieczeństwa.</li>
+  </ol>
+
+  <h2>§ 5. Dalsze podmioty przetwarzające</h2>
+  <ol>
+    <li>Administrator wyraża ogólną zgodę na korzystanie z dalszych podmiotów przetwarzających. Aktualna lista:</li>
+  </ol>
+  <table>
+    <tr><th>Podmiot</th><th>Zakres</th><th>Lokalizacja</th></tr>
+    <tr><td>Render Services, Inc.</td><td>serwery aplikacji</td><td>USA</td></tr>
+    <tr><td>Cloudflare, Inc.</td><td>baza danych, pliki, wyszukiwanie, modele do wyszukiwania</td><td>UE / globalnie</td></tr>
+    <tr><td>OpenRouter, Inc. i dostawcy modeli AI, do których OpenRouter kieruje zapytania (m.in. Anthropic, DeepInfra, Novita, Nebius)</td><td>tworzenie odpowiedzi, dopasowanie zapytań do oferty</td><td>USA / UE</td></tr>
+    <tr><td>TypeSafe</td><td>model sprawdzający odpowiedzi i kierujący rozmową</td><td>{{TYPESAFE_LOCATION}}</td></tr>
+    <tr><td>Resend, Inc.</td><td>wysyłka e-maili</td><td>USA</td></tr>
+    <tr><td>Twilio Inc.</td><td>SMS</td><td>USA</td></tr>
+    <tr><td>Browserless</td><td>odczyt stron internetowych</td><td>USA</td></tr>
+  </table>
+  <ol start="2">
+    <li>O zamiarze dodania lub zmiany dalszego podmiotu Przetwarzający informuje Administratora e-mailem co najmniej 14 dni wcześniej; Administrator może zgłosić sprzeciw, a gdy sprzeciw uniemożliwia świadczenie usługi - rozwiązać umowę.</li>
+    <li>Przetwarzający nakłada na dalsze podmioty obowiązki ochrony danych nie mniejsze niż w tej umowie i odpowiada za ich wykonanie.</li>
+  </ol>
+
+  <h2>§ 6. Przekazywanie danych poza EOG</h2>
+  <p>Przekazanie danych poza Europejski Obszar Gospodarczy odbywa się na podstawie decyzji stwierdzającej odpowiedni stopień ochrony (Ramy ochrony danych UE-USA) albo standardowych klauzul umownych przyjętych przez Komisję Europejską.</p>
+
+  <h2>§ 7. Kontrola</h2>
+  <ol>
+    <li>Administrator może sprawdzać, jak Przetwarzający wykonuje umowę - w pierwszej kolejności przez pytania na piśmie, na które Przetwarzający odpowiada w ciągu 14 dni.</li>
+    <li>Audyt na miejscu jest możliwy po uprzedzeniu co najmniej 14 dni wcześniej, w godzinach pracy, nie częściej niż raz w roku (chyba że doszło do naruszenia), na koszt Administratora, przez audytora zobowiązanego do poufności.</li>
+  </ol>
+
+  <h2>§ 8. Naruszenia i usuwanie danych</h2>
+  <ol>
+    <li>O naruszeniu ochrony danych Przetwarzający informuje Administratora bez zbędnej zwłoki, nie później niż w ciągu 48 godzin od jego stwierdzenia, podając znane informacje z art. 33 ust. 3 RODO.</li>
+    <li>Okresy przechowywania: rozmowy z czatu i zapisane decyzje modeli - 365 dni od wiadomości; zapytania i ich pliki - 30 dni od utworzenia i od ostatniej aktywności; zdarzenia bezpieczeństwa - do 90 dni.</li>
+    <li>Po zakończeniu umowy dane Użytkowników są usuwane w terminach z ust. 2, chyba że prawo wymaga ich przechowywania; na żądanie Administratora zgłoszone przed końcem umowy Przetwarzający przekazuje mu rozmowy w formacie elektronicznym.</li>
+  </ol>
+
+  <h2>§ 9. Postanowienia końcowe</h2>
+  <ol>
+    <li>Odpowiedzialność stron określa RODO i Regulamin.</li>
+    <li>W sprawach nieuregulowanych stosuje się Regulamin, RODO i prawo polskie.</li>
+    <li>W razie sprzeczności z Regulaminem w sprawach ochrony danych pierwszeństwo ma ta umowa.</li>
+  </ol>
+</main>
+</body>
+</html>

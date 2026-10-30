@@ -503,6 +503,9 @@ section { padding: 100px 0; }
 
 /* ─── Pricing ─── */
 .pricing-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; align-items: start; }
+.pricing-grid.pricing-two { grid-template-columns: repeat(2,1fr); max-width: 760px; margin-left: auto; margin-right: auto; }
+.pricing-two .price-card.featured::before { display: none; }
+.pricing-note { text-align: center; color: var(--text-3, #64748b); font-size: 13px; margin-top: 20px; }
 .price-card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 32px 24px;
@@ -604,7 +607,7 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
   .steps { grid-template-columns: 1fr; }
   .features-grid { grid-template-columns: 1fr; }
   .testimonials-grid { grid-template-columns: 1fr; }
-  .pricing-grid { grid-template-columns: 1fr; }
+  .pricing-grid, .pricing-grid.pricing-two { grid-template-columns: 1fr; }
   .nav-links a:not(.nav-cta):not(.lang-toggle) { display: none; }
   .footer-grid { grid-template-columns: 1fr; gap: 28px; }
   .footer-col a { padding: 10px 0; }
@@ -873,53 +876,35 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
 <section id="pricing">
   <div class="container">
     <div class="section-label reveal" data-i18n="price.label">Pricing</div>
-    <div class="section-title reveal" style="transition-delay:0.1s" data-i18n="price.title">Free forever. Pay for insights.</div>
-    <div class="pricing-grid reveal" style="transition-delay:0.2s">
+    <div class="section-title reveal" style="transition-delay:0.1s" data-i18n="price.title">The chat is free. The panel is 149 PLN.</div>
+    <div class="pricing-grid pricing-two reveal" style="transition-delay:0.2s">
       <div class="price-card">
-        <div class="price-name">Free</div>
-        <div class="price-amount">0 <span>PLN / month</span></div>
-        <div class="price-desc">Everything to get started.</div>
+        <div class="price-name" data-i18n="price.free.name">Chat on your site</div>
+        <div class="price-amount">0 <span data-i18n="price.free.per">PLN, for good</span></div>
+        <div class="price-desc" data-i18n="price.free.desc">Answers your customers from your own information, day and night.</div>
         <ul class="price-features">
-          <li>AI chat widget</li>
-          <li>Auto-scrape your site</li>
-          <li>Unlimited conversations</li>
-          <li>1 recorded flow</li>
-          <li>Gap notifications</li>
-          <li>7-day history</li>
+          <li data-i18n="price.free.f1">Reads your website by itself</li>
+          <li data-i18n="price.free.f2">Unlimited conversations</li>
+          <li data-i18n="price.free.f3">Customer enquiries sent to your e-mail</li>
+          <li data-i18n="price.free.f4">One line of code or the WordPress plugin</li>
         </ul>
-        <a href="#signup" class="price-btn price-btn-outline">Get started</a>
+        <a href="#signup" class="price-btn price-btn-outline" data-i18n="price.free.cta">Start free</a>
       </div>
       <div class="price-card featured">
-        <div class="price-name">Analytics Pro</div>
-        <div class="price-amount">149 <span>PLN / month</span></div>
-        <div class="price-desc">Know what your visitors want.</div>
+        <div class="price-name" data-i18n="price.panel.name">Business panel</div>
+        <div class="price-amount">149 <span data-i18n="price.panel.per">PLN / month, VAT included</span></div>
+        <div class="price-desc" data-i18n="price.panel.desc">See what your customers ask and make every answer right.</div>
         <ul class="price-features">
-          <li>Everything in Free</li>
-          <li>Intent heatmap & trends</li>
-          <li>Full conversation search</li>
-          <li>Weekly email digest</li>
-          <li>90-day history</li>
-          <li>Unlimited flows</li>
-          <li>API access</li>
+          <li data-i18n="price.panel.f1">Every conversation, searchable</li>
+          <li data-i18n="price.panel.f2">What people ask about, and what the chat could not answer</li>
+          <li data-i18n="price.panel.f3">Fix answers: your knowledge, price list and files</li>
+          <li data-i18n="price.panel.f4">Requests from businesses in the Whisp network</li>
+          <li data-i18n="price.panel.f5">Quotes and calculations for your customers, with your approval</li>
         </ul>
-        <a href="#signup" class="price-btn price-btn-primary">Start free trial</a>
-      </div>
-      <div class="price-card">
-        <div class="price-name">Industry Benchmarks</div>
-        <div class="price-amount">299 <span>PLN / month</span></div>
-        <div class="price-desc">Compare to your sector.</div>
-        <ul class="price-features">
-          <li>Everything in Pro</li>
-          <li>Cross-industry insights</li>
-          <li>Competitor comparison</li>
-          <li>AI recommendations</li>
-          <li>White-label widget</li>
-          <li>Priority support</li>
-          <li>Custom integrations</li>
-        </ul>
-        <a href="#signup" class="price-btn price-btn-outline">Contact us</a>
+        <a href="#signup" class="price-btn price-btn-primary" data-i18n="price.panel.cta">Create an account</a>
       </div>
     </div>
+    <p class="pricing-note" data-i18n="price.note">Monthly, cancel any time. No card needed to start.</p>
   </div>
 </section>
 
@@ -930,11 +915,11 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
     <div class="section-title reveal" style="transition-delay:0.1s" data-i18n="faq.title">Common questions</div>
     <div class="faq-list reveal" style="transition-delay:0.2s">
       <div class="faq-item"><button class="faq-q" data-i18n="faq.q1">How does it work with my existing website?</button><div class="faq-a"><p data-i18n="faq.a1">You add one line of code before your closing &lt;/body&gt; tag. Works with any website: WordPress, Shopify, static HTML, anything. Zero impact on page speed.</p></div></div>
-      <div class="faq-item"><button class="faq-q" data-i18n="faq.q2">Is the free tier really free?</button><div class="faq-a"><p data-i18n="faq.a2">Yes, completely. The chat widget, auto-scraping, and unlimited conversations are free forever. We charge for advanced analytics that help you understand your visitors better.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q2">Is the chat really free?</button><div class="faq-a"><p data-i18n="faq.a2">Yes. The chat on your site, reading your site and unlimited conversations are free for good. The business panel - every conversation, what people ask about, fixing answers and requests from the network - is 149 PLN a month, VAT included.</p></div></div>
       <div class="faq-item"><button class="faq-q" data-i18n="faq.q3">What about data privacy and GDPR?</button><div class="faq-a"><p data-i18n="faq.a3">Each business gets isolated storage, and we never share visitor data between websites. Conversations are kept by our hosting providers (Render in the US, Cloudflare) and processed by AI model providers to write the answers. Questions about your data: jakub@whisp.so.</p></div></div>
       <div class="faq-item"><button class="faq-q" data-i18n="faq.q4">What is flow recording?</button><div class="faq-a"><p data-i18n="faq.a4">You click through a process on your site (like filling a contact form). The AI learns the steps and replays them for visitors — filling the form on their behalf in their own browser.</p></div></div>
-      <div class="faq-item"><button class="faq-q" data-i18n="faq.q5">How accurate are the AI responses?</button><div class="faq-a"><p data-i18n="faq.a5">The AI only uses information from YOUR website. It never makes things up. When it can't answer, it logs the question so you can add the missing info.</p></div></div>
-      <div class="faq-item"><button class="faq-q" data-i18n="faq.q6">Can I customize the appearance?</button><div class="faq-a"><p data-i18n="faq.a6">The widget auto-adapts to your site's colors. You can set brand name and accent color. Analytics Pro plan includes full white-label customization.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q5">How accurate are the answers?</button><div class="faq-a"><p data-i18n="faq.a5">The chat answers only from your information and every answer is checked against it before it is sent. It can still be wrong now and then; when it does not know, it says so and records the question, so you can add the missing information in the panel.</p></div></div>
+      <div class="faq-item"><button class="faq-q" data-i18n="faq.q6">Can I customize the appearance?</button><div class="faq-a"><p data-i18n="faq.a6">The widget adapts to your site's colours by itself. You can set your brand name and accent colour.</p></div></div>
     </div>
   </div>
 </section>
@@ -961,7 +946,7 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
       </div>
       <div class="footer-col">
         <div class="footer-col-title" data-i18n="footer.product">Product</div>
-        <a href="/pricing" data-i18n="nav.pricing">Pricing</a>
+        <a href="/#pricing" data-i18n="nav.pricing">Pricing</a>
         <a href="/dashboard" data-i18n="footer.dashboard">Dashboard</a>
         <a href="/auth/login" data-i18n="footer.login">Login</a>
       </div>
@@ -998,14 +983,20 @@ var i18n = {
     "test.t1": "“I set it up in 10 minutes. Now 40% of my customers use the chat instead of browsing the menu.”",
     "test.t2": "“Before, nobody used the booking form. Now the AI fills it for them — reservations are up 60%.”",
     "test.t3": "“I discovered that 30% of visitors asked about pricing — and my site didn’t mention it anywhere!”",
-    "price.label": "Pricing", "price.title": "Free forever. Pay for insights.",
+    "price.label": "Pricing", "price.title": "The chat is free. The panel is 149 PLN.",
+    "price.free.name": "Chat on your site", "price.free.per": "PLN, for good", "price.free.desc": "Answers your customers from your own information, day and night.",
+    "price.free.f1": "Reads your website by itself", "price.free.f2": "Unlimited conversations", "price.free.f3": "Customer enquiries sent to your e-mail", "price.free.f4": "One line of code or the WordPress plugin", "price.free.cta": "Start free",
+    "price.panel.name": "Business panel", "price.panel.per": "PLN / month, VAT included", "price.panel.desc": "See what your customers ask and make every answer right.",
+    "price.panel.f1": "Every conversation, searchable", "price.panel.f2": "What people ask about, and what the chat could not answer", "price.panel.f3": "Fix answers: your knowledge, price list and files", "price.panel.f4": "Requests from businesses in the Whisp network", "price.panel.f5": "Quotes and calculations for your customers, with your approval", "price.panel.cta": "Create an account",
+    "price.note": "Monthly, cancel any time. No card needed to start.",
+
     "faq.label": "FAQ", "faq.title": "Common questions",
     "faq.q1": "How does it work with my existing website?", "faq.a1": "You add one line of code before your closing </body> tag. Works with any website: WordPress, Shopify, static HTML, anything. Zero impact on page speed.",
-    "faq.q2": "Is the free tier really free?", "faq.a2": "Yes, completely. The chat widget, auto-scraping, and unlimited conversations are free forever. We charge for advanced analytics that help you understand your visitors better.",
+    "faq.q2": "Is the chat really free?", "faq.a2": "Yes. The chat on your site, reading your site and unlimited conversations are free for good. The business panel - every conversation, what people ask about, fixing answers and requests from the network - is 149 PLN a month, VAT included.",
     "faq.q3": "What about data privacy and GDPR?", "faq.a3": "Each business gets isolated storage, and we never share visitor data between websites. Conversations are kept by our hosting providers (Render in the US, Cloudflare) and processed by AI model providers to write the answers. Questions about your data: jakub@whisp.so.",
     "faq.q4": "What is flow recording?", "faq.a4": "You click through a process on your site (like filling a contact form). The AI learns the steps and replays them for visitors — filling the form on their behalf in their own browser.",
-    "faq.q5": "How accurate are the AI responses?", "faq.a5": "The AI only uses information from YOUR website. It never makes things up. When it can’t answer, it logs the question so you can add the missing info.",
-    "faq.q6": "Can I customize the appearance?", "faq.a6": "The widget auto-adapts to your site’s colors. You can set brand name and accent color. Analytics Pro plan includes full white-label customization.",
+    "faq.q5": "How accurate are the answers?", "faq.a5": "The chat answers only from your information and every answer is checked against it before it is sent. It can still be wrong now and then; when it does not know, it says so and records the question, so you can add the missing information in the panel.",
+    "faq.q6": "Can I customize the appearance?", "faq.a6": "The widget adapts to your site's colours by itself. You can set your brand name and accent colour.",
     "cta.h": "Ready to try it?", "cta.p": "Join hundreds of businesses that turned their websites into conversations.",
     "footer.tagline": "Your website, but it talks. An AI assistant that reads your site and answers visitors 24/7.",
     "footer.product": "Product", "footer.dashboard": "Dashboard", "footer.login": "Login", "footer.contact": "Contact",
@@ -1037,14 +1028,20 @@ var i18n = {
     "test.t1": "„Skonfigurowałam to w 10 minut. Teraz 40% moich klientów używa czatu zamiast przeglądania menu.”",
     "test.t2": "„Wcześniej nikt nie używał formularza rezerwacji. Teraz AI wypełnia go za nich — rezerwacje wzrosły o 60%.”",
     "test.t3": "„Odkryłam, że 30% odwiedzających pytało o cennik — a moja strona w ogóle go nie miała!”",
-    "price.label": "Cennik", "price.title": "Na zawsze za darmo. Płacisz tylko za analitykę.",
+    "price.label": "Cennik", "price.title": "Czat za darmo. Panel za 149 zł.",
+    "price.free.name": "Czat na Twojej stronie", "price.free.per": "zł, na zawsze", "price.free.desc": "Odpowiada Twoim klientom na podstawie Twoich informacji, o każdej porze.",
+    "price.free.f1": "Sam czyta Twoją stronę", "price.free.f2": "Bez limitu rozmów", "price.free.f3": "Zapytania klientów na Twój e-mail", "price.free.f4": "Jedna linijka kodu albo wtyczka WordPress", "price.free.cta": "Zacznij za darmo",
+    "price.panel.name": "Panel firmy", "price.panel.per": "zł / mies., z VAT", "price.panel.desc": "Zobacz, o co pytają klienci, i popraw każdą odpowiedź.",
+    "price.panel.f1": "Wszystkie rozmowy, z wyszukiwaniem", "price.panel.f2": "O co pytają klienci i na co czat nie znał odpowiedzi", "price.panel.f3": "Poprawianie odpowiedzi: wiedza, cennik, pliki", "price.panel.f4": "Zapytania od firm z sieci Whisp", "price.panel.f5": "Wyceny i zestawienia dla klientów, z Twoją akceptacją", "price.panel.cta": "Załóż konto",
+    "price.note": "Płatność miesięczna, anulujesz w każdej chwili. Bez karty na start.",
+
     "faq.label": "FAQ", "faq.title": "Częste pytania",
     "faq.q1": "Jak to działa z moją istniejącą stroną?", "faq.a1": "Dodajesz jedną linijkę kodu przed zamykającym tagiem </body>. Działa z każdą stroną: WordPress, Shopify, HTML, cokolwiek. Zero wpływu na szybkość.",
-    "faq.q2": "Czy darmowy plan jest naprawdę darmowy?", "faq.a2": "Tak, w pełni. Widget czatu, automatyczne skanowanie i nielimitowane rozmowy są darmowe na zawsze. Pobieramy opłaty za zaawansowaną analitykę.",
+    "faq.q2": "Czy czat jest naprawdę darmowy?", "faq.a2": "Tak. Czat na Twojej stronie, czytanie strony i rozmowy bez limitu są darmowe na zawsze. Panel firmy - wszystkie rozmowy, o co pytają klienci, poprawianie odpowiedzi i zapytania z sieci - kosztuje 149 zł miesięcznie z VAT.",
     "faq.q3": "A co z prywatnością danych i RODO?", "faq.a3": "Każda firma ma osobne, izolowane dane i nigdy nie udostępniamy danych odwiedzających między stronami. Rozmowy przechowują nasi dostawcy hostingu (Render w USA, Cloudflare), a do napisania odpowiedzi przetwarzają je dostawcy modeli AI. Pytania o dane: jakub@whisp.so.",
     "faq.q4": "Czym jest nagrywanie procesów?", "faq.a4": "Klikasz przez proces na swojej stronie (np. wypełnianie formularza). AI uczy się kroków i odtwarza je dla klientów — wypełniając formularz w ich przeglądarce.",
-    "faq.q5": "Jak dokładne są odpowiedzi AI?", "faq.a5": "AI korzysta wyłącznie z informacji z TWOJEJ strony. Nigdy nie wymyśla odpowiedzi. Gdy nie może odpowiedzieć, zapisuje pytanie, żebyś mógł uzupełnić brakujące info.",
-    "faq.q6": "Czy mogę dostosować wygląd?", "faq.a6": "Widget automatycznie dopasowuje się do kolorów Twojej strony. Możesz ustawić nazwę marki i kolor akcentu. Plan Pro zawiera pełną personalizację.",
+    "faq.q5": "Jak dokładne są odpowiedzi?", "faq.a5": "Czat odpowiada tylko na podstawie Twoich informacji, a każda odpowiedź jest z nimi sprawdzana przed wysłaniem. Mimo to może się czasem pomylić; gdy czegoś nie wie, mówi o tym i zapisuje pytanie, żebyś mógł uzupełnić brakującą informację w panelu.",
+    "faq.q6": "Czy mogę dostosować wygląd?", "faq.a6": "Widget sam dopasowuje się do kolorów Twojej strony. Możesz ustawić nazwę marki i kolor akcentu.",
     "cta.h": "Chcesz spróbować?", "cta.p": "Dołącz do firm, które zamieniły swoje strony w rozmowy.",
     "footer.tagline": "Twoja strona, ale mówi. Asystent AI, który czyta Twoją stronę i odpowiada klientom 24/7.",
     "footer.product": "Produkt", "footer.dashboard": "Panel", "footer.login": "Logowanie", "footer.contact": "Kontakt",

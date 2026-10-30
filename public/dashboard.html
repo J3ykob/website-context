@@ -30,6 +30,18 @@
 
     * { margin:0; padding:0; box-sizing:border-box; }
 
+    .plan-box { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 24px; }
+    .plan-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .plan-card h2 { font-size: 20px; }
+    .plan-muted { color: var(--text-2); font-size: 14px; line-height: 1.5; }
+    .plan-muted a { color: var(--text); }
+    .plan-code { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 12px; color: var(--text-2); white-space: pre-wrap; word-break: break-all; }
+    .plan-price { font-size: 32px; font-weight: 700; }
+    .plan-price span { font-size: 14px; font-weight: 400; color: var(--text-2); }
+    .plan-list { list-style: none; display: grid; gap: 8px; font-size: 14px; }
+    .plan-list li::before { content: "✓ "; color: var(--green); }
+    .plan-buy { align-self: flex-start; }
+
     html, body { overflow-x: hidden; }
 
     input::placeholder, textarea::placeholder { color: var(--text-3); }
@@ -712,6 +724,7 @@
         <a class="btn btn-outline" id="open-site-btn" href="#" target="_blank">Open site</a>
         <button class="btn btn-outline" onclick="openAgentFlowModal()">Describe flow</button>
         <button class="btn btn-dark" onclick="startRecording()">Record flow</button>
+        <button class="btn btn-outline" id="billing-btn" style="display:none" onclick="openBilling()">Billing</button>
         <button class="btn btn-outline" onclick="logout()">Logout</button>
       </div>
     </div>
@@ -1544,8 +1557,76 @@
       return d.toLocaleDateString(undefined, {month:"short",day:"numeric"});
     }
 
-    loadAll();
-    refreshTimer = setInterval(loadAll, 30000);
+    // ─── The plan: the widget is free, the panel is paid (src/billing/plan.ts) ────
+    async function planGate() {
+      var back = new URLSearchParams(location.search).get("checkout");
+      if (back) {
+        await authFetch(API + "/api/dashboard/billing/confirm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: back }) }).catch(function() {});
+        history.replaceState(null, "", "/dashboard");
+      }
+      var b = await (await authFetch(API + "/api/dashboard/billing")).json().catch(function() { return { access: true }; });
+      if (b.access) { if (b.manage) document.getElementById("billing-btn").style.display = ""; return true; }
+      showPlan(b);
+      return false;
+    }
+
+    async function showPlan(b) {
+      var code = "";
+      try { var e = await (await authFetch(API + "/api/dashboard/embed-code")).json(); code = e.embedCode || ""; SITE_HREF = e.siteUrl || ""; document.getElementById("site-name").textContent = e.brandName || e.domain || "Your business"; document.getElementById("site-url").textContent = e.domain || ""; } catch (x) {}
+      var shell = document.querySelector(".shell");
+      Array.prototype.forEach.call(shell.children, function(el) { if (!el.classList.contains("topbar")) el.style.display = "none"; });
+      document.querySelectorAll(".topbar-right .btn").forEach(function(el) { if (!/Logout/.test(el.textContent)) el.style.display = "none"; });
+      var box = document.createElement("div");
+      box.className = "plan-box";
+      box.innerHTML =
+        '<div class="plan-card">' +
+          '<h2>Your assistant is free</h2>' +
+          '<p class="plan-muted">Paste this code into your site (before &lt;/head&gt;) and the assistant answers your visitors from your own information - no payment needed.</p>' +
+          '<pre class="plan-code" id="plan-code"></pre>' +
+          '<button class="btn btn-outline" onclick="copyPlanCode()">Copy code</button>' +
+        '</div>' +
+        '<div class="plan-card">' +
+          '<h2>The panel</h2>' +
+          '<p class="plan-price">' + esc(String(b.pricePln || 149)) + ' zł <span>/ month, VAT included</span></p>' +
+          '<ul class="plan-list">' +
+            '<li>Every conversation, searchable</li>' +
+            '<li>What people ask about, and what the assistant could not answer</li>' +
+            '<li>Fix answers: your knowledge, price list and files</li>' +
+            '<li>Requests from businesses in the Whisp network</li>' +
+            '<li>Calculations and quotes for your customers, with your approval</li>' +
+          '</ul>' +
+          (b.payments ? '<button class="btn btn-dark plan-buy" id="plan-buy" onclick="buyPlan()">Unlock the panel</button>' : '<p class="plan-muted">Payments are not available right now - write to jakub@whisp.so.</p>') +
+          '<p class="plan-muted">Monthly, cancel any time. By paying you accept the <a href="/regulamin" target="_blank">terms</a> and the data processing agreement.</p>' +
+        '</div>';
+      shell.appendChild(box);
+      document.getElementById("plan-code").textContent = code;
+    }
+
+    function copyPlanCode() {
+      var t = document.getElementById("plan-code").textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(t).catch(function() {});
+    }
+
+    async function buyPlan() {
+      var btn = document.getElementById("plan-buy");
+      btn.disabled = true; btn.textContent = "Opening payment...";
+      try {
+        var d = await (await authFetch(API + "/api/dashboard/billing/checkout", { method: "POST" })).json();
+        if (d.url) { location.href = d.url; return; }
+      } catch (e) {}
+      btn.disabled = false; btn.textContent = "Unlock the panel";
+      alert("Payment could not be opened - please try again in a moment.");
+    }
+
+    async function openBilling() {
+      try { var d = await (await authFetch(API + "/api/dashboard/billing/portal", { method: "POST" })).json(); if (d.url) location.href = d.url; } catch (e) {}
+    }
+
+    planGate().then(function(open) {
+      if (!open) return;
+      loadAll();
+      refreshTimer = setInterval(loadAll, 30000);
+    });
   </script>
 </body>
 </html>

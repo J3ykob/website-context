@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Regulamin · Whisp</title>
+<style>
+  :root { --bg: #0b1220; --card: #111a2e; --text: #e6ebf5; --muted: #9aa6bf; --line: #1f2a44; --accent: #3b82f6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 780px; margin: 0 auto; padding: 48px 16px 80px; }
+  h1 { font-size: 30px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 34px 0 8px; }
+  ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Regulamin świadczenia usług Whisp</h1>
+  <p class="muted">Obowiązuje od {{EFFECTIVE_DATE}} · <a href="/">whisp.so</a> · <a href="/umowa-powierzenia">Załącznik nr 1 - umowa powierzenia</a> · <a href="/polityka-prywatnosci">Polityka prywatności</a></p>
+
+  <h2>§ 1. Usługodawca</h2>
+  <ol>
+    <li>Usługi świadczy <strong>{{COMPANY_NAME}}</strong>, {{COMPANY_ADDRESS}}{{COMPANY_IDS}} („Usługodawca”).</li>
+    <li>Kontakt: <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>.</li>
+  </ol>
+
+  <h2>§ 2. Definicje</h2>
+  <ol>
+    <li><strong>Klient</strong> - przedsiębiorca (osoba fizyczna prowadząca działalność gospodarczą, osoba prawna lub jednostka organizacyjna), który zawiera umowę w związku ze swoją działalnością gospodarczą. Usługi nie są przeznaczone dla konsumentów.</li>
+    <li><strong>Asystent</strong> - czat umieszczany na stronie internetowej Klienta, odpowiadający osobom odwiedzającym stronę na podstawie Informacji Klienta.</li>
+    <li><strong>Panel</strong> - konto Klienta w serwisie whisp.so: historia rozmów, zestawienie pytań, zarządzanie Informacjami Klienta i ustawieniami, zapytania z Sieci Whisp.</li>
+    <li><strong>Informacje Klienta</strong> - treści, na podstawie których odpowiada Asystent: treści odczytane ze strony internetowej Klienta, pliki, cenniki i odpowiedzi dodane przez Klienta.</li>
+    <li><strong>Użytkownik</strong> - osoba pisząca z Asystentem na stronie Klienta.</li>
+    <li><strong>Sieć Whisp</strong> - funkcja przekazywania zapytań Użytkowników do innych firm korzystających z Whisp, które mogą je zrealizować, oraz przyjmowania takich zapytań przez Klienta.</li>
+    <li><strong>Abonament</strong> - płatny dostęp do Panelu, rozliczany miesięcznie.</li>
+  </ol>
+
+  <h2>§ 3. Zakres usług</h2>
+  <ol>
+    <li>Bezpłatnie Usługodawca udostępnia Klientowi Asystenta: automatyczny odczyt publicznych treści ze strony Klienta, odpowiedzi dla Użytkowników na podstawie Informacji Klienta oraz przekazywanie zapytań Użytkowników na adres e-mail Klienta.</li>
+    <li>W ramach Abonamentu Usługodawca udostępnia Panel, w tym: historię rozmów z wyszukiwaniem, zestawienie najczęstszych pytań i pytań, na które Asystent nie znał odpowiedzi, poprawianie Informacji Klienta (wiedza, cennik, pliki), przygotowywanie przez Asystenta wycen i zestawień na podstawie cennika Klienta w trybie wybranym przez Klienta (od razu do Użytkownika albo po zatwierdzeniu przez Klienta) oraz zapytania z Sieci Whisp.</li>
+    <li>Sieć Whisp jest funkcją rozwijaną; Usługodawca nie gwarantuje liczby ani rodzaju przekazywanych zapytań.</li>
+    <li>Powiadomienia e-mail i SMS do Użytkownika są wysyłane tylko wtedy, gdy Użytkownik wyrazi na nie zgodę w czacie.</li>
+    <li>Aktualny cennik jest dostępny na stronie <a href="/#pricing">whisp.so</a>.</li>
+  </ol>
+
+  <h2>§ 4. Wymagania techniczne</h2>
+  <ol>
+    <li>Do korzystania z Panelu potrzebne są: urządzenie z dostępem do internetu, aktualna przeglądarka z włączoną obsługą JavaScript oraz adres e-mail.</li>
+    <li>Aby umieścić Asystenta na stronie, Klient wkleja na niej dostarczony fragment kodu albo instaluje wtyczkę (np. WordPress).</li>
+    <li>Korzystanie z usług świadczonych drogą elektroniczną wiąże się z typowymi zagrożeniami (np. złośliwe oprogramowanie, przejęcie hasła). Klient chroni swoje dane logowania.</li>
+  </ol>
+
+  <h2>§ 5. Zawarcie umowy</h2>
+  <ol>
+    <li>Umowa o korzystanie z Asystenta zostaje zawarta z chwilą utworzenia konta Klienta i akceptacji Regulaminu. Klient oświadcza, że zawiera umowę jako przedsiębiorca w związku ze swoją działalnością.</li>
+    <li>Abonament zaczyna się z chwilą opłacenia pierwszego miesiąca w formularzu płatności.</li>
+    <li>Osoba zakładająca konto lub płacąca w imieniu Klienta oświadcza, że jest do tego umocowana.</li>
+  </ol>
+
+  <h2>§ 6. Płatności</h2>
+  <ol>
+    <li>Cena Abonamentu jest podana w cenniku i zawiera podatek VAT. Abonament jest płatny z góry za każdy miesiąc, kartą lub inną metodą udostępnioną przez operatora płatności Stripe.</li>
+    <li>Abonament odnawia się automatycznie co miesiąc, dopóki Klient go nie anuluje.</li>
+    <li>Klient może anulować Abonament w każdej chwili w Panelu (przycisk „Billing”, portal płatności Stripe). Anulowanie działa na koniec opłaconego okresu; opłata za rozpoczęty okres nie jest zwracana.</li>
+    <li>Usługodawca wystawia faktury w formie elektronicznej, na co Klient wyraża zgodę.</li>
+    <li>O zmianie ceny Usługodawca informuje e-mailem co najmniej 30 dni wcześniej; Klient, który się nie zgadza, może anulować Abonament przed zmianą.</li>
+    <li>Gdy płatność się nie powiedzie, dostęp do Panelu jest wstrzymany do czasu jej uregulowania; Asystent działa dalej.</li>
+  </ol>
+
+  <h2>§ 7. Obowiązki Klienta</h2>
+  <ol>
+    <li>Klient odpowiada za to, że Informacje Klienta są zgodne z prawem i prawdziwe oraz że ma prawo z nich korzystać, w tym zlecić ich odczyt ze swojej strony.</li>
+    <li>Klient aktualizuje Informacje Klienta (ceny, godziny, dostępność) - Asystent odpowiada na podstawie informacji, które ma.</li>
+    <li>Klient, jako administrator danych Użytkowników, informuje Użytkowników swojej strony o przetwarzaniu ich danych, w tym o korzystaniu z Asystenta.</li>
+    <li>Klient nie używa usług do wprowadzania w błąd, rozsyłania niezamówionych informacji handlowych ani w sposób naruszający prawo lub prawa osób trzecich.</li>
+    <li>Klient nie próbuje obejść zabezpieczeń ani limitów usług, nie obciąża ich w sposób zakłócający działanie i nie odsprzedaje ich bez zgody Usługodawcy.</li>
+  </ol>
+
+  <h2>§ 8. Odpowiedzi Asystenta</h2>
+  <ol>
+    <li>Odpowiedzi Asystenta tworzą automatycznie modele sztucznej inteligencji na podstawie Informacji Klienta. Usługodawca stosuje kontrole ograniczające błędy (m.in. sprawdzanie odpowiedzi z Informacjami Klienta, kwoty wyliczane przez system z cennika Klienta), ale odpowiedzi mogą zawierać błędy lub być niepełne.</li>
+    <li>Ceny, wyceny i terminy podane przez Asystenta są informacyjne; wiążą Klienta dopiero po jego potwierdzeniu, chyba że Klient ustawi inaczej.</li>
+    <li>Klient może przeglądać rozmowy, poprawiać Informacje Klienta i dodawać odpowiedzi na pytania, na które Asystent nie znał odpowiedzi.</li>
+  </ol>
+
+  <h2>§ 9. Odpowiedzialność</h2>
+  <ol>
+    <li>Usługodawca dokłada starań, by usługi działały nieprzerwanie, ale nie gwarantuje stałej dostępności. Prace serwisowe mogą powodować krótkie przerwy.</li>
+    <li>Usługodawca nie odpowiada za: treść Informacji Klienta; decyzje podjęte na podstawie odpowiedzi Asystenta bez ich sprawdzenia; przerwy wynikłe z działania dostawców infrastruktury, sieci lub siły wyższej; treść ofert i działania innych firm z Sieci Whisp.</li>
+    <li>Odpowiedzialność Usługodawcy wobec Klienta jest ograniczona do szkody rzeczywistej i do kwoty opłat zapłaconych przez Klienta w ostatnich 3 miesiącach; nie obejmuje utraconych korzyści. Ograniczenie nie dotyczy szkody wyrządzonej umyślnie.</li>
+  </ol>
+
+  <h2>§ 10. Dane osobowe</h2>
+  <ol>
+    <li>Dane Klienta i osób działających w jego imieniu Usługodawca przetwarza jako administrator - zasady opisuje <a href="/polityka-prywatnosci">polityka prywatności</a>.</li>
+    <li>Dane Użytkowników Usługodawca przetwarza w imieniu Klienta jako podmiot przetwarzający, na zasadach <a href="/umowa-powierzenia">umowy powierzenia przetwarzania danych osobowych</a> (Załącznik nr 1). Akceptując Regulamin, Klient zawiera tę umowę.</li>
+  </ol>
+
+  <h2>§ 11. Reklamacje</h2>
+  <ol>
+    <li>Reklamacje można składać na adres <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>, opisując problem i podając adres e-mail konta.</li>
+    <li>Usługodawca odpowiada na reklamację w ciągu 14 dni.</li>
+  </ol>
+
+  <h2>§ 12. Czas trwania i rozwiązanie umowy</h2>
+  <ol>
+    <li>Umowa jest zawarta na czas nieokreślony.</li>
+    <li>Klient może rozwiązać umowę w każdej chwili, pisząc na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>; opłacony Abonament działa do końca okresu.</li>
+    <li>Usługodawca może rozwiązać umowę z 30-dniowym wypowiedzeniem, a ze skutkiem natychmiastowym - gdy Klient rażąco narusza Regulamin lub prawo.</li>
+    <li>Po rozwiązaniu umowy Asystent przestaje działać. Dane Użytkowników są usuwane w terminach z Załącznika nr 1 (rozmowy - 365 dni od wiadomości), a dane rozliczeniowe przechowywane tak długo, jak wymagają tego przepisy.</li>
+  </ol>
+
+  <h2>§ 13. Zmiany Regulaminu</h2>
+  <ol>
+    <li>Usługodawca może zmienić Regulamin z ważnych przyczyn (zmiana przepisów, zakresu usług, cen, bezpieczeństwa), informując Klienta e-mailem co najmniej 14 dni przed zmianą.</li>
+    <li>Klient, który nie akceptuje zmian, może rozwiązać umowę przed ich wejściem w życie.</li>
+  </ol>
+
+  <h2>§ 14. Postanowienia końcowe</h2>
+  <ol>
+    <li>Do umowy stosuje się prawo polskie.</li>
+    <li>Spory rozstrzyga sąd właściwy dla siedziby Usługodawcy.</li>
+  </ol>
+</main>
+</body>
+</html>

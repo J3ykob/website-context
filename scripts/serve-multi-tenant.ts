@@ -254,7 +254,21 @@ async function authMiddleware(req: express.Request, res: express.Response, next:
   }
 
   (req as any).tenantId = tenantId;
+  // The panel is paid (src/billing/plan.ts); the widget is free, so its install code and the plan itself
+  // stay open. An admin's support session is let in.
+  if (!token.startsWith("adm-") && !PANEL_FREE.some((p) => req.path === p || req.path.startsWith(`${p}/`))) {
+    const { hasPanel } = await import("../src/billing/plan.js");
+    if (!(await hasPanel(tenantId).catch(() => false))) { res.status(402).json({ error: "Subscription required", plan: true }); return; }
+  }
   next();
+}
+const PANEL_FREE = ["/api/dashboard/embed-code", "/api/dashboard/billing"];
+// Where Stripe sends the business back: our own address (BASE_URL), never the request's Host header.
+function publicBase(): string {
+  let base = (process.env.BASE_URL || "").trim();
+  if (!base.startsWith("http")) base = "https://whisp.so";
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  return base;
 }
 
 // --- Security helpers ---
@@ -322,7 +336,8 @@ app.get("/claim", (_, res) => {
 
 // Pricing page
 app.get("/pricing", (_, res) => {
-  res.sendFile(resolve(__dirname, "../public/pricing.html"));
+  // One offer, in one place: the landing page's pricing section (EN/PL).
+  res.redirect(301, "/#pricing");
 });
 
 // Widget JS
@@ -1213,6 +1228,27 @@ let lastChatError: { tenantId: string; cause: string; msg: string; at: string } 
 registerAgentRoutes(app, { auth: authMiddleware, onFlowsChanged: (id) => tenantManager.evictTenant(id) });
 registerOfferRoutes(app, { auth: authMiddleware, onChanged: (id) => { tenantManager.evictTenant(id); reindexNetwork(id); } });
 
+// The plan (src/billing/plan.ts): its state, Checkout, the payment checked on the way back, Stripe's portal.
+app.get("/api/dashboard/billing", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId as string;
+  const plan = await import("../src/billing/plan.js");
+  const t = getTenant(tenantId);
+  res.json({ access: await plan.hasPanel(tenantId).catch(() => false), subscribed: await plan.subscribed(tenantId).catch(() => false), exempt: t?.settings?.billingExempt === true,
+    pricePln: plan.PRICE_PLN(), payments: !!plan.stripeKey(), manage: !!t?.settings?.stripeCustomer && !!plan.stripeKey() });
+});
+app.post("/api/dashboard/billing/checkout", authMiddleware, async (req, res) => {
+  try { res.json({ url: await (await import("../src/billing/plan.js")).panelCheckout((req as any).tenantId, publicBase()) }); }
+  catch (e: any) { console.warn(`[billing] checkout: ${e?.message || e}`); res.status(503).json({ error: "Payments are not available right now" }); }
+});
+app.post("/api/dashboard/billing/confirm", authMiddleware, async (req, res) => {
+  const ok = await (await import("../src/billing/plan.js")).storePaidSession((req as any).tenantId, String(req.body?.sessionId || "")).catch(() => false);
+  res.json({ access: ok });
+});
+app.post("/api/dashboard/billing/portal", authMiddleware, async (req, res) => {
+  try { res.json({ url: await (await import("../src/billing/plan.js")).portal((req as any).tenantId, `${publicBase()}/dashboard`) }); }
+  catch { res.status(404).json({ error: "No subscription" }); }
+});
+
 // Admin: rebuild the network capability index for one business or a whole network (?ecosystem=).
 app.post("/api/admin/network-index", async (req, res) => {
   if (!adminOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
@@ -1776,7 +1812,7 @@ app.get("/api/admin/login-as", async (req, res) => {
   const tenantId = ((req.query.tenantId as string) || "").trim();
   if (!tenantId) { res.status(400).json({ error: "tenantId required" }); return; }
   if (!getTenant(tenantId)) { res.status(404).json({ error: "Tenant not found" }); return; }
-  const token = await createSession(tenantId);
+  const token = await createSession(tenantId, { admin: true });
   if (req.query.redirect === "1") {
     res.type("html").send('<!DOCTYPE html><meta charset="utf-8"><title>Signing in…</title><script>'
       + 'localStorage.setItem("wctx-dashboard-token",' + JSON.stringify(token) + ');'
@@ -1802,6 +1838,11 @@ app.post("/api/auth/setup-password", async (req, res) => {
 
   if (!apiKey && !setupToken) {
     res.status(400).json({ error: "Either apiKey or token is required" });
+    return;
+  }
+  // Signing up from the setup page accepts the Terms and the data processing agreement (recorded below).
+  if (setupToken && req.body?.termsAccepted !== true) {
+    res.status(400).json({ error: "Please accept the Terms to continue." });
     return;
   }
 
@@ -1835,8 +1876,9 @@ app.post("/api/auth/setup-password", async (req, res) => {
   }
 
   const hash = hashPassword(password);
-  // Clear setup token after use
-  updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null });
+  // Clear setup token after use; the acceptance kept with the version (date) of the Terms accepted.
+  const accepted = req.body?.termsAccepted === true ? { termsAcceptedAt: new Date().toISOString(), termsVersion: process.env.TERMS_EFFECTIVE_DATE || "2026-10-31" } : {};
+  updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null, ...(Object.keys(accepted).length ? { settings: { ...(tenant.settings || {}), ...accepted } } : {}) });
   // The owner has claimed it: a crawl stopped at the onboarding cap now covers the whole site.
   const onboardCap = Number(process.env.ONBOARD_MAX_PAGES) || 150;
   if (tenant.siteUrl && (tenant.pagesCount || 0) >= onboardCap && tenant.status !== "scraping") worker.enqueue(tenant.id, tenant.siteUrl, Number(process.env.SCRAPE_MAX_PAGES) || 500);
@@ -1846,22 +1888,29 @@ app.post("/api/auth/setup-password", async (req, res) => {
 });
 
 // --- Auth pages ---
-// Privacy policy: served once the company's details are set (COMPANY_NAME, COMPANY_ADDRESS; COMPANY_NIP shown when set;
-// optional COMPANY_REGISTRY, PRIVACY_EMAIL, CHAT_RETENTION, PRIVACY_EFFECTIVE_DATE) - never with blanks.
-app.get(["/polityka-prywatnosci", "/privacy"], (_req, res) => {
-  const e = process.env;
-  // GDPR asks for the controller's name and contact; the NIP is shown once the company has one.
-  if (!e.COMPANY_NAME || !e.COMPANY_ADDRESS) { res.status(404).send("Not found"); return; }
-  const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
-  const vars: Record<string, string> = {
-    COMPANY_NAME: e.COMPANY_NAME, COMPANY_ADDRESS: e.COMPANY_ADDRESS, COMPANY_NIP: e.COMPANY_NIP ? `<br>NIP ${esc(e.COMPANY_NIP)}` : "",
-    COMPANY_REGISTRY: e.COMPANY_REGISTRY ? `<br>${e.COMPANY_REGISTRY}` : "", PRIVACY_EMAIL: e.PRIVACY_EMAIL || "jakub@whisp.so",
-    CHAT_RETENTION: e.CHAT_RETENTION || "12 miesięcy od ostatniej wiadomości", EFFECTIVE_DATE: e.PRIVACY_EFFECTIVE_DATE || new Date().toISOString().slice(0, 10),
-    TYPESAFE_LOCATION: e.TYPESAFE_LOCATION || "USA",
+// Legal pages, filled from the company's details (Render env) - none is served with blanks.
+// Terms (Regulamin) and its annex, the data processing agreement, are accepted at sign-up and at payment.
+function legalPage(file: string, dateVar: string) {
+  return (_req: express.Request, res: express.Response) => {
+    const e = process.env;
+    // GDPR asks for the controller's name and contact; the NIP is shown once the company has one.
+    if (!e.COMPANY_NAME || !e.COMPANY_ADDRESS) { res.status(404).send("Not found"); return; }
+    const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+    const ids = [e.COMPANY_NIP ? `NIP ${e.COMPANY_NIP}` : "", e.COMPANY_REGISTRY || ""].filter(Boolean);
+    const vars: Record<string, string> = {
+      COMPANY_NAME: esc(e.COMPANY_NAME), COMPANY_ADDRESS: esc(e.COMPANY_ADDRESS),
+      COMPANY_NIP: e.COMPANY_NIP ? `<br>NIP ${esc(e.COMPANY_NIP)}` : "", COMPANY_REGISTRY: e.COMPANY_REGISTRY ? `<br>${esc(e.COMPANY_REGISTRY)}` : "",
+      COMPANY_IDS: ids.length ? `, ${esc(ids.join(", "))}` : "",
+      PRIVACY_EMAIL: esc(e.PRIVACY_EMAIL || "jakub@whisp.so"), CHAT_RETENTION: esc(e.CHAT_RETENTION || "12 miesięcy od ostatniej wiadomości"),
+      // A fixed date (set when the text changes) - the default is only for a page set up without one.
+      EFFECTIVE_DATE: esc(e[dateVar] || e.PRIVACY_EFFECTIVE_DATE || "2026-10-31"), TYPESAFE_LOCATION: esc(e.TYPESAFE_LOCATION || "USA"),
+    };
+    res.type("html").send(readFileSync(resolve(__dirname, `../public/${file}`), "utf8").replace(/\{\{([A-Z_]+)\}\}/g, (_m, k) => vars[k] ?? ""));
   };
-  const html = readFileSync(resolve(__dirname, "../public/polityka-prywatnosci.html"), "utf8").replace(/\{\{([A-Z_]+)\}\}/g, (_m, k) => (k === "COMPANY_REGISTRY" || k === "COMPANY_NIP" ? vars[k] : esc(vars[k] ?? "")));
-  res.type("html").send(html);
-});
+}
+app.get(["/polityka-prywatnosci", "/privacy"], legalPage("polityka-prywatnosci.html", "PRIVACY_EFFECTIVE_DATE"));
+app.get(["/regulamin", "/terms"], legalPage("regulamin.html", "TERMS_EFFECTIVE_DATE"));
+app.get(["/umowa-powierzenia", "/dpa"], legalPage("umowa-powierzenia.html", "TERMS_EFFECTIVE_DATE"));
 
 app.get("/auth/login", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/auth/login.html"));
@@ -3064,7 +3113,7 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
 });
 
 // Admin: a business's place in the network (src/projects/network.ts isListed, src/projects/invite.ts).
-// body: { tenantIds: [...], network?: "listed" | "member", inviteEmail?: string, networkOptOut?: boolean, clearBilling?: true }
+// body: { tenantIds: [...], network?: "listed" | "member", inviteEmail?: string, networkOptOut?: boolean, clearBilling?: true, billingExempt?: boolean }
 // "listed" = in the network from its public data, nobody runs it; "member" (default) = it has joined.
 // Admin (support / tests): close a request's wait for other businesses now - the ones still waiting
 // count as "no answer" (as at the 24 h deadline) and the customer's result is finished with what came in.
@@ -3095,6 +3144,8 @@ app.post("/api/admin/network-status", (req, res) => {
     if (typeof req.body?.inviteEmail === "string") { const e = req.body.inviteEmail.trim(); if (e) settings.inviteEmail = e.slice(0, 200); else delete settings.inviteEmail; }
     if (typeof req.body?.networkOptOut === "boolean") { if (req.body.networkOptOut) settings.networkOptOut = true; else delete settings.networkOptOut; }
     if (req.body?.clearBilling === true) { delete settings.stripeCustomer; delete settings.stripeSubscription; }
+    // The panel without a subscription (support, pilots, accounts from before the paid panel - src/billing/plan.ts).
+    if (typeof req.body?.billingExempt === "boolean") { if (req.body.billingExempt) settings.billingExempt = true; else delete settings.billingExempt; }
     updateTenant(id, { settings });
     tenantManager.evictTenant(id);
     updated.push(id);
