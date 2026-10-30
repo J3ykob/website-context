@@ -54,6 +54,7 @@ export async function splitNeed(need: string): Promise<string[]> {
   const parts = (Array.isArray(j?.parts) ? j.parts : []).filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 2).map((p: string) => p.trim().slice(0, 300)).slice(0, MAX_PARTS);
   if (splitMemo.size > 5000) splitMemo.clear();
   splitMemo.set(key, parts);
+  (await import("../llm/decision-log.js")).logDecision("split", MODEL(), { need: need.slice(0, 3000) }, parts);
   await uploadToR2(key, JSON.stringify(parts), "application/json").catch(() => {});
   return parts;
 }

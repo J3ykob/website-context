@@ -13,6 +13,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { countJev, jevOffForTurn, jevTurnCount, noteJevCapped } from "./turn-usage.js";
+import { logDecision } from "./decision-log.js";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 
@@ -64,6 +65,7 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     if (u) { u.inputTokens += Number(json?.usage?.input_tokens) || 0; u.calls++; }
     countJev(Number(json?.usage?.input_tokens) || 0, t0);
     jevOutcome(true);
+    logDecision("jev", String(json?.model || process.env.JEV_MODEL || "jev-latest"), { state, questions }, answers);
     return answers;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;

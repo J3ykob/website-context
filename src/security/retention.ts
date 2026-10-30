@@ -10,6 +10,7 @@ export async function runRetention(): Promise<{ messages: number; projects: numb
   const days = Number(process.env.CHAT_RETENTION_DAYS) || 365;
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
   const m = await d1Query("DELETE FROM chat_messages WHERE created_at < ? RETURNING id", [cutoff]).catch(() => [] as any[]);
+  await d1Query("DELETE FROM decisions WHERE at < ?", [cutoff]).catch(() => {}); // decision log: same as chats
   const now = new Date().toISOString(), idle = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const due = (await d1Query("SELECT id FROM projects WHERE expires_at IS NOT NULL AND expires_at < ? AND updated_at < ? LIMIT 50", [now, idle]).catch(() => [] as any[])).map((r: any) => String(r.id));
   const { listFiles } = await import("../projects/repo.js");
