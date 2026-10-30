@@ -1029,7 +1029,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const statements = splitStatements(text);
       const [unsup, checks] = await Promise.all([
         !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000)).catch(() => null) : Promise.resolve(null),
-        jevEnabled() ? jevAsk({ conversation: convo, reply: text }, {
+        jevEnabled() ? jevAsk({ conversation: convo, reply: text, ...(network ? { network_businesses: network.text.slice(0, 6000) } : {}) }, {
           offers: { type: "noul", instructions: "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
           denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
           contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)? Saying we have no information on something and recommending another business for it is NOT a contradiction." },
@@ -1039,6 +1039,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
           unanswered: { type: "noul", instructions: "Does the customer's latest message in `conversation` ask about several things, and does `reply` skip one of them without saying anything about it?" },
           claimsSent: { type: "noul", instructions: "Does `reply` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered (already done, not offered)?" },
           vouches: { type: "noul", instructions: "Does `reply` praise or vouch for another company (e.g. 'reliable', 'trusted', 'experienced', 'sprawdzona')?" },
+          // W3: a wedding venue's chat gave a photographer's 3700 zł package as "the cheapest reportage we offer".
+          ...(network ? { theirsAsOurs: { type: "noul", instructions: "Does `reply` present something that one of `network_businesses` offers - its service, product, package or price - as offered by us ('we offer', 'our', 'u nas', 'oferujemy', 'nasz')?" } as const } : {}),
         }, 4000).catch(() => null) : Promise.resolve(null),
       ]);
       const nl = (k: string) => ((checks?.[k] as JevNoulAnswer | undefined)?.noul ?? 0);
@@ -1061,6 +1063,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (needContact && !hasContact(text) && !givesKnownContact(text)) problems.push("it does not give our phone number or e-mail from the official info - give it so the customer can ask us directly");
       if (network && hasContact(text)) problems.push("it gives our own phone number or e-mail, as if it were a recommended business's - give each business only the contact shown for it");
       if (network && nl("vouches") >= 0.6) problems.push("it praises or vouches for another company - describe them only by what they offer");
+      if (network && nl("theirsAsOurs") >= 0.6) problems.push("it presents a recommended business's offer or price as ours - say which business offers it");
       if (!network && nl("callUs") >= 0.6 && (!hasPhone || !hasEmail) && !/\d{3}[\s-]?\d{3}[\s-]?\d{3}|@/.test(text)) problems.push(`it suggests ${!hasPhone && !hasEmail ? "calling or e-mailing" : !hasPhone ? "calling" : "e-mailing"} us, but our information shows no ${!hasPhone && !hasEmail ? "phone number or e-mail" : !hasPhone ? "phone number" : "e-mail"} - point only to channels shown in our information (e.g. the contact form)`);
       if (network) for (const l of network.links) if (!text.includes(l)) problems.push(`it leaves out the link ${l} for one of the recommended businesses`);
       for (const m of text.matchAll(/https?:\/\/[^\s)\]]+/g)) {
