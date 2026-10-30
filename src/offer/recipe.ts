@@ -143,7 +143,13 @@ export function recipeFromFields(item: FieldsLike): Recipe | null {
     const allRates = parts.every((p) => p!.rule === "rates");
     price = allRates ? { rule: "rates", input: "hours", rates: parts.flatMap((p) => (p as Extract<Rule, { rule: "rates" }>).rates) }
       : comps.every((c) => c.combine === "alternative") ? { rule: "cheapest", options: parts as Rule[] } : { rule: "sum", parts: parts as Rule[] };
-  } else price = ruleOf(item.fields.price_type, item.price_value, item.price_max, item.fields.unit);
+  } else {
+    // A product sold by the piece: a fixed price is per piece (3 drills = 3 x the price).
+    const unit = item.fields.unit && item.fields.unit !== "unknown" ? item.fields.unit : item.fields.kind === "product" && item.fields.price_type !== "range" && item.fields.price_type !== "from" ? "szt" : item.fields.unit;
+    price = ruleOf(item.fields.price_type, item.price_value, item.price_max, unit);
+  }
+  // No price stated at all: the honest answer is to ask the business.
+  if (!price && item.price_value === null) price = { rule: "on_request" };
   if (!price) return null;
   const inputs = new Map<string, RecipeInput>();
   const walk = (r: Rule): void => {
