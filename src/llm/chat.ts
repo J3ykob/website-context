@@ -856,6 +856,12 @@ export class WebsiteChat {
           const computed = priceGiven(judged.given).map((c) => customerPriceLine(c));
           if (computed.length) { noteTurn("computed", computed); lines.push(`Computed for the customer's quantities (use these totals): ${computed.join("; ")}`); }
         }
+        // A price question whose quantity was not clear ("half a day"): no total is computed, and the reply
+        // must not work one out (C3: "6 h x 76 = 456 zł, hourly is cheaper" against a 380 zł daily rate).
+        else if (judged && rt && rt.price >= 0.5) {
+          const { inputsOf } = await import("../offer/quantities.js");
+          if (products.some((p) => inputsOf(p).length)) lines.push("No total is computed for this request: the customer's quantity is not clear from the message - give the prices, do not work out a total.");
+        }
         packText = `${packText ? `${packText}\n\n---\n\n` : ""}### ${this.catalogue ? "Products in our shop (from our catalogue)" : "Our offer and prices (from our price list)"}\n${lines.join("\n")}`;
         passages = [...passages, ...lines];
         productLinks = products.map((p) => p.url).filter(Boolean);
