@@ -85,6 +85,16 @@ export async function findBusinesses(need: string, ecosystem: string, opts: { in
       passages: [...e.items.slice(0, 4).map((i) => renderItem(i).slice(0, 600)), ...e.passages.map((p) => p.content)].slice(0, 5),
     }))).catch(() => null);
     if (!scores) return [] as BusinessHit[];
+    // 4b. A price is an offer only for the thing asked: every priced item of the qualified candidates is
+    // judged (one call per part) - "is this item the product or service the part asks for, not a component,
+    // a related job or a substitute?". Bathroom renovation priced from a screed and a paint job was quoted
+    // as a partial bathroom price (chain test C17); the per-business model answer used to make this call.
+    const priced = ev.flatMap((e, i) => (scores[i] >= MIN_OFFERS ? e.items.filter((it) => it.price_value !== null).slice(0, 3).map((it) => ({ e, it })) : []));
+    const { jevAsk } = await import("../llm/jev.js");
+    const same = priced.length ? await jevAsk({ part_asked: part, items: priced.map((x) => renderItem(x.it).slice(0, 300)) },
+      Object.fromEntries(priced.map((_, j) => [`i${j}`, { type: "noul" as const, instructions: `Is \`items[${j}]\` the product or service that \`part_asked\` asks for (the same thing, so its price prices that part) - not a component of it, a related or partial job, or a substitute of another kind?` }])), 8000).catch(() => null) : null;
+    const notIt = new Set(priced.filter((_, j) => (((same as any)?.[`i${j}`]?.noul as number) ?? 0) < 0.5).map((x) => x.it));
+    for (const e of ev) { e.items = e.items.filter((it) => !notIt.has(it)); e.precise = e.items.slice(0, 2).some((it) => it.price_value !== null); }
     // 5. qualified, ranked
     return ev.map((e, i): BusinessHit => ({
       tenantId: e.id, label: label(e.id), part: k, offers: scores[i], precise: e.precise, items: e.items, passages: e.passages,

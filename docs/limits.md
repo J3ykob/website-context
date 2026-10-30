@@ -53,7 +53,7 @@ The tables below show each limit as audited; these rows were then changed:
 | Queries per search for diversity | up to 4, businesses already found excluded ($nin) | capability-index.ts | a 150-record catalogue filled the 100 nearest records - shortlists of 1-2 businesses, chain test 11/2/7 (2026-10-30) |
 | Shortlist | 6 per need part (NETWORK_SHORTLIST_PART), one search for chat and agent (src/network/find.ts) | find.ts | measured: Warsaw 10/10 expected businesses in the top 6 (9 at rank 1); fleet of 1,067: 96% in the top 12, 92% top 6 |
 | Network wait without a live status line | 10 s (was 3.5 s) | chat.ts packsReply | the one search splits the need into parts first: 3-8 s; API calls without the widget missed the network |
-| A priced network offer | a price on one of the 2 best-scored matched items | find.ts | a loose match (grey laminate for grey vinyl) is not a quote |
+| A priced network offer | a price on one of the 2 best-scored matched items AND Jev >= 0.5 that the item IS the thing asked (not a component / related job / substitute) | find.ts | a loose match (grey laminate for grey vinyl) is not a quote; screed + painting priced a bathroom renovation (C17) |
 | Shortlist cache | 60 min (NETWORK_SEARCH_CACHE_MIN) | capability-index.ts | the same need in the same network; records change only at scrape / offer edit |
 | Record text | 900 chars (chunk excerpt 500) | capability-index.ts | one idea per record keeps similarity sharp |
 
