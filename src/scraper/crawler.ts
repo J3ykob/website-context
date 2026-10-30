@@ -54,6 +54,11 @@ export async function crawlSite(
   let politeDelay = opts.rateLimit;
   let throttled = false;
   let nextSlot = 0;
+  // A site that throttles every request (a firewall's penalty window on our IP, extended by each retry)
+  // is left after 12 throttles in a row with the pages read so far - not held for an hour with the
+  // scrape queue behind it.
+  let throttledInRow = 0;
+  let givenUp = false;
   const waitTurn = async (): Promise<void> => {
     for (;;) {
       const now = Date.now();
@@ -157,6 +162,7 @@ export async function crawlSite(
       pausedUntil = Math.max(pausedUntil, Date.now() + waitMs);
       throttled = true;
       politeDelay = Math.min(8000, Math.max(1000, politeDelay * 2));
+      if (++throttledInRow >= 12 && !givenUp) { givenUp = true; console.warn(`  [${fetchResult.statusCode}] ${baseUrl.hostname} throttles every request - stopping with ${pages.length} page(s)`); }
       if (attempt <= 3) {
         console.log(`  [${fetchResult.statusCode}] throttled on ${normalizedUrl}, pausing ${Math.round(waitMs / 1000)}s (attempt ${attempt}/3)`);
         visited.delete(normalizedUrl);
@@ -164,6 +170,7 @@ export async function crawlSite(
       } else failures.push(normalizedUrl);
       return;
     }
+    throttledInRow = 0;
     if (fetchResult.statusCode >= 400) { failures.push(normalizedUrl); return; }
 
     // Content-type is the authority, extensions are just a fast pre-filter.
@@ -230,7 +237,7 @@ export async function crawlSite(
   const worker = async (): Promise<void> => {
     while (true) {
       if (pages.length + inFlight >= opts.maxPages) return;
-      if (options.signal?.aborted) return; // the job timed out: stop, don't run on beside the retry
+      if (options.signal?.aborted || givenUp) return; // the job timed out (or the site throttles everything): stop
       if (!queue.length && pending.length) {
         if (!triaging) triaging = runTriage().finally(() => { triaging = null; });
         await triaging;

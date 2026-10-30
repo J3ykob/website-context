@@ -21,12 +21,12 @@ on the network chain test (20 mixed orders) and its 8 network cases run 3 times 
 |---|---|---|---|---|
 | 1 | Provider rotation / quantisation | deepseek on 40 providers | pin provider + quantisation + seed | done (step 1) |
 | 2 | Need split varies | 1 or 2 parts for the same message | store the split per normalised request | done (step 1) |
-| 3 | Choices made by a model in free text | "cheapest trestle" 240 vs 350 zł; hourly vs daily rate (C14) | the choice in code: offers evaluated (price recipes), sorted; the model only words it | next |
+| 3 | Choices made by a model in free text | "cheapest trestle" 240 vs 350 zł; hourly vs daily rate (C14) | the agent writes its options and choice as structure (wybor.json); code checks the cheapest is chosen and each amount against the item's recipe, failures go to the repair round | done (e09c350) |
 | 4 | Arithmetic and totals by the model | per-element scaffolding x guessed counts (C5) | totals only from given quantities (agent check, done); then the recipe evaluator computes | partly |
 | 5 | Decisions at a hard threshold | Jev 0.48/0.52 flips a route | an uncertain band (e.g. 0.35-0.65): show both / ask instead of flipping; store decisions per normalised input + data version | next |
-| 6 | Reply model writes facts differently each run | C1: price given in one run, not in another | the facts the reply must contain are decided before writing (prices, totals, businesses) and checked after (numbers check exists; add "must mention" check) | next |
+| 6 | Reply model writes facts differently each run | C1: price given in one run, not in another | the facts the reply must contain are decided before writing (prices, totals, businesses) and checked after (numbers check exists; add "must mention" check). C1 was not noise but missing data: the chat never saw website-read offer items - now it does | partly (e09c350) |
 | 7 | Judge noise and errors | C5, C9 graded against stale/incorrect truths | structured truths (items, prices, totals) checked by code; the LLM judge only for language and tone; 3 judge runs, majority | next |
-| 8 | Stale test data | Romax offer changed, C4/C16 | truths carry a data date; a check flags truths whose items no longer exist in the offer | next |
+| 8 | Stale test data | Romax offer changed, C4/C16 | truths carry a data date; a check flags truths whose items no longer exist in the offer | partly: C3/C4/C9/C16 truths corrected and dated |
 | 9 | Evaluation protocol | one run decides | always 3 runs per version, report mean and spread; compare versions on the same seeds/cases | adopted |
 
 ## Price recipes (the evaluator for #3 and #4)

@@ -849,6 +849,12 @@ export class WebsiteChat {
       if (products.length) {
         noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
         const lines = products.map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
+        // A price question: the customer's quantities read as structure, priced by code (src/offer/quantities.ts).
+        if (rt && rt.price >= 0.5) {
+          const { priceForCustomer, customerPriceLine } = await import("../offer/quantities.js");
+          const computed = (await priceForCustomer(convo, products, this.context.tenantId).catch(() => [])).map((c) => customerPriceLine(c));
+          if (computed.length) { noteTurn("computed", computed); lines.push(`Computed for the customer's quantities (use these totals): ${computed.join("; ")}`); }
+        }
         packText = `${packText ? `${packText}\n\n---\n\n` : ""}### ${this.catalogue ? "Products in our shop (from our catalogue)" : "Our offer and prices (from our price list)"}\n${lines.join("\n")}`;
         passages = [...passages, ...lines];
         productLinks = products.map((p) => p.url).filter(Boolean);
