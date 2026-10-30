@@ -1,4 +1,5 @@
 import { countLlm, turnVariant } from "./turn-usage.js";
+import { routingFor } from "./pin.js";
 
 // OpenRouter routes each call to one of a model's providers; a provider that
 // fails (404 "model not found", 429, 5xx, or a 400 the provider itself returned,
@@ -32,9 +33,12 @@ function noteSpeed(provider: string | undefined, ms: number, outTokens: number, 
   avoided.set(provider, Math.max(avoided.get(provider) || 0, Date.now() + SLOW_MS));
   console.warn(`[openrouter] ${provider} slow (${(ms / 1000).toFixed(1)}s, ${firstTokenMs !== undefined ? `first token ${(firstTokenMs / 1000).toFixed(1)}s` : `${outTokens} tokens`}) - skipped for 5 min`);
 }
-async function withProviderRetry(call: (provider: ProviderPrefs) => Promise<Response>): Promise<Response> {
+async function withProviderRetry(call: (provider: ProviderPrefs) => Promise<Response>, model = ""): Promise<Response> {
   const skip = avoidList();
-  let r = await call({ sort: process.env.OPENROUTER_PROVIDER_SORT || "throughput", ...(skip.length ? { ignore: skip } : {}) });
+  // A fixed provider order per model (src/llm/pin.ts) - the same input gives the same output; sorting by
+  // throughput rotated providers (and quantisations) on every call.
+  const pinned = process.env.OPENROUTER_PROVIDER_SORT ? { sort: process.env.OPENROUTER_PROVIDER_SORT } : routingFor(model).provider;
+  let r = await call({ ...pinned, ...(skip.length ? { ignore: skip } : {}) } as ProviderPrefs);
   for (let attempt = 0; attempt < 2 && !r.ok; attempt++) {
     const body = await r.clone().text().catch(() => "");
     let provider: string | undefined;
@@ -75,7 +79,8 @@ export class OpenRouterProvider {
     this.model = config.model || process.env.OPENROUTER_MODEL || "anthropic/claude-haiku-5.5"; // the production model (render.yaml); qwen until 2026-10-29
     this.maxTokens = config.maxTokens || 1024;
     // 0.3 since 2026-10-25: at 0.7 the replies had typos, garbled words and small invented details.
-    this.temperature = config.temperature ?? (Number(process.env.OPENROUTER_TEMPERATURE) || 0.3);
+    // 0: the same conversation gets the same reply (0.3 was tuned on qwen for typos - STALE; docs/limits.md).
+    this.temperature = config.temperature ?? (process.env.OPENROUTER_TEMPERATURE !== undefined ? Number(process.env.OPENROUTER_TEMPERATURE) : 0);
     this.siteUrl = config.siteUrl || process.env.SITE_URL || "";
     this.siteName = config.siteName || "website-context";
   }
@@ -100,10 +105,10 @@ export class OpenRouterProvider {
         ...REASONING,
         temperature: overrides?.temperature ?? this.temperature,
         usage: { include: true }, // the call's cost in USD (spend caps, src/security/budget.ts)
-        // The fastest of the model's providers (a visitor is waiting); OPENROUTER_PROVIDER_SORT=price to change.
         provider,
+        ...(routingFor(overrides?.model || testModel() || this.model).seed !== undefined ? { seed: routingFor(overrides?.model || testModel() || this.model).seed } : {}),
       }),
-    }));
+    }), overrides?.model || testModel() || this.model);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -149,7 +154,7 @@ export class OpenRouterProvider {
         usage: { include: true },
         ...REASONING,
       }),
-    }));
+    }), testModel() || this.model);
 
     if (!response.ok || !response.body) {
       const errorText = await response.text().catch(() => "");

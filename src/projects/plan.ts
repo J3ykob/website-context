@@ -124,7 +124,7 @@ async function llm(system: string, user: string): Promise<string> {
     method: "POST",
     signal: AbortSignal.timeout(Number(process.env.PLANNER_TIMEOUT_MS) || 90_000),
     headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: process.env.PLANNER_MODEL || "deepseek/deepseek-v4.1-flash", temperature: 0, max_tokens: 4000, response_format: { type: "json_object" }, provider: { sort: "throughput" },
+    body: JSON.stringify({ model: process.env.PLANNER_MODEL || "deepseek/deepseek-v4.1-flash", temperature: 0, max_tokens: 4000, response_format: { type: "json_object" }, provider: (await import("../llm/pin.js")).routingFor(process.env.PLANNER_MODEL || "deepseek/deepseek-v4.1-flash").provider, seed: 7,
       // No hidden reasoning: it multiplies latency and can eat the token budget before any JSON is written.
       // Benchmark 2026-10-13 (4 real requests): deepseek-v4.1-flash without reasoning 10-20 s and faithful to the
       // requester's words; qwen3-235b 22-39 s and mistranslated product names.
