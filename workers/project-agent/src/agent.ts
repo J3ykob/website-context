@@ -437,6 +437,9 @@ function opencodeConfig(model: ModelSpec, steps: number): unknown {
             reasoning: false,
             limit: { context: model.context ?? 1_000_000, output: model.output ?? 65_536 },
             cost: model.cost,
+            // A fixed provider (and its fp8 weights) for every step: OpenRouter otherwise rotates across ~40
+            // deepseek providers with different quantisations (2026-10-30, src/llm/pin.ts on the server).
+            options: model.id.startsWith("deepseek/") ? { provider: { order: ["deepinfra", "novita", "nebius"], quantizations: ["fp8"], allow_fallbacks: true }, seed: 7 } : {},
           },
         },
       },
@@ -444,7 +447,7 @@ function opencodeConfig(model: ModelSpec, steps: number): unknown {
     permission: { edit: "allow", bash: "allow", webfetch: "deny" },
     share: "disabled",
     autoupdate: false,
-    agent: { build: { steps } },
+    agent: { build: { steps, temperature: 0 } },
   };
 }
 
