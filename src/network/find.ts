@@ -93,8 +93,10 @@ export async function findBusinesses(need: string, ecosystem: string, opts: { in
     const { jevAsk } = await import("../llm/jev.js");
     const same = priced.length ? await jevAsk({ part_asked: part, items: priced.map((x) => renderItem(x.it).slice(0, 300)) },
       Object.fromEntries(priced.map((_, j) => [`i${j}`, { type: "noul" as const, instructions: `Is \`items[${j}]\` the product or service that \`part_asked\` asks for (the same thing, so its price prices that part) - not a component of it, a related or partial job, or a substitute of another kind?` }])), 8000).catch(() => null) : null;
-    const notIt = new Set(priced.filter((_, j) => (((same as any)?.[`i${j}`]?.noul as number) ?? 0) < 0.5).map((x) => x.it));
-    for (const e of ev) { e.items = e.items.filter((it) => !notIt.has(it)); e.precise = e.items.slice(0, 2).some((it) => it.price_value !== null); }
+    // Only priced items judged to be the thing asked keep a place (unjudged ones beyond the first 3 slipped
+    // through and the agent quoted silicone and skirting as a bathroom price - C17).
+    const isIt = new Set(priced.filter((_, j) => (((same as any)?.[`i${j}`]?.noul as number) ?? 0) >= 0.5).map((x) => x.it));
+    for (const e of ev) { e.items = e.items.filter((it) => it.price_value === null || isIt.has(it)); e.precise = e.items.slice(0, 2).some((it) => it.price_value !== null); }
     // 5. qualified, ranked
     return ev.map((e, i): BusinessHit => ({
       tenantId: e.id, label: label(e.id), part: k, offers: scores[i], precise: e.precise, items: e.items, passages: e.passages,
