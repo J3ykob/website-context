@@ -14,6 +14,7 @@
  * Numbers in anything the customer reads must come from files (prices, computed totals); the checks
  * enforce it. Env: PROJECT_AGENT_URL, PROJECT_AGENT_SECRET, PROJECT_AGENT_MODEL, PROJECT_AGENT_FALLBACK_MODEL.
  */
+import { recipeFromFields, evaluate } from "../offer/recipe.js";
 import { getProject, setMemory, addEvent, addUsage, listParticipants, claimAgentCollect, type Project } from "./store.js";
 import { listFiles, readFile, writeFile, writeBinaryFile, addRequirement, listRequirements, recordVerification, toCsv, type FileKind, type ReqStatus } from "./repo.js";
 import { loadOffer, priceText, type OfferItem } from "../offer/store.js";
@@ -123,6 +124,11 @@ Zasady:
    zapytaj tamtą. Usługa dodatkowa do rzeczy firmy prowadzącej (np. dowóz jej sprzętu) to sprawa tej firmy, nie innych.
    W tekście dla klienta nie pisz o zapytaniach do innych firm ani o tym, co zrobisz później - o tym informuje
    klienta system; opisz tylko to, co jest teraz (części bez ceny: "do wyceny").
+10. Gdy wyceniasz, zapisz też wybor.json - dla każdej części prośby pozycje, które brałeś pod uwagę, i wybraną:
+   [{"czesc": "...", "kryterium": "najtaniej" | "dokladnie_to" | "wybor_klienta", "opcje": [{"id": "<id pozycji z cennika>",
+   "ilosc": <liczba>, "jednostka": "<jednostka ilości: godzina, doba, tydzien, szt, m2, m3, kg...>", "suma": <kwota>}],
+   "wybrana": "<id>"}]. "najtaniej", gdy klient chce najtaniej albo wybór to tylko sposób rozliczenia (np. stawka godzinowa
+   czy dobowa); "dokladnie_to", gdy klient prosi o konkretną pozycję. System sprawdzi wybór i kwoty z cennikiem.
 `;
 
 // cenniki/README.md: how the offer files are laid out (general, for any business type).
@@ -276,7 +282,6 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
   // network is not involved (it once had the agent ask a contractor to quote a wall for a board count).
   else if (need && !project.memory.pureCalc) {
     const prevB = project.memory.broadcast as { need: string; parts: string[]; picked: { tenantId: string; part: number; precise: boolean; text: string; items: string[] }[] } | undefined;
-    const { loadOffer } = await import("../offer/store.js");
     if (prevB?.need === needHash) {
       const offersOf = new Map(await Promise.all([...new Set(prevB.picked.map((o) => o.tenantId))].map(async (id) => [id, (await loadOffer(id).catch(() => null))?.items || []] as const)));
       networkOffers = prevB.picked.map((o) => ({ ...o, items: (offersOf.get(o.tenantId) || []).filter((i) => o.items.includes(i.id)) }));
@@ -756,6 +761,16 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
     for (const t of [...sources, inputs.all]) for (const n of numbersIn(t)) known.add(Math.round(n * 100));
     const unsupported = [...new Set(numbersIn(reply).filter((n) => !known.has(Math.round(n * 100))))];
     results.push({ reqId: "sys-agent-numbers", status: unsupported.length ? "failed" : "met", evidence: unsupported.length ? `not in any file: ${unsupported.join(", ")}` : "ok" });
+    // The choice (structure -> structure, docs/noise-plan.md #3): wybor.json against the offers it names - the
+    // cheapest really chosen when that is the criterion, and each option's amount as the price list gives it
+    // (rates combined the cheapest way: 30 h = 2 days, not 30 x hourly). C9 picked 350 zł over 240 zł; C14/C19
+    // charged hourly where the daily rate was cheaper.
+    const choiceText = text("wybor.json");
+    if (choiceText) {
+      await req("sys-agent-choice", "The chosen option is the one the criterion picks, and every option's amount matches the price list.", "code");
+      const problems = await checkChoices(id, choiceText);
+      results.push({ reqId: "sys-agent-choice", status: problems.length ? "failed" : "met", evidence: problems.length ? problems.join("; ").slice(0, 900) : "ok" });
+    }
     // The reply is final for the customer: questions and notes for the business go to the business.
     await req("sys-agent-customer-only", `The text for the customer has no questions or notes meant for the business (those belong in ${BUSINESS_QUESTIONS}).`, "jev");
     await req("sys-agent-no-promise", "The text for the customer promises no follow-up that nothing guarantees (\"I'll update it when...\", \"the business will get back to you\").", "jev");
@@ -829,4 +844,50 @@ async function customerLanguage(text: string): Promise<string | null> {
   if (langMemo.size > 500) langMemo.clear();
   langMemo.set(key, lang);
   return lang;
+}
+
+/**
+ * wybor.json checked against the offers (code only: structure -> structure). Returns the problems found.
+ * Items are looked up by the 8-character id the price lists show; amounts recomputed with the item's
+ * price recipe from its fields (src/offer/recipe.ts) when it has one.
+ */
+export async function checkChoices(projectId: string, raw: string): Promise<string[]> {
+  let choices: unknown;
+  try { choices = JSON.parse(raw); } catch { return ["wybor.json is not valid JSON"]; }
+  if (!Array.isArray(choices)) return ["wybor.json must be a list"];
+  const proj = await getProject(projectId);
+  if (!proj) return [];
+  const tenants = new Set<string>([proj.initiatorTenantId, ...(await listParticipants(projectId).catch(() => [])).map((p) => p.tenantId)]);
+  const items = new Map<string, OfferItem>();
+  for (const t of tenants) for (const i of (await loadOffer(t).catch(() => null))?.items || []) items.set(i.id.slice(0, 8), i);
+  return choiceProblems(choices, items);
+}
+
+// Units the agent may give a duration in (the enum wybor.json asks for), in hours.
+const DURATION_HOURS: Record<string, number> = { godzina: 1, doba: 24, tydzien: 168, miesiac: 720 };
+
+/** The structure-only part of checkChoices: choices against items keyed by their 8-character id. */
+export function choiceProblems(choices: any[], items: Map<string, Pick<OfferItem, "name"> & Parameters<typeof recipeFromFields>[0]>): string[] {
+  const problems: string[] = [];
+  for (const c of choices) {
+    const opts = (Array.isArray(c?.opcje) ? c.opcje : []).filter((o: any) => typeof o?.suma === "number");
+    if (!opts.length) continue;
+    const label = String(c?.czesc || "?").slice(0, 60);
+    for (const o of opts) {
+      const item = items.get(String(o.id || "").slice(0, 8));
+      const recipe = item ? recipeFromFields(item) : null;
+      if (!recipe || typeof o.ilosc !== "number") continue;
+      const unit = String(o.jednostka || "");
+      const given: Record<string, number> = {};
+      for (const inp of recipe.inputs) given[inp.name] = inp.name === "hours" ? o.ilosc * (DURATION_HOURS[unit] ?? 1) : o.ilosc;
+      const r = evaluate(recipe.price, given);
+      if (r.kind === "price" && Math.abs(r.amount - o.suma) > 0.01) problems.push(`${label}: ${item!.name} for ${o.ilosc} ${unit} costs ${r.amount} by the price list${r.amount < o.suma ? " (a cheaper rate combination)" : ""}, not ${o.suma}`);
+    }
+    const chosen = opts.find((o: any) => String(o.id) === String(c?.wybrana));
+    if (c?.kryterium === "najtaniej" && chosen) {
+      const min = Math.min(...opts.map((o: any) => o.suma));
+      if (chosen.suma > min + 0.01) problems.push(`${label}: chose ${chosen.suma} but the cheapest option is ${min}`);
+    }
+  }
+  return problems;
 }

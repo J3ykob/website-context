@@ -65,3 +65,31 @@ describe("recipes from existing offer fields (no model)", () => {
     expect(evaluate(recipeFromFields({ fields: { price_type: "on_request" }, price_value: null, price_max: null })!.price, {})).toEqual({ kind: "on_request" });
   });
 });
+
+describe("optional add-ons and unclear alternatives", () => {
+  it("rooms: 50 or 80 zł per person (condition not stated) + optional breakfast 15 zł, or all rooms flat 1000 zł", () => {
+    const rooms: Rule = { rule: "either", options: [
+      { rule: "sum", parts: [{ rule: "either", options: [{ rule: "per", input: "people", price: 50 }, { rule: "per", input: "people", price: 80 }] }, { rule: "optional", input: "breakfast", price: { rule: "per", input: "people", price: 15 } }] },
+      { rule: "fixed", price: 1000 }] };
+    expect(evaluate(rooms, { people: 10, breakfast: "yes" })).toEqual({ kind: "range", min: 650, max: 1000 });
+    expect(evaluate(rooms, { people: 10 })).toEqual({ kind: "needs", inputs: ["breakfast"] });
+  });
+});
+
+import { choiceProblems } from "../src/projects/agent.js";
+describe("agent choice check (wybor.json, structure only)", () => {
+  const pump = { name: "Pompa do szlamu", fields: { price_type: "per_unit", unit: "godzina" }, price_value: 28, price_max: null, components: [
+    { label: "godzina", price_type: "per_unit", price_value: 28, price_max: null, unit: "godzina", quantity_from: "customer" as const, quantity_label: "", combine: "alternative" as const },
+    { label: "doba", price_type: "per_unit", price_value: 140, price_max: null, unit: "doba", quantity_from: "customer" as const, quantity_label: "", combine: "alternative" as const }] };
+  const items = new Map<string, any>([["aaaaaaaa", pump], ["bbbbbbbb", { name: "Kozioł MINI", fields: { price_type: "fixed", unit: "szt" }, price_value: 240, price_max: null }], ["cccccccc", { name: "Kozioł MAXI", fields: { price_type: "fixed", unit: "szt" }, price_value: 350, price_max: null }]]);
+  it("hourly charged where the daily rate is cheaper (C14/C19)", () => {
+    const p = choiceProblems([{ czesc: "pompa", kryterium: "najtaniej", opcje: [{ id: "aaaaaaaa", ilosc: 30, jednostka: "godzina", suma: 840 }], wybrana: "aaaaaaaa" }], items);
+    expect(p.join()).toMatch(/costs 280.*cheaper/);
+  });
+  it("the dearer option chosen when the customer wants the cheapest (C9)", () => {
+    const c = [{ czesc: "kozioł", kryterium: "najtaniej", opcje: [{ id: "bbbbbbbb", ilosc: 1, jednostka: "szt", suma: 240 }, { id: "cccccccc", ilosc: 1, jednostka: "szt", suma: 350 }], wybrana: "cccccccc" }];
+    expect(choiceProblems(c, items)).toEqual(["kozioł: chose 350 but the cheapest option is 240"]);
+    expect(choiceProblems([{ ...c[0], wybrana: "bbbbbbbb" }], items)).toEqual([]);
+    expect(choiceProblems([{ ...c[0], kryterium: "dokladnie_to" }], items)).toEqual([]);
+  });
+});

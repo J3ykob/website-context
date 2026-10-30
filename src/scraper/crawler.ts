@@ -46,10 +46,22 @@ export async function crawlSite(
   const visited = new Set<string>();
   const contentHashes = new Set<string>();
   const queue: { url: string; depth: number; parent?: string; attempt?: number }[] = [{ url: startUrl, depth: 0 }];
-  // Politeness: a 429/503 pauses ALL workers (Retry-After or 5s x attempt), slows
-  // the crawl for the rest of the run, and re-queues the page (max 3 attempts).
+  // Politeness: a 429/503 pauses ALL workers (Retry-After or 5s x attempt), re-queues the page (max 3
+  // attempts), and from then on requests go one at a time, `politeDelay` apart across all workers (doubled
+  // on each new throttle, max 8 s). Six workers resuming together after a pause were throttled together
+  // again: a florist's shop stuck at 25 of 150 pages for half an hour, the scrape queue behind it.
   let pausedUntil = 0;
   let politeDelay = opts.rateLimit;
+  let throttled = false;
+  let nextSlot = 0;
+  const waitTurn = async (): Promise<void> => {
+    for (;;) {
+      const now = Date.now();
+      const at = Math.max(pausedUntil, throttled ? nextSlot : 0);
+      if (at <= now) { if (throttled) nextSlot = now + politeDelay; return; }
+      await sleep(at - now);
+    }
+  };
   const pages: ScrapedPage[] = [];
   const failures: string[] = [];
   const startTime = Date.now();
@@ -143,7 +155,8 @@ export async function crawlSite(
       const ra = Number(fetchResult.headers["retry-after"]);
       const waitMs = Math.min(60000, Number.isFinite(ra) && ra > 0 ? ra * 1000 : 5000 * attempt);
       pausedUntil = Math.max(pausedUntil, Date.now() + waitMs);
-      politeDelay = Math.max(politeDelay, 1000);
+      throttled = true;
+      politeDelay = Math.min(8000, Math.max(1000, politeDelay * 2));
       if (attempt <= 3) {
         console.log(`  [${fetchResult.statusCode}] throttled on ${normalizedUrl}, pausing ${Math.round(waitMs / 1000)}s (attempt ${attempt}/3)`);
         visited.delete(normalizedUrl);
@@ -235,8 +248,7 @@ export async function crawlSite(
       if (!isAllowedUrl(normalizedUrl, allowedHosts, opts, disallowedPaths)) continue;
       visited.add(normalizedUrl);
       inFlight++;
-      const pause = pausedUntil - Date.now();
-      if (pause > 0) await sleep(pause);
+      await waitTurn();
       try {
         await handle(item, normalizedUrl);
       } catch (error) {

@@ -24,6 +24,8 @@ export type Rule =
   | { rule: "sum"; parts: Rule[] }                                                       // components that add up (scaffolding elements, menu + service)
   | { rule: "cheapest"; options: Rule[] }                                                // alternatives: the cheapest that can be priced
   | { rule: "extra"; input: string; free?: number; price: number }                      // travel: free up to N km, then per km
+  | { rule: "optional"; input: string; price: Rule }                                    // an add-on the customer may choose (breakfast, a second photographer)
+  | { rule: "either"; options: Rule[] }                                                  // several prices, the page does not say which applies -> a range, quoted
   | { rule: "on_request" };
 
 export interface Recipe { inputs: RecipeInput[]; price: Rule; currency?: string; note?: string }
@@ -95,6 +97,21 @@ export function evaluate(rule: Rule, given: Record<string, InputValue | undefine
       const hi = rs.some((r) => r.kind === "range" && r.max === null) ? null : rs.reduce((s, r) => s + (r.kind === "price" ? r.amount : (r as { max: number }).max), 0);
       return { kind: "range", min: round(lo), max: hi === null ? null : round(hi) };
     }
+    case "optional": {
+      const v = given[rule.input];
+      if (v === undefined || v === "") return need(rule.input);
+      const yes = v === true as unknown || /^(yes|tak|true|1)$/i.test(String(v));
+      return yes ? evaluate(rule.price, given) : { kind: "price", amount: 0 };
+    }
+    case "either": {
+      const rs = rule.options.map((o) => evaluate(o, given));
+      const missing = [...new Set(rs.flatMap((r) => (r.kind === "needs" ? r.inputs : [])))];
+      if (missing.length) return need(...missing);
+      const lows = rs.map((r) => (r.kind === "price" ? r.amount : r.kind === "range" ? r.min : NaN)).filter(Number.isFinite);
+      const highs = rs.map((r) => (r.kind === "price" ? r.amount : r.kind === "range" ? r.max : NaN));
+      if (!lows.length) return { kind: "on_request" };
+      return { kind: "range", min: Math.min(...lows), max: highs.some((h) => h === null || Number.isNaN(h as number)) ? null : Math.max(...(highs as number[])) };
+    }
     case "cheapest": {
       const rs = rule.options.map((o) => evaluate(o, given));
       const priced = rs.filter((r): r is { kind: "price"; amount: number } => r.kind === "price");
@@ -156,7 +173,8 @@ export function recipeFromFields(item: FieldsLike): Recipe | null {
     if ("input" in r && r.input) inputs.set(r.input, { name: r.input, type: r.rule === "variant" ? "choice" : "number" });
     if (r.rule === "range" && r.per) inputs.set(r.per, { name: r.per, type: "number" });
     if (r.rule === "sum") r.parts.forEach(walk);
-    if (r.rule === "cheapest") r.options.forEach(walk);
+    if (r.rule === "cheapest" || r.rule === "either") r.options.forEach(walk);
+    if (r.rule === "optional") walk(r.price);
   };
   walk(price);
   return { inputs: [...inputs.values()], price, currency: item.currency || "PLN" };

@@ -26,7 +26,7 @@ import { setMemory as setProjectMemory } from "../projects/store.js";
 import { type OfferLang, jevPassageRelevance, jevPickOption, jevEnabled, splitStatements, jevUnsupportedStatements, jevAsk, type JevNoulAnswer } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
-import { findOfferItems } from "../offer/search.js";
+import { findOfferItems, matchOfferItems } from "../offer/search.js";
 import type { Business } from "../projects/compare.js";
 import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
@@ -805,7 +805,12 @@ export class WebsiteChat {
       // Over a spend cap or from a site the business does not own: no network search (src/security/budget.ts).
       const net = rt && !behaviour.length && !turnCheap() ? await this.networkStart(question, messages, rt) : null;
       // Key facts (src/knowledge/facts.ts): the site's single sentences, found by meaning and kept by Jev - in parallel.
-      const productsP = this.catalogue ? this.shopProducts(query, question, rt).catch(() => [] as OfferItem[]) : Promise.resolve([] as OfferItem[]);
+      // Our offer items for this message: a shop's catalogue (or its live search), otherwise the items read
+      // from our pages and the owner's offer - the same item matcher the network search uses. Pages alone
+      // missed them: "ubić podjazd" ranked paving guides above the compactor price list (chain C1).
+      // null: the items could not be judged (Jev down) - then nothing is said about them.
+      const productsP: Promise<OfferItem[] | null> = this.catalogue ? this.shopProducts(query, question, rt).catch(() => [] as OfferItem[])
+        : this.offerItems.length && rt?.intent !== "chitchat" ? matchOfferItems(query, this.offerItems, 8).catch(() => null) : Promise.resolve([] as OfferItem[]);
       const factsP = turnVariant().includes("facts")
         ? this.embeddingProvider.embed([query]).then((v) => keyFacts(this.context.tenantId, v[0] || null, convo, question)).catch(() => null)
         : Promise.resolve(null);
@@ -838,14 +843,24 @@ export class WebsiteChat {
         packText = `### Key facts from our pages (word for word)\n${facts.map((f) => `- ${f.s}`).join("\n")}${packText ? `\n\n---\n\n${packText}` : ""}`;
         passages = [...facts.map((f) => f.s), ...passages];
       }
-      // A shop: the products this message is about, from the catalogue (or the shop's live search).
-      const products = await productsP;
+      // The products / offer items this message is about.
+      const judged = await productsP;
+      const products = judged || [];
       if (products.length) {
         noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
         const lines = products.map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
-        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Products in our shop (from our catalogue)\n${lines.join("\n")}`;
+        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### ${this.catalogue ? "Products in our shop (from our catalogue)" : "Our offer and prices (from our price list)"}\n${lines.join("\n")}`;
         passages = [...passages, ...lines];
         productLinks = products.map((p) => p.url).filter(Boolean);
+      }
+      // Asked for a specific product or service and none of our price list's items is it: that is a fact
+      // (the matcher judged every item), not missing information - "our price list has no mini-excavator"
+      // instead of "I don't have the mini-excavator's price", which says we rent one (chain C6).
+      else if (judged && !this.catalogue && this.offerItems.length && rt && rt.specific >= 0.5 && !behaviour.length) {
+        const line = `Our price list (${this.offerItems.length} items, read from our website) has no item that is what the customer asks for.`;
+        noteTurn("products", ["none of our price list"]);
+        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Our offer and prices (from our price list)\n${line}`;
+        passages = [...passages, line];
       }
       answered = passages.length > 0;
       // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer
