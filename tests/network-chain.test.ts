@@ -17,27 +17,29 @@ const JUDGE = "qwen/qwen3-235b-a22b-2507";
 const run = `test-chain-${Date.now()}`;
 const AT_ONCE = Number(process.env.CHAIN_AT_ONCE) || 4; // the test machines drop connections in bigger bursts
 
-type Case = { id: string; msg: string; truth: string; rows: [string, string[]][] };
+// must: numbers the reply has to contain, checked by code (each inner list = acceptable alternatives) -
+// the deterministic half of the verdict (docs/noise-plan.md #7); the LLM judge runs 3 times, majority.
+type Case = { id: string; msg: string; truth: string; rows: [string, string[]][]; must?: number[][] };
 const CASES: Case[] = [
-  { id: "C1", msg: "Cześć, muszę ubić podjazd przed domem, jakieś 60 m2, robię to w ten weekend (sobota i niedziela). Co polecacie i ile to wyjdzie?", truth: "Rentbud: a plate compactor (zagęszczarka; any reasonable one) for 2 days = 2 × its daily rate (e.g. 130 kg: 280 zł, 150 kg: 340 zł). The price must match the chosen item's daily rate. Concrete is not asked for.", rows: [["www_rentbud_pl", ["zagęszczarka", "ubijak"]]] },
-  { id: "C2", msg: "ile za wibrator do betonu od piątku rana do poniedziałku rana?", truth: "Rentbud: Wibrator do betonu 4m, 3 days × 90 zł = 270 zł (hourly would be 72 h × 18 = 1296, worse).", rows: [["www_rentbud_pl", ["wibrator"]]] },
+  { id: "C1", msg: "Cześć, muszę ubić podjazd przed domem, jakieś 60 m2, robię to w ten weekend (sobota i niedziela). Co polecacie i ile to wyjdzie?", truth: "Rentbud: a plate compactor (zagęszczarka; any reasonable one) for 2 days = 2 × its daily rate (e.g. 130 kg: 280 zł, 150 kg: 340 zł). The price must match the chosen item's daily rate. Concrete is not asked for.", rows: [["www_rentbud_pl", ["zagęszczarka", "ubijak"]]], must: [[280, 340]] },
+  { id: "C2", msg: "ile za wibrator do betonu od piątku rana do poniedziałku rana?", truth: "Rentbud: Wibrator do betonu 4m, 3 days × 90 zł = 270 zł (hourly would be 72 h × 18 = 1296, worse).", rows: [["www_rentbud_pl", ["wibrator"]]], must: [[270]] },
   { id: "C3", msg: "potrzebuje frezarke do betonu na pół dnia, ile to kosztuje", truth: "Rentbud has Frezarka do betonu FB200 (380 zł/day) and FB300 (104 zł/hour or 520 zł/day). 'Half a day' is ambiguous: correct = prices consistent with these rates for a stated assumption (hours or one day), or the rates explained. Wrong = any other price.", rows: [["www_rentbud_pl", ["frezarka"]]] },
-  { id: "C4", msg: "Hi, we're renovating a 4x5 m room and want the vinyl flooring in beige coast oak, plus whatever glue it needs. How much would that be?", truth: "Romax (offer as of 2026-10-30): no beige coast oak vinyl is listed; its vinyl panel (Amber Canyon Virtus SPC) has no price -> to be quoted. Glue: Bautec Multi TEC (LVT) 403 zł/pc (TEC SPU 779 zł is for hybrid floors); how many pieces for 20 m² is not in the data -> to confirm. Correct = says the exact colour isn't listed / flooring needs a quote, glue price right; an invented flooring price = wrong. Reply in English.", rows: [["www_romax_waw_pl", ["winyl", "spc", "bautec"]]] },
+  { id: "C4", msg: "Hi, we're renovating a 4x5 m room and want the vinyl flooring in beige coast oak, plus whatever glue it needs. How much would that be?", truth: "Romax (offer as of 2026-10-30): no beige coast oak vinyl is listed; its vinyl panel (Amber Canyon Virtus SPC) has no price -> to be quoted. Glue: Bautec Multi TEC (LVT) 403 zł/pc (TEC SPU 779 zł is for hybrid floors); how many pieces for 20 m² is not in the data -> to confirm. Correct = says the exact colour isn't listed / flooring needs a quote, glue price right; an invented flooring price = wrong. Reply in English.", rows: [["www_romax_waw_pl", ["winyl", "spc", "bautec"]]], must: [[403]] },
   { id: "C5", msg: "Добрий день, скільки коштуватиме оренда фасадного риштування на 2 тижні для приватного будинку?", truth: "OSTAP rents facade scaffolding with no rental price in the data; Rentbud lists per-element/per-m² scaffolding rates (e.g. Rusztowanie klinowe Rubo). Without the house size no total is possible: correct = rates quoted as rates and a quote/size needed. A computed total from a per-element rate without quantities = wrong. Reply in Ukrainian.", rows: [["www_ostap_pl", ["rusztow"]], ["www_rentbud_pl", ["rusztow"]]] },
   { id: "C6", msg: "Bonjour, je cherche une mini-pelle pour une journée, c'est combien ?", truth: "No mini-excavator in the network data. Rentbud has only 'Koparka do nawodnień' (chain trencher TRENCH ZK40, 450 zł/day) - it may be offered as an alternative only if clearly described as a trencher, not as a mini-pelle. Reply in French.", rows: [["www_rentbud_pl", ["koparka"]]] },
-  { id: "C7", msg: "Robię taras 3 na 4 metry, wylewka ok. 10 cm. Potrzebuję betonu, wibratora do betonu na jeden dzień i zacieraczki. Ile całość?", truth: "Concrete ~1,2 m³ (3×4×0,1): concrete firms (BUDOMAT ŁAZY, bostabeton) have no price -> individual quote. Rentbud: vibrator 1 day 90 zł; trowel (zacieraczka) 1 day 120 zł (disc only) or 240 zł (disc + blades). Priced parts 210 or 330 zł plus concrete to be quoted. A total with an invented concrete price = wrong.", rows: [["www_rentbud_pl", ["wibrator", "zacieraczka"]], ["beton_lazy_pl", ["beton"]]] },
-  { id: "C8", msg: "jaki koszt tynku cienkowarstwowego na dom, ściany mają razem jakieś 200 metrów", truth: "KH-Bud: Tynk cienkowarstwowy 70-110 zł/m² × 200 m² = 14000-22000 zł.", rows: [["kh_bud_pl", ["tynk"]]] },
-  { id: "C9", msg: "chcę kupić 15 kozłów budowlanych, najtańszych jakie macie", truth: "OSTAP: the cheapest trestle in its price list is Kozioł MINI 240 zł/pc (net, from its 2011 price list) -> 15 x 240 = 3600 zł; other models B-BR 350, B-SK 455, B-S 520 zł. Rentbud itself does not sell trestles. Mentioning that the list may be dated is a plus, not required.", rows: [["www_ostap_pl", ["kozioł"]]] },
-  { id: "C10", msg: "potrzebuję kleju do paneli winylowych, 3 wiadra, ile zapłacę?", truth: "Romax: Bautec Multi TEC klej do LVT 14 kg 403 zł × 3 = 1209 zł (preferred: it is for vinyl/LVT). TEC SPU 779 zł × 3 = 2337 zł is for hybrid floors - acceptable only as a clearly labelled alternative.", rows: [["www_romax_waw_pl", ["klej", "bautec"]]] },
+  { id: "C7", msg: "Robię taras 3 na 4 metry, wylewka ok. 10 cm. Potrzebuję betonu, wibratora do betonu na jeden dzień i zacieraczki. Ile całość?", truth: "Concrete ~1,2 m³ (3×4×0,1): concrete firms (BUDOMAT ŁAZY, bostabeton) have no price -> individual quote. Rentbud: vibrator 1 day 90 zł; trowel (zacieraczka) 1 day 120 zł (disc only) or 240 zł (disc + blades). Priced parts 210 or 330 zł plus concrete to be quoted. A total with an invented concrete price = wrong.", rows: [["www_rentbud_pl", ["wibrator", "zacieraczka"]], ["beton_lazy_pl", ["beton"]]], must: [[90], [120, 240]] },
+  { id: "C8", msg: "jaki koszt tynku cienkowarstwowego na dom, ściany mają razem jakieś 200 metrów", truth: "KH-Bud: Tynk cienkowarstwowy 70-110 zł/m² × 200 m² = 14000-22000 zł.", rows: [["kh_bud_pl", ["tynk"]]], must: [[14000], [22000]] },
+  { id: "C9", msg: "chcę kupić 15 kozłów budowlanych, najtańszych jakie macie", truth: "OSTAP: the cheapest trestle in its price list is Kozioł MINI 240 zł/pc (net, from its 2011 price list) -> 15 x 240 = 3600 zł; other models B-BR 350, B-SK 455, B-S 520 zł. Rentbud itself does not sell trestles. Mentioning that the list may be dated is a plus, not required.", rows: [["www_ostap_pl", ["kozioł"]]], must: [[3600]] },
+  { id: "C10", msg: "potrzebuję kleju do paneli winylowych, 3 wiadra, ile zapłacę?", truth: "Romax: Bautec Multi TEC klej do LVT 14 kg 403 zł × 3 = 1209 zł (preferred: it is for vinyl/LVT). TEC SPU 779 zł × 3 = 2337 zł is for hybrid floors - acceptable only as a clearly labelled alternative.", rows: [["www_romax_waw_pl", ["klej", "bautec"]]], must: [[1209]] },
   { id: "C11", msg: "Ile za wymianę rynien i obróbek blacharskich na dachu? Dom 10x12 m.", truth: "Perfekt Dach: both 'Montaż i naprawa rynien' and 'Wymiana obróbek blacharskich' are price on request -> individual quote. Any concrete price = wrong.", rows: [["www_dachywarszawa_pl", ["rynien", "obróbek"]]] },
-  { id: "C12", msg: "Zagęszczarka 130 kg na 5 godzin, a jakbym wziął na całą dobę to ile?", truth: "Rentbud: 5 h × 28 = 140 zł; one day = 140 zł. Both 140 zł.", rows: [["www_rentbud_pl", ["zagęszczarka 130"]]] },
-  { id: "C13", msg: "Wiertnica do otworów 150 mm na 3 dni, plus korona do niej", truth: "Rentbud: Wiertnica do max. śr. 152 mm, 3 days × 160 = 480 zł. A core bit (korona) is not in the data -> to confirm / quote.", rows: [["www_rentbud_pl", ["wiertnica", "korona"]]] },
-  { id: "C14", msg: "Need a sludge pump for about 30 hours over the next two days, what's the cost?", truth: "Rentbud: Motopompa szlamowa 2 days × 140 = 280 zł (hourly 30 × 28 = 840 is worse). Reply in English.", rows: [["www_rentbud_pl", ["motopompa"]]] },
-  { id: "C15", msg: "Wynajem 2 zagęszczarek 130 kg na tydzień - ile?", truth: "Rentbud: 2 × 7 days × 140 = 1960 zł.", rows: [["www_rentbud_pl", ["zagęszczarka 130"]]] },
-  { id: "C16", msg: "podłoga winylowa szara 25 m2 i grunt pod nią", truth: "Romax (offer as of 2026-10-30): no grey vinyl floor with a price - the vinyl panel Amber Canyon Virtus SPC is unpriced (to be quoted); grey SPC mineral boards (Płyta Mineralna SPC Zenith Grey 139 zł/m², 25 m² = 3475 zł) are acceptable only if clearly named as what they are. Primer Bautec TEC PRIMER D 5 kg 239 zł/pc, quantity not in data -> to confirm. A laminate (Akacja szara) presented as vinyl = wrong.", rows: [["www_romax_waw_pl", ["winyl", "spc", "primer"]]] },
+  { id: "C12", msg: "Zagęszczarka 130 kg na 5 godzin, a jakbym wziął na całą dobę to ile?", truth: "Rentbud: 5 h × 28 = 140 zł; one day = 140 zł. Both 140 zł.", rows: [["www_rentbud_pl", ["zagęszczarka 130"]]], must: [[140]] },
+  { id: "C13", msg: "Wiertnica do otworów 150 mm na 3 dni, plus korona do niej", truth: "Rentbud: Wiertnica do max. śr. 152 mm, 3 days × 160 = 480 zł. A core bit (korona) is not in the data -> to confirm / quote.", rows: [["www_rentbud_pl", ["wiertnica", "korona"]]], must: [[480]] },
+  { id: "C14", msg: "Need a sludge pump for about 30 hours over the next two days, what's the cost?", truth: "Rentbud: Motopompa szlamowa 2 days × 140 = 280 zł (hourly 30 × 28 = 840 is worse). Reply in English.", rows: [["www_rentbud_pl", ["motopompa"]]], must: [[280]] },
+  { id: "C15", msg: "Wynajem 2 zagęszczarek 130 kg na tydzień - ile?", truth: "Rentbud: 2 × 7 days × 140 = 1960 zł.", rows: [["www_rentbud_pl", ["zagęszczarka 130"]]], must: [[1960]] },
+  { id: "C16", msg: "podłoga winylowa szara 25 m2 i grunt pod nią", truth: "Romax (offer as of 2026-10-30): no grey vinyl floor with a price - the vinyl panel Amber Canyon Virtus SPC is unpriced (to be quoted); grey SPC mineral boards (Płyta Mineralna SPC Zenith Grey 139 zł/m², 25 m² = 3475 zł) are acceptable only if clearly named as what they are. Primer Bautec TEC PRIMER D 5 kg 239 zł/pc, quantity not in data -> to confirm. A laminate (Akacja szara) presented as vinyl = wrong.", rows: [["www_romax_waw_pl", ["winyl", "spc", "primer"]]], must: [[239]] },
   { id: "C17", msg: "Dzień dobry, tu Anna Kowalska z Ząbek, tel. 600 111 222. Robimy remont łazienki i kuchni. Ile by kosztował remont łazienki około 6 m2?", truth: "Renovation firms (e.g. RUTAS 'Remonty łazienek') are price on request -> individual quote. Any concrete price = wrong.", rows: [["rutas_pl", ["łazien"]]] },
-  { id: "C18", msg: "macie zacieraczkę z łopatkami na 2 doby?", truth: "Rentbud: zacieraczka with disc + blades ('Talerz + łopatki') 240 zł/day × 2 = 480 zł (230V Ø600 or petrol Ø1000).", rows: [["www_rentbud_pl", ["zacieraczka"]]] },
-  { id: "C19", msg: "Potrzebuję wykopać rów pod drenaż, ok. 25 m, jakąś maszyną na 6 godzin. Ile to kosztuje?", truth: "Rentbud: Koparka do nawodnień (trencher) - 6 h hourly 540 vs daily 450 -> 450 zł (540 as the price without the cheaper daily rate = wrong).", rows: [["www_rentbud_pl", ["koparka"]]] },
+  { id: "C18", msg: "macie zacieraczkę z łopatkami na 2 doby?", truth: "Rentbud: zacieraczka with disc + blades ('Talerz + łopatki') 240 zł/day × 2 = 480 zł (230V Ø600 or petrol Ø1000).", rows: [["www_rentbud_pl", ["zacieraczka"]]], must: [[480]] },
+  { id: "C19", msg: "Potrzebuję wykopać rów pod drenaż, ok. 25 m, jakąś maszyną na 6 godzin. Ile to kosztuje?", truth: "Rentbud: Koparka do nawodnień (trencher) - 6 h hourly 540 vs daily 450 -> 450 zł (540 as the price without the cheaper daily rate = wrong).", rows: [["www_rentbud_pl", ["koparka"]]], must: [[450]] },
   { id: "C20", msg: "Потрібно 5 м3 бетону з доставкою на завтра, скільки це коштує?", truth: "Concrete firms (BUDOMAT ŁAZY, bostabeton) have no prices -> individual quote, delivery date to confirm. Any concrete price = wrong. Reply in Ukrainian.", rows: [["beton_lazy_pl", ["beton"]]] },
 ];
 const PII = ["Kowalsk", "600 111 222", "600111222"];
@@ -57,7 +59,29 @@ const realFetch = globalThis.fetch;
 let M: any;
 let tm: TenantManager;
 
+/** Numbers in a text: "1 960", "1960,00", "1.960 zł" -> 1960. */
+function numbersOf(t: string): number[] {
+  return [...t.replace(/\u00a0/g, " ").matchAll(/\d{1,3}(?:[ .]\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?/g)].map((m) => {
+    let x = m[0];
+    if (/^\d{1,3}([ .]\d{3})+/.test(x)) x = x.replace(/[ .](?=\d{3})/g, "");
+    return Number(x.replace(",", "."));
+  }).filter((n) => Number.isFinite(n));
+}
+const RANK: Record<string, number> = { correct: 0, partial: 1, wrong: 2, unjudged: 1, error: 3 };
+
 async function judge(c: Case, reply: string, rows: string[]): Promise<{ verdict: string; reason: string }> {
+  // Code: every required number present (deterministic). LLM: three judgements, the majority.
+  const nums = numbersOf(reply);
+  const missing = (c.must || []).filter((alts) => !alts.some((a) => nums.some((n) => Math.abs(n - a) < 0.01)));
+  const votes = await Promise.all([0, 1, 2].map(() => judgeOnce(c, reply, rows)));
+  const count = (v: string) => votes.filter((x) => x.verdict === v).length;
+  let llm = ["correct", "partial", "wrong"].find((v) => count(v) >= 2) || "partial";
+  const reason = votes.find((x) => x.verdict === llm)?.reason || votes[0].reason;
+  if (missing.length && RANK[llm] < RANK.partial) return { verdict: "partial", reason: `missing required number(s) ${missing.map((a) => a.join("/")).join(", ")}; judge: ${reason}` };
+  return { verdict: llm, reason: `${reason}${missing.length ? ` [missing ${missing.map((a) => a.join("/")).join(", ")}]` : ""} (votes ${votes.map((v) => v.verdict[0]).join("")})` };
+}
+
+async function judgeOnce(c: Case, reply: string, rows: string[]): Promise<{ verdict: string; reason: string }> {
   for (let k = 0; k < 3; k++) {
     try {
       const r = await realFetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
