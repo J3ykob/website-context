@@ -175,8 +175,8 @@ export async function runCompare(opts: {
     const quotes = (await Promise.all(businesses.map(async (b) => {
       if (!b.items.length) return null;
       jevCalls++;
-      let hit = (await findOfferItems(line.need, b.items, 1, 0.7).catch(() => []))[0];
-      if (!hit && line.needInCatalog && line.needInCatalog !== line.need) { jevCalls++; hit = (await findOfferItems(line.needInCatalog, b.items, 1, 0.7).catch(() => []))[0]; }
+      let hit = (await findOfferItems(line.need, b.items, 1, b.tenantId).catch(() => []))[0];
+      if (!hit && line.needInCatalog && line.needInCatalog !== line.need) { jevCalls++; hit = (await findOfferItems(line.needInCatalog, b.items, 1, b.tenantId).catch(() => []))[0]; }
       return hit ? priceLine(hit, line, b) : null;
     }))).filter(Boolean) as Quote[];
     const priced = quotes.filter((q) => q.total !== null && q.tbd.length === 0);

@@ -57,3 +57,24 @@ export async function nearestItems(tenantId: string, items: OfferItem[], text: s
     return null;
   }
 }
+
+// Item sets that are not one business's whole offer (its priced items, several businesses' items merged):
+// vectors kept per item text in memory, so the same items are not embedded again on every call.
+const byText = new Map<string, Float32Array>();
+const BY_TEXT_MAX = 50_000;
+
+/** Like nearestItems, for any set of items (cached per item text, not per business). */
+export async function nearestOf(items: OfferItem[], text: string, k: number): Promise<OfferItem[] | null> {
+  try {
+    const texts = items.map(itemText);
+    const missing = [...new Set(texts.filter((t) => !byText.has(t)))];
+    const [q, ...fresh] = await embed([text.slice(0, 2000), ...missing]);
+    missing.forEach((t, i) => byText.set(t, fresh[i]));
+    while (byText.size > BY_TEXT_MAX) byText.delete(byText.keys().next().value!);
+    return texts.map((t, i) => { const v = byText.get(t)!; let s = 0; for (let d = 0; d < v.length; d++) s += v[d] * q[d]; return { i, s }; })
+      .sort((a, b) => b.s - a.s).slice(0, k).map((r) => items[r.i]);
+  } catch (e: any) {
+    console.warn(`[offer-vectors] ${e?.message || e}`);
+    return null;
+  }
+}

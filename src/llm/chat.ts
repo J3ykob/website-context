@@ -26,7 +26,7 @@ import { setMemory as setProjectMemory } from "../projects/store.js";
 import { type OfferLang, jevPassageRelevance, jevPickOption, jevEnabled, splitStatements, jevUnsupportedStatements, jevAsk, type JevNoulAnswer } from "./jev.js";
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
-import { findOfferItems, matchOfferItems } from "../offer/search.js";
+import { findOfferItems, matchItems, type ItemMatch } from "../offer/search.js";
 import type { Business } from "../projects/compare.js";
 import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
@@ -539,7 +539,7 @@ export class WebsiteChat {
     if (langKeyTerms.length > 2) {
       tasks.push(searchContext(langKeyTerms, this.embeddingProvider, this.store, { topK: Math.floor(this.topK / 2) }));
     }
-    const offerHits = this.offerItems.length ? findOfferItems(lastUserMessage, this.offerItems).catch(() => [] as OfferItem[]) : Promise.resolve([] as OfferItem[]);
+    const offerHits = this.offerItems.length ? findOfferItems(lastUserMessage, this.offerItems, 8, this.context.tenantId).catch(() => [] as OfferItem[]) : Promise.resolve([] as OfferItem[]);
     const [mainChunks, ...extraResults] = await Promise.all(tasks);
     const retrievedChunks = mainChunks;
     const seen = new Set(retrievedChunks.map((c) => c.content.slice(0, 50)));
@@ -809,8 +809,9 @@ export class WebsiteChat {
       // from our pages and the owner's offer - the same item matcher the network search uses. Pages alone
       // missed them: "ubić podjazd" ranked paving guides above the compactor price list (chain C1).
       // null: the items could not be judged (Jev down) - then nothing is said about them.
-      const productsP: Promise<OfferItem[] | null> = this.catalogue ? this.shopProducts(query, question, rt).catch(() => [] as OfferItem[])
-        : this.offerItems.length && rt?.intent !== "chitchat" ? matchOfferItems(query, this.offerItems, 8).catch(() => null) : Promise.resolve([] as OfferItem[]);
+      // A price question also reads the customer's quantities for the items (priced in code below).
+      const productsP: Promise<ItemMatch | null> = this.catalogue ? this.shopProducts(query, question, rt).then((items) => ({ items, given: new Map() }), () => ({ items: [], given: new Map() }))
+        : this.offerItems.length && rt?.intent !== "chitchat" ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: !!rt && rt.price >= 0.5 }).catch(() => null) : Promise.resolve({ items: [], given: new Map() });
       const factsP = turnVariant().includes("facts")
         ? this.embeddingProvider.embed([query]).then((v) => keyFacts(this.context.tenantId, v[0] || null, convo, question)).catch(() => null)
         : Promise.resolve(null);
@@ -845,14 +846,14 @@ export class WebsiteChat {
       }
       // The products / offer items this message is about.
       const judged = await productsP;
-      const products = judged || [];
+      const products = judged?.items || [];
       if (products.length) {
         noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
         const lines = products.map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
-        // A price question: the customer's quantities read as structure, priced by code (src/offer/quantities.ts).
-        if (rt && rt.price >= 0.5) {
-          const { priceForCustomer, customerPriceLine } = await import("../offer/quantities.js");
-          const computed = (await priceForCustomer(convo, products, this.context.tenantId).catch(() => [])).map((c) => customerPriceLine(c));
+        // A price question: the customer's quantities read with the items, priced by code (src/offer/quantities.ts).
+        if (judged?.given.size) {
+          const { priceGiven, customerPriceLine } = await import("../offer/quantities.js");
+          const computed = priceGiven(judged.given).map((c) => customerPriceLine(c));
           if (computed.length) { noteTurn("computed", computed); lines.push(`Computed for the customer's quantities (use these totals): ${computed.join("; ")}`); }
         }
         packText = `${packText ? `${packText}\n\n---\n\n` : ""}### ${this.catalogue ? "Products in our shop (from our catalogue)" : "Our offer and prices (from our price list)"}\n${lines.join("\n")}`;
@@ -1096,7 +1097,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
 
   /**
    * A shop's products for this message (src/scraper/catalogue.ts): the catalogue items closest by meaning
-   * (vectors) plus those sharing a word or SKU with it, judged by Jev; none of ours -> the shop's own live
+   * (vectors) plus those sharing a word or SKU with it (a catalogue number is not found by meaning), picked
+   * by the item matcher (src/offer/search.ts); none of ours -> the shop's own live
    * search (a catalogue larger than our index, or a product added since the last scrape).
    */
   private async shopProducts(query: string, question: string, rt: TurnRoute | null): Promise<OfferItem[]> {
@@ -1253,7 +1255,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const offerItems = this.offerItems;
     return cat || offerItems.length
       ? async (q: string) => [
-          ...(offerItems.length ? (await findOfferItems(q, offerItems, 5).catch(() => [] as OfferItem[])).map(renderItem) : []),
+          ...(offerItems.length ? (await findOfferItems(q, offerItems, 5, this.context.tenantId).catch(() => [] as OfferItem[])).map(renderItem) : []),
           ...(cat ? lexicalSnippets(q, cat, 5) : []),
         ]
       : undefined;
