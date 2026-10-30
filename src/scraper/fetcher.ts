@@ -16,9 +16,14 @@ const DEFAULT_USER_AGENT =
 
 export async function fetchPage(
   url: string,
-  options: { timeout?: number; userAgent?: string } = {}
+  options: { timeout?: number; userAgent?: string; browser?: boolean } = {}
 ): Promise<FetchResult> {
   const { timeout = 15000, userAgent = DEFAULT_USER_AGENT } = options;
+  // Straight to the browser (the crawler asks for it when a site's start page links nowhere - a bot check).
+  if (options.browser) {
+    const r = await fetchDynamic(url, { timeout, userAgent });
+    return { ...r, html: normalizeHtml(r.html), renderMethod: "dynamic" };
+  }
 
   // Try static fetch first (fast path)
   const staticResult = await fetchStatic(url, { timeout, userAgent });
@@ -210,7 +215,7 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
-export function hasSubstantialContent(html: string): boolean {
+function hasSubstantialContent(html: string): boolean {
   // Check for common SPA indicators first
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   if (bodyMatch) {
@@ -243,10 +248,6 @@ export function hasSubstantialContent(html: string): boolean {
 
   // Very minimal text AND no meaningful HTML structure = needs JS
   if (textContent.length < 50) return false;
-
-  // A bot-protection interstitial (a sentence and a script, no links - pelnyparkiet.pl served "One moment,
-  // please..." to our servers and the whole site became that one page): a real page links somewhere.
-  if (!/<a\s[^>]*href=/i.test(html) && textContent.length < 600) return false;
 
   return true;
 }

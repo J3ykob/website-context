@@ -154,7 +154,7 @@ export async function crawlSite(
       return;
     }
 
-    const fetchResult = await fetchPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
+    let fetchResult = await fetchPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
     if (fetchResult.statusCode === 429 || fetchResult.statusCode === 503) {
       const attempt = (item.attempt || 0) + 1;
       const ra = Number(fetchResult.headers["retry-after"]);
@@ -198,7 +198,18 @@ export async function crawlSite(
       }
     }
 
-    const page = extractPage(fetchResult);
+    let page = extractPage(fetchResult);
+    // A start page that links nowhere on its site may be a bot check served to our servers instead of the
+    // site (pelnyparkiet.pl: "One moment, please..." - the whole site became that one page): once, a real
+    // browser, which runs the check and waits for the site; kept only if it finds the site's links.
+    const ownLinks = (p: typeof page) => p.links.some((l) => { try { return allowedHosts.has(new URL(l.href).hostname); } catch { return false; } });
+    if (item.depth === 0 && fetchResult.renderMethod === "static" && !ownLinks(page)) {
+      const viaBrowser = await fetchPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent, browser: true }).catch(() => null);
+      if (viaBrowser && viaBrowser.statusCode < 400) {
+        const again = extractPage(viaBrowser);
+        if (ownLinks(again)) { console.log(`  [BROWSER] start page had no links, the browser found ${again.links.length}: ${normalizedUrl}`); fetchResult = viaBrowser; page = again; }
+      }
+    }
     // The page names its real address (rel=canonical): an alias of a page we have, or will fetch, is not
     // fetched twice - and its links (resolved against the alias) are not followed.
     const canonicalRaw = page.metadata?.canonical;
