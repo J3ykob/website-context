@@ -1846,19 +1846,20 @@ app.post("/api/auth/setup-password", async (req, res) => {
 });
 
 // --- Auth pages ---
-// Privacy policy: served once the company's details are set (COMPANY_NAME, COMPANY_ADDRESS, COMPANY_NIP;
+// Privacy policy: served once the company's details are set (COMPANY_NAME, COMPANY_ADDRESS; COMPANY_NIP shown when set;
 // optional COMPANY_REGISTRY, PRIVACY_EMAIL, CHAT_RETENTION, PRIVACY_EFFECTIVE_DATE) - never with blanks.
 app.get(["/polityka-prywatnosci", "/privacy"], (_req, res) => {
   const e = process.env;
-  if (!e.COMPANY_NAME || !e.COMPANY_ADDRESS || !e.COMPANY_NIP) { res.status(404).send("Not found"); return; }
+  // GDPR asks for the controller's name and contact; the NIP is shown once the company has one.
+  if (!e.COMPANY_NAME || !e.COMPANY_ADDRESS) { res.status(404).send("Not found"); return; }
   const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
   const vars: Record<string, string> = {
-    COMPANY_NAME: e.COMPANY_NAME, COMPANY_ADDRESS: e.COMPANY_ADDRESS, COMPANY_NIP: e.COMPANY_NIP,
+    COMPANY_NAME: e.COMPANY_NAME, COMPANY_ADDRESS: e.COMPANY_ADDRESS, COMPANY_NIP: e.COMPANY_NIP ? `<br>NIP ${esc(e.COMPANY_NIP)}` : "",
     COMPANY_REGISTRY: e.COMPANY_REGISTRY ? `<br>${e.COMPANY_REGISTRY}` : "", PRIVACY_EMAIL: e.PRIVACY_EMAIL || "jakub@whisp.so",
     CHAT_RETENTION: e.CHAT_RETENTION || "12 miesięcy od ostatniej wiadomości", EFFECTIVE_DATE: e.PRIVACY_EFFECTIVE_DATE || new Date().toISOString().slice(0, 10),
     TYPESAFE_LOCATION: e.TYPESAFE_LOCATION || "USA",
   };
-  const html = readFileSync(resolve(__dirname, "../public/polityka-prywatnosci.html"), "utf8").replace(/\{\{([A-Z_]+)\}\}/g, (_m, k) => (k === "COMPANY_REGISTRY" ? vars[k] : esc(vars[k] ?? "")));
+  const html = readFileSync(resolve(__dirname, "../public/polityka-prywatnosci.html"), "utf8").replace(/\{\{([A-Z_]+)\}\}/g, (_m, k) => (k === "COMPANY_REGISTRY" || k === "COMPANY_NIP" ? vars[k] : esc(vars[k] ?? "")));
   res.type("html").send(html);
 });
 
