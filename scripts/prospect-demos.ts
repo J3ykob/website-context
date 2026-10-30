@@ -37,7 +37,7 @@ const api = async (path: string, init?: RequestInit): Promise<any> => {
     try {
       const r = await fetch(`${BASE}${path}`, { ...init, headers: { ...headers, ...(init?.headers || {}) }, signal: AbortSignal.timeout(120_000) });
       const body = await r.json().catch(() => ({}));
-      return { status: r.status, ...body };
+      return { http: r.status, ...body }; // `status` is the business's (the API's own field), never the HTTP code
     } catch (e) {
       if (attempt >= 3) throw e;
       await new Promise((ok) => setTimeout(ok, 5000 * attempt)); // the network drops now and then
@@ -51,8 +51,8 @@ const rows: Row[] = sites.map((site) => ({ site, status: "new", warnings: [] }))
 
 // 1. Register (or find) each business; read it (again with --rescrape).
 for (const row of rows) {
-  const r = await api("/api/onboard-demo", { method: "POST", body: JSON.stringify({ siteUrl: row.site, email: EMAIL }) }).catch((e) => ({ status: 0, error: String(e) }));
-  if (!r.tenantId) { row.status = "error"; row.warnings.push(`could not register: ${r.error || r.status}`); continue; }
+  const r = await api("/api/onboard-demo", { method: "POST", body: JSON.stringify({ siteUrl: row.site, email: EMAIL }) }).catch((e) => ({ http: 0, error: String(e) }));
+  if (!r.tenantId) { row.status = "error"; row.warnings.push(`could not register: ${r.error || `HTTP ${r.http}`}`); continue; }
   row.tenantId = r.tenantId;
   if (RESCRAPE && r.ready) await api(`/api/admin/rescrape/${encodeURIComponent(r.tenantId)}?maxPages=150`, { method: "POST" });
   row.status = r.ready && !RESCRAPE ? "active" : "reading";
@@ -64,7 +64,8 @@ const until = Date.now() + WAIT_MIN * 60_000;
 for (;;) {
   for (const row of rows.filter((r) => r.tenantId)) {
     const s = await api(`/api/tenants/${encodeURIComponent(row.tenantId!)}/status`).catch(() => null);
-    if (s?.status) { row.status = s.status; row.pages = s.pagesCount; }
+    // A server restart answers 502 for a moment: keep the last known state and ask again.
+    if (s?.http === 200 && s.status) { row.status = s.status; row.pages = s.pagesCount; }
   }
   const waiting = rows.filter((r) => r.tenantId && ["pending", "queued", "scraping", "reading"].includes(r.status));
   if (!waiting.length || Date.now() > until) break;
@@ -77,11 +78,18 @@ for (const row of rows.filter((r) => r.tenantId)) {
   if (row.status !== "active") { row.warnings.push(row.status === "scraping" || row.status === "pending" ? `still being read after ${WAIT_MIN} min - run again later` : `site status "${row.status}"`); continue; }
   if ((row.pages || 0) <= 1) row.warnings.push("only 1 page read - the site may block our servers (a bot check) or be a one-page app: open the demo before showing it, try --rescrape");
   else if ((row.pages || 0) < 5) row.warnings.push(`only ${row.pages} pages read - check the demo knows the offer`);
+  // The audit asks the bot standard customer questions (contact, area, hours, prices, quote, payment, ...).
+  // Judged by what a visitor gets - the questions, not the audit's data checks (an address written in a
+  // sentence is answered although no "official address" was extracted). Topics a business may simply not
+  // have (warranty for a café) are listed, not counted against it; a failing contact answer is.
   const a = await api(`/api/admin/audit/${encodeURIComponent(row.tenantId!)}`, { method: "POST" }).catch(() => null);
-  if (a && typeof a.ok === "number") {
-    row.audit = { ok: a.ok, partial: a.partial || 0, missing: a.missing || 0 };
-    const total = a.ok + (a.partial || 0) + (a.missing || 0);
-    if (total && a.ok / total < 0.4) row.warnings.push(`the bot answers few standard questions (${a.ok}/${total}) - check its knowledge before showing it`);
+  const qs: { topic: string; status: string }[] = (Array.isArray(a?.items) ? a.items : []).filter((i: any) => i.kind === "question");
+  if (qs.length) {
+    const n = (st: string) => qs.filter((i) => i.status === st).length;
+    row.audit = { ok: n("ok"), partial: n("partial"), missing: n("missing") };
+    if (qs.some((i) => i.topic === "contact" && i.status !== "ok")) row.warnings.push("the bot does not give the contact details properly - check before showing");
+    const gaps = qs.filter((i) => i.status !== "ok").map((i) => `${i.topic}${i.status === "partial" ? " (partly)" : ""}`);
+    if (gaps.length) row.warnings.push(`no full answer on the site for: ${gaps.join(", ")} (fine if the business does not publish it)`);
   } else row.warnings.push("knowledge audit unavailable");
 }
 
@@ -91,7 +99,7 @@ const report = `# Prospect demos - ${new Date().toISOString().slice(0, 16).repla
 
 Demo links show each business its own chat. Nothing was sent to the businesses; "bot ready" notes went to ${EMAIL}.
 
-| Website | Demo | Status | Pages read | Standard questions | Before showing |
+| Website | Demo | Status | Pages read | Customer questions answered | Notes |
 |---|---|---|---|---|---|
 ${rows.map(line).join("\n")}
 `;
