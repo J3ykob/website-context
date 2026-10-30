@@ -136,7 +136,7 @@ const PRICE_README = `# Oferty firm
 
 Zapytanie trafiło do firm z sieci; każda sprawdziła je na swojej ofercie. W firmy.md są tylko firmy, które mają coś
 do tego zapytania. Dla każdej z nich:
-- cennik_<firma>.csv - pozycje oferty, które firma dopasowała do zapytania: id, nazwa, kategoria, cena (opis ceny),
+- cennik_<firma>.csv - pozycje oferty, które firma dopasowała do zapytania: id, nazwa, rodzaj (Produkt, Usługa, Wynajem...), kategoria, cena (opis ceny),
   cena_od, cena_do, waluta, jednostka, dostepnosc, czas_realizacji, opis. Pusta cena = brak ceny w ofercie (do ustalenia z firmą).
 - oferta_<firma>.csv (tylko firma prowadząca projekt) - cała jej oferta, w tym samym formacie, gdy dopasowanych pozycji
   nie wystarcza (np. zamiennik, wariant, akcesoria).
@@ -157,8 +157,9 @@ const fieldLabel = (f: keyof typeof FIELDS, v?: string) => (v && v !== "unknown"
 
 function itemsCsv(items: OfferItem[]): string {
   return toCsv(
-    ["id", "nazwa", "kategoria", "cena", "cena_od", "cena_do", "waluta", "jednostka", "dostepnosc", "czas_realizacji", "opis"],
-    items.map((i) => [i.id.slice(0, 8), i.name, i.category, priceText(i) || (i.components.some((c) => c.price_value !== null) ? "patrz skladniki" : ""), i.price_value, i.price_max, i.currency,
+    ["id", "nazwa", "rodzaj", "kategoria", "cena", "cena_od", "cena_do", "waluta", "jednostka", "dostepnosc", "czas_realizacji", "opis"],
+    // rodzaj (produkt / usługa / wynajem...): an installer's "Podłogi" is laying floors, not the floor (C4, C16).
+    items.map((i) => [i.id.slice(0, 8), i.name, fieldLabel("kind", i.fields.kind), i.category, priceText(i) || (i.components.some((c) => c.price_value !== null) ? "patrz skladniki" : ""), i.price_value, i.price_max, i.currency,
       unitLabel(i.fields.unit), fieldLabel("availability", i.fields.availability), fieldLabel("lead_time", i.fields.lead_time), i.description.slice(0, 300)]),
   ).slice(1); // no BOM: the agent reads these with python
 }
@@ -761,6 +762,13 @@ async function verifyOutputs(id: string, r: RunResult, instruction: string): Pro
     for (const t of [...sources, inputs.all]) for (const n of numbersIn(t)) known.add(Math.round(n * 100));
     const unsupported = [...new Set(numbersIn(reply).filter((n) => !known.has(Math.round(n * 100))))];
     results.push({ reqId: "sys-agent-numbers", status: unsupported.length ? "failed" : "met", evidence: unsupported.length ? `not in any file: ${unsupported.join(", ")}` : "ok" });
+    // Prices: none the data does not give (C20: "approx. 300-400 zł/m³ from the firm's public data" - the firm
+    // publishes no concrete prices; the number check passed because the agent had written it into its own
+    // table). Judged by a model against what the agent was given only: price lists, the request, the conversation.
+    await req("sys-agent-prices", "Every price in the reply is given by the price lists or answers, or calculated from them.", "jev");
+    const given = r.files.filter((f) => f.encoding === "utf-8" && f.path.startsWith(`${PRICE_DIR}/`)).map((f) => `## ${f.path}\n${f.content}`).join("\n\n") + "\n\n" + inputs.all;
+    const pInvented = await inventedPrice(reply, given);
+    results.push({ reqId: "sys-agent-prices", status: pInvented === null ? "open" : pInvented < 0.5 ? "met" : "failed", evidence: `P(a price not in the data) = ${pInvented?.toFixed(2) ?? "n/a"}` });
     // The choice (structure -> structure, docs/noise-plan.md #3): wybor.json against the offers it names - the
     // cheapest really chosen when that is the criterion, and each option's amount as the price list gives it
     // (rates combined the cheapest way: 30 h = 2 days, not 30 x hourly). C9 picked 350 zł over 240 zł; C14/C19
@@ -890,4 +898,12 @@ export function choiceProblems(choices: any[], items: Map<string, Pick<OfferItem
     }
   }
   return problems;
+}
+
+/** P that the reply states a price (or range) the data neither gives nor allows to calculate; null = no answer. */
+export async function inventedPrice(reply: string, data: string): Promise<number | null> {
+  const a = await jevAsk({ reply: reply.slice(0, 4000), data: data.slice(0, 60000) }, {
+    p: { type: "noul", instructions: "Does `reply` state a price, price range or total for something whose price `data` does not give and that cannot be calculated from prices in `data` (for example an 'approximate' or 'typical' price)?" },
+  }, 15000).catch(() => null);
+  return ((a?.p as any)?.noul as number | undefined) ?? null;
 }

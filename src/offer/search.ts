@@ -49,7 +49,10 @@ function firstJson(c: string): any {
   throw new Error("unfinished JSON");
 }
 
-const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}${i.description ? ` - ${i.description.slice(0, 150)}` : ""}`;
+// The item's kind (product, service, rental...) is a field of its own: shown so "laying floors" (a service)
+// is not taken for the vinyl floor it lays (C4, C16 - an installer asked for the price of the flooring).
+const KIND: Record<string, string> = { product: "product", service: "service", rental: "rental", package: "package", subscription: "subscription" };
+const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}${KIND[i.fields.kind || ""] ? ` [${KIND[i.fields.kind!]}]` : ""}${i.description ? ` - ${i.description.slice(0, 150)}` : ""}`;
 
 export interface ItemMatch { items: OfferItem[]; given: Map<OfferItem, Record<string, number>> }
 export interface MatchOptions {
@@ -108,7 +111,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
         body: JSON.stringify({
           model: MODEL, temperature: 0, max_tokens: 400, response_format: { type: "json_object" }, provider: r.provider, ...(r.seed !== undefined ? { seed: r.seed } : {}), reasoning: { enabled: false },
           messages: [
-            { role: "system", content: `Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.quantities ? ` Also, for each item you give that lists inputs, the value of each input the customer's latest message states or that follows directly from it (e.g. "Saturday and Sunday" = 48 hours, "4x5 m" = 20 m²) - leave out any the customer did not give, never assume a typical value, and leave out an input when the customer's quantity is of another kind (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known): "quantities": [{"id": <item id>, "input": "<input name>", "value": <number>}].` : ""}` },
+            { role: "system", content: `Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. Items are marked product or service: when the customer asks for a product, a service done on it is not it; when they ask for a service, a product is not it. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.quantities ? ` Also, for each item you give that lists inputs, the value of each input the customer's latest message states or that follows directly from it (e.g. "Saturday and Sunday" = 48 hours, "4x5 m" = 20 m²) - leave out any the customer did not give, never assume a typical value, and leave out an input when the customer's quantity is of another kind (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known): "quantities": [{"id": <item id>, "input": "<input name>", "value": <number>}].` : ""}` },
             { role: "user", content: `Customer: ${question}\n\nItems:\n${list}` },
           ],
         }),
