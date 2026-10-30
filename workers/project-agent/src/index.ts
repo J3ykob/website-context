@@ -5,12 +5,14 @@ import type { Env } from "./env";
 
 export { ProjectAgent } from "./agent";
 export { PiiMasker } from "./masker";
+export { Reranker } from "./reranker";
 export { Outbound } from "./outbound";
 
 // Called only by the Render server (bearer RUNNER_SECRET):
 //   POST   /projects/:id/run   start a run (RunRequest without projectId) -> 202 {runId} | 409 busy
 //   GET    /projects/:id/run   {state: none | running | done (with the unmasked result)}
 //   DELETE /projects/:id/run   stop and forget (mapping, result, sandbox)
+//   POST   /rerank             {pairs: [[query, text], ...]} -> {scores: [...]} (network decisions)
 //   GET    /health
 const MAX_PROMPT_BYTES = 100 * 1024; // one argv entry; Linux rejects 128 KiB or more
 const MAX_FILES = 200;
@@ -21,6 +23,16 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/health") return Response.json({ ok: true });
     if (!authorized(request, env.RUNNER_SECRET)) return new Response("Unauthorized", { status: 401 });
+
+    // The network's decision model: a few instances, spread by a hash of the batch so a burst is shared.
+    if (url.pathname === "/rerank" && request.method === "POST") {
+      const body = (await request.json().catch(() => null)) as { pairs?: [string, string][] } | null;
+      const pairs = Array.isArray(body?.pairs) ? body!.pairs.slice(0, 512) : [];
+      if (!pairs.length) return Response.json({ scores: [] });
+      const shard = Math.abs([...JSON.stringify(pairs[0])].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 2;
+      try { return Response.json(await env.RERANKER.getByName(`rr-${shard}`).score(pairs)); }
+      catch (e) { return Response.json({ error: String((e as Error).message || e).slice(0, 300) }, { status: 503 }); }
+    }
 
     const parts = url.pathname.split("/").filter(Boolean);
     if (parts.length !== 3 || parts[0] !== "projects" || (parts[2] !== "run" && parts[2] !== "warm")) return new Response("Not found", { status: 404 });

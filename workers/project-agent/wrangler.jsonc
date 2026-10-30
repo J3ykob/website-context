@@ -15,7 +15,8 @@
   "durable_objects": {
     "bindings": [
       { "name": "AGENT", "class_name": "ProjectAgent" },
-      { "name": "MASKER", "class_name": "PiiMasker" }
+      { "name": "MASKER", "class_name": "PiiMasker" },
+      { "name": "RERANKER", "class_name": "Reranker" }
     ]
   },
   "containers": [
@@ -28,11 +29,17 @@
       "class_name": "PiiMasker",
       "scheduling_policy": "durable_object",
       "images": { "masker": { "dockerfile": "./masker/Dockerfile" } }
+    },
+    {
+      "class_name": "Reranker",
+      "scheduling_policy": "durable_object",
+      "images": { "reranker": { "dockerfile": "./reranker/Dockerfile" } }
     }
   ],
   "exports": {
     "ProjectAgent": { "type": "durable-object", "storage": "sqlite" },
-    "PiiMasker": { "type": "durable-object", "storage": "sqlite" }
+    "PiiMasker": { "type": "durable-object", "storage": "sqlite" },
+    "Reranker": { "type": "durable-object", "storage": "sqlite" }
   },
   "observability": { "enabled": true }
 }
