@@ -179,6 +179,8 @@ async function fetchDynamicInner(
     });
 
     await page.waitForTimeout(2000);
+    // Still a page without links (a bot check running its script): give it time to pass and load the site.
+    if (!(await page.$("a[href]"))) await page.waitForLoadState("load").then(() => page.waitForSelector("a[href]", { timeout: 8000 })).catch(() => {});
 
     const html = await page.content();
     const headers: Record<string, string> = {};
@@ -208,7 +210,7 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
-function hasSubstantialContent(html: string): boolean {
+export function hasSubstantialContent(html: string): boolean {
   // Check for common SPA indicators first
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   if (bodyMatch) {
@@ -241,6 +243,10 @@ function hasSubstantialContent(html: string): boolean {
 
   // Very minimal text AND no meaningful HTML structure = needs JS
   if (textContent.length < 50) return false;
+
+  // A bot-protection interstitial (a sentence and a script, no links - pelnyparkiet.pl served "One moment,
+  // please..." to our servers and the whole site became that one page): a real page links somewhere.
+  if (!/<a\s[^>]*href=/i.test(html) && textContent.length < 600) return false;
 
   return true;
 }
