@@ -110,3 +110,48 @@ export function missingInputs(recipe: Recipe, given: Record<string, InputValue |
   const r = evaluate(recipe.price, given);
   return r.kind === "needs" ? r.inputs : [];
 }
+
+// ── From the fields an offer item already has (no model) ──
+// Period units in hours, so rental rates per hour / day / week / month combine into the cheapest cover.
+const PERIOD_HOURS: Record<string, number> = { godzina: 1, doba: 24, tydzien: 168, miesiac: 720 };
+const INPUT_OF: Record<string, string> = { szt: "pieces", kg: "kg", t: "tonnes", m2: "m2", m3: "m3", mb: "metres", worek: "bags", paleta: "pallets", litr: "litres", osoba: "people", komplet: "sets", wizyta: "visits" };
+
+interface FieldsLike { fields: Record<string, string | undefined>; price_value: number | null; price_max: number | null; currency?: string; components?: { label: string; price_type: string; price_value: number | null; price_max: number | null; unit: string; quantity_from: "fixed" | "customer"; quantity_label: string; combine: "sum" | "alternative" }[] }
+
+function ruleOf(priceType: string | undefined, value: number | null, max: number | null, unit: string | undefined, qtyLabel?: string): Rule | null {
+  const u = unit && unit !== "unknown" ? unit : "";
+  if (priceType === "on_request" || priceType === "not_listed") return { rule: "on_request" };
+  if (priceType === "free" || priceType === "included") return { rule: "fixed", price: 0 };
+  if (value === null) return null;
+  const input = qtyLabel || (u in PERIOD_HOURS ? "hours" : INPUT_OF[u] || "");
+  if (priceType === "range") return { rule: "range", min: value, max, ...(input && u && !["usluga", "projekt"].includes(u) ? { per: input } : {}) };
+  if (priceType === "from") return { rule: "range", min: value, max: null };
+  if (u in PERIOD_HOURS) return { rule: "rates", input: "hours", rates: [{ per: PERIOD_HOURS[u], price: value }] };
+  if (priceType === "per_unit" && input) return { rule: "per", input, price: value };
+  if (priceType === "fixed" && input && u && !["usluga", "projekt", "wizyta"].includes(u)) return { rule: "per", input, price: value };
+  return { rule: "fixed", price: value };
+}
+
+/** A recipe from an offer item's existing fields; null when they say too little (no price, no type). */
+export function recipeFromFields(item: FieldsLike): Recipe | null {
+  const comps = item.components || [];
+  let price: Rule | null;
+  if (comps.length) {
+    const parts = comps.map((c) => ruleOf(c.price_type, c.price_value, c.price_max, c.unit, c.quantity_from === "customer" ? c.quantity_label : undefined));
+    if (parts.some((p) => p === null)) return null;
+    // Alternative period rates of one rental (per hour OR per day) are one "rates" rule (cheapest cover).
+    const allRates = parts.every((p) => p!.rule === "rates");
+    price = allRates ? { rule: "rates", input: "hours", rates: parts.flatMap((p) => (p as Extract<Rule, { rule: "rates" }>).rates) }
+      : comps.every((c) => c.combine === "alternative") ? { rule: "cheapest", options: parts as Rule[] } : { rule: "sum", parts: parts as Rule[] };
+  } else price = ruleOf(item.fields.price_type, item.price_value, item.price_max, item.fields.unit);
+  if (!price) return null;
+  const inputs = new Map<string, RecipeInput>();
+  const walk = (r: Rule): void => {
+    if ("input" in r && r.input) inputs.set(r.input, { name: r.input, type: r.rule === "variant" ? "choice" : "number" });
+    if (r.rule === "range" && r.per) inputs.set(r.per, { name: r.per, type: "number" });
+    if (r.rule === "sum") r.parts.forEach(walk);
+    if (r.rule === "cheapest") r.options.forEach(walk);
+  };
+  walk(price);
+  return { inputs: [...inputs.values()], price, currency: item.currency || "PLN" };
+}

@@ -50,3 +50,18 @@ describe("price recipes", () => {
     expect(evaluate(tr, { pieces: 15 })).toEqual({ kind: "price", amount: 3600 });
   });
 });
+
+import { recipeFromFields } from "../src/offer/recipe.js";
+describe("recipes from existing offer fields (no model)", () => {
+  it("rental with hourly and daily alternatives -> cheapest cover", () => {
+    const r = recipeFromFields({ fields: { price_type: "per_unit", unit: "godzina" }, price_value: 28, price_max: null, components: [
+      { label: "godzina", price_type: "per_unit", price_value: 28, price_max: null, unit: "godzina", quantity_from: "customer", quantity_label: "", combine: "alternative" },
+      { label: "doba", price_type: "per_unit", price_value: 140, price_max: null, unit: "doba", quantity_from: "customer", quantity_label: "", combine: "alternative" }] })!;
+    expect(evaluate(r.price, { hours: 30 })).toEqual({ kind: "price", amount: 280 });
+  });
+  it("per m² range, fixed service, on request", () => {
+    expect(evaluate(recipeFromFields({ fields: { price_type: "range", unit: "m2" }, price_value: 70, price_max: 110 })!.price, { m2: 200 })).toEqual({ kind: "range", min: 14000, max: 22000 });
+    expect(evaluate(recipeFromFields({ fields: { price_type: "fixed", unit: "usluga" }, price_value: 350, price_max: null })!.price, {})).toEqual({ kind: "price", amount: 350 });
+    expect(evaluate(recipeFromFields({ fields: { price_type: "on_request" }, price_value: null, price_max: null })!.price, {})).toEqual({ kind: "on_request" });
+  });
+});
