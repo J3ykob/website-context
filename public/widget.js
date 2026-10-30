@@ -1,7 +1,13 @@
 (function() {
   var config = window.__wctx || {};
-  var API_HOST = config.apiHost || window.location.origin;
-  var TENANT_ID = config.tenantId || "default";
+  // The dashboard's install code sets data-tenant-id / data-api-url on this script's tag (the WordPress
+  // plugin and the demo page set window.__wctx); without either, the API is where this file came from -
+  // never the customer's own site (it answered "Something went wrong" on every pasted install).
+  var ownTag = document.currentScript || document.querySelector('script[src*="/widget.js"][data-tenant-id]');
+  var tagAttr = function (n) { return (ownTag && ownTag.getAttribute(n)) || ""; };
+  var tagOrigin = ""; try { tagOrigin = ownTag && ownTag.src ? new URL(ownTag.src).origin : ""; } catch (e) {}
+  var API_HOST = config.apiHost || tagAttr("data-api-url") || tagOrigin || window.location.origin;
+  var TENANT_ID = config.tenantId || tagAttr("data-tenant-id") || "default";
   var BRAND = config.brandName || "Whisp";
 
   // Owner mode — activated via ?wctx-owner=true or config.ownerKey matching a cookie
