@@ -100,7 +100,8 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
     const { routingFor } = await import("../llm/pin.js");
     const r = routingFor(MODEL);
     let j: any;
-    try {
+    // An answer that cannot be read (no JSON - once in a chain run) is asked again once.
+    for (let attempt = 1; attempt <= 2 && j === undefined; attempt++) try {
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST", signal: AbortSignal.timeout(TIMEOUT_MS),
         headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
@@ -114,7 +115,8 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
       });
       const c = String(((await res.json()) as any)?.choices?.[0]?.message?.content || "");
       j = firstJson(c);
-    } catch (e) { console.warn(`[items] no answer: ${(e as Error).message}`); return null; }
+    } catch (e) { console.warn(`[items] no answer (attempt ${attempt}): ${(e as Error).message}`); }
+    if (j === undefined) return null;
     const ids = (Array.isArray(j?.ids) ? j.ids : []).filter((k: unknown) => Number.isInteger(k) && pool[k as number]) as number[];
     const q = (Array.isArray(j?.quantities) ? j.quantities : []).filter((x: any) => Number.isInteger(x?.id) && ids.includes(x.id) && inputs[x.id]?.includes(x.input) && typeof x.value === "number" && x.value > 0);
     hit = { at: Date.now(), ids: [...new Set(ids)], q };
