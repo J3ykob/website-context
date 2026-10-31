@@ -59,6 +59,7 @@ export async function crawlSite(
   // scrape queue behind it.
   let throttledInRow = 0;
   let givenUp = false;
+  let browserSite = false; // the start page needed the browser (a bot check): every page goes through it
   const waitTurn = async (): Promise<void> => {
     for (;;) {
       const now = Date.now();
@@ -154,7 +155,7 @@ export async function crawlSite(
       return;
     }
 
-    let fetchResult = await fetchPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent });
+    let fetchResult = await fetchPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent, browser: browserSite });
     if (fetchResult.statusCode === 429 || fetchResult.statusCode === 503) {
       const attempt = (item.attempt || 0) + 1;
       const ra = Number(fetchResult.headers["retry-after"]);
@@ -207,7 +208,9 @@ export async function crawlSite(
       const viaBrowser = await fetchPage(normalizedUrl, { timeout: opts.timeout, userAgent: opts.userAgent, browser: true }).catch(() => null);
       if (viaBrowser && viaBrowser.statusCode < 400) {
         const again = extractPage(viaBrowser);
-        if (ownLinks(again)) { console.log(`  [BROWSER] start page had no links, the browser found ${again.links.length}: ${normalizedUrl}`); fetchResult = viaBrowser; page = again; }
+        // The site shows its bot check to every plain request: its other pages go through the browser too
+        // (they came back as the same check page and were dropped as duplicates - 1 page of Sosnowy Dwór's 20).
+        if (ownLinks(again)) { console.log(`  [BROWSER] start page had no links, the browser found ${again.links.length} - the whole site through the browser: ${normalizedUrl}`); fetchResult = viaBrowser; page = again; browserSite = true; }
       }
     }
     // The page names its real address (rel=canonical): an alias of a page we have, or will fetch, is not
