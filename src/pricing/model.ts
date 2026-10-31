@@ -221,7 +221,7 @@ export async function read(message: string, catalog: Catalog, llm: Llm): Promise
 // ── A whole business: parts, completeness, storage ──
 const PART_CHARS = 40000; // page text per part (one generation call)
 const MAX_PARTS = () => Number(process.env.PRICING_MAX_PARTS) || 12;
-export interface PricingBusiness { tenantId: string; hash: string; builtAt: string; model: string; parts: PricingModel[]; costUsd: number; missing: string[] }
+export interface PricingBusiness { tenantId: string; hash: string; builtAt: string; model: string; parts: PricingModel[]; costUsd: number; missing: string[]; failed?: string[] }
 
 /** The generation model with reasoning on (one-off per business; OpenRouter, pinned to the model's maker). */
 export function reasonedLlm(model: string, usage?: { usd: number }): Llm {
@@ -271,9 +271,9 @@ export async function buildBusiness(tenantId: string, business: string, pages: {
   const { jevAsk } = await import("../llm/jev.js");
   const rj = pages.length > 1 ? await jevAsk({ pages: pages.map((p) => `${p.url} - ${p.text.slice(0, 300)}`) }, Object.fromEntries(pages.map((_, k) => [`r${k}`, { type: "noul" as const, instructions: `Is \`pages[${k}]\` about terms that apply to all of the business's offers (rental or order conditions, delivery, deposits, discounts, minimums) rather than particular products?` }])), 15000).catch(() => null) : null;
   const rules = new Set(pages.filter((_, k) => ((((rj as any)?.[`r${k}`]?.noul) as number) ?? 0) >= 0.5).map((p) => p.url));
-  const built: PricingModel[] = [];
+  const built: PricingModel[] = [], failed: string[] = [];
   for (const part of partsOf(pages, rules)) {
-    const pm = await build(business, part, llm, llm, model).catch((e) => { console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; });
+    const pm = await build(business, part, llm, llm, model).catch((e) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; });
     if (pm) built.push(pm);
   }
   // Completeness: offer items no part covers, judged by a cheaper model; those parts are rebuilt once with the gap named.
@@ -288,7 +288,7 @@ export async function buildBusiness(tenantId: string, business: string, pages: {
     missing = await missingFromCatalog({ ...all, items: built.flatMap((p) => p.catalog.items || []) }, offerNames.slice(0, 300), cheap).catch(() => missing);
   }
   console.log(`[pricing] ${tenantId}: ${built.length} part(s), ${built.reduce((n, p) => n + p.catalog.items.length, 0)} items, checks ${built.reduce((n, p) => n + (p.verified?.agreed || 0), 0)}/${built.reduce((n, p) => n + (p.verified?.cases || 0), 0)}, missing ${missing.length}, $${usage.usd.toFixed(2)}`);
-  return { tenantId, hash, builtAt: new Date().toISOString(), model, parts: built, costUsd: usage.usd, missing };
+  return { tenantId, hash, builtAt: new Date().toISOString(), model, parts: built, costUsd: usage.usd, missing, failed };
 }
 
 /**
