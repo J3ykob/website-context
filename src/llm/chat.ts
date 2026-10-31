@@ -1143,11 +1143,13 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
   }
 
   /** The business's quoting model applied to the conversation: the quote as text for the reply, or null. */
-  private pricingCache: { at: number; pb: import("../pricing/model.js").PricingBusiness | null } | null = null;
-  private async quoteWithModel(convo: string): Promise<string | null> {
+  private pricingCache = new Map<string, { at: number; pb: import("../pricing/model.js").PricingBusiness | null }>();
+  // tenantId: our own by default; a network business's for the businesses relayed to the customer.
+  private async quoteWithModel(convo: string, tenantId = this.context.tenantId): Promise<string | null> {
     const m = await import("../pricing/model.js");
-    if (!this.pricingCache || Date.now() - this.pricingCache.at > 10 * 60_000) this.pricingCache = { at: Date.now(), pb: await m.loadPricing(this.context.tenantId) };
-    const pb = this.pricingCache.pb;
+    let hit = this.pricingCache.get(tenantId);
+    if (!hit || Date.now() - hit.at > 10 * 60_000) this.pricingCache.set(tenantId, (hit = { at: Date.now(), pb: await m.loadPricing(tenantId) }));
+    const pb = hit.pb;
     if (!pb?.parts.length) return null;
     const catalog = m.catalogOf(pb);
     const { OpenRouterProvider } = await import("./openrouter-provider.js");
@@ -1164,8 +1166,15 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
 
   /** The network businesses found for a need, as prompt text + fact-check evidence + links. */
   private async networkBlock(found: EcosystemMatch[], need: string) {
+    // Each relayed business with a quoting model prices the customer's request itself (its own program);
+    // the quote joins its passages. Off unless the quoting model is on for this chat.
+    if (process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing")) {
+      const quotes = await Promise.all(found.map((f) => Promise.race([this.quoteWithModel(need, f.tenantId).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 8000))])));
+      found = found.map((f, k) => (quotes[k] ? { ...f, passages: [{ content: `Prices computed from ${f.label}'s own price list for this request: ${quotes[k]!.replace(/\n/g, "; ")}`, url: "", title: "quote" }, ...f.passages] } : f));
+      quotes.forEach((q, k) => q && noteTurn("networkQuote", `${found[k].tenantId}: ${q.slice(0, 400)}`));
+    }
     const links = this.handoffLinks ? await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [{ role: "user", content: need }], need).catch(() => ({} as Record<string, string>)) : ({} as Record<string, string>);
-    const text = found.map((f) => `### ${f.label}${links[f.tenantId] ? ` | link for the customer: ${links[f.tenantId]}` : ""}\nContact: ${f.contact || "no phone or e-mail known - only the link"}\n${f.passages.map((p) => p.content.replace(/\s+/g, " ").slice(0, 900)).join("\n")}`).join("\n\n---\n\n");
+    const text = found.map((f) => `### ${f.label}${links[f.tenantId] ? ` | link for the customer: ${links[f.tenantId]}` : ""}\nContact: ${f.contact || "no phone or e-mail known - only the link"}\n${f.passages.map((p) => p.content.replace(/\s+/g, " ").slice(0, p.title === "quote" ? 2500 : 900)).join("\n")}`).join("\n\n---\n\n");
     const evidence = [
       { content: `Businesses from our network checked for the customer: ${found.map((f) => f.label).join(", ")}.` },
       ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }, { content: `${f.label} offers, sells, rents or does what the customer asked for ("${need.slice(0, 300)}") - checked against its own website.` }]),
