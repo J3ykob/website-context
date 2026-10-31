@@ -844,6 +844,10 @@ export class WebsiteChat {
         packText = `### Key facts from our pages (word for word)\n${facts.map((f) => `- ${f.s}`).join("\n")}${packText ? `\n\n---\n\n${packText}` : ""}`;
         passages = [...facts.map((f) => f.s), ...passages];
       }
+      // The business's own quoting model (src/pricing/model.ts), when it has one and it is switched on: the
+      // conversation read into a request in its terms, its program quotes it - replaces the recipe computation.
+      const modelQuote = rt && rt.price >= 0.5 && (process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing")) ? await this.quoteWithModel(convo).catch(() => null) : null;
+      if (modelQuote) noteTurn("modelQuote", modelQuote.slice(0, 600));
       // The products / offer items this message is about.
       const judged = await productsP;
       const products = judged?.items || [];
@@ -851,7 +855,8 @@ export class WebsiteChat {
         noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
         const lines = products.map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
         // A price question: the customer's quantities read with the items, priced by code (src/offer/quantities.ts).
-        if (judged?.given.size) {
+        if (modelQuote) { /* priced below by the business's quoting model */ }
+        else if (judged?.given.size) {
           const { priceGiven, customerPriceLine } = await import("../offer/quantities.js");
           const computed = priceGiven(judged.given).map((c) => customerPriceLine(c));
           if (computed.length) { noteTurn("computed", computed); lines.push(`Computed for the customer's quantities (use these totals): ${computed.join("; ")}`); }
@@ -865,6 +870,10 @@ export class WebsiteChat {
         packText = `${packText ? `${packText}\n\n---\n\n` : ""}### ${this.catalogue ? "Products in our shop (from our catalogue)" : "Our offer and prices (from our price list)"}\n${lines.join("\n")}`;
         passages = [...passages, ...lines];
         productLinks = products.map((p) => p.url).filter(Boolean);
+      }
+      if (modelQuote) {
+        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Prices computed from our price list for this request (use these amounts; ask for what it says is missing)\n${modelQuote}`;
+        passages = [...passages, modelQuote];
       }
       // Asked for a specific product or service and none of our price list's items is it: that is a fact
       // (the matcher judged every item), not missing information - "our price list has no mini-excavator"
@@ -1131,6 +1140,26 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (live.length) { noteTurn("productsLive", live.length); found = (await matchOfferItems(query, live, 6)) || []; }
     }
     return found;
+  }
+
+  /** The business's quoting model applied to the conversation: the quote as text for the reply, or null. */
+  private pricingCache: { at: number; pb: import("../pricing/model.js").PricingBusiness | null } | null = null;
+  private async quoteWithModel(convo: string): Promise<string | null> {
+    const m = await import("../pricing/model.js");
+    if (!this.pricingCache || Date.now() - this.pricingCache.at > 10 * 60_000) this.pricingCache = { at: Date.now(), pb: await m.loadPricing(this.context.tenantId) };
+    const pb = this.pricingCache.pb;
+    if (!pb?.parts.length) return null;
+    const catalog = m.catalogOf(pb);
+    const { OpenRouterProvider } = await import("./openrouter-provider.js");
+    const or = new OpenRouterProvider({ model: "anthropic/claude-haiku-5.5", maxTokens: 1500, temperature: 0 });
+    const request = await m.read(convo, catalog, async (sys, user, max = 1500) => (await or.chat([{ role: "system", content: sys }, { role: "user", content: user }], { maxTokens: max })).content);
+    if (!request.lines.length) return null;
+    const q = await m.quoteBusiness(pb, request);
+    const name = (id: string) => catalog.items.find((i) => i.id === id)?.name || id;
+    const zl = (n: number) => `${Math.round(n * 100) / 100} ${catalog.currency || "PLN"}`;
+    const lines = q.lines.map((l) => `- ${name(l.item)}: ${l.status === "price" ? zl(l.amount!) : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
+    if (q.total) lines.push(`Total of the priced lines: ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
+    return lines.join("\n");
   }
 
   /** The network businesses found for a need, as prompt text + fact-check evidence + links. */

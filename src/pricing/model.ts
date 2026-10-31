@@ -212,7 +212,7 @@ export async function read(message: string, catalog: Catalog, llm: Llm): Promise
 
 // ── A whole business: parts, completeness, storage ──
 const PART_CHARS = 40000; // page text per part (one generation call)
-const MAX_PARTS = 12;
+const MAX_PARTS = () => Number(process.env.PRICING_MAX_PARTS) || 12;
 export interface PricingBusiness { tenantId: string; hash: string; builtAt: string; model: string; parts: PricingModel[]; costUsd: number; missing: string[] }
 
 /** The generation model with reasoning on (one-off per business; OpenRouter, pinned to the model's maker). */
@@ -249,13 +249,13 @@ function partsOf(pages: { url: string; text: string }[], rules: Set<string>): { 
     cur.push(p); size += p.text.length;
   }
   if (cur.length || !parts.length) parts.push([...shared, ...cur]);
-  return parts.slice(0, MAX_PARTS);
+  return parts.slice(0, MAX_PARTS());
 }
 
 /** The business's quoting model, built once from its offer pages (and its extracted items for completeness). */
-export async function buildBusiness(tenantId: string, business: string, pages: { url: string; text: string }[], offerNames: string[], model = process.env.PRICING_MODEL || "anthropic/claude-opus-5.5"): Promise<PricingBusiness> {
+export async function buildBusiness(tenantId: string, business: string, pages: { url: string; text: string }[], offerNames: string[], model = process.env.PRICING_MODEL || "anthropic/claude-opus-5.5", llms?: { gen: Llm; check: Llm }): Promise<PricingBusiness> {
   const usage = { usd: 0 };
-  const llm = reasonedLlm(model, usage);
+  const llm = llms?.gen || reasonedLlm(model, usage);
   const hash = createHash("sha1").update(`${model}\n${pages.map((p) => `${p.url}\n${p.text}`).join("\n")}`).digest("hex");
   // Rules pages (terms, delivery, deposits, discounts that apply to every offer) go into every part.
   const { jevAsk } = await import("../llm/jev.js");
@@ -267,7 +267,7 @@ export async function buildBusiness(tenantId: string, business: string, pages: {
     if (pm) built.push(pm);
   }
   // Completeness: offer items no part covers, judged by a cheaper model; those parts are rebuilt once with the gap named.
-  const cheap = reasonedLlm(process.env.PRICING_CHECK_MODEL || "anthropic/claude-sonnet-5.5", usage);
+  const cheap = llms?.check || reasonedLlm(process.env.PRICING_CHECK_MODEL || "anthropic/claude-sonnet-5.5", usage);
   const all: Catalog = { business, currency: "PLN", shared: [], items: built.flatMap((p) => p.catalog.items || []) };
   let missing = await missingFromCatalog(all, offerNames.slice(0, 300), cheap).catch(() => [] as string[]);
   if (missing.length) {
