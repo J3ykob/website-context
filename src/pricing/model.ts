@@ -110,6 +110,8 @@ Rules:
   bought (a menu, a package, a size) are inputs; if not chosen, give the range over the priced options.
 - Several prices with no stated rule for which applies -> status "range".
 - One input per quantity, in one unit (a duration is total hours, never days + hours side by side).
+- Items that cover a fixed amount (a package of 5 h, 80 photos, 100 guests) take the amount the customer needs as
+  an input, so quote() can tell whether the item covers it (extended by the stated extra-hour price, or "not_offered").
 - A line may name a NEED instead of an item ({"item": "need", "inputs": {"what": "...", ...}}) or several items that
   could cover it; when packages and single items can both cover what is asked (a package for 5 people vs
   4 single services), quote() picks the cheapest combination that covers it and says so in the note.
