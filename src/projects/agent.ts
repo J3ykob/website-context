@@ -417,8 +417,10 @@ export async function agentStatus(projectId: string): Promise<AgentRunState | nu
   const state = project?.memory.agentRun as AgentRunState | undefined;
   if (!project || !state || state.status === "done" || state.status === "failed") return state || null;
   if (state.status === "collecting" && Date.now() - Date.parse(state.finishedAt || state.startedAt) < 120_000) return state;
-  const r = await runner(`/projects/${encodeURIComponent(projectId)}/run`, { method: "GET" }, 60_000);
-  if (!r.ok) return state;
+  // The runner unreachable for a moment (a network blip ended two chain cases): still running, asked again
+  // at the next poll - never a failed delivery.
+  const r = await runner(`/projects/${encodeURIComponent(projectId)}/run`, { method: "GET" }, 60_000).catch(() => null);
+  if (!r || !r.ok) return state;
   const s = (await r.json()) as any;
   if (s.state === "running") return state;
   if (s.state === "none" || s.result?.runId !== state.runId) {
@@ -467,8 +469,11 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
   // A reply that may speak to the business is not a failed run: the owner sees it first (needsOwner).
   const hard = (verification?.failed || 0) - (verification?.customerOnlyFailed ? 1 : 0) - (verification?.specFailed || 0);
   const clean = result.state === "succeeded" && result.unknownPlaceholders.length === 0 && result.alteredPlaceholders.length === 0 && hard === 0;
-  // First attempt: any failed criterion earns a repair pass. After it, only hard checks decide.
-  const ok = clean && (state.attempt > 1 || !(verification?.specFailed));
+  // Only the hard checks (invented prices, numbers, the choice, network requests, assumed quantities...)
+  // earn a repair pass. The planner's task-specific criteria are recorded and shown but do not: in the
+  // chain runs they were the main cause of 4-5 runs per request (17 min median) - many asked for what the
+  // data cannot give ("the price for 5 m3 of concrete") or for formatting ("the columns are exactly ...").
+  const ok = clean;
   const done: AgentRunState = {
     ...state, status: ok ? "done" : "failed", stopReason: result.stopReason, error: result.error?.slice(0, 500),
     files: written, verification: verification ? { met: verification.met, failed: verification.failed } : undefined,
