@@ -16,7 +16,7 @@ export const INPUT_HELP: Record<string, string> = {
   hours: "duration of use in hours (a day / doba = 24 h, a week = 168 h)",
   pieces: "number of pieces", kg: "weight in kg", tonnes: "weight in tonnes", m2: "area in m²", m3: "volume in m³",
   metres: "length in metres", bags: "number of bags", pallets: "number of pallets", litres: "litres", people: "number of people",
-  sets: "number of sets", visits: "number of visits",
+  sets: "number of sets", visits: "number of visits", quantity: "the amount the price depends on (as the item counts it)",
 };
 
 /** The price inputs an item's recipe needs, when they are all ones we can describe; [] otherwise. */

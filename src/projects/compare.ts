@@ -17,6 +17,7 @@
  * Everything is recorded in the project (memory, participants, events, usage).
  */
 import { findOfferItems } from "../offer/search.js";
+import { recipeFromFields, evaluate } from "../offer/recipe.js";
 import { jevAsk, type JevQuestion } from "../llm/jev.js";
 import { FIELDS, validValue } from "../offer/schema.js";
 import type { OfferItem } from "../offer/store.js";
@@ -128,6 +129,14 @@ export function priceLine(it: OfferItem, line: Line, b: Business): Quote {
       const pick = match || [...priced].sort((a, b) => a.price_value! - b.price_value!)[0];
       const q = match ? line.quantity : null;
       return { ...base, unitPrice: pick.price_value, unit: pick.unit, total: q !== null ? r2(pick.price_value! * q) : null, priceNote: pick.label };
+    }
+    // Prices by quantity range: the shared evaluator (src/offer/recipe.ts) picks the customer's tier.
+    if (it.components.some((c) => c.combine === "tier")) {
+      const recipe = recipeFromFields(it);
+      const input = recipe?.inputs[0]?.name;
+      const r = recipe && input && line.quantity !== null ? evaluate(recipe.price, { [input]: line.quantity }) : null;
+      if (r?.kind === "price") return { ...base, total: r.amount, priceNote: "cena według ilości" };
+      return { ...base, priceNote: "cena zależy od ilości", tbd: [`${it.name} (ilość)`] };
     }
     // Parts that add up.
     let sum = 0, known = true;

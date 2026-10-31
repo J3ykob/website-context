@@ -126,9 +126,9 @@ export async function buildTemplate(offer: Offer, businessName: string): Promise
       r.getCell("unit").value = label("unit", c.unit);
       r.getCell("quantity_from").value = c.quantity_from === "customer" ? "Podaje klient" : "Stała (1)";
       r.getCell("quantity_label").value = c.quantity_label;
-      r.getCell("combine").value = c.combine === "alternative" ? "Do wyboru (alternatywa)" : "Sumuje się";
+      r.getCell("combine").value = c.combine === "alternative" ? "Do wyboru (alternatywa)" : c.combine === "tier" ? `Według ilości ${c.applies_from ?? ""}-${c.applies_to ?? ""}` : "Sumuje się";
     }
-    r.getCell("combine").dataValidation = { type: "list", allowBlank: true, formulae: ['"Sumuje się,Do wyboru (alternatywa)"'] };
+    r.getCell("combine").dataValidation = { type: "list", allowBlank: true, formulae: ['"Sumuje się,Do wyboru (alternatywa),Według ilości 0-"'] };
     r.getCell("price_type").dataValidation = { type: "list", allowBlank: true, formulae: [listRef.price_type!] };
     r.getCell("unit").dataValidation = { type: "list", allowBlank: true, formulae: [listRef.unit!] };
     r.getCell("quantity_from").dataValidation = { type: "list", allowBlank: true, formulae: ['"Stała (1),Podaje klient"'] };
@@ -241,9 +241,21 @@ export async function readTemplate(buffer: Buffer): Promise<{ items: OfferItem[]
         unit: unit || "unknown",
         quantity_from: text(row.getCell(7).value) === "Podaje klient" ? "customer" : "fixed",
         quantity_label: text(row.getCell(8).value).slice(0, 80),
-        combine: text(row.getCell(9).value) === "Do wyboru (alternatywa)" ? "alternative" : "sum",
+        // "Według ilości 80-99": our own cell format (written above), read back as a tier and its range.
+        ...tierCell(text(row.getCell(9).value)),
       });
     });
   }
   return { items, problems: problems.slice(0, 50) };
 }
+
+/** The "combine" cell of our spreadsheet back into structure ("Według ilości 80-99" = a tier 80..99). */
+function tierCell(v: string): { combine: "sum" | "alternative" | "tier"; applies_from?: number | null; applies_to?: number | null } {
+  if (v === "Do wyboru (alternatywa)") return { combine: "alternative" };
+  const tag = "Według ilości";
+  if (!v.startsWith(tag)) return { combine: "sum" };
+  const [from, to] = v.slice(tag.length).trim().split("-");
+  const n = (x?: string) => (x && x.trim() !== "" && Number.isFinite(Number(x)) ? Number(x) : null);
+  return { combine: "tier", applies_from: n(from), applies_to: n(to) };
+}
+

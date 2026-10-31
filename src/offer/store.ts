@@ -95,7 +95,8 @@ function cleanComponent(raw: any): PriceComponent | null {
     unit: validValue("unit", raw?.unit),
     quantity_from: raw?.quantity_from === "customer" ? "customer" : "fixed",
     quantity_label: str(raw?.quantity_label, 80),
-    combine: raw?.combine === "alternative" ? "alternative" : "sum",
+    combine: raw?.combine === "alternative" ? "alternative" : raw?.combine === "tier" ? "tier" : "sum",
+    ...(raw?.combine === "tier" ? { applies_from: num(raw?.applies_from), applies_to: num(raw?.applies_to) } : {}),
   };
 }
 
@@ -201,7 +202,9 @@ export function renderItem(i: OfferItem): string {
   }
   if (i.components.length) {
     const alt = i.components.every((c) => c.combine === "alternative");
-    parts.push(`${alt ? "Stawki (do wyboru)" : "Składniki ceny (sumują się)"}: ${i.components.map((c) => `${c.label} - ${priceText({ fields: { price_type: c.price_type, unit: c.unit }, price_value: c.price_value, price_max: c.price_max, currency: i.currency, components: [] }) || "do wyceny"}${c.quantity_from === "customer" && c.quantity_label ? ` (ilość: ${c.quantity_label})` : ""}`).join("; ")}`);
+    const tier = i.components.some((c) => c.combine === "tier");
+    const range = (c: typeof i.components[number]) => c.combine !== "tier" ? "" : ` [przy ilości ${c.applies_from ?? "?"}${c.applies_to != null ? `-${c.applies_to}` : "+"}]`;
+    parts.push(`${tier ? "Cena zależna od ilości (obowiązuje przedział, w który wpada ilość)" : alt ? "Stawki (do wyboru)" : "Składniki ceny (sumują się)"}: ${i.components.map((c) => `${c.label} - ${priceText({ fields: { price_type: c.price_type, unit: c.unit }, price_value: c.price_value, price_max: c.price_max, currency: i.currency, components: [] }) || "do wyceny"}${range(c)}${tier && c.combine === "sum" ? " (dolicza się)" : ""}${c.quantity_from === "customer" && c.quantity_label ? ` (ilość: ${c.quantity_label})` : ""}`).join("; ")}`);
   }
   if (i.description) parts.push(`Opis: ${i.description}`);
   return parts.join(" | ");

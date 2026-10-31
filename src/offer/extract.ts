@@ -50,12 +50,12 @@ List every product or service this business offers that the text names, as
   "fields": {
     ${FIELD_SPEC}
   },
-  "components": [{"label": "...", "price_type": "...", "price_value": number|null, "price_max": number|null, "unit": "...", "quantity_from": "fixed"|"customer", "quantity_label": "...", "combine": "sum"|"alternative"}]
+  "components": [{"label": "...", "price_type": "...", "price_value": number|null, "price_max": number|null, "unit": "...", "quantity_from": "fixed"|"customer", "quantity_label": "...", "combine": "sum"|"alternative"|"tier", "applies_from": number|null, "applies_to": number|null}]
 }]}
 - "name": the item's short name as the text writes it, like a heading or list entry (copy it; at most ~8 words) - never a descriptive sentence. List each item once, even if the text mentions it several times. "category": from the text's headings, in its language.
 - "price_value": the number written next to the item (the lower end for a range), null if none. Never compute or guess.
 - "fields": choose only from the listed values, and only when the text STATES it for this item (e.g. "dostawa gratis", "od ręki", "cena do uzgodnienia"). Never assume a typical value for this kind of business: if the text does not say, use "unknown" (an empty answer is better than a wrong one).
-- "components": only when the text itself gives the item several prices: parts that add up (design + labour per m² + materials -> "combine": "sum"), or alternative rates the customer picks from (per hour / per day -> "combine": "alternative"; then also set price_value to the lowest rate). Otherwise [].
+- "components": only when the text itself gives the item several prices: parts that add up (design + labour per m² + materials -> "combine": "sum"), alternative rates the customer picks from (per hour / per day -> "combine": "alternative"; then also set price_value to the lowest rate), or prices that depend on the quantity - per guest by number of guests, a lower unit price above some amount (-> "combine": "tier" with "applies_from" / "applies_to": the quantity range each price is for, null for an open end; price_value = the lowest). Otherwise [].
 List the concrete products / services this text presents (e.g. each machine, each model, each service with its own price) - not the names of other categories or pages it links to. Do not list navigation, contact data, opening hours, news or testimonials. Empty list if the text names no offer.`,
     6000,
   ));

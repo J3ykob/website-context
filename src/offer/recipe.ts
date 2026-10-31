@@ -133,7 +133,7 @@ export function missingInputs(recipe: Recipe, given: Record<string, InputValue |
 const PERIOD_HOURS: Record<string, number> = { godzina: 1, doba: 24, tydzien: 168, miesiac: 720 };
 const INPUT_OF: Record<string, string> = { szt: "pieces", kg: "kg", t: "tonnes", m2: "m2", m3: "m3", mb: "metres", worek: "bags", paleta: "pallets", litr: "litres", osoba: "people", komplet: "sets", wizyta: "visits" };
 
-interface FieldsLike { fields: Record<string, string | undefined>; price_value: number | null; price_max: number | null; currency?: string; components?: { label: string; price_type: string; price_value: number | null; price_max: number | null; unit: string; quantity_from: "fixed" | "customer"; quantity_label: string; combine: "sum" | "alternative" }[] }
+interface FieldsLike { fields: Record<string, string | undefined>; price_value: number | null; price_max: number | null; currency?: string; components?: { label: string; price_type: string; price_value: number | null; price_max: number | null; unit: string; quantity_from: "fixed" | "customer"; quantity_label: string; combine: "sum" | "alternative" | "tier"; applies_from?: number | null; applies_to?: number | null }[] }
 
 function ruleOf(priceType: string | undefined, value: number | null, max: number | null, unit: string | undefined, qtyLabel?: string): Rule | null {
   const u = unit && unit !== "unknown" ? unit : "";
@@ -153,7 +153,21 @@ function ruleOf(priceType: string | undefined, value: number | null, max: number
 export function recipeFromFields(item: FieldsLike): Recipe | null {
   const comps = item.components || [];
   let price: Rule | null;
-  if (comps.length) {
+  // Prices by quantity range (per guest by guest count, cheaper per m² above an area): the tier the
+  // customer's quantity falls in applies, per unit; parts that add up ("sum") come on top.
+  const tiers = comps.filter((c) => c.combine === "tier" && c.price_value !== null);
+  // Ranges that cannot pick one tier (missing, or all from the same start) give no rule - no computed
+  // price is better than a wrong one (the model once read the tiers but left their ranges empty).
+  const starts = new Set(tiers.map((c) => c.applies_from ?? 0));
+  if (tiers.length >= 2 && (starts.size < tiers.length || tiers.every((c) => c.applies_from == null && c.applies_to == null))) return null;
+  if (tiers.length >= 2) {
+    const u = tiers[0].unit && tiers[0].unit !== "unknown" ? tiers[0].unit : item.fields.unit || "";
+    const input = tiers[0].quantity_label || INPUT_OF[u] || (u in PERIOD_HOURS ? "hours" : "quantity");
+    const perUnit = tiers.every((c) => c.price_type !== "fixed" || (u && !["usluga", "projekt"].includes(u)));
+    const tierRule: Rule = { rule: "tiers", input, per: perUnit, tiers: tiers.map((c) => ({ from: c.applies_from ?? 0, ...(c.applies_to != null ? { to: c.applies_to } : {}), price: c.price_value! })).sort((a, b) => a.from - b.from) };
+    const extras = comps.filter((c) => c.combine === "sum").map((c) => ruleOf(c.price_type, c.price_value, c.price_max, c.unit, c.quantity_from === "customer" ? c.quantity_label : undefined));
+    price = extras.length && extras.every(Boolean) ? { rule: "sum", parts: [tierRule, ...(extras as Rule[])] } : tierRule;
+  } else if (comps.length) {
     const parts = comps.map((c) => ruleOf(c.price_type, c.price_value, c.price_max, c.unit, c.quantity_from === "customer" ? c.quantity_label : undefined));
     if (parts.some((p) => p === null)) return null;
     // Alternative period rates of one rental (per hour OR per day) are one "rates" rule (cheapest cover).

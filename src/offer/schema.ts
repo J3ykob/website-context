@@ -190,6 +190,11 @@ export interface PriceComponent {
   quantity_from: "fixed" | "customer";
   quantity_label: string; // what to ask the customer for, e.g. "metraż łazienki"
   // "sum": the parts add up (design + labour + materials); "alternative": the
-  // customer picks one (rental per hour OR per day).
-  combine: "sum" | "alternative";
+  // customer picks one (rental per hour OR per day); "tier": the price depends on
+  // the customer's quantity - the one whose range [applies_from, applies_to]
+  // contains it applies (per guest by guest count, a lower price per m² above
+  // 100 m², a weekly rate from 7 days).
+  combine: "sum" | "alternative" | "tier";
+  applies_from?: number | null; // "tier": the quantity range this price applies to
+  applies_to?: number | null;
 }

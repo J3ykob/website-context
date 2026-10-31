@@ -146,6 +146,8 @@ do tego zapytania. Dla każdej z nich:
   polaczenie = "do_wyboru": klient płaci jedną z nich (np. stawka godzinowa albo dobowa, albo wariant produktu) -
   wybierz tę, o którą prosi klient; gdy to tylko sposób rozliczenia, tę najkorzystniejszą dla klienta przy danej
   ilości (doba = 24 h).
+  polaczenie = "przy_ilosci OD-DO": cena obowiązuje, gdy ilość klienta (np. liczba gości) mieści się w przedziale -
+  bierzesz jedną, tę z przedziału ilości klienta (nie sumujesz przedziałów); puste DO = bez górnej granicy.
   ilosc_od_klienta: czego ilość podaje klient (np. metraż) - jeśli jej nie podał, to jest założenie albo "do ustalenia".
 Firma bez pliku cennika zgłosiła, że to oferuje (na podstawie opisu) - o ceny trzeba ją zapytać.
 oferty_sieci.md (jeśli jest) - oferty firm z sieci dla każdej części prośby, najlepsze najpierw: punkt wyjścia do wyboru
@@ -165,7 +167,7 @@ function itemsCsv(items: OfferItem[]): string {
 }
 
 function componentsCsv(items: OfferItem[]): string | null {
-  const rows = items.flatMap((i) => i.components.map((c) => [i.id.slice(0, 8), i.name, c.label, c.price_value, c.price_max, unitLabel(c.unit), c.combine === "sum" ? "suma" : "do_wyboru", c.quantity_from === "customer" ? c.quantity_label || "tak" : ""]));
+  const rows = items.flatMap((i) => i.components.map((c) => [i.id.slice(0, 8), i.name, c.label, c.price_value, c.price_max, unitLabel(c.unit), c.combine === "sum" ? "suma" : c.combine === "tier" ? `przy_ilosci ${c.applies_from ?? ""}-${c.applies_to ?? ""}` : "do_wyboru", c.quantity_from === "customer" ? c.quantity_label || "tak" : ""]));
   return rows.length ? toCsv(["id_pozycji", "pozycja", "skladnik", "cena", "cena_do", "jednostka", "polaczenie", "ilosc_od_klienta"], rows).slice(1) : null;
 }
 

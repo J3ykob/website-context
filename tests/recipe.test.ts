@@ -93,3 +93,19 @@ describe("agent choice check (wybor.json, structure only)", () => {
     expect(choiceProblems([{ ...c[0], kryterium: "dokladnie_to" }], items)).toEqual([]);
   });
 });
+
+describe("prices by quantity range (tiers from offer components)", () => {
+  const tier = (from: number | null, to: number | null, price: number, unit = "osoba") => ({ label: `${from}-${to}`, price_type: "per_unit", price_value: price, price_max: null, unit, quantity_from: "customer" as const, quantity_label: "", combine: "tier" as const, applies_from: from, applies_to: to });
+  it("per guest by guest count (a venue): the guest count's tier, per guest - never the tiers added up", () => {
+    const venue = recipeFromFields({ fields: { price_type: "per_unit", unit: "osoba" }, price_value: 200, price_max: 245, components: [tier(40, 60, 245), tier(60, 79, 225), tier(80, 99, 205), tier(100, null, 200)] })!;
+    expect(evaluate(venue.price, { people: 90 })).toEqual({ kind: "price", amount: 18450 });
+    expect(evaluate(venue.price, { people: 120 })).toEqual({ kind: "price", amount: 24000 });
+    expect(evaluate(venue.price, { people: 50 })).toEqual({ kind: "price", amount: 12250 });
+  });
+  it("a lower price per m² above an area (a contractor), with a fixed part on top", () => {
+    const work = recipeFromFields({ fields: { price_type: "per_unit", unit: "m2" }, price_value: 40, price_max: 50, components: [tier(0, 100, 50, "m2"), tier(100, null, 40, "m2"),
+      { label: "dojazd", price_type: "fixed", price_value: 200, price_max: null, unit: "usluga", quantity_from: "fixed", quantity_label: "", combine: "sum" as const }] })!;
+    expect(evaluate(work.price, { m2: 80 })).toEqual({ kind: "price", amount: 4200 });
+    expect(evaluate(work.price, { m2: 150 })).toEqual({ kind: "price", amount: 6200 });
+  });
+});
