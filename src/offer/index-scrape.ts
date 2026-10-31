@@ -5,9 +5,9 @@
  *      by code.
  *   2. The readable text of every page is kept (no HTML). Jev skips pages that
  *      show no offer (blog posts, contact, policies) - one yes/no per page.
- *   3. An LLM reads each remaining page and fills the schema (extract.ts); code
- *      then checks it: the name must appear in the page text, a price's digits
- *      too, field values must be schema values - anything else is dropped.
+ *   3. An LLM reads each remaining page (long pages in overlapping windows - a price list's prices came
+ *      after 6000 characters) and fills the schema; Jev confirms each item and its prices against the
+ *      text (extract.ts), and each field value (verifyFields) - anything not confirmed is dropped.
  */
 import * as cheerio from "cheerio";
 import { jevAsk, type JevQuestion } from "../llm/jev.js";
@@ -16,7 +16,9 @@ import { clean, mergeItems, type OfferItem } from "./store.js";
 import { extractFromBlock, type Llm } from "./extract.js";
 
 const MAX_PAGES = 150;      // pages an LLM reads per site
-const PAGE_TEXT = 6000;     // characters of each page it reads
+const PAGE_TEXT = 6000;     // characters the model reads at once
+const PAGE_MAX = 24000;     // characters of a page kept: a long page is read in windows of PAGE_TEXT
+const WINDOW_OVERLAP = 500; // windows overlap, so an item on the border is whole in one of them
 
 // Whitespace collapsed by scanning characters (no regex in extraction).
 function squash(t: string): string {
@@ -114,7 +116,7 @@ export function createOfferIndexer() {
     finish: (llm: Llm) => {
       const limit = Math.max(3, Math.ceil(pages.length * 0.4));
       const texts = pages
-        .map((p) => ({ url: p.url, title: p.title, text: p.blocks.filter((b) => pages.length < 4 || (seenOn.get(b) || 0) < limit).join(" ").slice(0, PAGE_TEXT) }))
+        .map((p) => ({ url: p.url, title: p.title, text: p.blocks.filter((b) => pages.length < 4 || (seenOn.get(b) || 0) < limit).join(" ").slice(0, PAGE_MAX) }))
         .filter((p) => p.text.length >= 80);
       return buildIndex(texts, jsonLd, llm);
     },
@@ -205,7 +207,15 @@ async function buildIndex(pages: { url: string; title: string; text: string }[],
   const types = await businessTypes(pages[0]?.text || "");
   const withOffer = (await offerPages(pages)).slice(0, MAX_PAGES);
   let items = jsonLd;
-  const perPage = await pool(8, withOffer.map((p) => async () => {
+  const windows = withOffer.flatMap((p) => {
+    const out: { url: string; title: string; text: string }[] = [];
+    for (let at = 0; at < p.text.length || at === 0; at += PAGE_TEXT - WINDOW_OVERLAP) {
+      out.push({ ...p, text: p.text.slice(at, at + PAGE_TEXT) });
+      if (at + PAGE_TEXT >= p.text.length) break;
+    }
+    return out;
+  });
+  const perPage = await pool(8, windows.map((p) => async () => {
     try {
       const found = (await extractFromBlock(`${p.title}\n${p.text}`, llm, "website")).map((it) => ({ ...it, url: p.url }));
       return await pool(4, found.map((it) => () => verifyFields(it, p.text)));

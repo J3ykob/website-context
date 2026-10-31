@@ -1,12 +1,14 @@
 /**
- * Offer items from a file that is NOT our onboarding spreadsheet (a price list
- * or catalog as PDF / XLSX / CSV / DOCX / photo). A model reads the text in
- * blocks and fills the schema; every name must appear in the text and every
- * price's digits too, field values must be schema values, so nothing is
- * invented. The owner reviews the result before it is saved. (Our own
- * spreadsheet is read column by column, no model - see sheet.ts.)
+ * Offer items from text (a website page, a price list or catalog as PDF / XLSX / CSV / DOCX / photo). A
+ * model reads the text and fills the schema (text -> structure); a second model (Jev) checks each item
+ * against the same text - is it an offer of this business, are these its prices - and what it does not
+ * confirm is dropped. Code checks structure only (schema values, min <= max). Code used to match names and
+ * digits in the text: it dropped Pełny Parkiet's 5500 zł DJ package (its name is not written as such on the
+ * page) and let numbers through that only appeared elsewhere on it. (Our own spreadsheet is read column by
+ * column, no model - see sheet.ts.)
  */
-import { clean, type OfferItem } from "./store.js";
+import { clean, priceText, type OfferItem } from "./store.js";
+import { jevAsk, type JevQuestion } from "../llm/jev.js";
 import { FIELDS, type FieldId } from "./schema.js";
 
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
@@ -34,12 +36,6 @@ function salvage(raw: string): any {
   }
   return items.length ? { items } : null;
 }
-const fold = (t: string) => t.toLowerCase().normalize("NFKC");
-function digitsOf(t: string): string {
-  let d = "";
-  for (const ch of t) if (ch >= "0" && ch <= "9") d += ch;
-  return d;
-}
 const FIELD_SPEC = (Object.keys(FIELDS) as FieldId[]).map((f) => `"${f}": ${Object.keys(FIELDS[f].values).map((v) => `"${v}"`).join("|")}`).join(",\n    ");
 
 /** Items from one block of text; kept only when grounded in the block. */
@@ -63,23 +59,42 @@ List every product or service this business offers that the text names, as
 List the concrete products / services this text presents (e.g. each machine, each model, each service with its own price) - not the names of other categories or pages it links to. Do not list navigation, contact data, opening hours, news or testimonials. Empty list if the text names no offer.`,
     6000,
   ));
-  const text = fold(block);
-  const textDigits = digitsOf(block);
   const items: OfferItem[] = [];
   for (const raw of Array.isArray(out?.items) ? out.items : []) {
     const it = clean(raw, source);
-    if (!it || !text.includes(fold(it.name))) continue;
-    // A number is kept only when its digits appear in the text.
-    const grounded = (n: number | null) => n !== null && textDigits.includes(digitsOf(String(n).split(".").join("")).slice(0, 6));
-    if (!grounded(it.price_value)) it.price_value = null;
-    if (!grounded(it.price_max)) it.price_max = null;
-    it.components = it.components.map((c) => ({ ...c, price_value: grounded(c.price_value) ? c.price_value : null, price_max: grounded(c.price_max) ? c.price_max : null }));
+    if (!it) continue;
     if (it.price_value !== null && it.price_max !== null && it.price_max < it.price_value) [it.price_value, it.price_max] = [it.price_max, it.price_value];
     it.components = it.components.map((c) => (c.price_value !== null && c.price_max !== null && c.price_max < c.price_value ? { ...c, price_value: c.price_max, price_max: c.price_value } : c));
-    if (it.price_value === null && ["fixed", "from", "range", "per_unit"].includes(it.fields.price_type || "")) delete it.fields.price_type;
     items.push(it);
   }
-  return items;
+  return confirmItems(items, block.slice(0, 6000));
+}
+
+/**
+ * Jev checks the model's items against the text (one call for the block): is each one an offer of this
+ * business the text presents, and does the text give it these prices. Not an offer -> dropped; prices not
+ * given -> removed (the item stays, "price unknown"). Jev unavailable: the items are kept as read.
+ */
+async function confirmItems(items: OfferItem[], text: string): Promise<OfferItem[]> {
+  if (!items.length) return items;
+  const prices = (it: OfferItem) => [priceText(it), ...it.components.map((c) => (c.price_value !== null ? `${c.label}: ${c.price_value}${c.price_max !== null ? `-${c.price_max}` : ""} ${it.currency}` : ""))].filter(Boolean).join("; ");
+  const qs: Record<string, JevQuestion> = {};
+  items.forEach((it, k) => {
+    qs[`o${k}`] = { type: "noul", instructions: `Does \`text\` present \`items[${k}]\` as a product or service this business offers (not navigation, a category of other pages, news or a testimonial)?` };
+    if (prices(it)) qs[`p${k}`] = { type: "noul", instructions: `Does \`text\` give \`items[${k}]\` this price: ${prices(it)}? (The same amounts for this item, however written.)` };
+  });
+  const a = await jevAsk({ text, items: items.map((it) => `${it.name}${it.description ? ` - ${it.description.slice(0, 100)}` : ""}`) }, qs, 15000).catch(() => null);
+  if (!a) return items;
+  const p = (key: string) => (((a as any)[key]?.noul as number | undefined) ?? 1);
+  return items.flatMap((it, k) => {
+    if (p(`o${k}`) < 0.5) return [];
+    if (qs[`p${k}`] && p(`p${k}`) < 0.5) {
+      it.price_value = null; it.price_max = null;
+      it.components = it.components.map((c) => ({ ...c, price_value: null, price_max: null }));
+      if (["fixed", "from", "range", "per_unit"].includes(it.fields.price_type || "")) delete it.fields.price_type;
+    }
+    return [it];
+  });
 }
 
 /** Items from many blocks (a file), de-duplicated by name. */
