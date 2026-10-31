@@ -79,14 +79,31 @@ export function fromJsonLd($: cheerio.CheerioAPI, url: string): OfferItem[] {
 }
 
 /** A page's text as blocks: each element's own text, in document order. */
-function textBlocks($: cheerio.CheerioAPI): string[] {
+// Elements that start a new block of text; everything else (strong, em, a, span...) is inline and stays in
+// its sentence. Taking each element's own text nodes pulled inline text out of it: "W cenę <strong>nie
+// wliczony</strong> jest alkohol" became "W cenę jest alkohol" + "nie wliczony" - the opposite meaning.
+const BLOCK_TAGS = new Set(["p", "li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "dt", "dd", "blockquote", "figcaption", "caption", "pre", "address", "div", "section", "article", "main", "aside", "header", "footer", "ul", "ol", "dl", "table", "tbody", "thead", "tr", "figure", "form", "fieldset", "nav", "details", "summary"]);
+export function textBlocks($: cheerio.CheerioAPI): string[] {
   const out: string[] = [];
-  $("body *").each((_: any, el: any) => {
-    let own = "";
-    for (const n of el.children || []) if (n.type === "text") own += ` ${n.data}`;
-    own = squash(own);
-    if (own.length >= 2) out.push(own);
-  });
+  const isBlock = (n: any) => n?.type === "tag" && BLOCK_TAGS.has(String(n.name).toLowerCase());
+  const hasBlockInside = (el: any): boolean => (el.children || []).some((c: any) => isBlock(c) || (c.type === "tag" && hasBlockInside(c)));
+  // One walk in reading order: a leaf block gives its whole text (inline elements in place); in a block that
+  // holds blocks, loose text and inline runs between its child blocks are blocks of their own, in place.
+  const walk = (el: any): void => {
+    if (!hasBlockInside(el)) { const t = squash($(el).text()); if (t.length >= 2) out.push(t); return; }
+    let run = "";
+    const flush = () => { const t = squash(run); if (t.length >= 2) out.push(t); run = ""; };
+    for (const c of el.children || []) {
+      if (c.type === "text") run += ` ${c.data}`;
+      else if (c.type === "tag" && !isBlock(c) && !hasBlockInside(c)) run += ` ${$(c).text()}`;
+      else if (c.type === "tag") { flush(); walk(c); }
+    }
+    flush();
+  };
+  // A line break separates words ("pokoi.<br>Posiadamy" read as "pokoi.Posiadamy").
+  $("br").replaceWith(" ");
+  const body = $("body").get(0);
+  if (body) walk(body);
   return out;
 }
 

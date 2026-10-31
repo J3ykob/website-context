@@ -103,6 +103,8 @@ Rules:
 - An input missing from the request: if a price can still be given (the options the customer did not choose,
   each priced) -> status "range" over them; status "needs" (with the input names) ONLY when no price can be given
   without it (e.g. per-guest pricing without the number of guests). Never assume a value.
+- A price that holds under a condition the customer did not mention (within 50 km, on weekdays, for up to 100
+  guests) -> give that price with the condition in the note; do not withhold it to ask first.
 - Where the customer may choose a way of paying (a rate per hour or per day, a weekly rate), quote the cheapest
   for the customer and do not make it an input - the duration is the input. Options that change WHAT is
   bought (a menu, a package, a size) are inputs; if not chosen, give the range over the priced options.
