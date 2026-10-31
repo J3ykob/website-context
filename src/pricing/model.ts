@@ -242,7 +242,9 @@ export function reasonedLlm(model: string, usage?: { usd: number }): Llm {
 async function missingFromCatalog(catalog: Catalog, offer: string[], llm: Llm): Promise<string[]> {
   if (!offer.length) return [];
   const j = firstJson(await llm("You compare two lists of a business's products and services. Output only JSON.",
-    `Catalogue (a program's items):\n${catalog.items.map((i) => `- ${i.name}`).join("\n")}\n\nOffer items read from the same pages:\n${offer.map((n, k) => `${k}: ${n}`).join("\n")}\n\nWhich offer items have NO counterpart in the catalogue (the same product or service under any name)? {"missing": [numbers]}`, 2000));
+    // Items with their inputs' options: a flavour or size offered as an option of an item is covered (Liliowa's
+    // 12 cake flavours were flagged as missing products and sent the build round after nothing).
+    `Catalogue (a program's items, with the options of their inputs):\n${catalog.items.map((i) => `- ${i.name}${(i.inputs || []).filter((x) => x.options?.length).map((x) => ` [${x.name}: ${x.options!.join(", ")}]`).join("")}${i.note ? ` - ${i.note.slice(0, 300)}` : ""}`).join("\n")}\n\nOffer items read from the same pages:\n${offer.map((n, k) => `${k}: ${n}`).join("\n")}\n\nWhich offer items have NO counterpart in the catalogue - neither an item (the same product or service under any name) nor one of an item's options, nor named in an item's note as a variant of it (e.g. a flavour)? {"missing": [numbers]}`, 2000));
   return (Array.isArray(j?.missing) ? j.missing : []).filter((k: unknown) => Number.isInteger(k) && offer[k as number]).map((k: number) => offer[k]);
 }
 
