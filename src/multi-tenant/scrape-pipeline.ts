@@ -317,6 +317,13 @@ export async function scrapeTenant(
       const kept = prev.items.filter((i) => i.source !== "website" || i.owner_set.length > 0);
       await saveOffer(tenantId, mergeItems(kept, idx.items), idx.businessTypes.length ? idx.businessTypes : prev.businessTypes);
       console.log(`[scrape-pipeline] Offer index: ${JSON.stringify(idx.stats)} types=${idx.businessTypes.join(",")}`);
+      // The offer pages' text, kept for the business's quoting model (src/pricing/model.ts) - built from it
+      // once (PRICING_BUILD=on: after every scrape whose pages changed; otherwise by the admin route).
+      if (idx.pages?.length) {
+        const { uploadToR2 } = await import("../storage/r2.js");
+        await uploadToR2(`tenants/${tenantId}/offer-pages.json`, JSON.stringify(idx.pages), "application/json").catch(() => {});
+        if (process.env.PRICING_BUILD === "on") void import("../pricing/build-job.js").then((m) => m.buildPricingFor(tenantId)).catch((e) => console.warn(`[pricing] ${tenantId}: ${e?.message || e}`));
+      }
     } catch (err) {
       console.warn(`[scrape-pipeline] Offer index skipped: ${(err as Error).message}`);
     }

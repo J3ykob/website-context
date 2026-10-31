@@ -1703,6 +1703,24 @@ app.get("/api/admin/active-tenant-ids", (req, res) => {
 });
 
 // Admin rescrape single tenant (?maxPages=10 to limit crawl size)
+// Admin: build a business's quoting model (src/pricing/build-job.ts) from its last scrape's offer pages - in the
+// background (minutes; ~$0.5-1 per part with the default model). ?force=1 rebuilds unchanged pages.
+app.post("/api/admin/pricing/:tenantId", (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  const id = req.params.tenantId;
+  if (!getTenant(id)) { res.status(404).json({ error: "Tenant not found" }); return; }
+  void import("../src/pricing/build-job.js").then((m) => m.buildPricingFor(id, { force: req.query.force === "1" }))
+    .then((r: any) => console.log(`[pricing] ${id}: ${"skipped" in r ? `skipped - ${r.skipped}` : `built, ${r.parts.length} part(s), $${r.costUsd.toFixed(2)}`}`))
+    .catch((e) => console.warn(`[pricing] ${id}: build failed - ${e?.message || e}`));
+  res.json({ ok: true, building: true });
+});
+app.get("/api/admin/pricing/:tenantId", async (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  const pb = await (await import("../src/pricing/model.js")).loadPricing(req.params.tenantId);
+  if (!pb) { res.status(404).json({ error: "No quoting model" }); return; }
+  res.json({ tenantId: pb.tenantId, builtAt: pb.builtAt, model: pb.model, costUsd: pb.costUsd, missing: pb.missing, parts: pb.parts.map((p) => ({ items: p.catalog.items.length, shared: p.catalog.shared.map((s) => s.name), verified: p.verified })) });
+});
+
 app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenant = getTenant(req.params.tenantId);

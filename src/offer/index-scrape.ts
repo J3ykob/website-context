@@ -201,7 +201,7 @@ async function dedupe(items: OfferItem[]): Promise<OfferItem[]> {
   return kept;
 }
 
-async function buildIndex(pages: { url: string; title: string; text: string }[], jsonLd: OfferItem[], llm: Llm): Promise<{ businessTypes: BusinessType[]; items: OfferItem[]; stats: Record<string, number> }> {
+async function buildIndex(pages: { url: string; title: string; text: string }[], jsonLd: OfferItem[], llm: Llm): Promise<{ businessTypes: BusinessType[]; items: OfferItem[]; pages?: { url: string; text: string }[]; stats: Record<string, number> }> {
   const t0 = Date.now();
   if (!pages.length && !jsonLd.length) return { businessTypes: [], items: [], stats: { pages: 0 } };
   const types = await businessTypes(pages[0]?.text || "");
@@ -225,5 +225,6 @@ async function buildIndex(pages: { url: string; title: string; text: string }[],
   for (const list of perPage) items = mergeItems(items, list);
   items = await dedupe(items);
   const priced = items.filter((i) => i.price_value !== null || ["on_request", "free", "included"].includes(i.fields.price_type || "")).length;
-  return { businessTypes: types, items, stats: { pages: pages.length, offerPages: withOffer.length, jsonLd: jsonLd.length, items: items.length, priced, ms: Date.now() - t0 } };
+  // The offer pages' text goes on to the business's quoting model (src/pricing/model.ts), built from it once.
+  return { businessTypes: types, items, pages: withOffer.map((p) => ({ url: p.url, text: p.text })), stats: { pages: pages.length, offerPages: withOffer.length, jsonLd: jsonLd.length, items: items.length, priced, ms: Date.now() - t0 } };
 }
