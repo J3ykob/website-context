@@ -577,7 +577,7 @@ section { padding: 100px 0; }
 footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-height: auto; position: relative; z-index: 1; }
 .footer-inner { max-width: 1080px; margin: 0 auto; }
 .footer-grid {
-  display: grid; grid-template-columns: 1.6fr 1fr 1fr;
+  display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr;
   gap: 32px; padding-bottom: 32px;
 }
 .footer-logo {
@@ -914,6 +914,12 @@ footer { padding: 56px 28px 32px; border-top: 1px solid var(--border); min-heigh
         <div class="footer-col-title" data-i18n="footer.contact">Contact</div>
         <a href="mailto:jakub@whisp.so">jakub@whisp.so</a>
       </div>
+      <div class="footer-col">
+        <div class="footer-col-title" data-i18n="footer.legal">Legal</div>
+        <a href="/regulamin" data-i18n="footer.terms">Terms of service</a>
+        <a href="/polityka-prywatnosci" data-i18n="footer.privacy">Privacy policy</a>
+        <a href="/umowa-powierzenia" data-i18n="footer.dpa">Data processing agreement</a>
+      </div>
     </div>
     <div class="footer-bottom">© 2026 Whisp</div>
   </div>
@@ -956,7 +962,7 @@ var i18n = {
     "faq.q6": "Can I customize the appearance?", "faq.a6": "The widget adapts to your site's colours by itself. You can set your brand name and accent colour.",
     "cta.h": "Ready to try it?", "cta.p": "Try it on your own website - the chat is free.",
     "footer.tagline": "Your website, but it talks. A chat that reads your site and answers visitors day and night.",
-    "footer.product": "Product", "footer.dashboard": "Dashboard", "footer.login": "Login", "footer.contact": "Contact",
+    "footer.product": "Product", "footer.dashboard": "Dashboard", "footer.login": "Login", "footer.contact": "Contact", "footer.legal": "Legal", "footer.terms": "Terms of service", "footer.privacy": "Privacy policy", "footer.dpa": "Data processing agreement",
     "demo.convo": [
       { type: "user", text: "How much for same-day to Kraków?" },
       { type: "bot", text: "Same-day to Kraków starts at 89 PLN for parcels up to 5kg. Express (before 12:00) is 129 PLN. Want me to start a shipment?" },
@@ -998,7 +1004,7 @@ var i18n = {
     "faq.q6": "Czy mogę dostosować wygląd?", "faq.a6": "Widget sam dopasowuje się do kolorów Twojej strony. Możesz ustawić nazwę marki i kolor akcentu.",
     "cta.h": "Chcesz spróbować?", "cta.p": "Wypróbuj na swojej stronie - czat jest darmowy.",
     "footer.tagline": "Twoja strona, ale mówi. Czat, który czyta Twoją stronę i odpowiada klientom o każdej porze.",
-    "footer.product": "Produkt", "footer.dashboard": "Panel", "footer.login": "Logowanie", "footer.contact": "Kontakt",
+    "footer.product": "Produkt", "footer.dashboard": "Panel", "footer.login": "Logowanie", "footer.contact": "Kontakt", "footer.legal": "Informacje prawne", "footer.terms": "Regulamin", "footer.privacy": "Polityka prywatności", "footer.dpa": "Umowa powierzenia danych",
     "demo.convo": [
       { type: "user", text: "Ile kosztuje przesyłka same-day do Krakowa?" },
       { type: "bot", text: "Same-day do Krakowa od 89 PLN za paczki do 5kg. Express (przed 12:00) to 129 PLN. Mam zacząć wysyłkę?" },
