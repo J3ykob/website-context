@@ -27,8 +27,8 @@ import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
 export interface InputSpec { name: string; meaning: string; type: "number" | "boolean" | "choice" | "date" | "text"; unit?: string; options?: string[] }
 export interface CatalogItem { id: string; name: string; inputs: InputSpec[]; note?: string }
 export interface Catalog { business: string; currency: string; shared: InputSpec[]; items: CatalogItem[] }
-export interface Request { context: Record<string, unknown>; lines: { item: string; inputs: Record<string, unknown> }[] }
-export interface QuoteLine { item: string; status: "price" | "range" | "needs" | "on_request" | "not_offered"; amount?: number; min?: number; max?: number | null; needs?: string[]; note?: string }
+export interface Request { context: Record<string, unknown>; lines: { item: string; inputs: Record<string, unknown>; need?: string }[] }
+export interface QuoteLine { item: string; status: "price" | "range" | "needs" | "on_request" | "not_offered" | "included"; amount?: number; min?: number; max?: number | null; needs?: string[]; note?: string; need?: string; alternative?: boolean }
 export interface Quote { lines: QuoteLine[]; total?: { min: number; max: number | null } | null; rules?: string[] }
 export interface PricingModel { catalog: Catalog; code: string; source: string; model: string; verified?: { cases: number; agreed: number; problems: string[] } }
 
@@ -89,7 +89,7 @@ const catalog = { business, currency, shared: [InputSpec], items: [{ id, name, i
 function needs(request) -> [{ item, missing: [input names] }]   // what is still missing for each line
 function quote(request) -> { lines: [QuoteLine], total, rules }
   // request = { context: {shared input values}, lines: [{ item: id, inputs: {...} }] }
-  // QuoteLine = { item, status: "price"|"range"|"needs"|"on_request"|"not_offered", amount?, min?, max?, needs?, note? }
+  // QuoteLine = { item, status: "price"|"range"|"needs"|"on_request"|"not_offered"|"included", amount?, min?, max?, needs?, note? }
   // total = { min, max } over priced lines (null when nothing is priced); rules = the rules you applied, short
 
 Rules:
@@ -97,7 +97,9 @@ Rules:
   delivery charge, and how they combine. Rules that span items (a package replacing single services, a fee
   charged once per order, a minimum order) go in quote().
 - A price the pages do not give -> status "on_request". Never invent a price or a typical value.
-- status is EXACTLY one of "price", "range", "needs", "on_request", "not_offered" (no other words).
+- status is EXACTLY one of "price", "range", "needs", "on_request", "not_offered", "included" (no other words).
+  "included" = its price is part of another item's price (a service inside a package): say which in the note -
+  never "price" 0 for that ("price" 0 only when the pages say it is free).
 - An input missing from the request: if a price can still be given (the options the customer did not choose,
   each priced) -> status "range" over them; status "needs" (with the input names) ONLY when no price can be given
   without it (e.g. per-guest pricing without the number of guests). Never assume a value.
@@ -122,11 +124,11 @@ export async function generate(business: string, pages: { url: string; text: str
   return { catalog, code, source, model };
 }
 
-const STATUSES = new Set(["price", "range", "needs", "on_request", "not_offered"]);
+const STATUSES = new Set(["price", "range", "needs", "on_request", "not_offered", "included"]);
 /** The interface, checked by code: shapes and status values (structure only). */
 function contractProblems(q: any): string[] {
   if (!q || !Array.isArray(q.lines)) return ["quote() must return { lines: [...] }"];
-  return q.lines.flatMap((l: any) => !STATUSES.has(l?.status) ? [`status "${l?.status}" is not one of price/range/needs/on_request/not_offered`]
+  return q.lines.flatMap((l: any) => !STATUSES.has(l?.status) ? [`status "${l?.status}" is not one of price/range/needs/on_request/not_offered/included`]
     : l.status === "price" && typeof l.amount !== "number" ? [`${l.item}: status price without a numeric amount`]
     : l.status === "range" && typeof l.min !== "number" ? [`${l.item}: status range without a numeric min`] : []);
 }
@@ -154,8 +156,8 @@ the quote each must get. Cover: single items, several items in one order, edge v
 pages state (tiers, free distance, minimums), a missing input (expected status "needs"), and something the pages
 do not price (expected "on_request"). Use the catalogue's item ids and input names.
 Answer JSON: {"cases": [{"request": {"context": {}, "lines": [{"item": "...", "inputs": {}}]},
-  "expected": {"lines": [{"item": "...", "status": "price|range|needs|on_request|not_offered", "amount": 0, "min": 0, "max": 0}], "total": {"min": 0, "max": 0} }, "why": "..."}]}
-status is EXACTLY one of those five words. When the customer does not choose between options the business
+  "expected": {"lines": [{"item": "...", "status": "price|range|needs|on_request|not_offered|included", "amount": 0, "min": 0, "max": 0}], "total": {"min": 0, "max": 0} }, "why": "..."}]}
+status is EXACTLY one of those six words ("included" = its price is part of another item's, e.g. inside a package). When the customer does not choose between options the business
 prices, expect "range" over them (or "price" when the business takes the cheapest for the customer); expect
 "needs" only when no price can be given without the input. 8 to 12 cases.`;
 
@@ -200,14 +202,18 @@ Sunday" = 2 days, "4x5 m" = 20 m², "the bride and 3 bridesmaids" = 4 people); l
 never assume. A duration is not a choice of rate ("6 hours" sets the duration, not "pay per hour"); one value
 per input in the catalogue's unit ("30 hours over two days" = 30 hours). Every product or service asked for is a
 line - for each person or thing the item that is for them (a bridesmaid's make-up is not the bride's). When
-several catalogue items (a package or single services) could cover it, list each of them - the business's
-program picks. Shared inputs go in "context".
-Answer JSON: {"context": {...}, "lines": [{"item": "<id>", "inputs": {...}}]} ({"lines": []} when nothing matches).`;
+several catalogue items (a package, or single services) could cover the same thing, they are OPTIONS of one need -
+only the cheapest of them counts. Shared inputs go in "context".
+Answer JSON: {"context": {...}, "needs": [{"what": "<what the customer asks for>", "options": [{"item": "<id>", "inputs": {...}}]}]}
+({"needs": []} when nothing matches). One need per thing asked; its options are the items that could each cover it.`;
 
 /** The customer's message as a request in the business's terms (text -> structure). */
 export async function read(message: string, catalog: Catalog, llm: Llm): Promise<Request> {
   const j = firstJson(await llm(READ, `Catalogue:\n${JSON.stringify(catalog)}\n\nCustomer: ${message}`, 1500));
-  return { context: j?.context || {}, lines: Array.isArray(j?.lines) ? j.lines : [] };
+  // Needs with their options -> lines; the options of one need share its position as their "need" (structure, no text).
+  const needs: any[] = Array.isArray(j?.needs) ? j.needs : [];
+  const lines = needs.flatMap((n, k) => (Array.isArray(n?.options) ? n.options : []).filter((o: any) => typeof o?.item === "string").map((o: any) => ({ item: o.item, inputs: o.inputs || {}, need: `n${k}` })));
+  return { context: j?.context || {}, lines };
 }
 
 // ── A whole business: parts, completeness, storage ──
@@ -281,18 +287,34 @@ export async function buildBusiness(tenantId: string, business: string, pages: {
   return { tenantId, hash, builtAt: new Date().toISOString(), model, parts: built, costUsd: usage.usd, missing };
 }
 
-/** A quote over every part: each line goes to the part whose catalogue has its item. */
+/**
+ * A quote over every part: each line goes to the part whose catalogue has its item (the first part that has
+ * it - an item found on two pages is quoted once). Lines sharing a "need" are alternatives for one thing: only
+ * the cheapest priced one counts in the total, the others are listed as alternatives (a make-up package and
+ * the single services it replaces were added up: 6045 zł instead of 2545).
+ */
 export async function quoteBusiness(pb: PricingBusiness, request: Request): Promise<Quote> {
   const lines: QuoteLine[] = [], rules: string[] = [];
-  for (const part of pb.parts) {
-    const own = request.lines.filter((l) => part.catalog.items.some((i) => i.id === l.item));
+  const owner = (id: string) => pb.parts.findIndex((p) => p.catalog.items.some((i) => i.id === id));
+  for (let k = 0; k < pb.parts.length; k++) {
+    const own = request.lines.filter((l) => owner(l.item) === k);
     if (!own.length) continue;
-    const q = (await run(part.code, "quote", { context: request.context, lines: own }).catch((e) => ({ lines: own.map((l) => ({ item: l.item, status: "on_request", note: `could not compute: ${(e as Error).message.slice(0, 60)}` })) }))) as Quote;
-    lines.push(...(q.lines || [])); rules.push(...(q.rules || []));
+    const q = (await run(pb.parts[k].code, "quote", { context: request.context, lines: own.map(({ item, inputs }) => ({ item, inputs })) }).catch((e) => ({ lines: own.map((l) => ({ item: l.item, status: "on_request", note: `could not compute: ${(e as Error).message.slice(0, 60)}` })) }))) as Quote;
+    for (const l of q.lines || []) lines.push({ ...l, need: own.find((x) => x.item === l.item)?.need });
+    rules.push(...(q.rules || []));
   }
-  for (const l of request.lines) if (!lines.some((x) => x.item === l.item)) lines.push({ item: l.item, status: "not_offered" });
-  const priced = lines.filter((l) => l.status === "price" || l.status === "range");
-  const total = priced.length ? { min: priced.reduce((n, l) => n + (l.status === "price" ? l.amount! : l.min!), 0), max: priced.some((l) => l.status === "range" && l.max == null) ? null : priced.reduce((n, l) => n + (l.status === "price" ? l.amount! : l.max!), 0) } : null;
+  for (const l of request.lines) if (!lines.some((x) => x.item === l.item)) lines.push({ item: l.item, status: "not_offered", need: l.need });
+  // One line per need in the total: the cheapest priced alternative (by its lower amount).
+  const low = (l: QuoteLine) => (l.status === "price" ? l.amount! : l.status === "range" ? l.min! : Infinity);
+  const groups = new Map<string, QuoteLine[]>();
+  lines.forEach((l, k) => { const key = l.need || `#${k}`; groups.set(key, [...(groups.get(key) || []), l]); });
+  const counted: QuoteLine[] = [];
+  for (const g of groups.values()) {
+    const best = g.filter((l) => low(l) < Infinity).sort((a, b) => low(a) - low(b))[0];
+    if (best) counted.push(best);
+    if (g.length > 1) for (const l of g) if (l !== best) l.alternative = true;
+  }
+  const total = counted.length ? { min: counted.reduce((n, l) => n + low(l), 0), max: counted.some((l) => l.status === "range" && l.max == null) ? null : counted.reduce((n, l) => n + (l.status === "price" ? l.amount! : l.max!), 0) } : null;
   return { lines, total, rules };
 }
 

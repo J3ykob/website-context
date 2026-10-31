@@ -1157,8 +1157,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const q = await m.quoteBusiness(pb, request);
     const name = (id: string) => catalog.items.find((i) => i.id === id)?.name || id;
     const zl = (n: number) => `${Math.round(n * 100) / 100} ${catalog.currency || "PLN"}`;
-    const lines = q.lines.map((l) => `- ${name(l.item)}: ${l.status === "price" ? zl(l.amount!) : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
-    if (q.total) lines.push(`Total of the priced lines: ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
+    const lines = q.lines.map((l) => `- ${name(l.item)}${l.alternative ? " (an alternative - not in the total)" : ""}: ${l.status === "price" ? zl(l.amount!) : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
+    if (q.total) lines.push(`Total (the cheapest option for each thing asked): ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
     return lines.join("\n");
   }
 
