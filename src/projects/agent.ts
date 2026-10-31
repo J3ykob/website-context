@@ -149,6 +149,8 @@ do tego zapytania. Dla każdej z nich:
   polaczenie = "przy_ilosci OD-DO": cena obowiązuje, gdy ilość klienta (np. liczba gości) mieści się w przedziale -
   bierzesz jedną, tę z przedziału ilości klienta (nie sumujesz przedziałów); puste DO = bez górnej granicy.
   ilosc_od_klienta: czego ilość podaje klient (np. metraż) - jeśli jej nie podał, to jest założenie albo "do ustalenia".
+- wycena_<firma>.md (zamiast jej cennika, jeśli jest) - to zapytanie wycenione programem cenowym firmy (zbudowanym
+  raz z jej cennika): kwoty dla ilości klienta, wariant najtańszy w sumie, alternatywy poza sumą, czego brakuje.
 Firma bez pliku cennika zgłosiła, że to oferuje (na podstawie opisu) - o ceny trzeba ją zapytać.
 oferty_sieci.md (jeśli jest) - oferty firm z sieci dla każdej części prośby, najlepsze najpierw: punkt wyjścia do wyboru
 firm; ceny sprawdź w cennikach i przelicz sam.
@@ -175,7 +177,7 @@ function componentsCsv(items: OfferItem[]): string | null {
  * The offers of the businesses that answered the need (public data): the items each matched, and for the
  * business running the project its whole offer too. Businesses that have nothing for it stay out.
  */
-async function priceLists(project: Project, adverts: Advert[], mustAsk: string[] | null): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
+async function priceLists(project: Project, adverts: Advert[], mustAsk: string[] | null, need = ""): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
   const files: Record<string, string> = {};
   const slugs: Record<string, string> = {};
   const { networkMembers } = await import("./network.js");
@@ -187,7 +189,16 @@ async function priceLists(project: Project, adverts: Advert[], mustAsk: string[]
   const own = project.initiatorTenantId;
   const byTenant = new Map(adverts.map((a) => [a.tenantId, a]));
   const ownOffer = (await loadOffer(own).catch(() => null))?.items || [];
-  for (const tenantId of [own, ...adverts.map((a) => a.tenantId).filter((id) => id !== own)]) {
+  const quoting = process.env.PRICING_CHAT === "on";
+  const quoteOf = async (tenantId: string, text: string) => {
+    const m = await import("../pricing/model.js");
+    const pb = await m.loadPricing(tenantId).catch(() => null);
+    return pb?.parts.length ? Promise.race([m.quoteText(pb, text).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 20000))]) : null;
+  };
+  const ids = [own, ...adverts.map((a) => a.tenantId).filter((id) => id !== own)];
+  const quotes = await Promise.all(ids.map((id) => (quoting && need ? quoteOf(id, need) : null)));
+  if (quoting) console.log(`[pricing] ${project.id}: quoting models priced ${ids.filter((_, k) => quotes[k]).join(", ") || "none"} of ${ids.length}`);
+  for (const [n, tenantId] of ids.entries()) {
     const ad = byTenant.get(tenantId);
     const t = getTenant(tenantId);
     const label = t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId;
@@ -198,8 +209,12 @@ async function priceLists(project: Project, adverts: Advert[], mustAsk: string[]
     slugs[slug] = tenantId;
     const matched = ad?.items || [];
     const whole = tenantId === own ? ownOffer : [];
+    // Its quoting model (src/pricing/model.ts), when it has one: the request priced by its own program -
+    // given instead of its price-list rows (W5: the agent took a stale row over the computed package).
+    const quote = quotes[n];
     const lines = [`## ${slug}: ${label}${tenantId === own ? " (firma prowadząca ten projekt)" : ""}`, about.get(tenantId) || "(brak opisu)"];
-    if (matched.length) lines.push(`Pozycje dopasowane do zapytania: cennik_${slug}.csv (${matched.length})`);
+    if (quote) lines.push(`Wycena tego zapytania z jej programu cenowego: wycena_${slug}.md`);
+    else if (matched.length) lines.push(`Pozycje dopasowane do zapytania: cennik_${slug}.csv (${matched.length})`);
     // Which businesses must be asked (rule 9) was decided before the run (mustAskBusinesses); without
     // that decision (Jev down), matched items without a price decide.
     if (tenantId !== own && mustAsk) {
@@ -208,13 +223,16 @@ async function priceLists(project: Project, adverts: Advert[], mustAsk: string[]
       const unpriced = matched.filter((i) => (!priceText(i) || priceText(i) === "cena na zapytanie") && !i.components.some((c) => c.price_value !== null));
       if (unpriced.length) lines.push(unpriced.length === matched.length ? "W dopasowanych pozycjach nie ma cen - o ceny trzeba zapytać firmę." : `Bez ceny: ${unpriced.slice(0, 8).map((i) => i.name).join("; ")} - o ich ceny trzeba zapytać firmę.`);
     }
-    if (whole.length) lines.push(`Cała oferta: oferta_${slug}.csv (${whole.length})`);
-    if (!matched.length && !whole.length) lines.push("Brak cennika w danych - o ceny trzeba zapytać firmę.");
+    if (whole.length && !quote) lines.push(`Cała oferta: oferta_${slug}.csv (${whole.length})`);
+    if (!matched.length && !whole.length && !quote) lines.push("Brak cennika w danych - o ceny trzeba zapytać firmę.");
     directory.push(lines.join("\n"));
-    if (matched.length) files[`cennik_${slug}.csv`] = itemsCsv(matched);
-    if (whole.length) files[`oferta_${slug}.csv`] = itemsCsv(whole);
-    const comps = componentsCsv([...new Map([...matched, ...whole].map((i) => [i.id, i])).values()]);
-    if (comps) files[`skladniki_${slug}.csv`] = comps;
+    if (quote) files[`wycena_${slug}.md`] = `# Wycena: ${label}\n\nPoliczone programem cenowym firmy (zbudowanym z jej cennika) dla tego zapytania. Kwoty bierz stąd; "needs" = brakuje danych od klienta.\n\n${quote}\n`;
+    else {
+      if (matched.length) files[`cennik_${slug}.csv`] = itemsCsv(matched);
+      if (whole.length) files[`oferta_${slug}.csv`] = itemsCsv(whole);
+      const comps = componentsCsv([...new Map([...matched, ...whole].map((i) => [i.id, i])).values()]);
+      if (comps) files[`skladniki_${slug}.csv`] = comps;
+    }
     for (const i of [...matched, ...whole]) for (const w of i.name.split(" ")) if (w.length > 2) catalog.add(w);
   }
   if (directory.length > 1) files["firmy.md"] = `# Firmy z sieci, które mają coś do tego zapytania\n\n${directory.join("\n\n")}\n`;
@@ -311,7 +329,7 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
     }
     mustAsk = project.memory.networkAsked ? [] : [...new Set(ask)].slice(0, MUST_ASK_MAX);
   }
-  const offers = await priceLists(project, adverts, mustAsk);
+  const offers = await priceLists(project, adverts, mustAsk, need);
   if (networkOffers.length) {
     const net = await import("./network.js");
     offers.files["oferty_sieci.md"] = networkOffersText(parts, networkOffers, project.initiatorTenantId, net.businessLabel, net.isListed);

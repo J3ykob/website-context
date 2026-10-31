@@ -1151,17 +1151,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     if (!hit || Date.now() - hit.at > 10 * 60_000) this.pricingCache.set(tenantId, (hit = { at: Date.now(), pb: await m.loadPricing(tenantId) }));
     const pb = hit.pb;
     if (!pb?.parts.length) return null;
-    const catalog = m.catalogOf(pb);
-    const { OpenRouterProvider } = await import("./openrouter-provider.js");
-    const or = new OpenRouterProvider({ model: "anthropic/claude-haiku-5.5", maxTokens: 1500, temperature: 0 });
-    const request = await m.read(convo, catalog, async (sys, user, max = 1500) => (await or.chat([{ role: "system", content: sys }, { role: "user", content: user }], { maxTokens: max })).content);
-    if (!request.lines.length) return null;
-    const q = await m.quoteBusiness(pb, request);
-    const name = (id: string) => catalog.items.find((i) => i.id === id)?.name || id;
-    const zl = (n: number) => `${Math.round(n * 100) / 100} ${catalog.currency || "PLN"}`;
-    const lines = q.lines.map((l) => `- ${name(l.item)}${l.alternative ? " (an alternative - not in the total)" : ""}: ${l.status === "price" ? zl(l.amount!) : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
-    if (q.total) lines.push(`Total (the cheapest option for each thing asked): ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
-    return lines.join("\n");
+    return m.quoteText(pb, convo);
   }
 
   /** The network businesses found for a need, as prompt text + fact-check evidence + links. */
