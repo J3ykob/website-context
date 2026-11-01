@@ -126,6 +126,9 @@ const LOG_RING: { ts: string; level: string; msg: string }[] = [];
 const LOG_MAX = 500;
 
 const DATA_DIR = resolve(__dirname, "../data");
+// Files that live only on this disk come back from R2 on a new server before they are read (src/storage/disk-mirror.ts).
+const { mirror, restoreDisk } = await import("../src/storage/disk-mirror.js");
+await restoreDisk(DATA_DIR);
 const DEMO_VISITS_PATH = resolve(DATA_DIR, "demo-visits.json");
 const DEMO_VISITS_MAX = 2000;
 let DEMO_VISITS: { ts: string; tenantId: string; domain: string; ip: string; ref: string; ua: string }[] = [];
@@ -135,7 +138,7 @@ let demoVisitsDirty = false;
 setInterval(async () => {
   if (!demoVisitsDirty) return;
   demoVisitsDirty = false;
-  await writeFile(DEMO_VISITS_PATH, JSON.stringify(DEMO_VISITS, null, 2)).catch(() => {});
+  await writeFile(DEMO_VISITS_PATH, JSON.stringify(DEMO_VISITS, null, 2)).then(() => mirror(DEMO_VISITS_PATH)).catch(() => {});
 }, 5000);
 function pushLog(level: string, msg: string) {
   LOG_RING.push({ ts: new Date().toISOString(), level, msg });
@@ -1204,6 +1207,16 @@ app.post("/api/admin/rescrape-list", (req, res) => {
   res.json({ queued: queued.length, ids: queued, maxPages });
 });
 
+// Admin: mirror every disk-only file on this server to R2 now (before moving the server; afterwards each save mirrors itself).
+app.post("/api/admin/disk-mirror-all", async (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  const { readdirSync } = await import("fs");
+  const files = [DEMO_VISITS_PATH, voiceSuppressionPath, voiceRepliesPath, unsubPath,
+    ...readdirSync(DATA_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => resolve(DATA_DIR, d.name, "context_notes.json"))].filter((f) => existsSync(f));
+  for (const f of files) await mirror(f);
+  res.json({ mirrored: files.map((f) => f.slice(DATA_DIR.length + 1)) });
+});
+
 // Check tenant status
 app.get("/api/tenants/:id/status", (req, res) => {
   const tenant = getTenant(req.params.id);
@@ -2148,7 +2161,7 @@ app.post("/api/dashboard/context-notes", authMiddleware, async (req, res) => {
   let notes: any[] = [];
   if (existsSync(notesPath)) notes = JSON.parse(await readFile(notesPath, "utf-8"));
   notes.push({ question, answer, addedAt: new Date().toISOString() });
-  await writeFile(notesPath, JSON.stringify(notes, null, 2));
+  await writeFile(notesPath, JSON.stringify(notes, null, 2)); void mirror(notesPath);
 
   // Update the cached chat instance if it exists
   try {
@@ -2170,7 +2183,7 @@ app.delete("/api/dashboard/context-notes/:index", authMiddleware, async (req, re
   const notes: any[] = JSON.parse(await readFile(notesPath, "utf-8"));
   if (idx >= notes.length) { res.status(404).json({ error: "Not found" }); return; }
   const [removed] = notes.splice(idx, 1);
-  await writeFile(notesPath, JSON.stringify(notes, null, 2));
+  await writeFile(notesPath, JSON.stringify(notes, null, 2)); void mirror(notesPath);
   try {
     const chat = await tenantManager.getChatForTenant(tenantId);
     chat.setContextNotes(notes);
@@ -3297,7 +3310,7 @@ const VOICE_FORWARD_TO = process.env.VOICE_FORWARD_TO || ""; // user's cell for 
 const VOICE_SUPPRESSION = new Set<string>();
 const voiceSuppressionPath = resolve(__dirname, "../data/voice-suppression.json");
 try { (JSON.parse(require("fs").readFileSync(voiceSuppressionPath, "utf-8")) as string[]).forEach(n => VOICE_SUPPRESSION.add(n)); } catch {}
-function saveVoiceSuppression() { writeFile(voiceSuppressionPath, JSON.stringify([...VOICE_SUPPRESSION], null, 2)).catch(() => {}); }
+function saveVoiceSuppression() { writeFile(voiceSuppressionPath, JSON.stringify([...VOICE_SUPPRESSION], null, 2)).then(() => mirror(voiceSuppressionPath)).catch(() => {}); }
 
 const voiceRepliesPath = resolve(__dirname, "../data/voice-replies.json");
 
@@ -3412,7 +3425,7 @@ app.post("/api/voice/sms-in", (req, res) => {
   console.log(`[voice-sms] from=${from} optOut=${optOut} body="${body.slice(0, 80)}"`);
 
   if (from) {
-    appendFile(voiceRepliesPath, JSON.stringify({ ts: new Date().toISOString(), from, body }) + "\n").catch(() => {});
+    appendFile(voiceRepliesPath, JSON.stringify({ ts: new Date().toISOString(), from, body }) + "\n").then(() => mirror(voiceRepliesPath)).catch(() => {});
     if (optOut) { VOICE_SUPPRESSION.add(from); saveVoiceSuppression(); }
     // Notify the owner so replies are actually seen (no inbox on the campaign number).
     const key = process.env.RESEND_API_KEY;
@@ -3545,7 +3558,7 @@ app.post("/unsubscribe", async (req, res) => {
   const email = (req.query.email as string || req.body?.email || "").toLowerCase().trim();
   if (email) {
     UNSUBSCRIBED.add(email);
-    await writeFile(unsubPath, JSON.stringify([...UNSUBSCRIBED], null, 2));
+    await writeFile(unsubPath, JSON.stringify([...UNSUBSCRIBED], null, 2)); void mirror(unsubPath);
     console.log(`[unsubscribe] ${email}`);
     recordEvent(email, "unsubscribe").catch(() => {});
   }
@@ -3557,7 +3570,7 @@ app.get("/unsubscribe", async (req, res) => {
   const confirmed = req.query.confirmed === "1";
   if (email && confirmed) {
     UNSUBSCRIBED.add(email);
-    await writeFile(unsubPath, JSON.stringify([...UNSUBSCRIBED], null, 2));
+    await writeFile(unsubPath, JSON.stringify([...UNSUBSCRIBED], null, 2)); void mirror(unsubPath);
     console.log(`[unsubscribe] ${email}`);
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribed</title></head><body style="font-family:system-ui;background:#0a0e1a;color:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;max-width:400px;padding:40px;"><h2 style="margin:0 0 12px;">You've been unsubscribed</h2><p style="color:#94a3b8;font-size:15px;">You won't receive any more emails from Whisp. Sorry for the bother.</p></div></body></html>`);
   } else {
@@ -3568,7 +3581,7 @@ app.get("/unsubscribe", async (req, res) => {
 app.delete("/api/admin/unsubscribed", async (req, res) => {
   if (!adminOk(req)) return res.status(403).json({ error: "Forbidden" });
   UNSUBSCRIBED.clear();
-  await writeFile(unsubPath, JSON.stringify([], null, 2));
+  await writeFile(unsubPath, JSON.stringify([], null, 2)); void mirror(unsubPath);
   res.json({ ok: true, cleared: true });
 });
 
