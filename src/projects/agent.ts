@@ -513,7 +513,11 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
   // One more attempt, started before this run is marked finished (so nobody delivers the failure in
   // between): a run that failed goes to the fallback model; a run whose outputs did not verify gets a
   // repair pass on the same model, told exactly what to fix (its files are in the repository now).
-  const again = result.state !== "succeeded"
+  // A run that "succeeded" without writing a single file looped (W2: ~32.7k output tokens in 3-7 steps, no
+  // files, no final message - the same input and seed loop the same way again): like a failed run, it goes
+  // to the fallback model.
+  const wroteNothing = result.state === "succeeded" && !result.files.length;
+  const again = result.state !== "succeeded" || wroteNothing
     ? await startAgentRun(id, state.instruction, "system", 2, fallbackModel().id !== state.model ? fallbackModel() : primaryModel(), state.runId)
     : await startAgentRun(id, `${state.instruction}\n\nPOPRAWKA - poprzednia wersja plików jest w repozytorium; popraw ją:\n${(await repairNotes(id, result, verification?.missing || [])).join("\n")}`, "system", 2, MODELS[state.model] || primaryModel(), state.runId);
   if ("error" in again) {

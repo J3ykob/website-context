@@ -354,6 +354,7 @@ export async function loadPricing(tenantId: string): Promise<PricingBusiness | n
  * A conversation priced by a business's quoting model, as fact lines for a reply or an agent: the request
  * read in the model's terms (Haiku), its program quotes it. null = nothing in its catalogue was asked.
  */
+const ALTERNATIVES_MAX = 4;
 export async function quoteText(pb: PricingBusiness, convo: string): Promise<string | null> {
   const catalog = catalogOf(pb);
   const { OpenRouterProvider } = await import("../llm/openrouter-provider.js");
@@ -363,8 +364,24 @@ export async function quoteText(pb: PricingBusiness, convo: string): Promise<str
   const q = await quoteBusiness(pb, request);
   const name = (id: string) => catalog.items.find((i) => i.id === id)?.name || id;
   const zl = (n: number) => `${Math.round(n * 100) / 100} ${catalog.currency || "PLN"}`;
-  // An alternative that is not offered says nothing the customer needs (the need's other options cover it).
-  const lines = q.lines.filter((l) => !(l.alternative && l.status === "not_offered")).map((l) => `- ${name(l.item)}${l.alternative ? " (an alternative - not in the total)" : ""}: ${l.status === "price" ? `${zl(l.amount!)} for this request (the customer's quantities, everything in the note included)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
+  // An alternative that is not offered says nothing the customer needs (the need's other options cover it);
+  // alternatives repeating another line's item, status and amounts are one line, and a need shows at most
+  // ALTERNATIVES_MAX of them, cheapest first (Sweet Home listed "Tort weselny 2160 zł" again and again - the
+  // repetition looped the agent until its output limit).
+  const seen = new Set<string>();
+  const perNeed = new Map<string, number>();
+  const lowOf = (l: QuoteLine) => l.amount ?? l.min ?? Infinity;
+  const ordered = [...q.lines].sort((a, b) => Number(!!a.alternative) - Number(!!b.alternative) || (a.alternative ? lowOf(a) - lowOf(b) : 0));
+  const kept = ordered.filter((l) => !(l.alternative && l.status === "not_offered")).filter((l) => {
+    const key = JSON.stringify([name(l.item), l.status, l.amount, l.min, l.max, l.need]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    if (!l.alternative) return true;
+    const n = (perNeed.get(l.need || "") || 0) + 1;
+    perNeed.set(l.need || "", n);
+    return n <= ALTERNATIVES_MAX;
+  });
+  const lines = kept.map((l) => `- ${name(l.item)}${l.alternative ? " (an alternative - not in the total)" : ""}: ${l.status === "price" ? `${zl(l.amount!)} for this request (the customer's quantities, everything in the note included)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
   lines.unshift("Each amount already includes everything its note lists (e.g. travel) - nothing of it is added again.");
   if (q.total) lines.push(`Total (the cheapest option for each thing asked): ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
   return lines.join("\n");
