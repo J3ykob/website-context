@@ -145,6 +145,17 @@ export async function scrapeTenant(
     throw new Error(`No SITE chunks for ${tenantId} from ${siteUrl} - dead, JS-only, or blocking the crawler; refusing to register (Google Maps data alone is not a valid site demo).`);
   }
 
+  // A live bot whose re-scrape came back much smaller (the site blocked us, served a bot check, or was half
+  // down) keeps its last scrape: Sosnowy Dwor's 15 pages were once replaced by one bot-check page.
+  {
+    const { getTenant } = await import("./tenant-registry.js");
+    const prev = getTenant(tenantId);
+    const prevPages = prev?.status === "active" && prev.lastScrapedAt ? Number(prev.pagesCount) || 0 : 0;
+    if (prevPages >= 5 && pagesScraped < prevPages * 0.3) {
+      throw new Error(`Re-scrape of ${tenantId} found ${pagesScraped} page(s), its last scrape ${prevPages} - kept the last scrape`);
+    }
+  }
+
   // --- Dedup for Vectorize: deterministic IDs + orphan cleanup ---
   // Vectorize has no delete-by-filter, so we track each tenant's chunk IDs in R2.
   // Unchanged chunks keep their ID (overwritten on upsert); removed/changed chunks

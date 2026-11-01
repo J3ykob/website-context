@@ -215,8 +215,13 @@ export class ScrapeWorker {
   private async runJob(job: QueuedJob): Promise<void> {
     const db = getDb();
 
+    // A re-scrape of a live bot: it keeps answering from its last scrape (status stays "active" - "scraping"
+    // made the chat answer 503 for the whole crawl), a failure leaves it live, and the "bot is ready" e-mail
+    // is not sent again (it went to the business on every re-scrape).
+    const before = getTenant(job.tenantId);
+    const wasLive = before?.status === "active" && !!before.lastScrapedAt;
     try {
-      updateTenant(job.tenantId, { status: "scraping" });
+      if (!wasLive) updateTenant(job.tenantId, { status: "scraping" });
 
       db.prepare(`
         UPDATE scrape_jobs
@@ -279,7 +284,8 @@ export class ScrapeWorker {
 
       try {
         const tenant = getTenant(job.tenantId);
-        if (tenant && result.chunks > 0) {
+        if (wasLive) console.log(`[worker] ${job.tenantId}: re-scrape of a live bot - no bot-ready e-mail`);
+        else if (tenant && result.chunks > 0) {
           const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3211}`;
           await sendBotReadyEmail(tenant.email, tenant.id, tenant.domain, baseUrl);
         } else if (tenant && result.chunks === 0) {
@@ -302,7 +308,10 @@ export class ScrapeWorker {
         LIMIT 1
       `).run(msg, job.tenantId);
 
-      if (job.attempt < MAX_RETRIES) {
+      if (wasLive) {
+        console.warn(`[worker] Re-scrape of ${job.tenantId} failed - it stays live on its last scrape`);
+        updateTenant(job.tenantId, { status: "active" });
+      } else if (job.attempt < MAX_RETRIES) {
         console.log(`[worker] Queuing retry for ${job.tenantId} (attempt ${job.attempt + 1}/${MAX_RETRIES})`);
         updateTenant(job.tenantId, { status: "pending" });
 

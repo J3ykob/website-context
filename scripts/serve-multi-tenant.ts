@@ -1189,17 +1189,19 @@ app.post("/api/admin/rescrape-list", (req, res) => {
   if (!ADMIN_SECRET || (req.query.secret as string) !== ADMIN_SECRET) { res.status(403).json({ error: "Forbidden" }); return; }
   const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) { res.status(400).json({ error: "ids[] required" }); return; }
+  // Behind new sign-ups in the queue; a live bot keeps answering from its last scrape meanwhile (setting it
+  // "pending" took it offline for hours). maxPages: the crawl's ceiling (small sites stop earlier).
+  const maxPages = Math.min(150, Math.max(1, Number(req.body?.maxPages) || 15));
   const queued: string[] = [];
   for (const id of ids.slice(0, 300)) {
     const t = getTenant(id);
     if (!t) continue;
-    updateTenant(id, { status: "pending" });
-    worker.enqueue(id, t.siteUrl || `https://${t.domain}`, 15);
+    worker.enqueue(id, t.siteUrl || `https://${t.domain}`, maxPages);
     tenantManager.evictTenant(id);
     queued.push(id);
   }
-  console.log(`[rescrape-list] queued ${queued.length} tenant(s)`);
-  res.json({ queued: queued.length, ids: queued });
+  console.log(`[rescrape-list] queued ${queued.length} tenant(s), up to ${maxPages} pages each`);
+  res.json({ queued: queued.length, ids: queued, maxPages });
 });
 
 // Check tenant status
