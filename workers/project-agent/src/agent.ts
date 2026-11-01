@@ -427,6 +427,8 @@ export class ProjectAgent extends DurableObject<Env> {
   }
 }
 
+const REASONING_PER_STEP = 8000;
+
 function opencodeConfig(model: ModelSpec, steps: number, seed = 7): unknown {
   return {
     $schema: "https://opencode.ai/config.json",
@@ -445,7 +447,9 @@ function opencodeConfig(model: ModelSpec, steps: number, seed = 7): unknown {
             cost: model.cost,
             // A fixed provider (and its fp8 weights) for every step: OpenRouter otherwise rotates across ~40
             // deepseek providers with different quantisations (2026-10-30, src/llm/pin.ts on the server).
-            options: model.id.startsWith("deepseek/") ? { provider: { order: ["deepinfra", "novita", "nebius"], quantizations: ["fp8"], allow_fallbacks: true }, seed } : {},
+            // A reasoning budget per step: with seven businesses' quotes to compare, a step once spent its whole
+            // 32k output on reasoning (reason=length, out=0) and the run ended with no files (W2, 2026-11-01).
+            options: { ...(model.id.startsWith("deepseek/") ? { provider: { order: ["deepinfra", "novita", "nebius"], quantizations: ["fp8"], allow_fallbacks: true }, seed } : {}), reasoning: { max_tokens: REASONING_PER_STEP } },
           },
         },
       },
