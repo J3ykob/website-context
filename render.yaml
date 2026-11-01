@@ -106,6 +106,10 @@ services:
         value: bge-m3
       - key: VECTORIZE_INDEX
         value: whisp-vectors-m3
+      # Pages fetched in parallel per site (crawler). 12 since 2026-11-01: the server is in Oregon and most
+      # sites are in Europe - pages took ~12 s each with 6 workers while CPU sat at 10-33%.
+      - key: SCRAPE_CONCURRENCY
+        value: "12"
       - key: PORT
         value: "3210"
       - key: RESEND_API_KEY
