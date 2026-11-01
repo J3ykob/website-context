@@ -4,7 +4,7 @@
  * Cloudflare Vectorize namespaces (Qdrant has been fully retired from the serving path).
  */
 
-import { existsSync } from "fs";
+import { existsSync, statSync } from "fs";
 import { readFile, writeFile } from "fs/promises";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -16,6 +16,18 @@ import { createHandoffs } from "../ecosystem/handoff.js";
 import { ensureCollectFlow, ensureQuestionFlow } from "../flows/collect-store.js";
 import { getFlows } from "../flows/flow-store.js";
 import { getTenant } from "./tenant-registry.js";
+
+/**
+ * A locally cached tenant file that is older than the tenant's last scrape is stale: another instance
+ * re-scraped it (or a test machine kept an old copy - the chain tests ran on 2-day-old knowledge, Sosnowy
+ * Dwor's home page still its bot check). Ten minutes of slack: a scrape writes its files just before the
+ * registry records the scrape.
+ */
+function freshLocal(tenantId: string, path: string): boolean {
+  if (!existsSync(path)) return false;
+  const last = Date.parse(getTenant(tenantId)?.lastScrapedAt || "");
+  return !Number.isFinite(last) || statSync(path).mtimeMs >= last - 10 * 60_000;
+}
 import type { WebsiteContext, SiteMapEntry, FlowDefinition, OfficialBusinessInfo } from "../context/types.js";
 import { CATALOG_FILE, type KnowledgeCatalog } from "../knowledge/catalog.js";
 import type { Inquiry } from "../flows/collect.js";
@@ -80,7 +92,7 @@ export class TenantManager {
     // Load context metadata from disk or R2
     const metaPath = resolve(DATA_ROOT, tenantId, "context-meta.json");
     let metaRaw: string | null = null;
-    if (existsSync(metaPath)) {
+    if (freshLocal(tenantId, metaPath)) {
       metaRaw = await readFile(metaPath, "utf-8");
     } else {
       // Try R2
@@ -268,7 +280,7 @@ export class TenantManager {
 export async function loadKnowledgeCatalog(tenantId: string): Promise<KnowledgeCatalog | null> {
   try {
     const catPath = resolve(DATA_ROOT, tenantId, CATALOG_FILE);
-    let catRaw: string | null = existsSync(catPath) ? await readFile(catPath, "utf-8") : null;
+    let catRaw: string | null = freshLocal(tenantId, catPath) ? await readFile(catPath, "utf-8") : null;
     if (!catRaw) {
       const { downloadTenantFile } = await import("../storage/r2.js");
       const buf = await downloadTenantFile(tenantId, CATALOG_FILE);
