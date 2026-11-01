@@ -211,12 +211,25 @@ only the cheapest of them counts. Shared inputs go in "context".
 Answer JSON: {"context": {...}, "needs": [{"what": "<what the customer asks for>", "options": [{"item": "<id>", "inputs": {...}}]}]}
 ({"needs": []} when nothing matches). One need per thing asked; its options are the items that could each cover it.`;
 
+// A big catalogue (a shop's 1,469 cakes = 280k chars of JSON) is shown to the reader one line per item - id,
+// name, inputs - without notes and meanings; small ones whole (the notes say what a package covers).
+const VIEW_FULL_MAX = 60_000;
+function catalogView(c: Catalog): string {
+  const full = JSON.stringify(c);
+  if (full.length <= VIEW_FULL_MAX) return full;
+  const inp = (x: InputSpec) => `${x.name}${x.unit ? ` ${x.unit}` : ""}${x.options?.length ? ` [${x.options.join("/")}]` : ""}`;
+  return [`shared inputs: ${c.shared.map((x) => `${inp(x)} (${x.meaning})`).join("; ") || "none"}`, "items (id | name | inputs):",
+    ...c.items.map((i) => `${i.id} | ${i.name}${i.inputs?.length ? ` | ${i.inputs.map(inp).join(", ")}` : ""}`)].join("\n");
+}
+
 /** The customer's message as a request in the business's terms (text -> structure). */
 export async function read(message: string, catalog: Catalog, llm: Llm): Promise<Request> {
-  const j = firstJson(await llm(READ, `Catalogue:\n${JSON.stringify(catalog)}\n\nCustomer: ${message}`, 1500));
+  const j = firstJson(await llm(READ, `Catalogue:\n${catalogView(catalog)}\n\nCustomer: ${message}`, 1500));
   // Needs with their options -> lines; the options of one need share its position as their "need" (structure, no text).
   const needs: any[] = Array.isArray(j?.needs) ? j.needs : [];
-  const lines = needs.flatMap((n, k) => (Array.isArray(n?.options) ? n.options : []).filter((o: any) => typeof o?.item === "string").map((o: any) => ({ item: o.item, inputs: o.inputs || {}, need: `n${k}` })));
+  // Only the catalogue's own ids (Sweet Home's reader invented "sh-6866" ids over a 1,469-item catalogue).
+  const ids = new Set(catalog.items.map((i) => i.id));
+  const lines = needs.flatMap((n, k) => (Array.isArray(n?.options) ? n.options : []).filter((o: any) => typeof o?.item === "string" && ids.has(o.item)).map((o: any) => ({ item: o.item, inputs: o.inputs || {}, need: `n${k}` })));
   return { context: j?.context || {}, lines };
 }
 
@@ -350,7 +363,8 @@ export async function quoteText(pb: PricingBusiness, convo: string): Promise<str
   const q = await quoteBusiness(pb, request);
   const name = (id: string) => catalog.items.find((i) => i.id === id)?.name || id;
   const zl = (n: number) => `${Math.round(n * 100) / 100} ${catalog.currency || "PLN"}`;
-  const lines = q.lines.map((l) => `- ${name(l.item)}${l.alternative ? " (an alternative - not in the total)" : ""}: ${l.status === "price" ? zl(l.amount!) : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
+  // An alternative that is not offered says nothing the customer needs (the need's other options cover it).
+  const lines = q.lines.filter((l) => !(l.alternative && l.status === "not_offered")).map((l) => `- ${name(l.item)}${l.alternative ? " (an alternative - not in the total)" : ""}: ${l.status === "price" ? zl(l.amount!) : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
   lines.unshift("Each amount already includes everything its note lists (e.g. travel) - nothing of it is added again.");
   if (q.total) lines.push(`Total (the cheapest option for each thing asked): ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
   return lines.join("\n");
