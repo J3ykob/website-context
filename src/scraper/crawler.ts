@@ -212,6 +212,14 @@ export async function crawlSite(
         // (they came back as the same check page and were dropped as duplicates - 1 page of Sosnowy Dwór's 20).
         if (ownLinks(again)) { console.log(`  [BROWSER] start page had no links, the browser found ${again.links.length} - the whole site through the browser: ${normalizedUrl}`); fetchResult = viaBrowser; page = again; browserSite = true; }
       }
+      // Still no links on its site, through the browser too: not kept as the site's home page (Sosnowy Dwór's
+      // home page was saved as its bot check while the sitemap pages came through) - tried once more at the end.
+      // A one-page site with nothing else to read keeps it (a business page with only phone and e-mail links).
+      if (!ownLinks(page) && (queue.length > 0 || pages.length > 0)) {
+        if (!item.attempt) { console.log(`  [CHECK?] start page links nowhere, even in a browser - retried at the end: ${normalizedUrl}`); visited.delete(normalizedUrl); queue.push({ ...item, attempt: 1 }); }
+        else { console.log(`  [CHECK?] start page still links nowhere - not kept: ${normalizedUrl}`); failures.push(normalizedUrl); }
+        return;
+      }
     }
     // The page names its real address (rel=canonical): an alias of a page we have, or will fetch, is not
     // fetched twice - and its links (resolved against the alias) are not followed.
