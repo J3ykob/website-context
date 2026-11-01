@@ -324,7 +324,7 @@ export class WebsiteChat {
   private ensureQuestionFlow: ChatConfig["ensureQuestionFlow"];
   // Sessions where we offered to pass the visitor's question on to the business
   // (no answer here, or no prices for a quote): waiting for their yes.
-  private handoffOffers: Map<string, { question: string; lang: OfferLang; kind: "question" | "quote"; at: number }> = new Map();
+  private handoffOffers: Map<string, { question: string; lang: OfferLang; kind: "question" | "quote" | "network"; at: number }> = new Map();
   // The router's decision per message (the stream path decides, the full path reuses it).
   private routeMemo: Map<string, { at: number; route: TurnRoute | null }> = new Map();
   private handoffLinks: ChatConfig["handoffLinks"];
@@ -657,9 +657,10 @@ export class WebsiteChat {
     const offer = this.handoffOffers.get(sessionKey);
     if (offer && Date.now() - offer.at < 30 * 60 * 1000 && !this.collectSessions.has(sessionKey)) {
       const ourReply = sanitizedMessages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || "";
-      const a = await jevAsk({ our_offer: `We offered to pass the customer's question on to our team and asked whether they want that. Our reply was: ${ourReply.slice(-600)}`, message: question }, {
+      const what = offer.kind === "network" ? "to check businesses from our local network for the customer's question" : "to pass the customer's question on to our team";
+      const a = await jevAsk({ our_offer: `We offered ${what} and asked whether they want that. Our reply was: ${ourReply.slice(-600)}`, message: question }, {
         answer: { type: "choice", instructions: "How does the customer's `message` answer `our_offer`?", criteria: {
-          yes: "Explicitly agrees to have it passed on (e.g. 'tak, przekaż', 'yes please', 'proszę'), or replies with their contact details (name, phone, e-mail, address).",
+          yes: offer.kind === "network" ? "Explicitly agrees (e.g. 'tak', 'tak, sprawdź', 'yes please', 'proszę')." : "Explicitly agrees to have it passed on (e.g. 'tak, przekaż', 'yes please', 'proszę'), or replies with their contact details (name, phone, e-mail, address).",
           what: "Asks what that means or how it works.",
           no: "Declines (e.g. 'nie', 'nie trzeba', 'no thanks').",
           other: "Anything else: thanks or ok without agreeing, a new question, another topic.",
@@ -669,6 +670,8 @@ export class WebsiteChat {
       const answer = c?.choice && (c.probabilities?.[c.choice] ?? 0) >= 0.7 ? c.choice : "other";
       if (answer === "what") return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.explainHandoff], packs: [], keepOffer: true });
       this.handoffOffers.delete(sessionKey);
+      // Agreed that we check the network (offered when our information on it was vague): the search, then the reply.
+      if (answer === "yes" && offer.kind === "network") return this.packsReply(sanitizedMessages, sessionKey, onToken, { packs: [], networkNeed: offer.question, rt: { lang: offer.lang } as TurnRoute });
       if (answer === "yes") {
         const flow = await this.ensureQuestionFlow?.().catch(() => null);
         if (flow) {
@@ -775,7 +778,7 @@ export class WebsiteChat {
    * turn's instructions; without them the turn is decided here (answer / no information + hand-off /
    * network).
    */
-  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote"; t0?: number }): Promise<ChatResponse> {
+  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; t0?: number }): Promise<ChatResponse> {
     const st = this.packStateOf(sessionKey);
     const question = messages.findLast((m) => m.role === "user")?.content || "";
     const rt = opts.rt ?? null;
@@ -788,6 +791,11 @@ export class WebsiteChat {
     let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[]; partners: { tenantId: string; label: string }[] } | null = null;
     let searching: { matches: Promise<EcosystemMatch[]>; need: string } | null = null;
     let productLinks: string[] = [];
+    if (opts.networkNeed && this.askEcosystem) {
+      const found = await Promise.race([this.askEcosystem([{ role: "user", content: opts.networkNeed }]).catch(() => [] as EcosystemMatch[]), new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 15000))]);
+      if (found.length) network = await this.networkBlock(found, opts.networkNeed);
+      behaviour.push(network ? BEHAVIOUR.networkAccepted : BEHAVIOUR.networkNone);
+    }
 
     // The conversation's language: kept from the last message long enough to tell (a name, a phone
     // number or "ok" does not switch it); "other" = whatever language the customer writes in.
@@ -898,17 +906,20 @@ export class WebsiteChat {
         partial = ((f?.full as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5;
         outOfScope = ((f?.ours as JevNoulAnswer | undefined)?.noul ?? 1) < 0.35;
       }
-      // Nothing of ours answers it, or our information shows it isn't ours: the network may have it.
-      if ((!answered || outOfScope) && net) {
+      // Nothing of ours answers it, or our information shows it isn't ours: the network may have it. Asked
+      // for recommendations elsewhere (router intent): the network too, next to what we have (W3: the venue's
+      // 120 zł "photographer service" fee was judged ours and the photographers found were dropped).
+      const alsoNetwork = answered && !outOfScope && rt?.intent === "elsewhere";
+      if ((!answered || outOfScope || alsoNetwork) && net) {
         // Matches already there: one reply. Still searching and the widget can show it: say so now, show the
         // search, continue the message when the matches come (the owner's wish 2026-10-27, like Gemini's search).
         const quick = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), this.statusOf.has(sessionKey) ? 400 : 10000))]); // no live status (API / tests): wait for the network search (3-8 s since it splits the need into parts)
         if (quick === null && this.statusOf.has(sessionKey)) {
           searching = { matches: net.matches, need: net.need };
-          behaviour.push(BEHAVIOUR.networkCheck);
+          behaviour.push(alsoNetwork ? BEHAVIOUR.networkCheckAlso : BEHAVIOUR.networkCheck);
         } else if (quick?.length) {
           network = await this.networkBlock(quick, net.need);
-          behaviour.push(BEHAVIOUR.network);
+          behaviour.push(alsoNetwork ? BEHAVIOUR.networkAlso : BEHAVIOUR.network);
         }
       }
       if (!answered && !network && !searching) {
@@ -920,8 +931,13 @@ export class WebsiteChat {
       if (answered && !network && !searching) behaviour.unshift(BEHAVIOUR.answer);
       if (answered && partial && !network && !searching) {
         behaviour.push(BEHAVIOUR.partial);
+        // Our information on it is vague and the network has businesses for it: offer to check them (the
+        // customer decides - network last, our own answer first).
+        const netHas = net && !st.handoffDeclined ? ((await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), 1500))]))?.length ?? 0) : 0;
         const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
-        if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
+        noteTurn("partialOffer", { netHas, offerOk: !!offerOk });
+        if (netHas && offerOk) { behaviour.push(BEHAVIOUR.offerNetwork); opts.handoffKind = "network"; }
+        else if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
     }
     behaviour.push(...(opts.extra || []));
@@ -952,7 +968,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
 - If the question is ambiguous (several locations, variants or departments), say which applies or ask briefly.
 - General professional advice is fine when asked, clearly as general advice.
 - Write naturally, like a helpful person at the business: full sentences, no lists unless listing 4+ items, at most about 80 words unless the customer asks for full details.
-- End with at most one question${opts.handoffKind || opts.keepOffer ? " (the offer to pass the question on, when instructed above)" : ""}. Never offer to do something yourself - send, check, calculate, measure, book, arrange or call back: this chat can only answer.
+- End with at most one question${opts.handoffKind === "network" ? " (the offer to check our network, when instructed above)" : opts.handoffKind || opts.keepOffer ? " (the offer to pass the question on, when instructed above)" : ""}. Never offer to do something yourself - send, check, calculate, measure, book, arrange or call back: this chat can only answer.
 - Links only as given above, as markdown [name](url).
 - Answer every part of the customer's message. For a part our information doesn't answer directly but a sentence of it bears on (e.g. "we also serve towns bordering the capital" for a question about a nearby town), quote that sentence in quotation marks (translated into the customer's language if needed) instead of saying you don't know - and draw no conclusion from it. Only when there is no such sentence, say we don't state it.
 - For a specific location, branch or department, use the address, phone and hours shown for that one; the official info is the general contact.
@@ -1003,7 +1019,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     }
     // Checks; a failed one blocks the reply and sends it back to the model with the reasons. Every
     // rewrite is checked again (twice at most); the last one is sent.
-    const sources = [...passages.map((content) => ({ content })), ...(network?.evidence || [])];
+    const sources = [...passages.map((content) => ({ content })), ...(network?.evidence || []),
+      // Offering to check the network is something this chat really does (on a yes it searches) - not a claim about the business.
+      ...(opts.handoffKind === "network" ? [{ content: "This chat can check businesses from our local Whisp network for the customer's question, if the customer wants that." }] : [])];
     const factsText = `${renderOfficialInfo(this.context.businessProfile)}\n${passages.join("\n")}`;
     const hasPhone = /(?:\+?\d[\d\s().-]{7,}\d)/.test(factsText.replace(/\d{2}-\d{3}/g, "")), hasEmail = /[\w.+-]+@[\w-]+\.[\w.]+/.test(factsText);
     const allowedLinks = new Set([...(network?.links || []), ...this.context.siteMap.map((p) => p.url), ...used.map((p) => p.url), ...productLinks].filter(Boolean));
@@ -1039,11 +1057,11 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const [unsup, checks] = await Promise.all([
         !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000)).catch(() => null) : Promise.resolve(null),
         jevEnabled() ? jevAsk({ conversation: convo, reply: text, ...(network ? { network_businesses: network.text.slice(0, 6000) } : {}) }, {
-          offers: { type: "noul", instructions: "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
+          offers: { type: "noul", instructions: opts.handoffKind === "network" ? "Does `reply` offer to check businesses from a local network for the customer (or ask whether to check them)?" : "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
           denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
           contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)? Saying we have no information on something and recommending another business for it is NOT a contradiction." },
           callUs: { type: "noul", instructions: "Does `reply` tell the customer to call us, phone us, or e-mail us (or mention our phone number or e-mail as a way to reach us)?" },
-          promises: { type: "noul", instructions: "Does `reply` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call them back, send them something? (Offering to explain, describe or advise more in this chat, asking the customer for details, offering to pass the question on to the team, or inviting them to contact us does not count.)" },
+          promises: { type: "noul", instructions: "Does `reply` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call them back, send them something? (Offering to explain, describe or advise more in this chat, asking the customer for details, offering to pass the question on to the team, offering to check businesses from our local network, or inviting them to contact us does not count.)" },
           meta: { type: "noul", instructions: "Does `reply` refer to an internal resource it was given - 'in our information', 'w dostępnych informacjach', 'w naszych materiałach', 'in the information provided', 'according to the data/sources'? Plain statements like 'I don't have that information', 'nie mam tej informacji' or 'we don't list it on our website' are NOT this." },
           unanswered: { type: "noul", instructions: "Does the customer's latest message in `conversation` ask about several things, and does `reply` skip one of them without saying anything about it?" },
           claimsSent: { type: "noul", instructions: "Does `reply` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered (already done, not offered)?" },
