@@ -1,10 +1,12 @@
 services:
   # Main web service
+  # Frankfurt since 2026-11-01 (was website-context in Oregon): nearly all customers and their sites are in
+  # Europe - every chat and every crawled page crossed the Atlantic.
   - type: web
-    name: website-context
+    name: website-context-fra
     runtime: docker
     plan: standard
-    region: oregon
+    region: frankfurt
     healthCheckPath: /api/health
     disk:
       name: data
