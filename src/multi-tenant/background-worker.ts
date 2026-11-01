@@ -219,7 +219,7 @@ export class ScrapeWorker {
     // made the chat answer 503 for the whole crawl), a failure leaves it live, and the "bot is ready" e-mail
     // is not sent again (it went to the business on every re-scrape).
     const before = getTenant(job.tenantId);
-    const wasLive = before?.status === "active" && !!before.lastScrapedAt;
+    const wasLive = before?.status === "active"; // older live bots have no scrape date recorded
     try {
       if (!wasLive) updateTenant(job.tenantId, { status: "scraping" });
 
