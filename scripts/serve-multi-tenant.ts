@@ -1998,9 +1998,10 @@ function reindexNetwork(tenantId: string): void {
     .then((n) => console.log(`[network-index] ${tenantId}: ${n} records`))
     .catch((e) => console.warn(`[network-index] ${tenantId}: ${(e as Error).message}`));
 }
-worker.onScraped = (tenantId) => {
+worker.onScraped = (tenantId, rescrape) => {
   reindexNetwork(tenantId);
-  if (process.env.KNOWLEDGE_AUDIT_AFTER_SCRAPE === "0") return;
+  // The knowledge check (8 test questions) after a bot's first scrape; a re-scrape of a live bot skips it.
+  if (process.env.KNOWLEDGE_AUDIT_AFTER_SCRAPE === "0" || rescrape) return;
   tenantManager.evictTenant(tenantId);
   setTimeout(() => { runKnowledgeAudit(tenantId).catch((e) => console.warn(`[audit] ${tenantId} failed: ${(e as Error).message}`)); }, 10_000);
 };

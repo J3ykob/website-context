@@ -242,12 +242,11 @@ export async function scrapeTenant(
       // kept ID, so the current vectors are safe regardless of async-delete timing.
       // (For a brand-new tenant the index is empty, so this resolves in one quick
       // round.) Non-fatal: residue gets re-cleaned on the next, now-tracked scrape.
-      try {
-        const removed = await (store as CloudflareVectorizeStore).deleteAll(newSet);
-        if (removed > 0) console.log(`[scrape-pipeline] Cleared ${removed} legacy residue vectors for ${tenantId} (kept ${newSet.size} current)`);
-      } catch (e) {
-        console.error(`[scrape-pipeline] residue cleanup failed for ${tenantId} (current vectors unaffected): ${(e as Error).message}`);
-      }
+      // In the background: it probes at random until nothing is left (~2.5 min on an old bot) and never deletes
+      // a current id, so the scrape does not wait for it.
+      void (store as CloudflareVectorizeStore).deleteAll(newSet)
+        .then((removed) => { if (removed > 0) console.log(`[scrape-pipeline] Cleared ${removed} legacy residue vectors for ${tenantId} (kept ${newSet.size} current)`); })
+        .catch((e) => console.error(`[scrape-pipeline] residue cleanup failed for ${tenantId} (current vectors unaffected): ${(e as Error).message}`));
     }
     await uploadToR2(`tenants/${tenantId}/vector-ids.json`, JSON.stringify(idsToTrack), "application/json");
   }
@@ -294,8 +293,9 @@ export async function scrapeTenant(
       if (catalog) {
         await writeFile(resolve(tenantDir, CATALOG_FILE), JSON.stringify(catalog));
         console.log(`[scrape-pipeline] Knowledge catalog: ${catalog.catalogs.length} catalogs, ${catalog.chunks.length} chunks (${Date.now() - t0}ms)`);
-        // Key facts: the site's sentences embedded one by one (src/knowledge/facts.ts). Non-fatal.
-        try {
+        // Key facts: the site's sentences embedded one by one (src/knowledge/facts.ts) - only for the "facts"
+        // variant (it lost the 2026-10-27 A/B; ~1 min per scrape). KEY_FACTS=on builds it. Non-fatal.
+        if (process.env.KEY_FACTS === "on") try {
           const { buildFactIndex } = await import("../knowledge/facts.js");
           const n = await buildFactIndex(tenantId, catalog, provider);
           console.log(`[scrape-pipeline] Key facts: ${n} sentences`);
