@@ -1217,6 +1217,27 @@ app.post("/api/admin/disk-mirror-all", async (req, res) => {
   res.json({ mirrored: files.map((f) => f.slice(DATA_DIR.length + 1)) });
 });
 
+// A bot that is used again after a long time is re-scraped in the background (the visitor is answered from
+// what it has): the fleet is refreshed where it matters instead of all 1,070 bots at once (2026-11-01).
+// At most once a day per bot on this instance; behind new sign-ups in the queue.
+const REFRESH_AFTER_DAYS = Number(process.env.REFRESH_AFTER_DAYS) || 30;
+const refreshAsked = new Map<string, number>();
+function refreshIfStale(t: { id: string; lastScrapedAt?: string | null; siteUrl?: string | null; domain: string }) {
+  const last = Date.parse(t.lastScrapedAt || "");
+  if (Number.isFinite(last) && Date.now() - last < REFRESH_AFTER_DAYS * 86400_000) return;
+  if (Date.now() - (refreshAsked.get(t.id) || 0) < 86400_000) return;
+  refreshAsked.set(t.id, Date.now());
+  if (refreshAsked.size > 5000) refreshAsked.delete(refreshAsked.keys().next().value!);
+  console.log(`[refresh] ${t.id}: last scrape ${t.lastScrapedAt || "unknown"} - re-scrape queued`);
+  worker.enqueue(t.id, t.siteUrl || `https://${t.domain}`, 150);
+}
+
+// Admin: empty the scrape queue (a bulk re-scrape stopped without a deploy). Running scrapes finish.
+app.post("/api/admin/scrape-queue/clear", (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  res.json({ cleared: worker.clearQueue() });
+});
+
 // Check tenant status
 app.get("/api/tenants/:id/status", (req, res) => {
   const tenant = getTenant(req.params.id);
@@ -1345,6 +1366,7 @@ app.post("/api/chat", async (req, res) => {
       res.status(503).json({ error: "Tenant is not ready yet", status: tenant.status });
       return;
     }
+    refreshIfStale(tenant);
 
     const sessionKey = sessionId || `${tenantId}_default`;
     const visitorIp = clientIp(req);

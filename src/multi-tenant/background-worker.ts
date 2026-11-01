@@ -61,6 +61,16 @@ export class ScrapeWorker {
   private processing = false;
   private retryQueue: QueuedJob[] = [];
 
+  /** Drops every queued job (running scrapes finish); returns how many were dropped. */
+  clearQueue(): number {
+    const n = this.queue.length + this.retryQueue.length;
+    this.queue = [];
+    this.retryQueue = [];
+    try { getDb().prepare(`UPDATE scrape_jobs SET status = 'cancelled' WHERE status = 'queued'`).run(); } catch {}
+    console.log(`[worker] Queue cleared (${n} job(s))`);
+    return n;
+  }
+
   enqueue(tenantId: string, siteUrl: string, maxPages: number = 20): void {
     ensureMigrated();
     const db = getDb();
@@ -113,12 +123,6 @@ export class ScrapeWorker {
 
   isProcessing(): boolean {
     return this.processing;
-  }
-
-  clearQueue(): void {
-    this.queue = [];
-    this.retryQueue = [];
-    console.log("[worker] Queue cleared");
   }
 
   getQueueLength(): number {
