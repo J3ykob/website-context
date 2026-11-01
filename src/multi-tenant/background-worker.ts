@@ -44,6 +44,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
+// Scrapes run side by side (SCRAPE_JOBS, default 1): CPU and memory sat at under half while one ran, the
+// fleet re-scrape needed days. The shared browser is closed only when no other scrape is running.
+const JOBS = Math.max(1, Math.min(4, Number(process.env.SCRAPE_JOBS) || 1));
+
 async function forceCleanupBrowser(): Promise<void> {
   try {
     await closeBrowser();
@@ -164,14 +168,18 @@ export class ScrapeWorker {
     }
   }
 
+  private runners = 0;
+
   private kick(): void {
-    if (!this.processing) {
-      this.processLoop();
+    // processLoop takes its job synchronously (before its first await), so the queue shrinks as runners start.
+    while (this.runners < JOBS && (this.queue.length > 0 || (this.runners === 0 && this.retryQueue.length > 0))) {
+      void this.processLoop();
     }
   }
 
   private async processLoop(): Promise<void> {
-    if (this.processing) return;
+    if (this.runners >= JOBS) return;
+    this.runners++;
     this.processing = true;
 
     try {
@@ -188,8 +196,8 @@ export class ScrapeWorker {
         }
       }
 
-      // After primary queue is drained, process retries
-      if (this.retryQueue.length > 0) {
+      // After primary queue is drained, process retries (the last runner does)
+      if (this.runners === 1 && this.retryQueue.length > 0) {
         console.log(`[worker] Processing ${this.retryQueue.length} retry job(s)`);
         const retries = [...this.retryQueue];
         this.retryQueue = [];
@@ -203,12 +211,13 @@ export class ScrapeWorker {
         }
       }
     } finally {
-      this.processing = false;
+      this.runners--;
+      this.processing = this.runners > 0;
     }
 
     // Check if new jobs arrived while we were finishing
-    if (this.queue.length > 0 || this.retryQueue.length > 0) {
-      this.processLoop();
+    if (this.queue.length > 0 || (this.runners === 0 && this.retryQueue.length > 0)) {
+      this.kick();
     }
   }
 
@@ -241,7 +250,7 @@ export class ScrapeWorker {
         `scrape ${job.tenantId}`,
       ).catch((e) => { stop.abort(); throw e; });
 
-      await forceCleanupBrowser();
+      if (this.runners <= 1) await forceCleanupBrowser();
 
       if (result.pages === 0) {
         throw new Error("Scraped 0 pages — site may be unreachable or blocking crawlers");
@@ -295,7 +304,7 @@ export class ScrapeWorker {
         console.error(`[worker] Email failed for ${job.tenantId}:`, emailErr.message);
       }
     } catch (error: any) {
-      await forceCleanupBrowser();
+      if (this.runners <= 1) await forceCleanupBrowser();
 
       const msg = error.message || "Unknown error";
       console.error(`[worker] Failed ${job.tenantId} (attempt ${job.attempt}): ${msg}`);

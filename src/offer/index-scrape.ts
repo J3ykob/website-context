@@ -232,7 +232,7 @@ async function buildIndex(pages: { url: string; title: string; text: string }[],
     }
     return out;
   });
-  const perPage = await pool(8, windows.map((p) => async () => {
+  const perPage = await pool(Number(process.env.OFFER_WINDOWS_AT_ONCE) || 16, windows.map((p) => async () => {
     try {
       const found = (await extractFromBlock(`${p.title}\n${p.text}`, llm, "website")).map((it) => ({ ...it, url: p.url }));
       return await pool(4, found.map((it) => () => verifyFields(it, p.text)));
