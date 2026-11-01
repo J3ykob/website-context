@@ -85,6 +85,7 @@ export interface RunRequest {
   allow?: string[]; // the business's own public data: never masked
   catalog?: string[]; // words from the business's offer (brands, product names): never masked as companies
   keepMasked?: string[]; // outputs returned with placeholders (e.g. requests to other businesses: no customer data leaves)
+  seed?: number; // sampling seed (default 7); a retry passes another, so it does not repeat the same run
 }
 
 export interface RunUsage { steps: number; costUsd: number; tokensIn: number; tokensOut: number; tokensCached: number; toolCalls: number; toolErrors: number }
@@ -105,6 +106,9 @@ export interface RunResult {
   startedAt: string;
   finishedAt: string;
   timing?: Record<string, number>;
+  // A run that wrote no files: what its steps did (still masked - customer data stays as placeholders), so
+  // the cause can be read (W2 runs ended with ~33k output tokens, no files and no final message).
+  eventsTail?: string;
 }
 export type RunStatus =
   | { state: "none" }
@@ -182,7 +186,7 @@ export class ProjectAgent extends DurableObject<Env> {
       }
       const placeholders = Object.keys((masked.state as { by_ph?: Record<string, unknown> }).by_ph ?? {});
       await this.#files.writeFile(`${PROJECT_DIR}/AGENTS.md`, `${req.rules.trim()}\n${piiRules(placeholders)}`);
-      await this.#files.writeFile(`${PROJECT_DIR}/opencode.json`, JSON.stringify(opencodeConfig(req.model, m.maxSteps), null, 1));
+      await this.#files.writeFile(`${PROJECT_DIR}/opencode.json`, JSON.stringify(opencodeConfig(req.model, m.maxSteps, req.seed), null, 1));
       await this.#sh(`find . -type f -printf '%P\\0' | sort -z | xargs -0 -r sha1sum > ${BEFORE_PATH}`, [], PROJECT_DIR);
 
       lap("filesMs");
@@ -276,7 +280,8 @@ export class ProjectAgent extends DurableObject<Env> {
         const log = (step: string) => console.log({ event: "project-agent.finish", runId: meta.runId, step, ms: Date.now() - t0 });
         const exitCode = (await this.#exitCode()) ?? -1;
         log("exit-code");
-        const ev = usageFrom(await this.#readText(EVENTS_PATH) ?? "");
+        const eventsRaw = await this.#readText(EVENTS_PATH) ?? "";
+        const ev = usageFrom(eventsRaw);
         log("events");
         const { files, skipped } = await this.#changedFiles();
         log("files");
@@ -305,6 +310,7 @@ export class ProjectAgent extends DurableObject<Env> {
           unknownPlaceholders: un.unknown, alteredPlaceholders: un.altered,
           piiMasked: meta.piiMasked, usage: ev.usage, model: meta.model, startedAt: meta.startedAt, finishedAt,
           timing: { ...JSON.parse(this.ctx.storage.kv.get<string>("timing") ?? "{}"), firstStepMs: ev.firstStepAt ? ev.firstStepAt - Date.parse(meta.startedAt) : -1 },
+          ...(files.length ? {} : { eventsTail: eventsSummary(eventsRaw) }),
         };
       }
       this.#saveResult(result);
@@ -421,7 +427,7 @@ export class ProjectAgent extends DurableObject<Env> {
   }
 }
 
-function opencodeConfig(model: ModelSpec, steps: number): unknown {
+function opencodeConfig(model: ModelSpec, steps: number, seed = 7): unknown {
   return {
     $schema: "https://opencode.ai/config.json",
     model: `openrouter/${model.id}`,
@@ -439,7 +445,7 @@ function opencodeConfig(model: ModelSpec, steps: number): unknown {
             cost: model.cost,
             // A fixed provider (and its fp8 weights) for every step: OpenRouter otherwise rotates across ~40
             // deepseek providers with different quantisations (2026-10-30, src/llm/pin.ts on the server).
-            options: model.id.startsWith("deepseek/") ? { provider: { order: ["deepinfra", "novita", "nebius"], quantizations: ["fp8"], allow_fallbacks: true }, seed: 7 } : {},
+            options: model.id.startsWith("deepseek/") ? { provider: { order: ["deepinfra", "novita", "nebius"], quantizations: ["fp8"], allow_fallbacks: true }, seed } : {},
           },
         },
       },
@@ -486,6 +492,26 @@ function usageFrom(events: string): { usage: RunUsage; finalText: string; error?
   }
   usage.costUsd = Math.round(usage.costUsd * 1e6) / 1e6;
   return { usage, finalText, error, firstStepAt };
+}
+
+// One short line per event (type, tool and status, tokens and finish reason, the start and end of any text),
+// at most ~24 KB, the end kept when longer.
+function eventsSummary(events: string): string {
+  const out: string[] = [];
+  for (const line of events.split("\n")) {
+    if (!line.trim()) continue;
+    let e: any;
+    try { e = JSON.parse(line); } catch { out.push(`(unparsed) ${line.slice(0, 200)}`); continue; }
+    const p = e?.part ?? {};
+    const cut = (t: string) => (t.length > 700 ? `${t.slice(0, 400)} [...${t.length - 600} chars...] ${t.slice(-200)}` : t);
+    if (e.type === "step_finish") out.push(`step_finish reason=${p.reason ?? "?"} out=${p.tokens?.output ?? "?"} reasoning=${p.tokens?.reasoning ?? "?"}`);
+    else if (e.type === "tool_use") out.push(`tool ${p.tool ?? "?"} ${p.state?.status ?? ""} ${cut(JSON.stringify(p.state?.input ?? {}))}${p.state?.error ? ` ERROR ${String(p.state.error).slice(0, 300)}` : ""}`);
+    else if (e.type === "text") out.push(`text ${cut(String(p.text ?? ""))}`);
+    else if (e.type === "error") out.push(`error ${JSON.stringify(e.error ?? {}).slice(0, 500)}`);
+    else out.push(String(e.type ?? "?"));
+  }
+  const all = out.join("\n");
+  return all.length > 24000 ? `[...]\n${all.slice(-24000)}` : all;
 }
 
 // Relative path inside the project, no "..", no leading "/".

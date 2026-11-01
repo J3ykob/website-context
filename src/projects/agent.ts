@@ -398,7 +398,7 @@ export async function startAgentRun(projectId: string, instruction: string, acto
   const tRunner = Date.now();
   const r = await runner(`/projects/${encodeURIComponent(projectId)}/run`, {
     method: "POST",
-    body: JSON.stringify({ prompt, rules, files, publicFiles, keepMasked: [(await import("./network.js")).REQUESTS_FILE], model, maxSteps: 60, timeoutSec: 900, maxCostUsd: 0.5, allow: offers.allow, catalog: offers.catalog }),
+    body: JSON.stringify({ prompt, rules, files, publicFiles, keepMasked: [(await import("./network.js")).REQUESTS_FILE], model, seed: attempt > 1 ? 7 + attempt * 97 : 7, maxSteps: 60, timeoutSec: 900, maxCostUsd: 0.5, allow: offers.allow, catalog: offers.catalog }),
   }).catch((e) => ({ ok: false, status: 0, text: async () => String(e?.message || e) }) as unknown as Response);
   if (r.status === 409) return { error: "The agent is already working on this project." };
   if (!r.ok) return { error: `The agent could not start (${r.status}): ${(await r.text()).slice(0, 200)}` };
@@ -459,6 +459,7 @@ interface RunResult {
   files: { path: string; encoding: "utf-8" | "base64"; content: string; size: number }[];
   skippedFiles: string[]; unknownPlaceholders: string[]; alteredPlaceholders: string[]; piiMasked: number;
   usage: { steps: number; costUsd: number; toolCalls: number; toolErrors: number };
+  eventsTail?: string; // a run that wrote no files: its steps, masked (workers/project-agent eventsSummary)
 }
 
 async function collect(project: Project, state: AgentRunState, result: RunResult): Promise<AgentRunState> {
@@ -475,6 +476,7 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
     }
   }
   await writeFile(id, "agent/raport.md", report(state, result), "md", "system").catch(() => {});
+  if (result.eventsTail) await writeFile(id, `agent/kroki-${state.runId.slice(0, 8)}.txt`, result.eventsTail, "txt", "system").catch(() => {});
   await addUsage(id, { llmCalls: result.usage.steps, costUsd: result.usage.costUsd }).catch(() => {});
   // The agent's cost counts against its business's daily cap and the total (src/security/budget.ts).
   { const pj = await getProject(id).catch(() => null); if (pj) (await import("../security/budget.js")).budgetAfter(pj.initiatorTenantId, `project:${id}`, result.usage.costUsd || 0); }
