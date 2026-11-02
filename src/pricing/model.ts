@@ -235,7 +235,9 @@ export async function read(message: string, catalog: Catalog, llm: Llm): Promise
 
 // ── A whole business: parts, completeness, storage ──
 const PART_CHARS = 40000; // page text per part (one generation call)
-const MAX_PARTS = () => Number(process.env.PRICING_MAX_PARTS) || 12;
+// No cap on parts by default (owner 2026-11-02: capped builds left 15-19 offer items out of the model);
+// PRICING_MAX_PARTS sets one.
+const MAX_PARTS = () => Number(process.env.PRICING_MAX_PARTS) || Infinity;
 export interface PricingBusiness { tenantId: string; hash: string; builtAt: string; model: string; parts: PricingModel[]; costUsd: number; missing: string[]; failed?: string[] }
 
 /** The generation model with reasoning on (one-off per business; OpenRouter, pinned to the model's maker). */
