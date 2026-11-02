@@ -118,12 +118,15 @@ Rules:
 Answer with the program in one \`\`\`js code block, nothing else.`;
 
 /** The business's quoting model from the text of its price pages; `feedback` = what a previous version got wrong. */
-export async function generate(business: string, pages: { url: string; text: string }[], llm: Llm, model: string, feedback?: { code: string; problems: string[] }): Promise<PricingModel> {
+export async function generate(business: string, pages: { url: string; text: string }[], llm: Llm, model: string, feedback?: { code: string; problems: string[] }, sharedSoFar: InputSpec[] = []): Promise<PricingModel> {
   const source = pages.map((p) => `### ${p.url}\n${p.text}`).join("\n\n").slice(0, 60000);
   const fix = !feedback ? "" : feedback.code
     ? `\n\nA previous version of the program:\n\`\`\`js\n${feedback.code}\n\`\`\`\nIt disagreed with these checks written from the pages - correct the program where the pages support the check:\n- ${feedback.problems.slice(0, 15).join("\n- ")}`
     : `\n\nMake sure of this:\n- ${feedback.problems.slice(0, 30).join("\n- ")}`;
-  const code = codeBlock(await llm(GENERATE, `Business: ${business}\n\nIts pages:\n${source}${fix}`, 8000));
+  // The business's other parts already named their shared inputs: the same names for the same things (Rentbud's
+  // parts said "godziny" and "hours" - the reader used one, the other part's program never saw the duration).
+  const vocab = sharedOf(sharedSoFar).length ? `\n\nShared inputs this business's other programs already use - for the same thing use exactly the same name and unit:\n${sharedOf(sharedSoFar).map((x) => `- ${x.name}${x.unit ? ` (${x.unit})` : ""}: ${x.meaning}`).join("\n")}` : "";
+  const code = codeBlock(await llm(GENERATE, `Business: ${business}\n\nIts pages:\n${source}${vocab}${fix}`, 8000));
   const catalog = (await run(code, "catalog", null)) as Catalog; // read through the sandbox too
   return { catalog, code, source, model };
 }
@@ -138,12 +141,12 @@ function contractProblems(q: any): string[] {
 }
 
 /** Generate -> verify -> regenerate with the disagreements (up to `rounds` more), keeping the best version. */
-export async function build(business: string, pages: { url: string; text: string }[], gen: Llm, check: Llm, model: string, rounds = 2, missing: string[] = []): Promise<PricingModel> {
+export async function build(business: string, pages: { url: string; text: string }[], gen: Llm, check: Llm, model: string, rounds = 2, missing: string[] = [], sharedSoFar: InputSpec[] = []): Promise<PricingModel> {
   let best: PricingModel | null = null, feedback: { code: string; problems: string[] } | undefined = missing.length ? { code: "", problems: missing.slice(0, 30).map((n) => `the catalogue leaves out "${n}" - include it if these pages offer it`) } : undefined;
   let cases: any[] | null = null;
   for (let k = 0; k <= rounds; k++) {
     let pm: PricingModel;
-    try { pm = await generate(business, pages, gen, model, feedback); } catch (e) { feedback = feedback && { ...feedback, problems: [`the program did not run: ${(e as Error).message.slice(0, 120)}`, ...feedback.problems] }; continue; }
+    try { pm = await generate(business, pages, gen, model, feedback, sharedSoFar); } catch (e) { feedback = feedback && { ...feedback, problems: [`the program did not run: ${(e as Error).message.slice(0, 120)}`, ...feedback.problems] }; continue; }
     cases ||= await writeCases(pm, check).catch(() => null); // the same independent checks for every version
     pm = await checkAgainst(pm, cases || []);
     if (!best || (pm.verified!.agreed > best.verified!.agreed)) best = pm;
@@ -202,7 +205,7 @@ export async function verify(pm: PricingModel, llm: Llm): Promise<PricingModel> 
 // ── For every question ──
 const READ = `You turn a customer's message into a request for this business's quoting program. Use ONLY the catalogue's
 item ids and input names. Put an input only when the customer states it or it follows directly ("Saturday and
-Sunday" = 2 days, "4x5 m" = 20 m², "the bride and 3 bridesmaids" = 4 people); leave out what they did not say -
+Sunday" = 2 days = 48 hours when the input counts hours, "4x5 m" = 20 m², "the bride and 3 bridesmaids" = 4 people); leave out what they did not say -
 never assume. A duration is not a choice of rate ("6 hours" sets the duration, not "pay per hour"); one value
 per input in the catalogue's unit ("30 hours over two days" = 30 hours). Every product or service asked for is a
 line - for each person or thing the item that is for them (a bridesmaid's make-up is not the bride's). When
@@ -217,14 +220,49 @@ const VIEW_FULL_MAX = 60_000;
 function catalogView(c: Catalog): string {
   const full = JSON.stringify(c);
   if (full.length <= VIEW_FULL_MAX) return full;
-  const inp = (x: InputSpec) => `${x.name}${x.unit ? ` ${x.unit}` : ""}${x.options?.length ? ` [${x.options.join("/")}]` : ""}`;
-  return [`shared inputs: ${c.shared.map((x) => `${inp(x)} (${x.meaning})`).join("; ") || "none"}`, "items (id | name | inputs):",
+  // The input's name exactly as the program reads it; unit and options in brackets (Rentbud: "godziny h" was read
+  // as the input name "godziny h" and every rental came back "needs: godziny").
+  const inp = (x: InputSpec) => `${x.name}${x.unit || x.options?.length ? ` (${[x.unit && `unit ${x.unit}`, x.options?.length && `one of ${x.options.join("/")}`].filter(Boolean).join("; ")})` : ""}`;
+  return [`shared inputs (name: meaning): ${c.shared.map((x) => `${inp(x)}: ${x.meaning}`).join("; ") || "none"}`, "items (id | name | input names):",
     ...c.items.map((i) => `${i.id} | ${i.name}${i.inputs?.length ? ` | ${i.inputs.map(inp).join(", ")}` : ""}`)].join("\n");
 }
 
+/** Shared inputs without repeats (by name). */
+function sharedOf(specs: InputSpec[]): InputSpec[] {
+  const seen = new Set<string>();
+  return specs.filter((x) => x?.name && !seen.has(x.name) && seen.add(x.name));
+}
+
+/** Input names in a reader's answer that neither the shared inputs nor the named item's inputs have. With
+ * partShared (item id -> its part's shared input names): a context name the chosen items' parts do not read. */
+function unknownInputs(j: any, catalog: Catalog, partShared?: Map<string, Set<string>>): string[] {
+  const chosen = (Array.isArray(j?.needs) ? j.needs : []).flatMap((n: any) => (Array.isArray(n?.options) ? n.options : []).map((o: any) => o?.item));
+  const shared = partShared && chosen.some((id: string) => partShared.has(id))
+    ? new Set(chosen.flatMap((id: string) => [...(partShared.get(id) || [])]))
+    : new Set(catalog.shared.map((x) => x.name));
+  const own = new Map(catalog.items.map((i) => [i.id, new Set((i.inputs || []).map((x) => x.name))]));
+  const bad = new Set<string>();
+  for (const k of Object.keys(j?.context || {})) if (!shared.has(k)) bad.add(k);
+  for (const n of Array.isArray(j?.needs) ? j.needs : []) for (const o of Array.isArray(n?.options) ? n.options : []) {
+    const names = own.get(o?.item);
+    if (names) for (const k of Object.keys(o?.inputs || {})) if (!names.has(k) && !shared.has(k)) bad.add(k);
+  }
+  return [...bad];
+}
+
 /** The customer's message as a request in the business's terms (text -> structure). */
-export async function read(message: string, catalog: Catalog, llm: Llm): Promise<Request> {
-  const j = firstJson(await llm(READ, `Catalogue:\n${catalogView(catalog)}\n\nCustomer: ${message}`, 1500));
+export async function read(message: string, catalog: Catalog, llm: Llm, partShared?: Map<string, Set<string>>): Promise<Request> {
+  const ask = `Catalogue:\n${catalogView(catalog)}\n\nCustomer: ${message}`;
+  let j = firstJson(await llm(READ, ask, 1500));
+  // Input names the catalogue does not have (a structure check): asked once more with the valid names
+  // (Rentbud's reader wrote "hours" for its "godziny" and every rental came back "needs").
+  const unknown = unknownInputs(j, catalog, partShared);
+  if (unknown.length) {
+    const chosen: string[] = (Array.isArray(j?.needs) ? j.needs : []).flatMap((n: any) => (Array.isArray(n?.options) ? n.options : []).map((o: any) => o?.item)).filter(Boolean);
+    const names = partShared ? [...new Set(chosen.flatMap((id) => [...(partShared.get(id) || [])]))] : catalog.shared.map((x) => x.name);
+    const again = firstJson(await llm(READ, `${ask}\n\nYour previous answer used input names the chosen items do not read: ${unknown.join(", ")}. For these items use only these shared names: ${names.join(", ") || "none"}; and each item's own input names as listed. Answer the JSON again.`, 1500));
+    if (again && unknownInputs(again, catalog, partShared).length < unknown.length) j = again;
+  }
   // Needs with their options -> lines; the options of one need share its position as their "need" (structure, no text).
   const needs: any[] = Array.isArray(j?.needs) ? j.needs : [];
   // Only the catalogue's own ids (Sweet Home's reader invented "sh-6866" ids over a 1,469-item catalogue).
@@ -290,7 +328,7 @@ export async function buildBusiness(tenantId: string, business: string, pages: {
   const rules = new Set(pages.filter((_, k) => ((((rj as any)?.[`r${k}`]?.noul) as number) ?? 0) >= 0.5).map((p) => p.url));
   const built: PricingModel[] = [], failed: string[] = [];
   for (const part of partsOf(pages, rules)) {
-    const pm = await build(business, part, llm, llm, model).catch((e) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; });
+    const pm = await build(business, part, llm, llm, model, 2, [], built.flatMap((b) => b.catalog.shared || [])).catch((e) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; });
     if (pm) built.push(pm);
   }
   // Completeness: offer items no part covers, judged by a cheaper model; those parts are rebuilt once with the gap named.
@@ -299,7 +337,7 @@ export async function buildBusiness(tenantId: string, business: string, pages: {
   let missing = await missingFromCatalog(all, offerNames.slice(0, 300), cheap).catch(() => [] as string[]);
   if (missing.length) {
     for (let k = 0; k < built.length; k++) {
-      const again = await build(business, partsOf(pages, rules)[k], llm, llm, model, 1, missing).catch(() => null);
+      const again = await build(business, partsOf(pages, rules)[k], llm, llm, model, 1, missing, built.filter((_, j) => j !== k).flatMap((b) => b.catalog.shared || [])).catch(() => null);
       if (again && again.catalog.items.length > built[k].catalog.items.length && again.verified!.agreed >= built[k].verified!.agreed) built[k] = again;
     }
     missing = await missingFromCatalog({ ...all, items: built.flatMap((p) => p.catalog.items || []) }, offerNames.slice(0, 300), cheap).catch(() => missing);
@@ -361,7 +399,8 @@ export async function quoteText(pb: PricingBusiness, convo: string): Promise<str
   const catalog = catalogOf(pb);
   const { OpenRouterProvider } = await import("../llm/openrouter-provider.js");
   const or = new OpenRouterProvider({ model: "anthropic/claude-haiku-5.5", maxTokens: 1500, temperature: 0 });
-  const request = await read(convo, catalog, async (sys, user, max = 1500) => (await or.chat([{ role: "system", content: sys }, { role: "user", content: user }], { maxTokens: max })).content);
+  const partShared = new Map(pb.parts.flatMap((p) => (p.catalog.items || []).map((i) => [i.id, new Set((p.catalog.shared || []).map((x) => x.name))] as const)));
+  const request = await read(convo, catalog, async (sys, user, max = 1500) => (await or.chat([{ role: "system", content: sys }, { role: "user", content: user }], { maxTokens: max })).content, partShared);
   if (!request.lines.length) return null;
   const q = await quoteBusiness(pb, request);
   const name = (id: string) => catalog.items.find((i) => i.id === id)?.name || id;
