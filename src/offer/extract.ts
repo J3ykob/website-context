@@ -80,7 +80,7 @@ async function confirmItems(items: OfferItem[], text: string): Promise<OfferItem
   const prices = (it: OfferItem) => [priceText(it), ...it.components.map((c) => (c.price_value !== null ? `${c.label}: ${c.price_value}${c.price_max !== null ? `-${c.price_max}` : ""} ${it.currency}` : ""))].filter(Boolean).join("; ");
   const qs: Record<string, JevQuestion> = {};
   items.forEach((it, k) => {
-    qs[`o${k}`] = { type: "noul", instructions: `Does \`text\` present \`items[${k}]\` as a product or service this business offers (not navigation, a category of other pages, news or a testimonial)?` };
+    qs[`o${k}`] = { type: "noul", instructions: `Does \`text\` present \`items[${k}]\` as a product or service this business offers to customers (sells, rents or does for them) - not its own equipment, premises or staff it describes (e.g. the machines at its branches), navigation, a category of other pages, news or a testimonial?` };
     if (prices(it)) qs[`p${k}`] = { type: "noul", instructions: `Does \`text\` give \`items[${k}]\` this price: ${prices(it)}? (The same amounts for this item, however written.)` };
   });
   const a = await jevAsk({ text, items: items.map((it) => `${it.name}${it.description ? ` - ${it.description.slice(0, 100)}` : ""}`) }, qs, 15000).catch(() => null);
