@@ -9,6 +9,11 @@
   var API_HOST = config.apiHost || tagAttr("data-api-url") || tagOrigin || window.location.origin;
   var TENANT_ID = config.tenantId || tagAttr("data-tenant-id") || "default";
   var BRAND = config.brandName || "Whisp";
+  // The interface in the site's language: Polish sites showed "Ask anything…". Polish when the page says so
+  // (or, with no page language, the visitor's browser); English otherwise. Text only - no layout changes.
+  var PAGE_LANG = (document.documentElement.getAttribute("lang") || "").toLowerCase();
+  var UI_PL = PAGE_LANG ? /^pl\b/.test(PAGE_LANG) : /^pl\b/i.test(navigator.language || "");
+  var wctxT = function (en, pl) { return UI_PL ? pl : en; };
 
   // Owner mode — activated via ?wctx-owner=true or config.ownerKey matching a cookie
   var urlParams = new URLSearchParams(window.location.search);
@@ -454,27 +459,27 @@
 #wctx-fab.wctx-cb .wctx-bar-bubble a { text-decoration:underline; font-weight:700; }\
 </style>\
 <div class="wctx-bar-row">\
-  <button class="wctx-mic wctx-glass" type="button" disabled title="Voice input (coming soon)">\
+  <button class="wctx-mic wctx-glass" type="button" disabled title="' + wctxT("Voice input (coming soon)", "Głos (wkrótce)") + '">\
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg>\
   </button>\
   <div class="wctx-bar-wrap">\
     <div class="wctx-bar-messages" id="wctx-bar-msgs"></div>\
     <div class="wctx-bar">\
       <span class="wctx-bar-dot"></span>\
-      <input class="wctx-bar-input" type="text" placeholder="Ask anything…" autocomplete="off" />\
-      <button class="wctx-bar-send" type="button" title="Send">\
+      <input class="wctx-bar-input" type="text" placeholder="' + wctxT("Ask anything…", "Zapytaj o cokolwiek…") + '" autocomplete="off" />\
+      <button class="wctx-bar-send" type="button" title="' + wctxT("Send", "Wyślij") + '">\
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>\
       </button>\
     </div>\
   </div>\
   <div class="wctx-ctrls wctx-glass">\
-    <button class="wctx-ctl wctx-ctl-settings" type="button" title="Settings">\
+    <button class="wctx-ctl wctx-ctl-settings" type="button" title="' + wctxT("Settings", "Ustawienia") + '">\
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>\
     </button>\
-    <button class="wctx-ctl wctx-ctl-theme" type="button" title="Toggle light / dark">\
+    <button class="wctx-ctl wctx-ctl-theme" type="button" title="' + wctxT("Toggle light / dark", "Jasny / ciemny") + '">\
       <svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>\
     </button>\
-    <button class="wctx-ctl wctx-bar-expand" type="button" title="Expand chat">\
+    <button class="wctx-ctl wctx-bar-expand" type="button" title="' + wctxT("Expand chat", "Rozwiń czat") + '">\
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H4v6M4 4l6 6M14 20h6v-6M20 20l-6-6"/></svg>\
     </button>\
   </div>\
@@ -521,10 +526,10 @@
 </style>\
 <div class="wctx-sm-bg"></div>\
 <div class="wctx-sm-card">\
-  <div class="wctx-sm-head"><h3>Settings</h3><button class="wctx-sm-close" type="button" aria-label="Close">&times;</button></div>\
-  <div class="wctx-sm-row"><div class="wctx-sm-label">Theme</div><div class="wctx-seg" data-seg="theme"><button data-v="light" type="button">Light</button><button data-v="dark" type="button">Dark</button></div></div>\
-  <div class="wctx-sm-row"><div class="wctx-sm-label">Text size</div><div class="wctx-seg" data-seg="fontSize"><button data-v="s" type="button">Small</button><button data-v="m" type="button">Medium</button><button data-v="l" type="button">Large</button></div></div>\
-  <div class="wctx-sm-row"><div class="wctx-toggle-row"><span>Color-impaired mode</span><button class="wctx-switch" data-toggle="colorImpaired" type="button" aria-label="Toggle color-impaired mode"></button></div><div class="wctx-sm-hint">Maximizes contrast and underlines links for clearer visibility.</div></div>\
+  <div class="wctx-sm-head"><h3>' + wctxT("Settings", "Ustawienia") + '</h3><button class="wctx-sm-close" type="button" aria-label="' + wctxT("Close", "Zamknij") + '">&times;</button></div>\
+  <div class="wctx-sm-row"><div class="wctx-sm-label">' + wctxT("Theme", "Motyw") + '</div><div class="wctx-seg" data-seg="theme"><button data-v="light" type="button">' + wctxT("Light", "Jasny") + '</button><button data-v="dark" type="button">' + wctxT("Dark", "Ciemny") + '</button></div></div>\
+  <div class="wctx-sm-row"><div class="wctx-sm-label">' + wctxT("Text size", "Rozmiar tekstu") + '</div><div class="wctx-seg" data-seg="fontSize"><button data-v="s" type="button">' + wctxT("Small", "Mały") + '</button><button data-v="m" type="button">' + wctxT("Medium", "Średni") + '</button><button data-v="l" type="button">' + wctxT("Large", "Duży") + '</button></div></div>\
+  <div class="wctx-sm-row"><div class="wctx-toggle-row"><span>' + wctxT("Color-impaired mode", "Tryb wysokiego kontrastu") + '</span><button class="wctx-switch" data-toggle="colorImpaired" type="button" aria-label="' + wctxT("Toggle color-impaired mode", "Przełącz tryb wysokiego kontrastu") + '"></button></div><div class="wctx-sm-hint">' + wctxT("Maximizes contrast and underlines links for clearer visibility.", "Zwiększa kontrast i podkreśla linki.") + '</div></div>\
 </div>';
     document.body.appendChild(m);
     m.querySelector(".wctx-sm-bg").addEventListener("click", closeSettings);
@@ -601,7 +606,7 @@
     var streamDiv = document.createElement("div");
     streamDiv.className = "wctx-bar-bubble assistant";
     streamDiv.id = "wctx-bar-thinking";
-    streamDiv.textContent = "Thinking...";
+    streamDiv.textContent = wctxT("Thinking...", "Myślę...");
     barMsgs.appendChild(streamDiv);
     barMsgs.scrollTop = barMsgs.scrollHeight;
 
@@ -634,7 +639,7 @@
       },
       onError: function(msg) {
         var t = document.getElementById("wctx-bar-thinking"); if (t) t.remove();
-        messages.push({ role: "assistant", content: msg || "Something went wrong." }); persistMessages();
+        messages.push({ role: "assistant", content: msg || wctxT("Something went wrong.", "Coś poszło nie tak.") }); persistMessages();
         syncBarMessages();
       }
     });
@@ -914,14 +919,14 @@
     onboardEl.className = "wctx-onboard-overlay" + (currentTheme === "dark" ? " wctx-dark" : "");
     onboardEl.innerHTML = '\
       <div class="wctx-onboard-card">\
-        <h2>Meet your AI assistant</h2>\
-        <p>You can interact with this website through a chat interface. Ask questions, get help, and complete tasks &mdash; all through conversation.</p>\
+        <h2>' + wctxT("Meet your AI assistant", "Zapytaj tę stronę") + '</h2>\
+        <p>' + wctxT("You can interact with this website through a chat interface. Ask questions, get help, and complete tasks &mdash; all through conversation.", "Zadaj pytanie w czacie - o ofertę, ceny, terminy. Odpowiedzi pochodzą z informacji tej firmy.") + '</p>\
         <div class="wctx-onboard-arrow">\
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\
             <path d="M12 5v14M19 12l-7 7-7-7"/>\
           </svg>\
         </div>\
-        <button class="wctx-onboard-btn" id="wctx-onboard-dismiss">Got it</button>\
+        <button class="wctx-onboard-btn" id="wctx-onboard-dismiss">' + wctxT("Got it", "Rozumiem") + '</button>\
       </div>\
     ';
     document.body.appendChild(onboardEl);
@@ -1321,7 +1326,7 @@
       onError: function(msg) {
         setLoading(false);
         if (bubble) { bubble.remove(); bubble = null; }
-        appendMsg("assistant", msg || "Something went wrong. Please try again.");
+        appendMsg("assistant", msg || wctxT("Something went wrong. Please try again.", "Coś poszło nie tak. Spróbuj jeszcze raz."));
       }
     });
   }
@@ -1598,7 +1603,7 @@
       if (sources && sources.length) {
         var s = document.createElement("div");
         s.className = "wctx-sources";
-        s.textContent = "Sources — " + sources.map(function(x) { return x.title; }).join(" · ");
+        s.textContent = wctxT("Sources — ", "Źródła — ") + sources.map(function(x) { return x.title; }).join(" · ");
         div.appendChild(s);
       }
     } else {
@@ -2288,8 +2293,8 @@
     <div class="wctx-topbar-right">\
       <div class="wctx-dot"></div>\
       ' + (IS_OWNER ? '<button class="wctx-owner-btn" id="wctx-owner-toggle">Owner</button>' : '') + '\
-      <button class="wctx-browse-btn">Browse site manually</button>\
-      <button class="wctx-minimize-btn" type="button" aria-label="Minimize chat" title="Minimize">\
+      <button class="wctx-browse-btn">' + wctxT("Browse site manually", "Przeglądaj stronę") + '</button>\
+      <button class="wctx-minimize-btn" type="button" aria-label="' + wctxT("Minimize chat", "Zwiń czat") + '" title="' + wctxT("Minimize", "Zwiń") + '">\
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>\
       </button>\
     </div>\
@@ -2304,12 +2309,12 @@
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>\
           </svg>\
         </div>\
-        <input class="wctx-chat-input" type="text" placeholder="Tell me what you need…" autocomplete="off" spellcheck="false" autofocus />\
+        <input class="wctx-chat-input" type="text" placeholder="' + wctxT("Tell me what you need…", "Napisz, czego potrzebujesz…") + '" autocomplete="off" spellcheck="false" autofocus />\
         <button class="wctx-send-btn" type="button">Send</button>\
       </div>\
       <div class="wctx-idle-footnote">\
         <span><kbd>↵</kbd>Send</span>\
-        <span>Ask anything about this website</span>\
+        <span>' + wctxT("Ask anything about this website", "Zapytaj o cokolwiek na tej stronie") + '</span>\
       </div>\
     </div>\
   </div>\
