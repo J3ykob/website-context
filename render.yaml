@@ -115,6 +115,11 @@ services:
       # Scrapes run side by side (the fleet re-scrape took days one at a time; memory 250-550 MB of 2 GB, CPU < 45%).
       - key: SCRAPE_JOBS
         value: "2"
+      # Businesses' quoting models (src/pricing/model.ts) price their own requests in the chat, the network
+      # businesses relayed to a customer, and the project agent's files. On since 2026-11-03 (wedding set 22/24,
+      # construction checks green); a business without a model keeps the old path.
+      - key: PRICING_CHAT
+        value: "on"
       - key: PORT
         value: "3210"
       - key: RESEND_API_KEY
