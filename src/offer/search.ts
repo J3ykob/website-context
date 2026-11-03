@@ -54,19 +54,21 @@ function firstJson(c: string): any {
 const KIND: Record<string, string> = { product: "product", service: "service", rental: "rental", package: "package", subscription: "subscription" };
 const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}${KIND[i.fields.kind || ""] ? ` [${KIND[i.fields.kind!]}]` : ""}${i.description ? ` - ${i.description.slice(0, 150)}` : ""}`;
 
-export interface ItemMatch { items: OfferItem[]; given: Map<OfferItem, Record<string, number>> }
+export interface ItemMatch { items: OfferItem[]; given: Map<OfferItem, Record<string, number>>; alternatives?: OfferItem[] }
 export interface MatchOptions {
   limit?: number;
   /** The business whose whole offer `items` is (its vectors are cached per business); otherwise per item text. */
   tenant?: string;
   /** Also read the customer's quantities for the picked items' price inputs. */
   quantities?: boolean;
+  /** When none is what was asked: the items that could do the same job another way (a trencher for a trench). */
+  alternatives?: boolean;
   /** The message is one part of a split request already (the network): no split for the short list. */
   onePart?: boolean;
 }
 
 // The same message against the same items gets the same answer for an hour (models vary run to run).
-const recent = new Map<string, { at: number; ids: number[]; q: { id: number; input: string; value: number }[] }>();
+const recent = new Map<string, { at: number; ids: number[]; q: { id: number; input: string; value: number }[]; alt: number[] }>();
 const RECENT_MS = 60 * 60 * 1000;
 
 /** The items the message is about, best first; null when the model could not be asked. */
@@ -97,7 +99,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
   const { INPUT_HELP, inputsOf } = await import("./quantities.js");
   const inputs = opts.quantities ? pool.map(inputsOf) : [];
   const list = pool.map((i, k) => `${k}: ${label(i)}${inputs[k]?.length ? ` [inputs: ${inputs[k].map((n) => `${n} = ${INPUT_HELP[n]}`).join("; ")}]` : ""}`).join("\n");
-  const key = createHash("sha1").update(`${opts.quantities ? "q" : ""}\n${question}\n${list}`).digest("hex");
+  const key = createHash("sha1").update(`${opts.quantities ? "q" : ""}${opts.alternatives ? "a" : ""}\n${question}\n${list}`).digest("hex");
   let hit = recent.get(key);
   if (!hit || Date.now() - hit.at > RECENT_MS) {
     const { routingFor } = await import("../llm/pin.js");
@@ -111,7 +113,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
         body: JSON.stringify({
           model: MODEL, temperature: 0, max_tokens: 400, response_format: { type: "json_object" }, provider: r.provider, ...(r.seed !== undefined ? { seed: r.seed } : {}), reasoning: { enabled: false },
           messages: [
-            { role: "system", content: `Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. Items are marked product or service: when the customer asks for a product, a service done on it is not it; when they ask for a service, a product is not it. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.quantities ? ` Also, for each item you give that lists inputs, the value of each input the customer's latest message states or that follows directly from it (e.g. "Saturday and Sunday" = 48 hours, "4x5 m" = 20 m²) - leave out any the customer did not give, never assume a typical value, and leave out an input when the customer's quantity is of another kind (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known): "quantities": [{"id": <item id>, "input": "<input name>", "value": <number>}].` : ""}` },
+            { role: "system", content: `Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. Items are marked product or service: when the customer asks for a product, a service done on it is not it; when they ask for a service, a product is not it. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.quantities ? ` Also, for each item you give that lists inputs, the value of each input the customer's latest message states or that follows directly from it (e.g. "Saturday and Sunday" = 48 hours, "4x5 m" = 20 m²) - leave out any the customer did not give, never assume a typical value, and leave out an input when the customer's quantity is of another kind (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known): "quantities": [{"id": <item id>, "input": "<input name>", "value": <number>}].` : ""}${opts.alternatives ? ` When no item is what the customer asks for, the items that could do the same job another way (e.g. a trencher when an excavator is asked for to dig a trench; not merely related items): "alternatives": [<item id>, ...] (at most 3; [] when none could).` : ""}` },
             { role: "user", content: `Customer: ${question}\n\nItems:\n${list}` },
           ],
         }),
@@ -122,14 +124,15 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
     if (j === undefined) return null;
     const ids = (Array.isArray(j?.ids) ? j.ids : []).filter((k: unknown) => Number.isInteger(k) && pool[k as number]) as number[];
     const q = (Array.isArray(j?.quantities) ? j.quantities : []).filter((x: any) => Number.isInteger(x?.id) && ids.includes(x.id) && inputs[x.id]?.includes(x.input) && typeof x.value === "number" && x.value > 0);
-    hit = { at: Date.now(), ids: [...new Set(ids)], q };
+    const alt = ids.length ? [] : (Array.isArray(j?.alternatives) ? j.alternatives : []).filter((k: unknown) => Number.isInteger(k) && pool[k as number]).slice(0, 3) as number[];
+    hit = { at: Date.now(), ids: [...new Set(ids)], q, alt };
     recent.set(key, hit);
     if (recent.size > 5000) recent.delete(recent.keys().next().value!);
     (await import("../llm/decision-log.js")).logDecision("items", MODEL, { question: question.slice(0, 1500), items: pool.map((i) => i.name.slice(0, 80)) }, { ids: hit.ids, quantities: q }, opts.tenant || "");
   }
   const given = new Map<OfferItem, Record<string, number>>();
   for (const x of hit.q) given.set(pool[x.id], { ...(given.get(pool[x.id]) || {}), [x.input]: x.value });
-  return { items: hit.ids.slice(0, limit).map((k) => pool[k]), given };
+  return { items: hit.ids.slice(0, limit).map((k) => pool[k]), given, alternatives: (hit.alt || []).map((k) => pool[k]) };
 }
 
 /** The items the message is about, best first (at most `limit`); null when they could not be judged. */

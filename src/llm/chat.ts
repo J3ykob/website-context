@@ -819,7 +819,7 @@ export class WebsiteChat {
       // null: the items could not be judged (Jev down) - then nothing is said about them.
       // A price question also reads the customer's quantities for the items (priced in code below).
       const productsP: Promise<ItemMatch | null> = this.catalogue ? this.shopProducts(query, question, rt).then((items) => ({ items, given: new Map() }), () => ({ items: [], given: new Map() }))
-        : this.offerItems.length && rt?.intent !== "chitchat" ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: !!rt && rt.price >= 0.5 }).catch(() => null) : Promise.resolve({ items: [], given: new Map() });
+        : this.offerItems.length && rt?.intent !== "chitchat" ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: !!rt && rt.price >= 0.5, alternatives: !!rt && rt.specific >= 0.5 }).catch(() => null) : Promise.resolve({ items: [], given: new Map() });
       const factsP = turnVariant().includes("facts")
         ? this.embeddingProvider.embed([query]).then((v) => keyFacts(this.context.tenantId, v[0] || null, convo, question)).catch(() => null)
         : Promise.resolve(null);
@@ -888,9 +888,13 @@ export class WebsiteChat {
       // instead of "I don't have the mini-excavator's price", which says we rent one (chain C6).
       else if (judged && !this.catalogue && this.offerItems.length && rt && rt.specific >= 0.5 && !behaviour.length) {
         const line = `Our price list (${this.offerItems.length} items, read from our website) has no item that is what the customer asks for.`;
-        noteTurn("products", ["none of our price list"]);
-        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Our offer and prices (from our price list)\n${line}`;
-        passages = [...passages, line];
+        // What could do the same job another way (judged by the matcher), with its price - offered as such (C6:
+        // no mini-excavator, but a trencher digs the trench).
+        const alt = (judged.alternatives || []).map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
+        const altText = alt.length ? `\nNot what the customer asked for, but could do the same job another way (offer it as such):\n${alt.join("\n")}` : "";
+        noteTurn("products", ["none of our price list", ...(judged.alternatives || []).map((p) => `alternative: ${p.name}`)]);
+        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Our offer and prices (from our price list)\n${line}${altText}`;
+        passages = [...passages, line, ...alt];
       }
       answered = passages.length > 0;
       // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer

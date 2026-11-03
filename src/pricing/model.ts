@@ -205,12 +205,13 @@ export async function verify(pm: PricingModel, llm: Llm): Promise<PricingModel> 
 // ── For every question ──
 const READ = `You turn a customer's message into a request for this business's quoting program. Use ONLY the catalogue's
 item ids and input names. Put an input only when the customer states it or it follows directly ("Saturday and
-Sunday" = 2 days = 48 hours when the input counts hours, "4x5 m" = 20 m², "the bride and 3 bridesmaids" = 4 people); leave out what they did not say -
+Sunday" = 2 days = 48 hours and "for a day" = 24 hours when the input counts hours, "4x5 m" = 20 m², "the bride and 3 bridesmaids" = 4 people); leave out what they did not say -
 never assume. A duration is not a choice of rate ("6 hours" sets the duration, not "pay per hour"); one value
 per input in the catalogue's unit ("30 hours over two days" = 30 hours). Every product or service asked for is a
 line - for each person or thing the item that is for them (a bridesmaid's make-up is not the bride's). When
 several catalogue items (a package, or single services) could cover the same thing, they are OPTIONS of one need -
-only the cheapest of them counts. Shared inputs go in "context".
+only the cheapest of them counts. An item that is not what the customer asks for, even if it could do a similar job
+(a trencher when a mini excavator is asked for), is not an option - leave the need out. Shared inputs go in "context".
 Answer JSON: {"context": {...}, "needs": [{"what": "<what the customer asks for>", "options": [{"item": "<id>", "inputs": {...}}]}]}
 ({"needs": []} when nothing matches). One need per thing asked; its options are the items that could each cover it.`;
 
