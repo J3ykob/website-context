@@ -1178,7 +1178,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     // the quote joins its passages. Off unless the quoting model is on for this chat.
     if (process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing")) {
       const quotes = await Promise.all(found.map((f) => Promise.race([this.quoteWithModel(need, f.tenantId).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 8000))])));
-      found = found.map((f, k) => (quotes[k] ? { ...f, passages: [{ content: `Prices computed from ${f.label}'s own price list for this request: ${quotes[k]!.replace(/\n/g, "; ")}`, url: "", title: "quote" }, ...f.passages] } : f));
+      // With a quote, its offer rows are left out: one source per price (the reply took Zajac's 3500 zl / 6 h row
+      // and added the 2 extra hours to the quote's 4500 zl that already had them).
+      found = found.map((f, k) => (quotes[k] ? { ...f, passages: [{ content: `Prices computed from ${f.label}'s own price list for this request: ${quotes[k]!.replace(/\n/g, "; ")}`, url: "", title: "quote" }, ...f.passages.filter((p) => !p.item)] } : f));
       quotes.forEach((q, k) => q && noteTurn("networkQuote", `${found[k].tenantId}: ${q.slice(0, 400)}`));
     }
     const links = this.handoffLinks ? await this.handoffLinks(found.map((f) => ({ tenantId: f.tenantId, label: f.label })), [{ role: "user", content: need }], need).catch(() => ({} as Record<string, string>)) : ({} as Record<string, string>);

@@ -13,7 +13,7 @@ export interface EcosystemMatch {
   plan: EcosystemPlan;
   offers: number;
   vector: number;
-  passages: { content: string; url: string; title: string }[];
+  passages: { content: string; url: string; title: string; item?: boolean }[]; // item: one of its offer rows
   contact: string;
 }
 
@@ -69,7 +69,7 @@ export async function askEcosystem(
     offers: h.offers,
     vector: h.vector,
     // Its matched items (with prices) and its own page excerpts: what the reply may say about it.
-    passages: [...h.items.slice(0, 4).map((i) => ({ content: `${i.name}${i.price_value !== null ? ` - ${i.price_value} ${i.currency}${i.price_max ? `-${i.price_max}` : ""}` : ""}${i.description ? `. ${i.description.slice(0, 200)}` : ""}`, url: i.url || "", title: i.name })), ...h.passages].slice(0, PASSAGES + 2),
+    passages: [...h.items.slice(0, 4).map((i) => ({ content: `${i.name}${i.price_value !== null ? ` - ${i.price_value} ${i.currency}${i.price_max ? `-${i.price_max}` : ""}` : ""}${i.description ? `. ${i.description.slice(0, 200)}` : ""}`, url: i.url || "", title: i.name, item: true })), ...h.passages].slice(0, PASSAGES + 2),
     contact: await contactOf(h.tenantId),
   })));
   console.log(`[ecosystem] ${fromTenantId}: ${r.parts.length} part(s), ${r.asked} judged -> relaying ${matches.map((x) => `${x.tenantId}${x.plan !== "free" ? `(${x.plan})` : ""}`).join(", ") || "none"} (${r.ms} ms)`);
