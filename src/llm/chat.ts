@@ -1044,7 +1044,8 @@ export class WebsiteChat {
     let notesLen = 0;
     const notes = [...this.contextNotes].reverse().map((n) => `Q: ${n.question}\nA: ${n.answer}`).filter((t) => (notesLen += t.length + 2) <= 12000).join("\n\n");
     // What the chat is (a fact, for "what is this? how do you know this?" - owners testing their demo were told to write to their own e-mail).
-    let system = `You are the website chat assistant of ${brand}. You speak for the business as "we". You answer from ${brand}'s own website and price list and what the business adds in its Whisp panel.${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
+    // The panel only when the owner really added answers there: on a demo "the firm gave me more information" was false (blind pairs, iteration 3).
+    let system = `You are the website chat assistant of ${brand}. You speak for the business as "we". You answer from ${brand}'s own website and price list${this.contextNotes.length ? " and what the business added in its Whisp panel" : ""}.${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
 ${renderOfficialInfo(this.context.businessProfile)}${notes ? `\n## Answers from the owner\n${notes}\n` : ""}
 ${packText ? `\n## Our information for this conversation (use only this for facts about us)\n${packText}\n` : opts.noFacts ? "" : "\n## Our information for this conversation\n(nothing in our information answers this message)\n"}
 ${network ? `\n## Businesses from our network (their own information)\n${network.text}\n` : ""}
