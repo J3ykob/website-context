@@ -1143,7 +1143,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if ((opts.handoffKind || opts.keepOffer) && rt && offers >= 0.5) { this.handoffOffers.set(sessionKey, { question, lang: rt.lang, kind: opts.handoffKind || "question", at: Date.now() }); st.handoffOfferedAt = st.turns; }
       if (network) st.referred = [...new Set([...(st.referred || []), ...network!.labels])];
       if (used.length) st.lastPacks = used.map((p) => p.id);
-      const srcs = used.filter((p) => p.url).map((p) => ({ url: p.url, title: p.title }));
+      // A page title can hold markup as text (an SEO plugin's "Sala weselna ... <time datetime="2026">2026</time>" was shown to
+      // Villa Mamma's customers in the sources line): tags are dropped from the title shown.
+      const srcs = used.filter((p) => p.url).map((p) => ({ url: p.url, title: p.title.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim() }));
       // A question about us that our information doesn't answer goes to the owner's gap list (dashboard).
       const gap = !answered && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
       return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network!.partners } : {}) };
