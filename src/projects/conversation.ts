@@ -10,7 +10,7 @@ import { createProject, findOpenProject, addEvent, getProject, setMemory, claimM
 import { writeFile, readFile } from "./repo.js";
 import { agentEnabled, agentStatus, type AgentRunState } from "./agent.js";
 import { jevAsk } from "../llm/jev.js";
-import { reviewMode, reviewForRun, openReview } from "./review.js";
+import { reviewMode, reviewForRun, openReview, hasReviewer } from "./review.js";
 import { BUSINESS_QUESTIONS } from "./agent.js";
 
 export const CONVERSATION = "conversation@1";
@@ -319,11 +319,18 @@ export async function businessQuestions(projectId: string, run?: AgentRunState):
   return questions;
 }
 
-/** The owner reviews first when the business chose so, or whenever the agent has questions for it. */
-async function ownerFirst(projectId: string, tenantId: string, run: AgentRunState): Promise<boolean> {
+/**
+ * The owner reviews first when the business chose so, or whenever the agent has questions for it - only
+ * a business that has an owner.
+ */
+export async function ownerFirst(projectId: string, tenantId: string, run: AgentRunState): Promise<boolean> {
   const p = await getProject(projectId);
   // A business that has not joined has no owner to wait for - until it steps in on its invite page.
-  if (p?.memory.listed && !p.memory.ownerLoop) return false;
+  // Nor does a business nobody has claimed (no owner account): nothing waits for an owner who does not
+  // exist; the result goes out after the automatic checks (2026-11-04 eval: betonlazy-3, bostabeton-2).
+  // No ownerLoop exception there: a rework asked through an old review link would be held again, and
+  // nobody would be e-mailed its new link.
+  if (p?.memory.listed ? !p.memory.ownerLoop : !hasReviewer(tenantId)) return false;
   if (reviewMode(tenantId) === "approve" || run.needsOwner) return true;
   // Quantities only (no prices, no commitments - the owner's decision 2026-10-22): delivered as is;
   // questions for the business stay in the project for the owner, but don't hold the customer up.
@@ -357,9 +364,11 @@ export async function onRunFinished(projectId: string): Promise<void> {
     return;
   }
   // A business answering another business's request without review: the answer goes straight back.
-  // Part of it left without a price: the owner (of a business that has joined) is asked for one too.
+  // Part of it left without a price: the owner (of a business that has joined) is asked for one too -
+  // only one that exists: an unclaimed member's address would get the e-mail, and the customer would be
+  // promised a price nobody sends (the part stays to be quoted).
   if (p.type === net.BUSINESS_REQUEST) {
-    if (draft && !p.memory.listed && !p.memory.ownerQuote && (await net.leavesUnpriced(String(p.memory.question || ""), draft))) {
+    if (draft && !p.memory.listed && !p.memory.ownerQuote && hasReviewer(p.initiatorTenantId) && (await net.leavesUnpriced(String(p.memory.question || ""), draft))) {
       await net.askOwnerForQuote(projectId, s.runId, draft).catch((e) => console.warn(`[network] ${projectId}: owner not asked for a quote: ${(e as Error).message}`));
     }
     await net.settle(projectId, draft, draft ? "answered" : "no_answer");

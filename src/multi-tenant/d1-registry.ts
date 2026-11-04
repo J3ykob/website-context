@@ -138,6 +138,15 @@ function upsert(rec: TenantRecord, label: string): void {
 export function getTenant(id: string): TenantRecord | null {
   return byId.get(id) || null;
 }
+/**
+ * Someone owns the business on Whisp: a set password, or a subscription paid for it (the lead-page /
+ * panel checkout stores settings.stripeSubscription without a password - src/projects/lead.ts:107-111,
+ * src/billing/plan.ts:78). Without either, its chat is a demo nobody has claimed.
+ */
+export function hasOwnerAccount(id: string): boolean {
+  const t = byId.get(id);
+  return !!t && (!!t.ownerPasswordHash || !!t.settings?.stripeSubscription);
+}
 export function getTenantByDomain(domain: string): TenantRecord | null {
   const id = byDomain.get(domain);
   return id ? byId.get(id) || null : null;

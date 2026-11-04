@@ -23,7 +23,7 @@ import { projectsForTenant, projectDetail } from "./store.js";
 import { listFiles, listRequirements, readFile, readFileBuffer, writeFile } from "./repo.js";
 import { agentEnabled, agentStatus } from "./agent.js";
 import { agentDelivery, reworkWithGuidance, businessQuestions, deliverNow, setCustomerContact, projectByLink, NOTIFY, CUSTOMER_DIR } from "./conversation.js";
-import { reviewByToken, decide, reviewMode, timeline } from "./review.js";
+import { reviewByToken, decide, timeline } from "./review.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
 import { resolve } from "path";
 import { getProject } from "./store.js";
@@ -111,8 +111,10 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     res.send(f.kind === "csv" && typeof body === "string" && !body.startsWith("\uFEFF") ? "\uFEFF" + body : body);
   });
 
+  // The stored choice: reviewMode reads "auto" until the business has an owner account, so an "approve"
+  // an admin saved on a demo would read back as unsaved.
   app.get("/api/dashboard/agent-review", deps.auth, (req, res) => {
-    res.json({ mode: reviewMode(tid(req)) });
+    res.json({ mode: getTenant(tid(req))?.settings?.agentReview === "approve" ? "approve" : "auto" });
   });
 
   app.put("/api/dashboard/agent-review", deps.auth, (req, res) => {
@@ -321,10 +323,11 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
     res.json({ ok: true });
   });
   // Reservations that ended unpaid: the request goes to the next business picked for the same part.
-  // Results left waiting for the owner: owner reminded once, the customer's conversation told.
+  // Results left waiting for the owner: owner reminded once, the customer's conversation told (with no
+  // owner account: the result released instead, review.ts).
   const sweep = setInterval(() => {
     void import("./lead.js").then((l) => l.passExpiredLeads()).catch((e) => console.warn(`[lead] sweep: ${e?.message || e}`));
-    void import("./review.js").then((r) => r.remindLateReviews()).then((n) => { if (n) console.log(`[review] ${n} late review(s): owner reminded, customer told`); }).catch((e) => console.warn(`[review] sweep: ${e?.message || e}`));
+    void import("./review.js").then((r) => r.remindLateReviews()).then((n) => { if (n) console.log(`[review] ${n} late review(s): owner reminded and customer told, or released (no owner)`); }).catch((e) => console.warn(`[review] sweep: ${e?.message || e}`));
   }, 10 * 60_000);
   sweep.unref?.();
 

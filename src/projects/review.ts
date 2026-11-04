@@ -5,11 +5,13 @@
  *               approve, edit the text, ask for changes (the agent reworks it with the owner's guidance
  *               and it comes back for review), or decline with their own message.
  * Businesses never browse projects: they get the outputs, and step in where they want to.
+ * A demo nobody has claimed (no owner account) has nobody to wait for: its results go out after the
+ * automatic checks whatever the setting, and the owner's choice applies once they claim it.
  */
 import { randomBytes } from "crypto";
 import { d1Query } from "../storage/conversation-store.js";
 import { addEvent, getProject } from "./store.js";
-import { getTenant } from "../multi-tenant/d1-registry.js";
+import { getTenant, hasOwnerAccount } from "../multi-tenant/d1-registry.js";
 
 export type ReviewMode = "auto" | "approve";
 export type ReviewStatus = "pending" | "approved" | "declined" | "changes_requested";
@@ -36,10 +38,20 @@ const row = (r: any): Review => ({
   draft: r.draft || "", final: r.final || "", note: r.note || "", createdAt: r.created_at, decidedAt: r.decided_at || null,
 });
 
+// AGENT_REVIEW_FORCE: tenant ids in approve mode regardless of settings; AGENT_OWNER_FORCE: tenant ids
+// treated as having an owner, under their own setting. Live tests only, never set in production, so a
+// test never changes a real business's setting or account. ("".split(",") is [""]: an empty id is never forced.)
+const forced = (key: string, id: string) => !!id && (process.env[key] || "").split(",").includes(id);
+
+/** Whether a result can wait for this business's owner: only when it has one (an owner account). */
+export function hasReviewer(tenantId: string): boolean {
+  return forced("AGENT_REVIEW_FORCE", tenantId) || forced("AGENT_OWNER_FORCE", tenantId) || hasOwnerAccount(tenantId);
+}
+
 export function reviewMode(tenantId: string): ReviewMode {
-  // AGENT_REVIEW_FORCE: tenant ids in approve mode regardless of settings (live tests only; never set
-  // in production), so a test never changes a real business's setting.
-  if ((process.env.AGENT_REVIEW_FORCE || "").split(",").includes(tenantId)) return "approve";
+  if (forced("AGENT_REVIEW_FORCE", tenantId)) return "approve";
+  // A stored "approve" on a demo nobody has claimed (only an admin can have set it) waits for the claim.
+  if (!hasReviewer(tenantId)) return "auto";
   return getTenant(tenantId)?.settings?.agentReview === "approve" ? "approve" : "auto";
 }
 
@@ -126,8 +138,11 @@ export async function openReview(projectId: string, tenantId: string, runId: str
 // (the link also works from a later email or the log).
 async function emailOwner(projectId: string, tenantId: string, runId: string, draft: string, files: string[], token: string): Promise<void> {
   const t = getTenant(tenantId);
-  if (!t?.email) return;
   const project = await getProject(projectId);
+  // Nobody to e-mail on a demo nobody has claimed: its address is claim@whisp.so (/claim), the visitor or
+  // salesperson who created it, or a scraped one. A business that has not joined (listed) is e-mailed as
+  // before once it has stepped in on its invite page.
+  if (!t?.email || (!project?.memory.listed && !hasReviewer(tenantId))) return;
   try {
     const { sendReviewEmail } = await import("../multi-tenant/email.js");
     const { readFile } = await import("./repo.js");
@@ -149,6 +164,7 @@ export const reviewLateMs = () => (Number(process.env.AGENT_REVIEW_LATE_MIN) || 
  * Results left waiting for the owner too long (the sweep, every 10 min): the owner gets the review
  * email again (same email and link, once), and the customer's conversation is told - also when the
  * customer has left the page (they see it when they come back; the result follows once decided).
+ * A business with no owner account is not reminded: its held result is released.
  */
 export async function remindLateReviews(): Promise<number> {
   await ensureSchema();
@@ -163,6 +179,14 @@ export async function remindLateReviews(): Promise<number> {
     // approval" reminder would be wrong there (it went to listed businesses' invite reviews until 2026-10-29).
     const pm = (await getProject(r.projectId).catch(() => null))?.memory;
     if ((pm?.listed && !pm.ownerLoop) || pm?.ownerQuote) continue;
+    // A demo nobody has claimed has nobody to remind (its results were held only before the 2026-11-04
+    // rule): decided again now - a customer's result delivered, a business's answer settled - once
+    // (reminded_at is claimed above), with no review_late and no e-mail.
+    if (!pm?.listed && !hasReviewer(r.tenantId)) {
+      const { onRunFinished } = await import("./conversation.js");
+      await onRunFinished(r.projectId).catch(() => {});
+      continue;
+    }
     await addEvent(r.projectId, { kind: "review_late", actor: "system", data: { runId: r.runId, waitedMin: Math.round((Date.now() - Date.parse(r.createdAt)) / 60_000) } }).catch(() => {});
     await emailOwner(r.projectId, r.tenantId, r.runId, r.draft, [], r.token);
     const { deliverNow } = await import("./conversation.js");

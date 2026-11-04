@@ -488,8 +488,13 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
     console.warn(`[project-agent] ${id} verification error: ${e?.message || e}`);
     return null;
   });
-  // A reply that may speak to the business is not a failed run: the owner sees it first (needsOwner).
-  const hard = (verification?.failed || 0) - (verification?.customerOnlyFailed ? 1 : 0) - (verification?.specFailed || 0);
+  // A reply that may speak to the business is not a failed run: the owner sees it first (needsOwner) - where
+  // there is one. A customer's result on a demo nobody has claimed has nobody to see it first: the check
+  // counts as failed - one repair pass (its notes name the check), then "could not prepare" (the owner's
+  // decision 2026-11-04). Answers to other businesses' requests are unchanged.
+  const [{ hasReviewer }, { CONVERSATION }] = await Promise.all([import("./review.js"), import("./conversation.js")]);
+  const soft = !!verification?.customerOnlyFailed && (project.type !== CONVERSATION || hasReviewer(project.initiatorTenantId));
+  const hard = (verification?.failed || 0) - (soft ? 1 : 0) - (verification?.specFailed || 0);
   const clean = result.state === "succeeded" && result.unknownPlaceholders.length === 0 && result.alteredPlaceholders.length === 0 && hard === 0;
   // Only the hard checks (invented prices, numbers, the choice, network requests, assumed quantities...)
   // earn a repair pass. The planner's task-specific criteria are recorded and shown but do not: in the
@@ -499,7 +504,7 @@ async function collect(project: Project, state: AgentRunState, result: RunResult
   const done: AgentRunState = {
     ...state, status: ok ? "done" : "failed", stopReason: result.stopReason, error: result.error?.slice(0, 500),
     files: written, verification: verification ? { met: verification.met, failed: verification.failed } : undefined,
-    needsOwner: !!verification?.customerOnlyFailed,
+    needsOwner: soft,
     costUsd: result.usage.costUsd, finishedAt: new Date().toISOString(),
   };
   const finished = async () => {
