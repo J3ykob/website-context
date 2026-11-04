@@ -1071,6 +1071,8 @@ export class WebsiteChat {
       account ? "- It cannot change its information itself: the owner corrects it or adds answers in the Whisp panel; changes on the website reach the chat when the website is read again."
         : "- It cannot change its information itself: with a Whisp account the owner corrects it or adds answers in the Whisp panel; changes on the website reach the chat when the website is read again.",
       `- ${account ? "" : "On the website, "}when a customer wants it, the chat takes their question or order with their contact details and, once they confirm, sends it to the business by e-mail and to the inquiries in the Whisp panel.`,
+      // A fact for the check too: "you are writing as the owner, testing the chat" was blocked as unsupported (smoke test, helsen-2).
+      "- The person writing in this conversation is the business's owner or staff, testing or correcting this chat.",
     ].join("\n") : "";
     let system = `You are the website chat assistant of ${brand}. You speak for the business as "we". You answer from ${brand}'s own website and price list${this.contextNotes.length ? " and what the business added in its Whisp panel" : ""}.${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
 ${renderOfficialInfo(this.context.businessProfile)}${notes ? `\n## Answers from the owner\n${notes}\n` : ""}${about ? `\n## About this chat\n${about}\n` : ""}
@@ -1146,7 +1148,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const sources = [...passages.map((content) => ({ content })), ...(network?.evidence || []),
       // What this chat is, so a reply describing itself ("I'm the chat on X's website...", asked by owners testing their
       // demo) is not blocked as unsupported - it was, in 3 of 14 fact-check blocks of the 2026-11-04 eval.
-      { content: `This is the chat on the website of ${brand}${this.getAllowedDomain() ? ` (${this.getAllowedDomain()})` : ""}: it answers customers' questions for the business from the business's own website and price list and what the business added.` },
+      { content: `This is ${account ? "the chat on the website of" : "a demo of the chat, made by Whisp, for the website of"} ${brand}${this.getAllowedDomain() ? ` (${this.getAllowedDomain()})` : ""}: it answers customers' questions for the business from the business's own website and price list and what the business added.` },
       // Offering to check the network is something this chat really does (on a yes it searches) - not a claim about the business.
       ...(opts.handoffKind === "network" ? [{ content: "This chat can check businesses from our local Whisp network for the customer's question, if the customer wants that." }] : []),
       ...(about ? [{ content: about }] : [])];
