@@ -274,7 +274,7 @@ export async function quickAnswer(s: CollectSession, message: string, prior: str
   return c.choice === "confirm" || c.choice === "cancel" || c.choice === "pause" ? c.choice : null;
 }
 
-export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, handOver = false): Promise<CollectResult> {
+export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, handOver = false, questionAnswered = false): Promise<CollectResult> {
   s.at = Date.now();
   const fields = fieldsOf(flow);
   const prior = s.transcript.slice(-12).join("\n");
@@ -369,7 +369,10 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
   else { outcome = "ask"; task = `Ask, briefly, for exactly these details and nothing else: ${missing.slice(0, 2).map((f) => `${f.label}${f.description ? ` (${f.description})` : ""}`).join("; ")}.`; }
   if (offerNote && outcome !== "cancel" && outcome !== "send") task = `${offerNote} Then: ${task}`;
   const asked = (read.values?.notes || "").trim();
-  if (asked && outcome !== "cancel") task += " They also asked something: do not answer it and promise nothing (no prices, availability or dates); say the team will reply to it together with the order.";
+  // The chat answers a question asked along the way itself (chat.ts, before this reply); otherwise the team does, with the order.
+  if (asked && outcome !== "cancel") task += questionAnswered
+    ? " Their question has just been answered above this message: do not answer or mention it again - just continue with the details."
+    : " They also asked something: do not answer it and promise nothing (no prices, availability or dates); say the team will reply to it together with the order.";
 
   // The reply as JSON: the message text, and (for the summary) the field names
   // translated into the customer's language.

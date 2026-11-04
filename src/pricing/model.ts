@@ -396,7 +396,16 @@ export async function loadPricing(tenantId: string): Promise<PricingBusiness | n
  * read in the model's terms (Haiku), its program quotes it. null = nothing in its catalogue was asked.
  */
 const ALTERNATIVES_MAX = 4;
+/** The quote as text for the reply, or null. */
 export async function quoteText(pb: PricingBusiness, convo: string): Promise<string | null> {
+  return (await quoteResult(pb, convo))?.text ?? null;
+}
+
+/**
+ * The quote as text plus whether it prices the whole request: every line that is not an alternative has a price
+ * (or is included in another one) - computed by the business's program, so the chat can give it (chat.ts).
+ */
+export async function quoteResult(pb: PricingBusiness, convo: string): Promise<{ text: string; covered: boolean } | null> {
   const catalog = catalogOf(pb);
   const { OpenRouterProvider } = await import("../llm/openrouter-provider.js");
   const or = new OpenRouterProvider({ model: "anthropic/claude-haiku-5.5", maxTokens: 1500, temperature: 0 });
@@ -432,5 +441,7 @@ export async function quoteText(pb: PricingBusiness, convo: string): Promise<str
   lines.unshift("Each amount already includes everything its note lists (e.g. travel) - nothing of it is added again.");
   if (several.size) lines.push("No single total: some things asked have several options above - give the options as they are and let the customer choose (or ask which one they mean).");
   else if (q.total) lines.push(`Total: ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
-  return lines.join("\n");
+  const main = q.lines.filter((l) => !l.alternative);
+  const covered = main.some((l) => l.status === "price") && main.every((l) => l.status === "price" || l.status === "included");
+  return { text: lines.join("\n"), covered };
 }

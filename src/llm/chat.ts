@@ -461,14 +461,14 @@ export class WebsiteChat {
   }
 
   /** A conversation already inside something - an order form, an on-page flow, a "which one?" question: its next step, or null. */
-  private async continueSession(messages: ChatMessage[], sessionKey: string, formState?: Record<string, string>): Promise<ChatResponse | null> {
+  private async continueSession(messages: ChatMessage[], sessionKey: string, formState?: Record<string, string>, questionAnswered = false): Promise<ChatResponse | null> {
     const message = messages.findLast((m) => m.role === "user")?.content || "";
     const effectiveSessionKey = sessionKey;
     // An "in chat" flow (order / inquiry) in progress takes every message.
     const cs = this.collectSessions.get(effectiveSessionKey);
     if (cs) {
       const flow = this.context.flows.find((f) => f.id === cs.flowId && f.status === "active");
-      if (flow && Date.now() - cs.at < COLLECT_IDLE_MS) return this.runCollect(flow, cs, effectiveSessionKey, message);
+      if (flow && Date.now() - cs.at < COLLECT_IDLE_MS) return this.runCollect(flow, cs, effectiveSessionKey, message, questionAnswered);
       this.collectSessions.delete(effectiveSessionKey);
     }
 
@@ -692,10 +692,22 @@ export class WebsiteChat {
 
     // An open form: a question to us asked in the middle is answered (the form stays open); everything else goes to the form.
     if (this.collectSessions.has(sessionKey)) {
-      const q = await jevAsk({ message: question }, { q: { type: "noul", instructions: "The customer is filling in an order or inquiry form in a chat. Is `message` a question to the business asking for information (price, availability, terms, how something works) rather than giving, correcting or declining details for the form?" } }, 3000).catch(() => null);
+      const q = await jevAsk({ message: question }, {
+        q: { type: "noul", instructions: "The customer is filling in an order or inquiry form in a chat. Is `message` a question to the business asking for information (price, availability, terms, how something works) rather than giving, correcting or declining details for the form?" },
+        alsoAsks: { type: "noul", instructions: "Besides giving, correcting or declining details for the form, does `message` also ask the business something (a price, availability, a term, whether something is possible)?" },
+      }, 3000).catch(() => null);
       if (((q?.q as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.75) {
         const rtQ = await this.routeTurn(sanitizedMessages, question);
         return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt: rtQ, extra: [BEHAVIOUR.midForm] });
+      }
+      // Details AND a question in one message: the form only took the details and said the team would answer with the order
+      // (kamilkozielewicz, insanit, 2026-11-04 eval). The checked reply answers the question; the form then takes the details.
+      if (((q?.alsoAsks as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.7) {
+        const rtQ = await this.routeTurn(sanitizedMessages, question);
+        const answer = await this.packsReply(sanitizedMessages, sessionKey, onToken, { rt: rtQ, extra: [BEHAVIOUR.answerInForm] });
+        const next = await this.continueSession(sanitizedMessages, sessionKey, formState, true);
+        if (next?.message) onToken(`\n\n${next.message}`);
+        return { ...answer, message: next?.message ? `${answer.message}\n\n${next.message}` : answer.message, ...(next?.collect ? { collect: next.collect } : {}) };
       }
     }
     // An open form / flow / pending choice: its next step (the form's replies are the model's).
@@ -782,6 +794,16 @@ export class WebsiteChat {
           if (r) { st.calcStarted = true; onToken(r.message); return r; }
         }
         return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
+      }
+      // The business's own quoting model priced every part of the request (its program computes the amounts): answered
+      // here, like the simple calculation. Zajacfoto's "6 h package + 4 extra hours + a session" (5500 + 1500 zl, computed)
+      // went to a 75 s calculation held for approval because the guessed gates fell to simple 0.26 / ours 0.12 (2026-11-04).
+      if (process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing")) {
+        const convoText = sanitizedMessages.slice(-8).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 700)}`).join("\n");
+        const quote = await this.quoteResultWithModel(convoText).catch(() => null);
+        markTurn("quotedForRoute");
+        noteTurn("quoteCovered", !!quote?.covered);
+        if (quote?.covered) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
       }
       // Listed unit prices times the customer's quantities: answered here (the owner's decision 2026-10-26);
       // anything more (measuring, unlisted work, discounts, many items) goes to the calculation and its approval.
@@ -1252,12 +1274,26 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
   private pricingCache = new Map<string, { at: number; pb: import("../pricing/model.js").PricingBusiness | null }>();
   // tenantId: our own by default; a network business's for the businesses relayed to the customer.
   private async quoteWithModel(convo: string, tenantId = this.context.tenantId): Promise<string | null> {
-    const m = await import("../pricing/model.js");
-    let hit = this.pricingCache.get(tenantId);
-    if (!hit || Date.now() - hit.at > 10 * 60_000) this.pricingCache.set(tenantId, (hit = { at: Date.now(), pb: await m.loadPricing(tenantId) }));
-    const pb = hit.pb;
-    if (!pb?.parts.length) return null;
-    return m.quoteText(pb, convo);
+    return (await this.quoteResultWithModel(convo, tenantId))?.text ?? null;
+  }
+  // The same conversation's quote once per turn: the calculation route asks first, the reply reuses it.
+  private quoteMemo = new Map<string, { at: number; p: Promise<{ text: string; covered: boolean } | null> }>();
+  private async quoteResultWithModel(convo: string, tenantId = this.context.tenantId): Promise<{ text: string; covered: boolean } | null> {
+    const key = `${tenantId}\n${convo}`;
+    const memo = this.quoteMemo.get(key);
+    if (memo && Date.now() - memo.at < 60_000) return memo.p;
+    const p = (async () => {
+      const m = await import("../pricing/model.js");
+      let hit = this.pricingCache.get(tenantId);
+      if (!hit || Date.now() - hit.at > 10 * 60_000) this.pricingCache.set(tenantId, (hit = { at: Date.now(), pb: await m.loadPricing(tenantId) }));
+      const pb = hit.pb;
+      if (!pb?.parts.length) return null;
+      return m.quoteResult(pb, convo);
+    })();
+    if (this.quoteMemo.size > 200) this.quoteMemo.clear();
+    this.quoteMemo.set(key, { at: Date.now(), p });
+    p.catch(() => this.quoteMemo.delete(key));
+    return p;
   }
 
   /** The network businesses found for a need, as prompt text + fact-check evidence + links. */
@@ -1436,12 +1472,12 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     return this.runCollect(flow, s, sessionKey, message);
   }
 
-  private async runCollect(flow: FlowDefinition, s: CollectSession, sessionKey: string, message: string): Promise<ChatResponse> {
+  private async runCollect(flow: FlowDefinition, s: CollectSession, sessionKey: string, message: string, questionAnswered = false): Promise<ChatResponse> {
     const llm = (system: string, user: string, maxTokens = 700) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
     const status = (stage: NonNullable<ChatResponse["collect"]>["stage"]) => ({ flowId: flow.id, stage, missing: stage === "collecting" || stage === "confirming" ? missingLabels(flow, s) : [] });
     try {
       const handOver = !!this.offerItems.length && agentEnabled() && (await this.hasNetwork().catch(() => false));
-      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge(), handOver);
+      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge(), handOver, questionAnswered);
       if ("handover" in r) {
         // Not ours to take as an order: the agent (this business's offer and the network) answers it.
         this.collectSessions.delete(sessionKey);
