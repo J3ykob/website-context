@@ -799,7 +799,10 @@ export class WebsiteChat {
         markTurn("simpleCheck");
         const simple = ((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.4, allOurs = ((s?.allOurs as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.5;
         noteTurn("simpleCalc", { simple: (s?.simple as JevNoulAnswer | undefined)?.noul, allOurs: (s?.allOurs as JevNoulAnswer | undefined)?.noul });
-        if (simple && (allOurs || !(await this.hasNetwork().catch(() => false)))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
+        // "Every price ours?" only matters when a price is asked: "with another 12 m2 path, is it enough?" (a quantity against the
+        // minimum order, no price) went to the background calculation because Bosta lists no prices ("ours" 0.04), and came back
+        // as "3.7 m3 meets the 4 m3 minimum" (2026-11-04 eval).
+        if (simple && (allOurs || rt.price < 0.5 || !(await this.hasNetwork().catch(() => false)))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
       }
       const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : undefined);
       if (r) { st.calcStarted = true; onToken(r.message); return r; }
