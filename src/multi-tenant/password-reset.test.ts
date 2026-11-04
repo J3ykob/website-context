@@ -13,7 +13,10 @@ vi.mock("resend", () => ({
 import * as registry from "./d1-registry.js";
 import * as auth from "./d1-auth.js";
 import * as store from "../storage/conversation-store.js";
-import { ownerByEmail, mintResetToken, checkResetToken, requestPasswordReset, resetPassword } from "./password-reset.js";
+import {
+  ownerByEmail, mintResetToken, checkResetToken, requestPasswordReset, resetPassword,
+  resetsOn, addressConfirmed, setupLinkMark, confirmAddress, ownerCanReset,
+} from "./password-reset.js";
 
 let mem: Database.Database;
 let failUpdates = false, failNewSessions = false, failSessionDeletes = false;
@@ -31,11 +34,17 @@ function makeQuery(db: Database.Database) {
 }
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const BASE = "https://whisp.so";
-const tokenOf = (text: string) => decodeURIComponent(/#reset=(\S+)/.exec(text)![1]);
+const tokenOf = (text: string) => decodeURIComponent(/#reset=([^&\s]+)/.exec(text)![1]);
+const quotaRows = () => mem.prepare("SELECT COUNT(*) AS n FROM usage_quota").get();
+const later = () => new Date(Date.now() + 1000).toISOString(); // a D1 row newer than the cached record
 
+// An owner as one is made: the set-password link e-mailed to the address (signup keeps setupEmail) is used, which
+// confirms the address (setup-password adds setupLinkMark).
 function owner(email: string, site: string, password = "old-password-1") {
   const t = registry.createTenant(email, site);
-  registry.updateTenant(t.id, { ownerPasswordHash: auth.hashPassword(password) });
+  registry.updateTenant(t.id, { setupToken: "link", settings: { setupEmail: email } });
+  const x = registry.getTenant(t.id)!;
+  registry.updateTenant(t.id, { ownerPasswordHash: auth.hashPassword(password), setupToken: null, settings: { ...x.settings, ...setupLinkMark(x) } });
   return registry.getTenant(t.id)!;
 }
 
@@ -198,10 +207,10 @@ describe("asking for a link", () => {
     await requestPasswordReset("x@unclaimed.com", "en", BASE);
     await requestPasswordReset("nobody@nowhere.com", "en", BASE);
     expect(sent).toHaveLength(0);
-    expect(mem.prepare("SELECT COUNT(*) AS n FROM usage_quota").get()).toEqual({ n: 0 });
+    expect(quotaRows()).toEqual({ n: 0 });
   });
 
-  it("the owner gets one e-mail with a working link in the #fragment, in the page's language", async () => {
+  it("the owner gets one e-mail with a working link in the #fragment, in the page's language, which the link carries", async () => {
     const o = owner("kubalol7982@gmail.com", "https://acme.pl");
     await requestPasswordReset(" KubaLOL7982@gmail.com", "pl", BASE);
     expect(sent).toHaveLength(1);
@@ -209,9 +218,15 @@ describe("asking for a link", () => {
     expect(sent[0].subject).toBe("Nowe hasło do konta Whisp - acme.pl");
     expect(sent[0].text).not.toContain("{{");
     expect(sent[0].text).toContain(`${BASE}/auth/setup?tenant=${o.id}#reset=`);
+    expect(sent[0].text).toMatch(/#reset=[^&\s]+&lang=pl\s/);
     expect(checkResetToken(tokenOf(sent[0].text))?.id).toBe(o.id);
     await requestPasswordReset("kubalol7982@gmail.com", "", BASE); // no page language: as the other owner e-mails (PL not approved -> EN)
     expect(sent[1].subject).toBe("Reset your Whisp password");
+    expect(sent[1].text).toMatch(/&lang=en\s/); // the page then reads English too (on its own it picks Polish for *_pl)
+    process.env.OWNER_EMAILS_PL_APPROVED = "1";
+    await requestPasswordReset("kubalol7982@gmail.com", "", BASE);
+    expect(sent[2].subject).toBe("Nowe hasło do konta Whisp - acme.pl");
+    expect(sent[2].text).toMatch(/&lang=pl\s/);
   });
 
   it("until the template is approved, only the Whisp owner's address gets it", async () => {
@@ -228,13 +243,93 @@ describe("asking for a link", () => {
     process.env.ADMIN_SECRET = "short";
     await requestPasswordReset("kubalol7982@gmail.com", "en", BASE);
     expect(sent).toHaveLength(0);
-    expect(mem.prepare("SELECT COUNT(*) AS n FROM usage_quota").get()).toEqual({ n: 0 });
+    expect(quotaRows()).toEqual({ n: 0 });
+  });
+
+  it("resets reach owners only once the e-mail is approved and the secret is strong (the page says so otherwise)", () => {
+    expect(resetsOn()).toBe(false);
+    process.env.PASSWORD_RESET_EMAIL_APPROVED = "1";
+    expect(resetsOn()).toBe(true);
+    process.env.ADMIN_SECRET = "whisp-admin-2026";
+    expect(resetsOn()).toBe(false);
   });
 
   it("at most 3 e-mails per address per day", async () => {
     owner("kubalol7982@gmail.com", "https://acme.com");
     for (let i = 0; i < 4; i++) await requestPasswordReset("kubalol7982@gmail.com", "en", BASE);
     expect(sent).toHaveLength(3);
+  });
+});
+
+describe("only a confirmed address gets a link", () => {
+  it("a set-password link confirms the address it was e-mailed to, while that is still the account's", () => {
+    const t = registry.createTenant("Owner@Acme.pl ", "https://acme.pl");
+    registry.updateTenant(t.id, { settings: { setupEmail: "owner@acme.pl" } });
+    const x = registry.getTenant(t.id)!;
+    expect(setupLinkMark(x)).toEqual({ confirmedEmail: "owner@acme.pl" });
+    expect(setupLinkMark({ ...x, settings: {} })).toEqual({}); // a link from before 2026-11: nothing kept with it
+    expect(setupLinkMark({ ...x, settings: { setupEmail: "other@acme.pl" } })).toEqual({});
+  });
+
+  it("an owner whose address was never confirmed (claimed before 2026-11) gets nothing until a login with it", async () => {
+    const t = registry.createTenant("jan@firma.pl", "https://firma.pl");
+    registry.updateTenant(t.id, { ownerPasswordHash: auth.hashPassword("owner-password-1") });
+    process.env.PASSWORD_RESET_EMAIL_APPROVED = "1";
+    await requestPasswordReset("jan@firma.pl", "en", BASE);
+    expect(sent).toHaveLength(0);
+    expect(quotaRows()).toEqual({ n: 0 });
+    confirmAddress(registry.getTenant(t.id)!); // POST /api/auth/login with the password
+    await flush();
+    const row = mem.prepare("SELECT settings_json FROM tenants WHERE id = ?").get(t.id) as any;
+    expect(JSON.parse(row.settings_json).confirmedEmail).toBe("jan@firma.pl");
+    await requestPasswordReset("jan@firma.pl", "en", BASE);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("an address rewritten before 2026-11 (the public onboard-demo form) never gets a link, even after the old link claims the account", async () => {
+    // Signup before 2026-11: the welcome e-mail took the link to owner@acme.pl; nothing kept the address with it.
+    const t = registry.createTenant("owner@acme.pl", "https://acme.pl");
+    registry.updateTenant(t.id, { setupToken: "old-link" });
+    await flush();
+    // The old /api/onboard-demo wrote a stranger's address over it, and the link lived on.
+    mem.prepare("UPDATE tenants SET email = ?, updated_at = ? WHERE id = ?").run("stranger@evil.example", later(), t.id);
+    await registry.hydrateRegistry();
+    expect(registry.getTenant(t.id)).toMatchObject({ email: "stranger@evil.example", setupToken: "old-link" });
+    // The owner uses the old link (setup-password: the token matches; setupLinkMark adds what it confirms - nothing).
+    const x = registry.getTenant(t.id)!;
+    registry.updateTenant(t.id, { ownerPasswordHash: auth.hashPassword("owner-password-1"), setupToken: null, settings: { ...x.settings, ...setupLinkMark(x) } });
+    expect(addressConfirmed(registry.getTenant(t.id)!)).toBe(false);
+    process.env.PASSWORD_RESET_EMAIL_APPROVED = "1";
+    await requestPasswordReset("stranger@evil.example", "en", BASE);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("an owner's address corrected later (support, in D1) gets a link only once the owner logs in with it", async () => {
+    const o = owner("jan@firma.pl", "https://firma.pl");
+    await flush();
+    mem.prepare("UPDATE tenants SET email = ?, updated_at = ? WHERE id = ?").run("jan.nowak@firma.pl", later(), o.id);
+    await registry.hydrateRegistry();
+    process.env.PASSWORD_RESET_EMAIL_APPROVED = "1";
+    await requestPasswordReset("jan.nowak@firma.pl", "en", BASE);
+    expect(sent).toHaveLength(0);
+    confirmAddress(registry.getTenant(o.id)!);
+    await requestPasswordReset("jan.nowak@firma.pl", "en", BASE);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("whether an owner gets back in alone (the lead page's rule): resets on, the address confirmed, a login opens this business", async () => {
+    const o = owner("jan@firma.pl", "https://firma.pl");
+    expect(ownerCanReset(o)).toBe(false); // the e-mail is not approved yet
+    process.env.PASSWORD_RESET_EMAIL_APPROVED = "1";
+    expect(ownerCanReset(o)).toBe(true);
+    await new Promise((r) => setTimeout(r, 5));
+    const newer = owner("jan@firma.pl", "https://druga-firma.pl");
+    expect(ownerCanReset(registry.getTenant(o.id)!)).toBe(false); // a login with the address opens the newer one
+    expect(ownerCanReset(newer)).toBe(true);
+    const unconfirmed = registry.createTenant("ewa@trzecia.pl", "https://trzecia.pl");
+    registry.updateTenant(unconfirmed.id, { ownerPasswordHash: auth.hashPassword("owner-password-1") });
+    expect(ownerCanReset(registry.getTenant(unconfirmed.id)!)).toBe(false);
+    expect(ownerCanReset(registry.createTenant("x@czwarta.pl", "https://czwarta.pl"))).toBe(false); // no password
   });
 });
 

@@ -13,6 +13,7 @@ import { getProject, setMemory, addEvent } from "./store.js";
 import { readFile } from "./repo.js";
 import { d1Query } from "../storage/conversation-store.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
+import { ownerCanReset } from "../multi-tenant/password-reset.js";
 import { stripe, stripeKey, subscribed, forgetSubscription, planForm, PRICE_PLN, portal } from "../billing/plan.js";
 export { subscribed } from "../billing/plan.js";
 
@@ -107,8 +108,8 @@ export async function confirmCheckout(token: string, sessionId: string): Promise
     const settings = { ...(t.settings || {}), stripeCustomer: String(s.customer || ""), stripeSubscription: String(s.subscription || "") };
     delete settings.network; // a member now: its requests come to it first, answered under its own settings
     // The business owns its account from now on: the address it paid with (logins, setup, its emails). An account
-    // that already has an owner (password set) keeps its login e-mail - a password reset link goes there. A new
-    // address ends the set-password link sent to the old one (updateTenant).
+    // that already has an owner (password set) keeps its login e-mail - a password reset link goes there (updateTenant
+    // keeps it too). A new address ends the set-password link sent to the old one (updateTenant).
     const payer = String(s.customer_details?.email || "").trim();
     updateTenant(t.id, { settings, ...(payer.includes("@") && !t.ownerPasswordHash ? { email: payer } : {}) });
   }
@@ -120,13 +121,17 @@ export async function confirmCheckout(token: string, sessionId: string): Promise
 
 /**
  * A dashboard session for a subscribed business (the whole Whisp panel: assistant, requests, analytics). A business
- * whose owner has set a password logs in with it ({ login: true } - the page opens the login): the lead link has no
- * expiry and is often forwarded, and opened a new session right after a password reset had ended every other one.
+ * whose owner gets back in alone (a password, and "Forgot password?" works for it - ownerCanReset) logs in with the
+ * password ({ login: true } - the page opens the login): the lead link has no expiry and is often forwarded, and
+ * opened a new session right after a password reset had ended every other one. Until a reset is possible (the e-mail
+ * not approved yet, an address not confirmed yet, a newer business that a login with the address opens), the link
+ * still opens the panel: there is no reset to outlive, and it would leave an owner who forgot the password no way in.
  */
 export async function dashboardSession(token: string): Promise<{ token: string; tenantId: string } | { login: true } | null> {
   const inv = await inviteByToken(token);
   if (!inv || !inv.unlocked_at || !(await subscribed(inv.tenant_id))) return null;
-  if (getTenant(inv.tenant_id)?.ownerPasswordHash) return { login: true };
+  const t = getTenant(inv.tenant_id);
+  if (t && ownerCanReset(t)) return { login: true };
   const { createSession } = await import("../multi-tenant/d1-auth.js");
   return { token: await createSession(inv.tenant_id), tenantId: inv.tenant_id };
 }

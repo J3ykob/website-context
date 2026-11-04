@@ -5,6 +5,12 @@
  * password hash, with a key of its own derived from ADMIN_SECRET. Setting the new password changes the hash, so
  * a link works once and every older link stops with it; it also stops at its expiry. Only an account that has a
  * password (an owner) is reset - claiming an account stays the set-password e-mail (setup token).
+ *
+ * A link goes only to the account's CONFIRMED address (settings.confirmedEmail): the one its set-password link was
+ * e-mailed to, once that link is used, or the one its owner logs in with. Before 2026-11 the public /api/onboard-demo
+ * form and a lead-page payment rewrote the address of accounts that already had an owner (security review
+ * 2026-11-04): a link to such an address would hand the account to whoever reads that mailbox. Only the owner logs
+ * in, and the owner does not log in with a stranger's address, so a rewritten address is never confirmed.
  */
 import { createHmac, timingSafeEqual } from "crypto";
 import { getTenant, listTenants, updateTenant, type TenantRecord } from "./d1-registry.js";
@@ -23,6 +29,35 @@ function resetKey(): Buffer | null {
 const sign = (key: Buffer, payload: string, hash: string) => createHmac("sha256", key).update(`${payload}|${hash}`).digest("base64url");
 
 /**
+ * Whether a reset e-mail can reach owners at all: a reset key, and the e-mail approved (until then email.ts sends it
+ * only to the Whisp owner's own address). Global, so saying it on the login page tells nothing about any account.
+ */
+export const resetsOn = (): boolean => !!resetKey() && process.env.PASSWORD_RESET_EMAIL_APPROVED === "1";
+
+/** The account's address is the one its owner confirmed: a reset link may go there. */
+export function addressConfirmed(t: TenantRecord): boolean {
+  const c = norm(t.settings?.confirmedEmail);
+  return !!c && c === norm(t.email);
+}
+
+/**
+ * What using the set-password link adds to the settings of the account it claims: the address the link was e-mailed
+ * to (settings.setupEmail, kept by signup and admin handover) is confirmed, while it is still the account's (a new
+ * address ends the link - updateTenant). A link from before 2026-11 has no setupEmail and confirms nothing: the
+ * address could have been rewritten after it was sent.
+ */
+export function setupLinkMark(t: TenantRecord): { confirmedEmail?: string } {
+  const sentTo = norm(t.settings?.setupEmail);
+  return sentTo && sentTo === norm(t.email) ? { confirmedEmail: sentTo } : {};
+}
+
+/** A login with the password confirms the address it was made with (an account claimed before 2026-11 gets it here). */
+export function confirmAddress(t: TenantRecord): void {
+  if (!t.ownerPasswordHash || addressConfirmed(t)) return;
+  updateTenant(t.id, { settings: { ...(t.settings || {}), confirmedEmail: norm(t.email) } });
+}
+
+/**
  * The account a login with this e-mail opens, and a reset sets: the newest business with this address that has a
  * password. One whose password was set with its apiKey (settings.claimedWithApiKey) comes after the others: the key
  * goes to whoever signs up, with any address typed, so it proves no mailbox - a stranger's account carrying an
@@ -32,6 +67,15 @@ export function ownerByEmail(email: unknown): TenantRecord | null {
   const e = norm(email);
   const owners = e ? listTenants().filter((t) => !!t.ownerPasswordHash && norm(t.email) === e) : [];
   return owners.find((t) => !t.settings?.claimedWithApiKey) || owners[0] || null;
+}
+
+/**
+ * Whether the owner of this business gets back in alone: resets are on, a login with its address opens this business
+ * (not a newer one with the same address), and its address is confirmed, so "Forgot password?" works for it.
+ * The lead page's dashboard button sends such a business to the login (src/projects/lead.ts).
+ */
+export function ownerCanReset(t: TenantRecord): boolean {
+  return !!t.ownerPasswordHash && resetsOn() && addressConfirmed(t) && ownerByEmail(t.email)?.id === t.id;
 }
 
 export function mintResetToken(t: TenantRecord, now = Date.now()): string | null {
@@ -61,6 +105,10 @@ export function checkResetToken(token: string, now = Date.now()): TenantRecord |
 export async function requestPasswordReset(email: string, lang: string, baseUrl: string): Promise<void> {
   const t = ownerByEmail(email);
   if (!t) return;
+  if (!addressConfirmed(t)) {
+    console.log(`[auth] ${t.id}: password reset not sent - its address is not confirmed yet (no set-password link used, or login, with it)`);
+    return;
+  }
   // Signed before it is counted: with resets off, a request must not use up one of the owner's e-mails of the day.
   const token = mintResetToken(t);
   if (!token) { console.error("[auth] password reset off: ADMIN_SECRET is unset or weak"); return; }
@@ -69,11 +117,14 @@ export async function requestPasswordReset(email: string, lang: string, baseUrl:
     logAbuse("password_reset_cap", `email:${norm(t.email)}`, t.id);
     return;
   }
-  const { sendPasswordResetEmail } = await import("./email.js");
+  const { sendPasswordResetEmail, ownerLang } = await import("./email.js");
+  // The e-mail's language (the login page's, else as the other owner e-mails) rides in the link too: the reset page
+  // then reads as the e-mail did. On its own it picks Polish for any .pl business, after an English e-mail too.
+  const l = lang === "pl" || lang === "en" ? lang : ownerLang(t.domain);
   // The token rides in the #fragment: a browser never sends it to a server (no access logs, no Referer).
   await sendPasswordResetEmail(t.email, {
-    domain: t.domain, lang, minutes: resetTtlMinutes(),
-    resetUrl: `${baseUrl}/auth/setup?tenant=${encodeURIComponent(t.id)}#reset=${encodeURIComponent(token)}`,
+    domain: t.domain, lang: l, minutes: resetTtlMinutes(),
+    resetUrl: `${baseUrl}/auth/setup?tenant=${encodeURIComponent(t.id)}#reset=${encodeURIComponent(token)}&lang=${l}`,
   });
 }
 

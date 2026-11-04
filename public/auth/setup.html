@@ -252,7 +252,10 @@
         "reset.btn": "Save new password", "reset.busy": "Saving...", "reset.done": "Password changed - taking you to your dashboard...",
         "reset.login": "Password changed - log in with your new password.",
         "reset.title": "Set a new password - Whisp", "reset.back": "Back to log in",
-        "reset.notSignedOut": "We could not sign you out on your other devices. If someone else may know your old password, write to jakub@whisp.so."
+        "reset.notSignedOut": "We could not sign you out on your other devices. If someone else may know your old password, write to jakub@whisp.so.",
+        "reset.subFor": "Choose a new password for the Whisp dashboard of {domain}. You'll be signed out on your other devices.",
+        // A set-password link that no longer works (used, replaced by a newer one, or its address changed): the way on.
+        "setup.api.401": "This link no longer works. Already set a password? Log in. Never set one? Write to jakub@whisp.so and we'll send you a new link."
       },
       pl: {
         // \u00a0 (&nbsp; in the HTML string) after one-letter words (w, z, i...) keeps them off the end of a line, as Polish typography requires;
@@ -268,8 +271,7 @@
         "err.link": "Ten link do ustawienia hasła jest nieprawidłowy. Użyj linku z\u00a0naszego e\u2011maila.",
         "err.short": "Hasło musi mieć co najmniej 8\u00a0znaków.", "err.mismatch": "Hasła nie są takie same.",
         "err.generic": "Coś poszło nie tak. Spróbuj ponownie.", "err.network": "Błąd sieci. Spróbuj ponownie.",
-        // The API answers in English - in Polish the text for its HTTP status (a link already used is a 401 too).
-        "api.401": "Ten link jest nieprawidłowy albo wygasł. Jeśli hasło jest już ustawione, zaloguj się.",
+        // The API answers in English - in Polish the text for its HTTP status.
         "api.404": "Nie znaleźliśmy konta dla tego linku.",
         "api.409": "Hasło jest już ustawione. Zaloguj się.",
         "api.429": "Za dużo prób. Spróbuj ponownie później.",
@@ -279,7 +281,10 @@
         "reset.login": "Hasło zmienione - zaloguj się nowym hasłem.",
         "reset.title": "Ustaw nowe hasło - Whisp", "reset.back": "Wróć do logowania",
         "reset.notSignedOut": "Nie udało się wylogować Cię na innych urządzeniach. Jeśli ktoś inny może znać Twoje stare hasło, napisz do nas: jakub@whisp.so.",
-        // A reset link: the texts for its API answers.
+        "reset.subFor": "Wybierz nowe hasło do panelu firmy {domain} w\u00a0Whisp. Na innych urządzeniach wylogujemy Cię.",
+        // A link's own texts for the API's answers: a set-password link that no longer works (used, replaced by a newer
+        // one, or its address changed - a link already used is a 401 too), a reset link.
+        "setup.api.401": "Ten link już nie działa. Masz już hasło? Zaloguj się. Nie masz jeszcze hasła? Napisz do nas (jakub@whisp.so) - wyślemy nowy link.",
         "reset.api.401": "Ten link wygasł albo został już użyty. Poproś o\u00a0nowy na stronie logowania (Nie pamiętasz hasła?).",
         "reset.api.503": "Nie udało się zapisać hasła. Spróbuj ponownie."
       }
@@ -289,6 +294,9 @@
       var saved = null;
       try { saved = localStorage.getItem('whisp-lang'); } catch (e) {}
       if (saved === 'en' || saved === 'pl') return saved;
+      // A reset link carries the language its e-mail was written in (the login page's): the page reads the same.
+      var linkLang = new URLSearchParams(window.location.hash.slice(1)).get('lang');
+      if (linkLang === 'en' || linkLang === 'pl') return linkLang;
       // The link from the e-mail names the business: its id is the domain with "_" for dots, so a .pl business reads Polish.
       if (/_pl$/i.test(new URLSearchParams(window.location.search).get('tenant') || '')) return 'pl';
       var nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
@@ -307,10 +315,14 @@
       document.getElementById(id).textContent = said[id]();
     }
 
-    // The API's messages are English: shown as they are in English; in Polish, the text for the HTTP status.
+    // The API's messages are English. The page's own text for the answer in this mode comes first, in both languages
+    // (a set-password link that no longer works says what to do next); otherwise English shows the API's message as it
+    // is, and Polish the text for the HTTP status.
     function apiError(status, message, fallbackKey) {
+      var own = (i18n[currentLang] || i18n.en)[(window.mode || 'setup') + '.api.' + status];
+      if (own) return own;
       if (currentLang !== 'pl') return message || t(fallbackKey);
-      return (window.resetToken && i18n.pl['reset.api.' + status]) || i18n.pl['api.' + status] || i18n.pl['api.other'];
+      return i18n.pl['api.' + status] || i18n.pl['api.other'];
     }
 
     // The tab's title follows the page's mode (a reset link switches it to its own).
@@ -350,9 +362,13 @@
     var params = new URLSearchParams(window.location.search);
     var token = params.get("token");
     var tenantId = params.get("tenant");
-    // A reset link ("Forgot password?" on the login page): its token rides in the #fragment, never sent to a server.
-    var resetToken = new URLSearchParams(window.location.hash.slice(1)).get("reset") || params.get("reset");
+    // A reset link ("Forgot password?" on the login page): its token rides in the #fragment, never sent to a server
+    // (a ?reset= in the query string would be, so it is not read). Read once, then taken out of the address bar and
+    // the history, where an unused link stayed usable for its hour.
+    var resetToken = new URLSearchParams(window.location.hash.slice(1)).get("reset");
+    if (resetToken) history.replaceState(null, "", window.location.pathname + window.location.search);
     var mode = resetToken ? "reset" : "setup";
+    var saving = false;
     if (resetToken) {
       document.getElementById("title").setAttribute("data-i18n", "reset.h1");
       document.getElementById("subtitle").setAttribute("data-i18n", "reset.sub");
@@ -365,6 +381,21 @@
       document.getElementById("terms").required = false;
       say("submit-btn", "reset.btn");
       applyLang(currentLang);
+      // The business the link is for, before anything is typed: a link someone else asked for and passed on names that
+      // someone's business (saving would log the reader into it), and a used or expired link says so at once.
+      fetch("/api/auth/reset-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: resetToken }) })
+        .then(function(res) {
+          return res.json().catch(function() { return {}; }).then(function(data) {
+            if (res.ok && data.domain) {
+              say("subtitle", function() { return t("reset.subFor").replace("{domain}", function() { return data.domain; }); });
+            } else if (res.status === 401 && !saving) { // a late answer never hides a save in progress
+              say("error-msg", function() { return apiError(401, data.error, "err.generic"); });
+              document.getElementById("error-msg").classList.add("visible");
+              document.getElementById("setup-form").style.display = "none";
+            }
+          });
+        })
+        .catch(function() {}); // no answer: the form stays, and saving says what is wrong
     }
 
     if (!resetToken && (!token || !tenantId)) {
@@ -398,6 +429,7 @@
       }
 
       btn.disabled = true;
+      saving = true;
       say("submit-btn", mode + ".busy");
 
       try {
@@ -414,6 +446,7 @@
           say("error-msg", function() { return apiError(res.status, data.error, "err.generic"); });
           errorEl.classList.add("visible");
           btn.disabled = false;
+          saving = false;
           say("submit-btn", mode + ".btn");
           return;
         }
@@ -443,6 +476,7 @@
         say("error-msg", "err.network");
         errorEl.classList.add("visible");
         btn.disabled = false;
+        saving = false;
         say("submit-btn", mode + ".btn");
       }
     });

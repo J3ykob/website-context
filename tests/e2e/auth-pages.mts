@@ -16,21 +16,28 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 const app = express();
 app.use(express.json());
 const seen: { url: string; body: any }[] = [];
-let forgotStatus = 200, resetStatus = 200;
+let forgotStatus = 200, resetStatus = 200, linkStatus = 200, forgotSending = true;
 let resetAnswer: any = { token: "sess", tenantId: "acme_pl", signedOut: true };
 const revoked = new Set<string>();
+const DEAD = "This link has expired or was already used. Ask for a new one on the login page.";
 app.get("/auth/login", (_q, r) => r.sendFile(resolve(root, "public/auth/login.html")));
 app.get("/auth/setup", (_q, r) => r.sendFile(resolve(root, "public/auth/setup.html")));
 app.get("/dashboard", (_q, r) => r.sendFile(resolve(root, "public/dashboard.html")));
 app.get("/lead/:token", (_q, r) => r.sendFile(resolve(root, "public/lead.html")));
+app.post("/api/auth/login", (q, r) => { seen.push({ url: q.url, body: q.body }); r.status(401).json({ error: "Password not set. Use setup-password endpoint." }); });
 app.post("/api/auth/forgot-password", (q, r) => {
   seen.push({ url: q.url, body: q.body });
-  if (forgotStatus === 200) r.json({ ok: true, minutes: 60 });
+  if (forgotStatus === 200) r.json({ ok: true, minutes: 60, sending: forgotSending });
   else r.status(forgotStatus).json({ error: "Too many requests. Try again later." });
+});
+app.post("/api/auth/reset-link", (q, r) => {
+  seen.push({ url: q.url, body: q.body });
+  if (linkStatus === 200) r.json({ domain: "acme.pl" });
+  else r.status(linkStatus).json({ error: DEAD });
 });
 app.post("/api/auth/reset-password", (q, r) => {
   seen.push({ url: q.url, body: q.body });
-  if (resetStatus !== 200) { r.status(resetStatus).json({ error: "This link has expired or was already used. Ask for a new one on the login page." }); return; }
+  if (resetStatus !== 200) { r.status(resetStatus).json({ error: DEAD }); return; }
   revoked.add("old"); // the reset ends the account's other sessions
   r.json(resetAnswer);
 });
@@ -62,8 +69,10 @@ const text = (p: Page, sel: string) => p.locator(sel).innerText({ timeout: 3000 
 const visible = (p: Page, sel: string) => p.locator(sel).isVisible();
 const stored = (p: Page) => p.evaluate(() => localStorage.getItem("wctx-dashboard-token"));
 // One scenario per block: a step that throws (an element or a page that never came) is a FAIL, and the run goes on.
+const lastTo = (path: string) => [...seen].reverse().find((s) => s.url === path);
 async function scenario(name: string, fn: () => Promise<void>) {
-  forgotStatus = 200; resetStatus = 200; resetAnswer = { token: "sess", tenantId: "acme_pl", signedOut: true }; revoked.clear();
+  forgotStatus = 200; resetStatus = 200; linkStatus = 200; forgotSending = true;
+  resetAnswer = { token: "sess", tenantId: "acme_pl", signedOut: true }; revoked.clear();
   try { await fn(); } catch (e: any) { check(`${name}: ran to the end`, false, String(e?.message || e).split("\n")[0]); }
   for (const c of browser.contexts()) await c.close().catch(() => {});
 }
@@ -84,11 +93,21 @@ await scenario("forgot form", async () => {
   await p.click("#forgot-btn");
   await p.waitForSelector("#forgot-msg.visible");
   const sentMsg = await text(p, "#forgot-msg");
-  check("EN sent message: minutes, and the way for an account without a password", sentMsg.includes("works for 60 minutes") && sentMsg.includes("Never set a password? Write to jakub@whisp.so"), sentMsg);
+  check("EN sent message: minutes, the support address when nothing arrives, the way without a password",
+    sentMsg.includes("works for 60 minutes") && sentMsg.includes("Nothing arrived? Check your spam folder or write to jakub@whisp.so.") && sentMsg.includes("Never set a password?"), sentMsg);
   const last = seen[seen.length - 1];
   check("EN request body", last.url === "/api/auth/forgot-password" && last.body.email === "Owner@Example.com" && last.body.lang === "en", JSON.stringify(last.body));
   await p.click("#lang-toggle");
-  check("switch to PL re-renders message, title, tab title", (await text(p, "#forgot-msg")).includes("Link działa przez 60") && (await text(p, "#title")) === "Nie pamiętasz hasła?" && (await p.title()) === "Nowe hasło - Whisp", await text(p, "#forgot-msg"));
+  const plMsg = await text(p, "#forgot-msg");
+  check("switch to PL re-renders message, title, tab title", plMsg.includes("Link działa przez 60") && plMsg.includes("albo napisz do nas (jakub@whisp.so)") && (await text(p, "#title")) === "Nie pamiętasz hasła?" && (await p.title()) === "Nowe hasło - Whisp", plMsg);
+  forgotSending = false; // resets cannot reach anyone yet (e-mail not approved): the page says so, no promised link
+  await p.click("#forgot-btn");
+  await p.waitForFunction(() => document.getElementById("forgot-msg")!.textContent!.includes("nie wysyłamy jeszcze"));
+  check("PL nothing can be sent: the support address instead of a link", (await text(p, "#forgot-msg")).startsWith("Linków do zmiany hasła nie wysyłamy jeszcze") && !(await text(p, "#forgot-msg")).includes("wysłaliśmy"), await text(p, "#forgot-msg"));
+  await p.click("#lang-toggle");
+  check("EN nothing can be sent, after the switch", (await text(p, "#forgot-msg")) === "We can't send password links by e-mail yet. Write to jakub@whisp.so and we'll get you back into your dashboard.", await text(p, "#forgot-msg"));
+  await p.click("#lang-toggle");
+  forgotSending = true;
   forgotStatus = 429;
   await p.click("#forgot-btn");
   await p.waitForSelector("#error-msg.visible");
@@ -99,11 +118,30 @@ await scenario("forgot form", async () => {
   await p.context().close();
 });
 
+// 1b. Login answered 401 in English: the page's own words with the way on, not the API's developer text.
+await scenario("login 401, English", async () => {
+  const p = await page("en");
+  await p.goto(`${base}/auth/login`);
+  await p.fill("#email", "owner@example.com");
+  await p.fill("#password", "some-password-1");
+  await p.click("#submit-btn");
+  await p.waitForSelector("#error-msg.visible");
+  const msg = await text(p, "#error-msg");
+  check("EN login 401: page text with the way on", msg.startsWith("Wrong e-mail or password.") && msg.includes("jakub@whisp.so") && !msg.includes("setup-password endpoint"), msg);
+  await p.context().close();
+});
+
 // 2. Reset link for a .pl business: Polish by default, no Terms box, its own chrome, posts the fragment token.
 await scenario("reset link, Polish", async () => {
   const p = await page("en");
   await p.goto(`${base}/auth/setup?tenant=acme_pl#reset=TOKEN.abc`);
   check("PL reset title (tenant *_pl) + tab title", (await text(p, "h1")) === "Ustaw nowe hasło" && (await p.title()) === "Ustaw nowe hasło - Whisp", await p.title());
+  check("token taken out of the address bar (query kept)", p.url() === `${base}/auth/setup?tenant=acme_pl`, p.url());
+  await p.waitForFunction(() => document.getElementById("subtitle")!.textContent!.includes("acme.pl"));
+  check("the business the link is for, before anything is typed", (await text(p, "#subtitle")).startsWith("Wybierz nowe hasło do panelu firmy acme.pl w") && lastTo("/api/auth/reset-link")?.body.token === "TOKEN.abc", await text(p, "#subtitle"));
+  await p.click("#lang-toggle");
+  check("the business stays after a language switch", (await text(p, "#subtitle")).startsWith("Choose a new password for the Whisp dashboard of acme.pl."), await text(p, "#subtitle"));
+  await p.click("#lang-toggle");
   check("Terms box hidden in reset mode", !(await visible(p, "#terms-row")));
   check("footer leads back to the login", !(await visible(p, "#footer-q")) && (await text(p, "#footer-a")) === "Wróć do logowania", await text(p, "#footer-a"));
   check("form shown (no invalid-link error)", (await visible(p, "#setup-form")) && !(await visible(p, "#error-msg")));
@@ -127,9 +165,9 @@ await scenario("reset link, Polish", async () => {
 // 3. Password saved but no session: its own text, then the login page without this account's dead token.
 await scenario("reset without a session", async () => {
   const p = await page("en");
-  await p.goto(`${base}/auth/setup?tenant=acme_pl#reset=T3`);
+  await p.goto(`${base}/auth/setup`); // same origin, to hold the old session before the link opens
   await p.evaluate(() => { localStorage.setItem("wctx-dashboard-token", "dead"); localStorage.setItem("wctx-tenant-id", "acme_pl"); });
-  await p.reload();
+  await p.goto(`${base}/auth/setup?tenant=acme_pl#reset=T3`);
   await fillPassword(p);
   resetAnswer = { token: "", tenantId: "acme_pl", signedOut: true };
   await p.click("#submit-btn");
@@ -181,6 +219,9 @@ await scenario("reset in English, setup unchanged", async () => {
   const p = await page("en");
   await p.goto(`${base}/auth/setup?tenant=acme_com#reset=T2`);
   check("EN reset title + tab title", (await text(p, "h1")) === "Set a new password" && (await p.title()) === "Set a new password - Whisp", await p.title());
+  // The e-mail was English (the login page's language): the link says so, and a .pl business's page follows it.
+  await p.goto(`${base}/auth/setup?tenant=acme_pl#reset=T2b&lang=en`);
+  check("the link's language over the *_pl rule", (await text(p, "h1")) === "Set a new password" && lastTo("/api/auth/reset-link")?.body.token === "T2b", await text(p, "h1"));
   await p.goto(`${base}/auth/setup?token=abc&tenant=acme_com`);
   check("setup mode unchanged: title, tab title, Terms box, footer", (await text(p, "h1")) === "Set your password" && (await p.title()) === "Set your password - Whisp" && (await visible(p, "#terms-row")) && (await text(p, "#footer-q")) === "Already have a password?", await text(p, "h1"));
   await fillPassword(p);
@@ -189,8 +230,27 @@ await scenario("reset in English, setup unchanged", async () => {
   await p.waitForSelector("#error-msg.visible");
   const last = seen[seen.length - 1];
   check("setup still posts to setup-password with Terms", last.url === "/api/auth/setup-password" && last.body.termsAccepted === true && last.body.tenantId === "acme_com", JSON.stringify(last.body));
+  check("EN set-password link that no longer works: the way on, not the API's words", (await text(p, "#error-msg")) === "This link no longer works. Already set a password? Log in. Never set one? Write to jakub@whisp.so and we'll send you a new link.", await text(p, "#error-msg"));
+  await p.click("#lang-toggle");
+  check("PL set-password link that no longer works", (await text(p, "#error-msg")) === "Ten link już nie działa. Masz już hasło? Zaloguj się. Nie masz jeszcze hasła? Napisz do nas (jakub@whisp.so) - wyślemy nowy link.", await text(p, "#error-msg"));
+  await p.click("#lang-toggle");
   await p.goto(`${base}/auth/setup`);
   check("no token at all: invalid-link message", (await visible(p, "#error-msg")) && !(await visible(p, "#setup-form")));
+  await p.goto(`${base}/auth/setup?tenant=acme_com&reset=T6q`);
+  check("a token in the query string is not read (it would reach server logs)", (await visible(p, "#error-msg")) && !(await visible(p, "#setup-form")) && lastTo("/api/auth/reset-link")?.body.token !== "T6q");
+  await p.context().close();
+});
+
+// 6b. A reset link already used or expired: said as the page opens, before a password is typed twice.
+await scenario("dead reset link", async () => {
+  linkStatus = 401;
+  const p = await page("pl");
+  await p.goto(`${base}/auth/setup?tenant=acme_pl#reset=T6b`);
+  await p.waitForSelector("#error-msg.visible");
+  check("PL dead link at once: its text, no form", (await text(p, "#error-msg")).startsWith("Ten link wygasł albo został już użyty") && !(await visible(p, "#setup-form")), await text(p, "#error-msg"));
+  await p.click("#lang-toggle");
+  check("EN dead link: the API's own words", (await text(p, "#error-msg")) === DEAD, await text(p, "#error-msg"));
+  check("dead link: the footer leads back to the login", (await visible(p, "#footer-a")) && (await text(p, "#footer-a")) === "Back to log in");
   await p.context().close();
 });
 

@@ -62,6 +62,10 @@ import {
   requestPasswordReset,
   resetPassword,
   resetTtlMinutes,
+  resetsOn,
+  checkResetToken,
+  setupLinkMark,
+  confirmAddress,
 } from "../src/multi-tenant/index.js";
 import {
   saveFlow,
@@ -1005,9 +1009,10 @@ app.post("/api/tenants", (req, res) => {
     // Generate API key
     const apiKey = generateApiKey();
 
-    // Generate setup token for password setup email
+    // Generate setup token for password setup email. The address the e-mail goes to is kept with it
+    // (settings.setupEmail): using the link confirms that address for password resets (password-reset.ts).
     const setupToken = randomBytes(32).toString("hex");
-    updateTenant(tenant.id, { apiKey, setupToken });
+    updateTenant(tenant.id, { apiKey, setupToken, ...(isAdmin ? {} : { settings: { ...(tenant.settings || {}), setupEmail: String(email) } }) });
 
     // Render owns scraping now (the VPS pipeline is gone) — queue the on-demand
     // scrape immediately, same bounded job as the claim flow. Without this the
@@ -1243,7 +1248,8 @@ function refreshIfStale(t: { id: string; lastScrapedAt?: string | null; siteUrl?
 // Admin: hand a demo (made by a seller through /claim, or by outreach) over to its owner - the owner said yes
 // on a call and gave their e-mail. Only while nobody has set a password (no takeover of a claimed account).
 // The owner gets the existing welcome / set-password e-mail with a new setup token (the old link and the apiKey
-// end with the new address - updateTenant).
+// end with the new address - updateTenant). The address is kept with the link (settings.setupEmail): using the
+// link confirms it for password resets (password-reset.ts).
 app.post("/api/admin/handover", async (req, res) => {
   if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenantId = String(req.body?.tenantId || "");
@@ -1253,7 +1259,7 @@ app.post("/api/admin/handover", async (req, res) => {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) { res.status(400).json({ error: "valid email required" }); return; }
   if ((t as any).ownerPasswordHash) { res.status(409).json({ error: "The account already has an owner (password set)" }); return; }
   const setupToken = randomBytes(32).toString("hex");
-  updateTenant(t.id, { email, setupToken });
+  updateTenant(t.id, { email, setupToken, settings: { ...(t.settings || {}), setupEmail: email } });
   const baseUrl = process.env.BASE_URL || "https://whisp.so";
   await sendWelcomeEmail(email, t.id, setupToken, baseUrl);
   console.log(`[handover] ${t.id} -> ${email}`);
@@ -1884,6 +1890,9 @@ app.post("/api/auth/login", async (req, res) => {
     return;
   }
 
+  // The owner logged in with this address: a reset link may go there (an account claimed before addresses were
+  // confirmed gets it here - src/multi-tenant/password-reset.ts).
+  confirmAddress(tenant);
   const token = await createSession(tenant.id);
   res.json({ token, tenantId: tenant.id });
 });
@@ -1961,11 +1970,12 @@ app.post("/api/auth/setup-password", async (req, res) => {
   }
 
   const hash = hashPassword(password);
-  // Clear setup token after use; the acceptance kept with the version (date) of the Terms accepted. A password set
-  // with the apiKey proves no mailbox (the key goes to whoever signs up, with any address): such an account comes
-  // after the others when its address is looked up (ownerByEmail - login and reset).
+  // Clear setup token after use; the acceptance kept with the version (date) of the Terms accepted. The link confirms
+  // the address it was e-mailed to, where a reset link may then go (setupLinkMark). A password set with the apiKey
+  // proves no mailbox (the key goes to whoever signs up, with any address): such an account comes after the others
+  // when its address is looked up (ownerByEmail - login and reset).
   const accepted = req.body?.termsAccepted === true ? { termsAcceptedAt: new Date().toISOString(), termsVersion: process.env.TERMS_EFFECTIVE_DATE || "2026-10-31" } : {};
-  const marks = { ...accepted, ...(setupToken ? {} : { claimedWithApiKey: true }) };
+  const marks = { ...accepted, ...(setupToken ? setupLinkMark(tenant) : { claimedWithApiKey: true }) };
   updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null, ...(Object.keys(marks).length ? { settings: { ...(tenant.settings || {}), ...marks } } : {}) });
   // The owner has claimed it: a crawl stopped at the onboarding cap now covers the whole site.
   const onboardCap = Number(process.env.ONBOARD_MAX_PAGES) || 150;
@@ -1986,10 +1996,23 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     res.status(429).json({ error: "Too many requests. Try again later." });
     return;
   }
-  res.json({ ok: true, minutes: resetTtlMinutes() });
+  // sending: false while no reset e-mail can reach an owner (not approved yet, or a weak ADMIN_SECRET): the page then
+  // names the support address instead of a link that will not come. Global, so it tells nothing about the address.
+  res.json({ ok: true, minutes: resetTtlMinutes(), sending: resetsOn() });
   const lang = req.body?.lang === "pl" || req.body?.lang === "en" ? req.body.lang : "";
   // Our own address (BASE_URL) in the link, never the request's Host header.
   requestPasswordReset(email, lang, publicBase()).catch((e) => console.error(`[auth] password reset: ${e?.message || e}`));
+});
+
+const RESET_LINK_DEAD = "This link has expired or was already used. Ask for a new one on the login page.";
+
+// The business a reset link sets a new password for, shown by the page before anything is typed: a link someone
+// else asked for and passed on names that someone's business (it would log the reader into it), and a used or
+// expired link says so at once. Reads only; no throttle, as below: the signature cannot be guessed.
+app.post("/api/auth/reset-link", (req, res) => {
+  const t = checkResetToken(String(req.body?.token || ""));
+  if (!t) { res.status(401).json({ error: RESET_LINK_DEAD }); return; }
+  res.json({ domain: t.domain });
 });
 
 // A new password from a reset link (works once, until it expires); every other session of the account ends.
@@ -2000,7 +2023,7 @@ app.post("/api/auth/reset-password", async (req, res) => {
   if (password.length < 8) { res.status(400).json({ error: "Password must be at least 8 characters" }); return; }
   try {
     const r = await resetPassword(token, password);
-    if (!r) { res.status(401).json({ error: "This link has expired or was already used. Ask for a new one on the login page." }); return; }
+    if (!r) { res.status(401).json({ error: RESET_LINK_DEAD }); return; }
     console.log(`[auth] ${r.tenantId}: password reset - other sessions ${r.signedOut ? "ended" : "NOT ended"}`);
     res.json(r);
   } catch (e: any) {

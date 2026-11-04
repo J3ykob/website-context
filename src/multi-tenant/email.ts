@@ -22,7 +22,7 @@ async function withinEmailCap(email: string): Promise<boolean> {
 
 // The owner's e-mails (templates/emails/owner-welcome.*, bot-ready.*): Polish for a .pl business once the Polish
 // texts are approved (OWNER_EMAILS_PL_APPROVED=1), English until then.
-function ownerLang(domain: string): "pl" | "en" {
+export function ownerLang(domain: string): "pl" | "en" {
   return process.env.OWNER_EMAILS_PL_APPROVED === "1" && /\.pl$/i.test(domain.trim()) ? "pl" : "en";
 }
 

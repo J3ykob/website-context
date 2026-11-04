@@ -97,9 +97,32 @@ describe("the dashboard button on the lead page", () => {
     expect(s && "token" in s ? await auth.validateSession(s.token) : null).toBe(id);
   });
 
-  it("sends an owner with a password to the login, and opens no session", async () => {
+  it("sends an owner who can reset the password alone to the login, and opens no session", async () => {
     const { id, token } = await paid("owner@delta.pl", "https://delta.pl", "owner@delta.pl", "owner-password-1");
-    expect(await dashboardSession(token)).toEqual({ login: true });
-    expect(mem.prepare("SELECT COUNT(*) AS n FROM sessions WHERE tenant_id = ?").get(id)).toEqual({ n: 0 });
+    registry.updateTenant(id, { settings: { ...registry.getTenant(id)!.settings, confirmedEmail: "owner@delta.pl" } }); // claimed with its e-mailed link
+    await withResetsOn(async () => {
+      expect(await dashboardSession(token)).toEqual({ login: true });
+      expect(mem.prepare("SELECT COUNT(*) AS n FROM sessions WHERE tenant_id = ?").get(id)).toEqual({ n: 0 });
+    });
+  });
+
+  it("still opens the panel for an owner with a password while no reset is possible: not approved yet, an address not confirmed", async () => {
+    const { id, token } = await paid("owner@epsilon.pl", "https://epsilon.pl", "owner@epsilon.pl", "owner-password-1");
+    const opens = async () => { const s = await dashboardSession(token); return s && "token" in s ? auth.validateSession(s.token) : null; };
+    vi.stubEnv("ADMIN_SECRET", "test-secret-0123456789abcdef-0123456789");
+    vi.stubEnv("PASSWORD_RESET_EMAIL_APPROVED", "0");
+    try {
+      expect(await opens()).toBe(id); // the reset e-mail not approved: "Forgot password?" e-mails nobody yet
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    await withResetsOn(async () => expect(await opens()).toBe(id)); // approved, but claimed before addresses were confirmed
   });
 });
+
+/** Resets on (a strong secret, the e-mail approved) for the time of `fn`; the environment is put back after. */
+async function withResetsOn(fn: () => Promise<void>) {
+  vi.stubEnv("ADMIN_SECRET", "test-secret-0123456789abcdef-0123456789");
+  vi.stubEnv("PASSWORD_RESET_EMAIL_APPROVED", "1");
+  try { await fn(); } finally { vi.unstubAllEnvs(); }
+}

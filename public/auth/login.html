@@ -258,9 +258,12 @@
         "login.btn": "Log in", "login.busy": "Logging in...",
         "login.noAccount": "Don't have an account?", "login.signup": "Sign up",
         "err.fill": "Please fill in all fields.", "err.invalid": "Invalid credentials.", "err.network": "Network error. Please try again.",
+        // The API's 401 is both a wrong password and no password yet (its own words are for developers).
+        "api.401": "Wrong e-mail or password. No password yet? Set it with the link in your e-mail from Whisp, or write to us (jakub@whisp.so).",
         "forgot.h1": "Forgot your password?", "forgot.sub": "Enter the e-mail of your Whisp account and we'll send you a link to set a new password.",
         "forgot.btn": "Send link", "forgot.busy": "Sending...", "forgot.back": "Back to log in",
-        "forgot.sent": "If this is the address of a Whisp account that has a password, we've sent it a link to set a new one. The link works for {minutes} minutes. Nothing arrived? Check your spam folder. Never set a password? Write to jakub@whisp.so and we'll send you a link.",
+        "forgot.sent": "If this is the address of a Whisp account that has a password, we've sent it a link to set a new one. The link works for {minutes} minutes. Nothing arrived? Check your spam folder or write to jakub@whisp.so. Never set a password? Write to us too and we'll send you a link.",
+        "forgot.off": "We can't send password links by e-mail yet. Write to jakub@whisp.so and we'll get you back into your dashboard.",
         "forgot.429": "Too many requests. Please try again later.", "forgot.fail": "Something went wrong. Please try again.",
         "forgot.title": "Reset password - Whisp"
       },
@@ -281,7 +284,8 @@
         "api.other": "Coś poszło nie tak. Spróbuj ponownie.",
         "forgot.h1": "Nie pamiętasz hasła?", "forgot.sub": "Podaj e\u2011mail swojego konta w\u00a0Whisp - wyślemy na niego link do ustawienia nowego hasła.",
         "forgot.btn": "Wyślij link", "forgot.busy": "Wysyłanie...", "forgot.back": "Wróć do logowania",
-        "forgot.sent": "Jeśli to adres konta w\u00a0Whisp, które ma już hasło, wysłaliśmy na niego link do ustawienia nowego. Link działa przez {minutes}\u00a0minut. Nic nie przyszło? Sprawdź folder spam. Nie masz jeszcze hasła? Napisz do nas (jakub@whisp.so) - wyślemy link do jego ustawienia.",
+        "forgot.sent": "Jeśli to adres konta w\u00a0Whisp, które ma już hasło, wysłaliśmy na niego link do ustawienia nowego. Link działa przez {minutes}\u00a0minut. Nic nie przyszło? Sprawdź folder spam albo napisz do nas (jakub@whisp.so). Nie masz jeszcze hasła? Też napisz - wyślemy link do jego ustawienia.",
+        "forgot.off": "Linków do zmiany hasła nie wysyłamy jeszcze e\u2011mailem. Napisz do nas (jakub@whisp.so) - pomożemy Ci wrócić do panelu.",
         "forgot.429": "Za dużo prób. Spróbuj ponownie później.", "forgot.fail": "Coś poszło nie tak. Spróbuj ponownie.",
         "forgot.title": "Nowe hasło - Whisp"
       }
@@ -307,9 +311,10 @@
       document.getElementById(id).textContent = said[id]();
     }
 
-    // The API's messages are English: shown as they are in English; in Polish, the text for the HTTP status.
+    // The API's messages are English: in English shown as they are, unless the page has its own text for the HTTP
+    // status (401); in Polish, the text for the status.
     function apiError(status, message, fallbackKey) {
-      if (currentLang !== 'pl') return message || t(fallbackKey);
+      if (currentLang !== 'pl') return i18n.en['api.' + status] || message || t(fallbackKey);
       return i18n.pl['api.' + status] || i18n.pl['api.other'];
     }
 
@@ -378,9 +383,11 @@
         });
         var data = await res.json().catch(function() { return {}; });
         if (res.ok) {
-          // The same answer for every address: the page never says whether it has an account.
+          // The same answer for every address: the page never says whether it has an account. While no reset e-mail
+          // can reach anyone (sending: false), it says so and names the support address instead of a link.
           var minutes = data.minutes || 60;
-          say("forgot-msg", function() { return t("forgot.sent").replace("{minutes}", minutes); });
+          if (data.sending === false) say("forgot-msg", "forgot.off");
+          else say("forgot-msg", function() { return t("forgot.sent").replace("{minutes}", minutes); });
           okEl.classList.add("visible");
         } else {
           say("error-msg", res.status === 429 ? "forgot.429" : "forgot.fail");

@@ -221,6 +221,15 @@ export function updateTenant(id: string, updates: Partial<{
 }>): Promise<boolean> {
   const rec = byId.get(id);
   if (!rec) return Promise.resolve(false);
+  // An owner's address (password set) is its login and where a reset link goes: no write changes it. The public
+  // /api/onboard-demo form and a lead-page payment did before 2026-11 (security review 2026-11-04); those routes
+  // skip it now, and this keeps a new caller from doing it again. Support corrects an address in D1.
+  if (updates.email !== undefined && rec.ownerPasswordHash && !sameAddress(updates.email, rec.email)) {
+    console.warn(`[d1-registry] ${id}: e-mail change ignored - the account has an owner (password set)`);
+    updates = { ...updates };
+    delete updates.email;
+    if (Object.keys(updates).length === 0) return Promise.resolve(true);
+  }
   // The set-password link and the apiKey claim the account for the address they were issued to (signup, admin
   // handover). A new address (/api/onboard-demo, a lead-page payment) ends both unless this write issues new ones:
   // the old address's link used to claim the account under the new one, which became its login and where a
