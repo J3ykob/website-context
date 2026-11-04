@@ -174,7 +174,9 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
       let ownAsked = 0;
       entries.forEach((e, k) => {
         if ((((a as any)[`r${k}`]?.noul as number) ?? 1) < 0.5) return;
-        if ((((a as any)[`o${k}`]?.noul as number) ?? 0) >= 0.5) { ownAsked++; return; }
+        // The own-parts answer missing (Jev left the key out): not checked = not sent, as when the call fails.
+        const o = (a as any)[`o${k}`]?.noul as number | undefined;
+        if (ownParts.length && (typeof o !== "number" || o >= 0.5)) { ownAsked++; return; }
         byTenant.set(e.t, [...(byTenant.get(e.t) || []), e.q]);
       });
       const dropped = entries.length - [...byTenant.values()].flat().length;
@@ -199,7 +201,9 @@ export async function askOne(parentId: string, tenantId: string, question: strin
   const listed = isListed(tenantId);
   const sub = await createProject(BUSINESS_REQUEST, { customerSession: `project:${parentId}`, initiatorTenantId: tenantId, title: `Zapytanie od ${from}`.slice(0, 120), memory: { parentId, fromTenant: parent.initiatorTenantId, ...(listed ? { listed: true } : {}) }, ttlHours: 30 * 24 });
   await addParticipant(sub.id, parent.initiatorTenantId, "initiator").catch(() => {});
-  await addParticipant(parentId, tenantId, "quoting").catch(() => {});
+  // The asked business is not made a participant of the customer's project: a participant read that project whole
+  // through the dashboard (the host's own parts and prices, the conversation, the customer's contact) and could run
+  // its agent (review 2026-11-04; done since 7bcebd1). Its own request project links back (memory.parentId).
   const request = `Firma ${from} (z tej samej sieci firm) przygotowuje dla swojego klienta wycenę / projekt i pyta Twoją firmę:\n\n${question}\n`;
   await writeFile(sub.id, "request.txt", request, "txt", `business:${parent.initiatorTenantId}`);
   await writeFile(sub.id, "rozmowa.md", `# Zapytanie od ${from}\n\n**${from}:** ${question}\n`, "md", "system");

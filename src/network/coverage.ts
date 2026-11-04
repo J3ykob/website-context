@@ -20,7 +20,7 @@
  *      order is not best first), confirmed by Jev as the thing itself (src/network/find.ts sameThing);
  *   2. its own 6 nearest passages, its description first, judged by the order form's question about the kind of
  *      product or service, whatever the amount, with the customer's own words (src/flows/collect.ts offeredOdds:
- *      "offered" >= 0.5 counts, "unknown" does not).
+ *      "offered" or "several" >= 0.5 counts, "unknown" does not).
  * A part is the business's when an item of its own is confirmed, when its pages say so, or when it is an add-on of
  * one of its parts (see decide). What could not be judged - the split, the matcher, Jev, the embedding or the page
  * search failed, or the decision was not ready within the caller's time limit - is the business's: fail closed, a
@@ -114,7 +114,7 @@ async function decide(tenantId: string, need: string, given: OfferItem[] | undef
   //   (2026-11-04 probes; the split with the description makes such parts much less often, see broadcast.ts).
   // - the add-on index: a part that only goes with another part's product (Łazy's delivery and pump for its own
   //   concrete, a florist's sash and delivery for its wreath) is the business's when that part is (below).
-  // Jev unavailable: every part stays, none is an add-on.
+  // Jev unavailable (6 s): every part stays, and with several parts none can come out not ours (3. below).
   const { jevAsk } = await import("../llm/jev.js");
   const qs: Record<string, any> = {};
   splitAll.forEach((p, k) => {
@@ -176,14 +176,19 @@ async function decide(tenantId: string, need: string, given: OfferItem[] | undef
   // unpriced name ("Instalacje solarne") was confirmed for photovoltaics at a solar-thermal installer, whose pages say
   // not_offered 0.77-0.90 to the question of the kind with the customer's words, while the business's own parts are at
   // 0.00-0.04 (Bosta's HydroBeton 0.00-0.04, where "not_offered >= 0.35" on the old question denied it - 0.44-0.53;
-  // probe 2026-11-04). Not ours only when every check could be asked: what could not be judged is ours.
-  const offered = (o: Record<string, number>) => (o.offered ?? 0) >= PAGES_MIN && (o.not_offered ?? 0) < PAGES_MIN;
+  // probe 2026-11-04). "Several" (several of its offers could be what the customer means) is offered too, one of them -
+  // the florist's delivery: offered 0.31-0.45 + several 0.17-0.36; every part not the business's in the smokes had several
+  // <= 0.01. Not ours only when every check could be asked: what could not be judged is ours - also every part that is
+  // not ours by its own checks when step 0 failed for several parts (it may be an add-on of one of ours).
+  const offered = (o: Record<string, number>) => (o.offered ?? 0) + (o.several ?? 0) >= PAGES_MIN && (o.not_offered ?? 0) < PAGES_MIN;
   const denied = (o: Record<string, number>) => (o.not_offered ?? 0) >= PAGES_MIN;
   const byItems = judged.map(({ confirmed, page }) => (confirmed?.length && (confirmed.some(hasPrice) || !(page.odds && denied(page.odds))) ? confirmed : []));
+  // Step 0 not answered for a part of several (the call failed, or Jev left out its key): whether it goes with another is unknown.
+  const addonUnknown = (k: number) => splitAll.length > 1 && !(asked?.[`o${kept[k]}`] as { choice?: string } | undefined)?.choice;
   const how: CoverageHow[] = judged.map(({ confirmed, page }, k) => {
     if (byItems[k].length) return "item";
     if (page.odds && offered(page.odds)) return "page";
-    return confirmed === null || page.odds === null ? "unjudged" : "none";
+    return confirmed === null || page.odds === null || addonUnknown(k) ? "unjudged" : "none";
   });
   const own = how.map((h) => h !== "none");
   // An add-on goes with its part (a chain - the pump of the concrete for the delivered concrete - takes one round per link).

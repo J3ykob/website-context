@@ -183,9 +183,13 @@ export async function projectDetail(id: string): Promise<{ project: Project; par
   };
 }
 
-/** A business's projects (newest first), for its dashboard. */
+/**
+ * A business's projects (newest first), for its dashboard: the ones it runs - its own, and the requests it sent to
+ * other businesses (initiator there too). Not a customer's project it was only asked about ("quoting" rows from before
+ * 2026-11-04: those carried the whole customer project, src/projects/routes.ts member).
+ */
 export async function projectsForTenant(tenantId: string, limit = 50): Promise<(Project & { role: ParticipantRole })[]> {
   await ensureSchema();
-  const rows = await d1Query("SELECT p.*, pp.role AS role FROM projects p JOIN project_participants pp ON pp.project_id = p.id WHERE pp.tenant_id = ? ORDER BY p.updated_at DESC LIMIT ?", [tenantId, limit]);
+  const rows = await d1Query("SELECT p.*, pp.role AS role FROM projects p JOIN project_participants pp ON pp.project_id = p.id WHERE pp.tenant_id = ? AND (pp.role = 'initiator' OR p.initiator_tenant = pp.tenant_id) ORDER BY p.updated_at DESC LIMIT ?", [tenantId, limit]);
   return rows.map((r: any) => ({ ...row(r), role: r.role }));
 }

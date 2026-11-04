@@ -922,7 +922,10 @@ export async function checkChoices(projectId: string, raw: string): Promise<stri
   if (!Array.isArray(choices)) return ["wybor.json must be a list"];
   const proj = await getProject(projectId);
   if (!proj) return [];
-  const tenants = new Set<string>([proj.initiatorTenantId, ...(await listParticipants(projectId).catch(() => [])).map((p) => p.tenantId)]);
+  // The businesses whose price lists the project was given: the broadcast's picks (the ones asked are among them - they
+  // are no longer participants of the customer's project, src/projects/network.ts askOne) and its participants.
+  const picked = ((proj.memory.broadcast as { picked?: { tenantId?: string }[] } | undefined)?.picked || []).map((o) => String(o?.tenantId || "")).filter(Boolean);
+  const tenants = new Set<string>([proj.initiatorTenantId, ...picked, ...(await listParticipants(projectId).catch(() => [])).map((p) => p.tenantId)]);
   const items = new Map<string, OfferItem>();
   for (const t of tenants) for (const i of (await loadOffer(t).catch(() => null))?.items || []) items.set(i.id.slice(0, 8), i);
   return choiceProblems(choices, items);

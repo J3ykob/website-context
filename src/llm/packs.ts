@@ -177,7 +177,8 @@ export function renderPacks(packs: Pack[], budget = 40000, hits?: string[]): { t
 }
 
 /** The conversation's state as facts for the model (what was already offered, declined, started). */
-export interface PackState { handoffOfferedAt?: number; handoffDeclined?: boolean; referred?: string[]; calcStarted?: boolean; turns: number; lang?: string; lastPacks?: string[]; owner?: boolean; contactGiven?: boolean }
+// requests: the request (the coverage text, chat.ts coverageNeed) of the latest two customer messages, by message.
+export interface PackState { handoffOfferedAt?: number; handoffDeclined?: boolean; referred?: string[]; calcStarted?: boolean; turns: number; lang?: string; lastPacks?: string[]; owner?: boolean; contactGiven?: boolean; requests?: Record<string, string> }
 export function renderState(s: PackState | undefined): string {
   if (!s) return "";
   const lines: string[] = [];

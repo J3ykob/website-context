@@ -51,8 +51,11 @@ export async function sameThing(part: string, items: OfferItem[]): Promise<boole
   const { renderItem } = await import("../offer/store.js");
   const a = await jevAsk({ part_asked: part, items: items.map((it) => renderItem(it).slice(0, 300)) },
     Object.fromEntries(items.map((_, j) => [`i${j}`, { type: "noul" as const, instructions: `Is \`items[${j}]\` the product or service that \`part_asked\` asks for (the same thing, so its price prices that part) - not a component of it, a related or partial job, a substitute of another kind, or an accessory, add-on or delivery that goes with it or that it goes with?` }])), 8000).catch(() => null);
-  if (!a) return null;
-  return items.map((_, j) => ((((a as any)[`i${j}`]?.noul as number) ?? 0) >= 0.5));
+  // An item Jev left without an answer was not judged: the whole answer counts as unavailable (a missing key read as
+  // "not the thing" made the business's own part not its own).
+  const odds = items.map((_, j) => (a as any)?.[`i${j}`]?.noul as number | undefined);
+  if (odds.some((p) => typeof p !== "number")) return null;
+  return odds.map((p) => p! >= 0.5);
 }
 
 /**

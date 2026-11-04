@@ -202,8 +202,9 @@ export async function offeredOdds(request: string, passages: string[], message?:
     not_offered: "No: the excerpts show what the business offers in this area, and what was asked is not among it (a different kind of product or service).",
     unknown: "The excerpts do not say whether the business offers this.",
   } } }, 6000);
-  if (!a) return null;
-  return ((a.status as any)?.probabilities || {}) as Record<string, number>;
+  // An answer without its distribution was not judged (the coverage read {} as "nothing shows it is offered").
+  const p = (a?.status as any)?.probabilities;
+  return p && typeof p === "object" && Object.keys(p).length ? (p as Record<string, number>) : null;
 }
 
 /**

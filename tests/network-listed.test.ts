@@ -71,13 +71,16 @@ live("a business that has not joined the network", () => {
     const back = (await M.repo.listFiles(pid)).filter((f: any) => f.path.startsWith("odpowiedzi_firm/"));
     const answer = await M.repo.readFile(pid, back[0].path);
     expect(answer).toContain("nie dołączyła do sieci");
-    // The invite: recorded with its full text and the link; the link opens in "listed" mode.
+    // The invite: recorded with its full text and the link - the lead page (src/projects/lead.ts), whose token is the review's.
     for (let k = 0; k < 20; k++) { if ((await M.store.projectDetail(ostap.id))?.events.some((e: any) => e.kind === "business_invited")) break; await new Promise((ok) => setTimeout(ok, 3000)); }
     const inv = (await M.store.projectDetail(ostap.id))!.events.find((e: any) => e.kind === "business_invited");
     console.log(`[invite] ${JSON.stringify(inv?.data)}`);
     expect(inv?.data.text).toContain("Rentbud");
-    expect(inv?.data.text).toContain("/review/");
-    const token = String(inv!.data.link).split("/review/")[1];
+    expect(inv?.data.text).toContain("/lead/");
+    const token = String(inv!.data.link).split("/lead/")[1];
+    // OSTAP is not a participant of Rentbud's customer project, so its panel cannot open it (src/projects/routes.ts member).
+    expect((await M.store.projectDetail(pid))!.participants.some((x: any) => x.tenantId === OSTAP)).toBe(false);
+    expect((await M.store.projectsForTenant(OSTAP)).some((x: any) => x.id === pid)).toBe(false);
     const rv = await M.review.reviewByToken(token);
     expect(rv?.status).toBe("pending");
     // Acting as OSTAP: confirm with a correction (what POST /api/review does for a business request).
