@@ -759,7 +759,7 @@ export class WebsiteChat {
             // other they took 14.7 s before the first word. The reply asks for the form's details itself.
             const collectP = this.startCollect(picked[0], sessionKey, question);
             const fields = picked[0].requiredInputs.filter((f) => f.required).map((f) => f.label).slice(0, 3);
-            const answer = await this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, extra: [BEHAVIOUR.orderQuestion(fields)] });
+            const answer = await this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, extra: [BEHAVIOUR.orderQuestion(fields)], formOpen: true });
             const started = await collectP.catch(() => null);
             const s = this.collectSessions.get(sessionKey);
             if (s?.transcript.length && s.transcript[s.transcript.length - 1].startsWith("Assistant:")) s.transcript[s.transcript.length - 1] = `Assistant: ${answer.message}`;
@@ -843,7 +843,7 @@ export class WebsiteChat {
    * turn's instructions; without them the turn is decided here (answer / no information + hand-off /
    * network).
    */
-  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; t0?: number }): Promise<ChatResponse> {
+  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; t0?: number; formOpen?: boolean }): Promise<ChatResponse> {
     const st = this.packStateOf(sessionKey);
     const question = messages.findLast((m) => m.role === "user")?.content || "";
     const rt = opts.rt ?? null;
@@ -862,6 +862,7 @@ export class WebsiteChat {
     const ownContacts = [prof?.primaryPhone?.value, prof?.primaryEmail?.value, ...(prof?.alternatePhones || [])].filter(Boolean).map((c) => String(c).includes("@") ? String(c).toLowerCase() : String(c).replace(/\D/g, "").slice(-9)).filter((c) => c.length >= 6);
     const hasContact = (t: string) => { const digits = t.replace(/\D/g, ""), low = t.toLowerCase(); return ownContacts.some((c) => (c.includes("@") ? low : digits).includes(c)); };
     const contactGiven = messages.slice(0, -1).some((m) => m.role === "assistant" && hasContact(m.content));
+    st.contactGiven = contactGiven;
     if (opts.networkNeed && this.askEcosystem) {
       const found = await Promise.race([this.askEcosystem([{ role: "user", content: opts.networkNeed }]).catch(() => [] as EcosystemMatch[]), new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 15000))]);
       if (found.length) network = await this.networkBlock(found, opts.networkNeed);
@@ -1146,7 +1147,10 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const allowedLinks = new Set([...(network?.links || []), ...this.context.siteMap.map((p) => p.url), ...used.map((p) => p.url), ...productLinks].filter(Boolean));
     const siteHost = (() => { try { return new URL(this.context.siteMap[0]?.url || `https://${this.getAllowedDomain()}`).hostname.replace(/^www\./, ""); } catch { return ""; } })();
     const customerText = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
-    const wantOffer = !!opts.handoffKind || !!opts.keepOffer;
+    // The order form opened with this reply (order + question): taking the order here is what the chat does - both drafts of
+    // rentbud-3's opening ("czy mogę zapisać zamówienie?") were blocked as a hand-off offer and a promise, and the rewrite said
+    // the opposite ("rezerwacji nie mogę tu przyjąć") while the form was open (iteration 4 smoke test).
+    const wantOffer = !!opts.handoffKind || !!opts.keepOffer || !!opts.formOpen;
     // A reply without an answer should give our phone or e-mail (unless an earlier reply already did, or the owner is writing).
     // Any phone number or e-mail the reply gives that our information shows (a branch's line counts too).
     const factsDigits = factsText.replace(/\D/g, ""), factsLow = factsText.toLowerCase();
@@ -1178,7 +1182,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
           denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
           contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)? Saying we have no information on something and recommending another business for it is NOT a contradiction." },
           callUs: { type: "noul", instructions: "Does `reply` tell the customer to call us, phone us, or e-mail us (or mention our phone number or e-mail as a way to reach us)?" },
-          promises: { type: "noul", instructions: "Does `reply` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call them back, send them something? (Offering to explain, describe or advise more in this chat, asking the customer for details, offering to pass the question on to the team, offering to check businesses from our local network, or inviting them to contact us does not count.)" },
+          promises: { type: "noul", instructions: `Does \`reply\` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call them back, send them something? (Offering to explain, describe or advise more in this chat, asking the customer for details, offering to pass the question on to the team, offering to check businesses from our local network, or inviting them to contact us does not count.${opts.formOpen ? " Nor does taking the customer's order details in this chat and saying it goes to the team once they confirm - this chat does that." : ""})` },
           // The business's own documents are not meta-talk: "z naszego cennika wynika" / "our price list shows" blocked about
           // half of 22 meta-blocked drafts in the 2026-11-04 eval (0.93 -> 0.05), and one rewrite turned a right total wrong.
           // Nor is telling an owner who asks "how do you know this?" that the answers come from the site and the panel (0.67 -> 0.13).

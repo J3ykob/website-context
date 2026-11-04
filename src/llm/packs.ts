@@ -177,13 +177,14 @@ export function renderPacks(packs: Pack[], budget = 40000, hits?: string[]): { t
 }
 
 /** The conversation's state as facts for the model (what was already offered, declined, started). */
-export interface PackState { handoffOfferedAt?: number; handoffDeclined?: boolean; referred?: string[]; calcStarted?: boolean; turns: number; lang?: string; lastPacks?: string[]; owner?: boolean }
+export interface PackState { handoffOfferedAt?: number; handoffDeclined?: boolean; referred?: string[]; calcStarted?: boolean; turns: number; lang?: string; lastPacks?: string[]; owner?: boolean; contactGiven?: boolean }
 export function renderState(s: PackState | undefined): string {
   if (!s) return "";
   const lines: string[] = [];
   if (s.handoffOfferedAt) lines.push(`- Earlier in this conversation we offered to pass a question to our team${s.handoffDeclined ? ", and the customer DECLINED - do not offer it again" : ""}.`);
   if (s.referred?.length) lines.push(`- We already recommended: ${s.referred.join(", ")}. Do not recommend them again unless asked.`);
   if (s.calcStarted) lines.push("- A calculation for the customer is being prepared and will appear in this chat.");
+  if (s.contactGiven) lines.push("- Our phone number or e-mail was already given earlier in this conversation.");
   return lines.length ? `## Conversation so far (facts)\n${lines.join("\n")}` : "";
 }
 
