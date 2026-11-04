@@ -14,7 +14,8 @@ import { addEvent, getProject } from "./store.js";
 import { getTenant, hasOwnerAccount } from "../multi-tenant/d1-registry.js";
 
 export type ReviewMode = "auto" | "approve";
-export type ReviewStatus = "pending" | "approved" | "declined" | "changes_requested";
+// "released": closed without a decision - the result went out without waiting for it (releaseReview).
+export type ReviewStatus = "pending" | "approved" | "declined" | "changes_requested" | "released";
 export interface Review {
   token: string; projectId: string; tenantId: string; runId: string; status: ReviewStatus;
   draft: string; final: string; note: string; createdAt: string; decidedAt: string | null;
@@ -105,10 +106,12 @@ export async function timeline(projectId: string): Promise<TimelineEntry[]> {
     out.push({ at: r.createdAt, who: "assistant", kind: "draft", text: `Wersja ${k + 1} do akceptacji:\n\n${r.draft || "(brak odpowiedzi)"}` });
     if (!r.decidedAt) return;
     const text = r.status === "changes_requested" ? `Prośba o zmiany:\n\n${r.note}`
+      : r.status === "released" ? "Zamknięto bez decyzji - wynik nie czekał na akceptację."
       : r.status === "declined" ? `Własna odpowiedź wysłana klientowi:\n\n${r.final}`
       : r.final.trim() && r.final.trim() !== r.draft.trim() ? `Zaakceptowano z poprawkami i wysłano klientowi:\n\n${r.final}`
       : "Zaakceptowano i wysłano klientowi bez zmian.";
-    out.push({ at: r.decidedAt, who: "owner", kind: r.status, text });
+    // Released: closed by the system, nobody from the business decided (the page labels "owner" as "Ty (firma)").
+    out.push({ at: r.decidedAt, who: r.status === "released" ? "assistant" : "owner", kind: r.status, text });
   });
   return out.sort((a, b) => a.at.localeCompare(b.at));
 }
@@ -164,7 +167,10 @@ export const reviewLateMs = () => (Number(process.env.AGENT_REVIEW_LATE_MIN) || 
  * Results left waiting for the owner too long (the sweep, every 10 min): the owner gets the review
  * email again (same email and link, once), and the customer's conversation is told - also when the
  * customer has left the page (they see it when they come back; the result follows once decided).
- * A business with no owner account is not reminded: its held result is released.
+ * A business with no owner account is not reminded: a result it held (before 2026-11-04) is released
+ * instead, through the server's own delivery (the e-mail / SMS the customer chose). Only reviews not
+ * reminded yet come here - those already reminded are released when the customer's chat or status page
+ * next asks for the result (agentDelivery).
  */
 export async function remindLateReviews(): Promise<number> {
   await ensureSchema();
@@ -181,10 +187,12 @@ export async function remindLateReviews(): Promise<number> {
     if ((pm?.listed && !pm.ownerLoop) || pm?.ownerQuote) continue;
     // A demo nobody has claimed has nobody to remind (its results were held only before the 2026-11-04
     // rule): decided again now - a customer's result delivered, a business's answer settled - once
-    // (reminded_at is claimed above), with no review_late and no e-mail.
+    // (reminded_at is claimed above), with no review_late and no e-mail. The review is closed here too:
+    // a business's answer, or a run the project has since moved past, has no delivery that closes it.
     if (!pm?.listed && !hasReviewer(r.tenantId)) {
       const { onRunFinished } = await import("./conversation.js");
       await onRunFinished(r.projectId).catch(() => {});
+      await releaseReview(r.token).catch(() => {});
       continue;
     }
     await addEvent(r.projectId, { kind: "review_late", actor: "system", data: { runId: r.runId, waitedMin: Math.round((Date.now() - Date.parse(r.createdAt)) / 60_000) } }).catch(() => {});
@@ -195,7 +203,19 @@ export async function remindLateReviews(): Promise<number> {
   return late.length;
 }
 
-export async function decide(token: string, status: Exclude<ReviewStatus, "pending">, fields: { final?: string; note?: string }): Promise<Review | null> {
+/**
+ * A result went out without waiting for its review (nobody to wait for, or the customer already has it):
+ * the review is closed, so a link sent earlier answers "already decided" instead of acting on it - an
+ * approval or own message sent nothing, "ask for changes" sent a second, reworked result (2026-11-04:
+ * review links had gone to demos' addresses before demos stopped waiting). Once per review.
+ */
+export async function releaseReview(token: string): Promise<void> {
+  await ensureSchema();
+  const rows = await d1Query("UPDATE project_reviews SET status = 'released', decided_at = ? WHERE token = ? AND status = 'pending' RETURNING project_id, run_id", [new Date().toISOString(), token]);
+  if (rows[0]) await addEvent(rows[0].project_id, { kind: "review_released", actor: "system", data: { runId: rows[0].run_id } }).catch(() => {});
+}
+
+export async function decide(token: string, status: Exclude<ReviewStatus, "pending" | "released">, fields: { final?: string; note?: string }): Promise<Review | null> {
   await ensureSchema();
   const rows = await d1Query("UPDATE project_reviews SET status = ?, final = ?, note = ?, decided_at = ? WHERE token = ? AND status = 'pending' RETURNING *",
     [status, (fields.final || "").slice(0, 20000), (fields.note || "").slice(0, 4000), new Date().toISOString(), token]);

@@ -10,7 +10,7 @@ import { createProject, findOpenProject, addEvent, getProject, setMemory, claimM
 import { writeFile, readFile } from "./repo.js";
 import { agentEnabled, agentStatus, type AgentRunState } from "./agent.js";
 import { jevAsk } from "../llm/jev.js";
-import { reviewMode, reviewForRun, openReview, hasReviewer } from "./review.js";
+import { reviewMode, reviewForRun, openReview, hasReviewer, releaseReview } from "./review.js";
 import { BUSINESS_QUESTIONS } from "./agent.js";
 
 export const CONVERSATION = "conversation@1";
@@ -400,12 +400,17 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   let files = (s.files || []).filter((f) => f.startsWith(`${CUSTOMER_DIR}/`));
   const draft = s.status === "done" ? ((await readFile(projectId, "odpowiedz.txt")) || "").trim() : "";
   let message = draft;
-  // The business approves first (its choice): the customer is told it is being checked; the result
-  // goes out once the owner decides.
   const tenantId = p?.initiatorTenantId || "";
-  if (tenantId && (await ownerFirst(projectId, tenantId, s))) {
+  // A decision made on a review link stands, whoever owns the business now: the link works for 14 days,
+  // also one e-mailed to a demo's address before demos stopped holding results - "decline, send my own
+  // message" would otherwise send the declined draft (2026-11-04 review).
+  let rv = await reviewForRun(projectId, s.runId);
+  // Not decided yet: the business approves first (its choice, or questions for it) - the customer is told
+  // it is being checked; the result goes out once the owner decides. Never a result the customer already
+  // has: once a demo is claimed, its delivered results would go back into review and e-mail the new owner.
+  if ((!rv || rv.status === "pending" || rv.status === "changes_requested") && !delivered && tenantId && (await ownerFirst(projectId, tenantId, s))) {
     const forOwner = draft || (s.runId.startsWith("failed-") ? "" : ((await readFile(projectId, "odpowiedz.txt").catch(() => null)) || "").trim());
-    const rv = (await reviewForRun(projectId, s.runId)) || (await openReview(projectId, tenantId, s.runId, forOwner, files));
+    rv ||= await openReview(projectId, tenantId, s.runId, forOwner, files);
     if (rv.status === "pending" || rv.status === "changes_requested") {
       const lang = await replyLanguage(projectId);
       const text = await wordNotice(projectId, s.runId, "reviewing", lang, REVIEWING[lang] || REVIEWING.en, "The result is ready, but the business checks it before it reaches the customer; it will appear in this chat once approved.");
@@ -425,10 +430,24 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
       }
       return { status: "review", message: text, projectId };
     }
-    if (rv.status === "approved") message = (rv.final || rv.draft || draft).trim();
-    else { message = rv.final.trim(); files = []; }
   }
-  if (!message) { const l = await replyLanguage(projectId); message = await wordNotice(projectId, s.runId, "couldnot", l, COULD_NOT[l] || COULD_NOT.en, "We could not prepare the result this time. Suggest asking again or contacting the business directly. Promise nothing."); }
+  if (rv?.status === "approved") message = (rv.final || rv.draft || draft).trim();
+  else if (rv?.status === "declined") { message = rv.final.trim(); files = []; }
+  // Nobody holds it and nobody approved it: not a version the owner sent back for changes (its rework
+  // replaces this run), nor a reply flagged as speaking to the business - where nobody reviews, that check
+  // counts as failed (agent.ts collect); runs flagged on a demo before 2026-11-04 still carry the flag.
+  else if (rv?.status === "changes_requested" || s.needsOwner) message = "";
+  if (!message) {
+    // "Could not prepare" carries no files nobody approved: a run that failed its checks is no longer held
+    // on a demo, and its blocked cost sheet would go out as chat links and e-mail attachments under the
+    // notice (2026-11-04 review).
+    if (rv?.status !== "approved") files = [];
+    const l = await replyLanguage(projectId);
+    message = await wordNotice(projectId, s.runId, "couldnot", l, COULD_NOT[l] || COULD_NOT.en, "We could not prepare the result this time. Suggest asking again or contacting the business directly. Promise nothing.");
+  }
+  // A review left open by a result that goes out without it is closed, so a link sent earlier answers
+  // "already decided" instead of acting on what the customer already has (review.ts releaseReview).
+  if (rv?.status === "pending") await releaseReview(rv.token).catch(() => {});
   if (!delivered && (await claimMemory(projectId, "delivered", s.runId))) {
     await setMemory(projectId, { ownerLoop: false });
     await onDeliver(message).catch(() => {});

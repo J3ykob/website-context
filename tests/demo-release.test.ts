@@ -5,11 +5,12 @@ import type { TenantManager } from "../src/multi-tenant/tenant-manager.js";
 // Live, one case: a demo nobody has claimed (no password, no subscription) gets its calculation without
 // anyone approving it. bostabeton-2 from the judged eval (evals/judged/cases/cases-concrete.json): in
 // iteration 4 its third turn started the agent and the result stayed "being approved" for an owner who
-// does not exist. Now it arrives (or "could not prepare"), no review is opened, nobody is e-mailed.
+// does not exist. Now it arrives (or "could not prepare"), no review waits for anyone, nobody is e-mailed.
 // Nothing leaves this process by e-mail, SMS, WhatsApp or Telegram: their keys are removed before any
 // module loads (email.ts reads its key on import; every caller imports it lazily and catches the failure).
-// Run before the deploy, once Q1 shows the tenant still unclaimed. About $0.03 (OpenRouter + Jev).
-for (const k of ["RESEND_API_KEY", "REVIEW_EMAIL_APPROVED", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "TWILIO_WHATSAPP_FROM", "TELEGRAM_BOT_TOKEN"]) delete process.env[k];
+// The live-test review knobs go too: a forced tenant would hold its result. Run before the deploy, once Q1
+// shows the tenant still unclaimed. About $0.03 (OpenRouter + Jev).
+for (const k of ["RESEND_API_KEY", "REVIEW_EMAIL_APPROVED", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "TWILIO_WHATSAPP_FROM", "TELEGRAM_BOT_TOKEN", "AGENT_REVIEW_FORCE", "AGENT_OWNER_FORCE"]) delete process.env[k];
 
 const live = process.env.PROJECT_AGENT_URL && process.env.PROJECT_AGENT_SECRET && process.env.JEV_API_KEY && process.env.CF_API_TOKEN && process.env.OPENROUTER_API_KEY ? describe : describe.skip;
 const TENANT = "bostabeton_pl";
@@ -88,18 +89,34 @@ live("a demo nobody has claimed", () => {
       runs.push(run.runId);
       console.log(`[T${k + 1} result] ${d.status} after ${Math.round((Date.now() - t0) / 1000)} s (run ${run.status}, needsOwner ${run.needsOwner})\n${d.message}\nfiles: ${JSON.stringify(d.files)}`);
       expect(await M.review.reviewForRun(pid, run.runId)).toBeNull();
-      // Delivered once into the conversation (by the server or this poll, whichever came first).
+      // Delivered once into the conversation (by the server or this poll, whichever came first). When the
+      // server's own delivery took it, its event follows the claim by a few writes: read again briefly.
       expect(p.project.memory.delivered).toBe(run.runId);
-      expect(p.events.some((e: any) => e.kind === "delivered" && e.data.runId === run.runId)).toBe(true);
+      const deliveredOf = (events: any[]) => events.filter((e: any) => e.kind === "delivered" && e.data.runId === run.runId);
+      let events = p.events;
+      for (let i = 0; i < 10 && !deliveredOf(events).length; i++) {
+        await new Promise((ok) => setTimeout(ok, 3000));
+        events = (await M.store.projectDetail(pid))!.events;
+      }
+      expect(deliveredOf(events).length).toBe(1);
       expect(p.project.memory.reviewNotified).toBeUndefined(); // REVIEWING never sent
       expect(p.project.memory.reviewLate).toBeUndefined(); // REVIEW_LATE never sent
-      // Neither the project nor any business it asked opened a review or asked an owner for a price.
-      const subs = ((p.project.memory.subRequests || []) as any[]).map((s) => s.id);
-      for (const id of [pid, ...subs]) {
-        const events = (await M.store.projectDetail(id))?.events || [];
-        console.log(`[events ${id}] ${events.map((e: any) => e.kind).join(", ")}`);
-        expect(events.filter((e: any) => ["review_requested", "review_late", "owner_quote_asked"].includes(e.kind))).toEqual([]);
-        expect(await M.review.reviewsForProject(id)).toEqual([]);
+      // Nothing waited for an owner: neither the project nor a member it asked opened a review or asked an
+      // owner for a price. A business that has not joined (listed) still gets its invite page - a review row
+      // opened without an e-mail (invite.ts) - and, with the e-mail key removed above, no invite e-mail.
+      for (const id of [pid, ...((p.project.memory.subRequests || []) as any[]).map((s) => s.id)]) {
+        const log = (await M.store.projectDetail(id))?.events || [];
+        console.log(`[events ${id}] ${log.map((e: any) => e.kind).join(", ")}`);
+        expect(log.filter((e: any) => ["review_late", "owner_quote_asked"].includes(e.kind))).toEqual([]);
+        const reviews = await M.review.reviewsForProject(id);
+        if (!(await M.store.getProject(id))?.memory.listed) {
+          expect(log.filter((e: any) => e.kind === "review_requested")).toEqual([]);
+          expect(reviews).toEqual([]);
+          continue;
+        }
+        const invites = await M.d1Query("SELECT token, emailed FROM network_invites WHERE project_id = ?", [id]).catch(() => []);
+        for (const rv of reviews) expect(invites.some((x: any) => x.token === rv.token), `listed ${id}: review ${rv.token} is not its invite`).toBe(true);
+        expect(invites.filter((x: any) => Number(x.emailed) !== 0)).toEqual([]);
       }
     }
     expect(runs.length).toBeGreaterThan(0);
