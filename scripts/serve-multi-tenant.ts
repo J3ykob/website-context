@@ -94,6 +94,8 @@ import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-
 import { registerAgentRoutes } from "../src/agent/routes.js";
 import { registerOfferRoutes } from "../src/offer/routes.js";
 import { registerProjectRoutes } from "../src/projects/routes.js";
+import { setStoppedNumbers } from "../src/projects/notify-channels.js";
+import { LEGAL_PAGES, legalVars, fillLegal } from "../src/legal/pages.js";
 import { getHandoff, markHandoffOpened } from "../src/ecosystem/handoff.js";
 import { turnUsage, newTurnUsage } from "../src/llm/turn-usage.js";
 import { guessLang, BACKEND_DOWN } from "../src/llm/lang.js";
@@ -456,7 +458,7 @@ app.get("/for/:tenantId", async (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Assistant for ${brand}</title>
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="/fonts/fonts.css" rel="stylesheet">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:"Archivo",sans-serif; background:#0a0e1a; color:#f1f5f9; min-height:100vh; }
@@ -598,7 +600,7 @@ function buildOnboardPage(opts: { siteUrl: string; brand: string; state: "onboar
         <p class="fine">Free preview. We only read public pages. No card required.</p>`;
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${safeBrand} - AI assistant</title>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<link href="/fonts/fonts.css" rel="stylesheet">
 <style>
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0a0e1a;color:#e7e9ee;font-family:'Archivo',-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
 .card{width:100%;max-width:480px;background:rgba(22,24,34,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px 36px;box-shadow:0 8px 32px rgba(0,0,0,0.35)}
@@ -764,7 +766,7 @@ app.get("/demo/:tenantId", async (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">\
 <title>' + brand + (demoPl ? ' - czat na stronie (Whisp)' : ' - AI assistant by Whisp') + '</title>\
 <link rel="icon" type="image/svg+xml" href="/logo.svg">\
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">\
+<link href="/fonts/fonts.css" rel="stylesheet">\
 <style>\
 * { margin:0; padding:0; box-sizing:border-box; }\
 html, body { height:100%; }\
@@ -1108,6 +1110,8 @@ app.post("/api/interview/start", async (req, res) => {
 });
 
 const interviewRate = new Map<string, { count: number; resetAt: number }>();
+// Expired windows go, like the other per-IP counters (without this every IP stayed until a restart).
+setInterval(() => { const now = Date.now(); for (const [k, e] of interviewRate) if (now > e.resetAt) interviewRate.delete(k); }, 600000);
 app.post("/api/interview/message", async (req, res) => {
   // Only the interview's own key (from /api/interview/start) - without it anyone could overwrite any
   // business's knowledge and site card (open until 2026-10-29).
@@ -1972,22 +1976,15 @@ function legalPage(file: string, dateVar: string) {
     const e = process.env;
     // GDPR asks for the controller's name and contact; the NIP is shown once the company has one.
     if (!e.COMPANY_NAME || !e.COMPANY_ADDRESS) { res.status(404).send("Not found"); return; }
-    const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
-    const ids = [e.COMPANY_NIP ? `NIP ${e.COMPANY_NIP}` : "", e.COMPANY_REGISTRY || ""].filter(Boolean);
-    const vars: Record<string, string> = {
-      COMPANY_NAME: esc(e.COMPANY_NAME), COMPANY_ADDRESS: esc(e.COMPANY_ADDRESS),
-      COMPANY_NIP: e.COMPANY_NIP ? `<br>NIP ${esc(e.COMPANY_NIP)}` : "", COMPANY_REGISTRY: e.COMPANY_REGISTRY ? `<br>${esc(e.COMPANY_REGISTRY)}` : "",
-      COMPANY_IDS: ids.length ? `, ${esc(ids.join(", "))}` : "",
-      PRIVACY_EMAIL: esc(e.PRIVACY_EMAIL || "jakub@whisp.so"), CHAT_RETENTION: esc(e.CHAT_RETENTION || "12 miesięcy od ostatniej wiadomości"),
-      // A fixed date (set when the text changes) - the default is only for a page set up without one.
-      EFFECTIVE_DATE: esc(e[dateVar] || e.PRIVACY_EFFECTIVE_DATE || "2026-10-31"), TYPESAFE_LOCATION: esc(e.TYPESAFE_LOCATION || "USA"),
-    };
-    res.type("html").send(readFileSync(resolve(__dirname, `../public/${file}`), "utf8").replace(/\{\{([A-Z_]+)\}\}/g, (_m, k) => vars[k] ?? ""));
+    res.type("html").send(fillLegal(readFileSync(resolve(__dirname, `../public/${file}`), "utf8"), legalVars(e, dateVar)));
   };
 }
-app.get(["/polityka-prywatnosci", "/privacy"], legalPage("polityka-prywatnosci.html", "PRIVACY_EFFECTIVE_DATE"));
-app.get(["/regulamin", "/terms"], legalPage("regulamin.html", "TERMS_EFFECTIVE_DATE"));
-app.get(["/umowa-powierzenia", "/dpa"], legalPage("umowa-powierzenia.html", "TERMS_EFFECTIVE_DATE"));
+for (const p of LEGAL_PAGES) {
+  app.get([...p.routes], legalPage(p.file, p.dateVar));
+  // express.static (below) also served the bare template here - unfilled ({{COMPANY_NAME}}) and without
+  // the check above - as a second public copy of each page.
+  app.get(`/${p.file}`, (_req, res) => res.redirect(301, p.routes[0]));
+}
 
 app.get("/auth/login", (_, res) => {
   res.sendFile(resolve(__dirname, "../public/auth/login.html"));
@@ -2414,7 +2411,7 @@ app.get("/record", (req, res) => {
   const base = process.env.BASE_URL || "https://" + (req.get("host") || "whisp.so");
   res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Record a flow - Whisp</title>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<link href="/fonts/fonts.css" rel="stylesheet">
 <style>
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0a0e1a;color:#e7e9ee;font-family:'Archivo',-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
 .card{width:100%;max-width:560px;background:rgba(22,24,34,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px 36px;box-shadow:0 8px 32px rgba(0,0,0,0.35)}
@@ -3370,6 +3367,8 @@ const VOICE_SUPPRESSION = new Set<string>();
 const voiceSuppressionPath = resolve(__dirname, "../data/voice-suppression.json");
 try { (JSON.parse(require("fs").readFileSync(voiceSuppressionPath, "utf-8")) as string[]).forEach(n => VOICE_SUPPRESSION.add(n)); } catch {}
 function saveVoiceSuppression() { writeFile(voiceSuppressionPath, JSON.stringify([...VOICE_SUPPRESSION], null, 2)).then(() => mirror(voiceSuppressionPath)).catch(() => {}); }
+// The same list stops customers' SMS (result ready, new offer): they come from this number too.
+setStoppedNumbers(() => VOICE_SUPPRESSION);
 
 const voiceRepliesPath = resolve(__dirname, "../data/voice-replies.json");
 

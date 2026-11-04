@@ -41,6 +41,7 @@
     .t-purpose td:nth-child(2)::before, .t-storage td:nth-child(2)::before { content: "Po co: "; }
     .t-purpose td:nth-child(3)::before { content: "Podstawa: "; }
     .t-recipients td:nth-child(2)::before { content: "Do czego: "; }
+    .t-independent td:nth-child(2)::before { content: "Co otrzymuje: "; }
     .t-recipients td:nth-child(3)::before { content: "Gdzie: "; }
     .t-retention td:nth-child(2)::before, .t-storage td:nth-child(3)::before { content: "Jak długo: "; }
   }
@@ -55,10 +56,10 @@
     <p><strong>W skrócie</strong></p>
     <ul>
       <li>Whisp to czat, który odpowiada klientom na stronach internetowych firm - na podstawie informacji tych firm, np. z ich stron i cenników. Odpowiedzi pisze automatycznie sztuczna inteligencja (AI).</li>
-      <li>Rozmowy z czatem firmy, która korzysta z Whisp na podstawie naszego Regulaminu, przetwarzamy w imieniu tej firmy. Sami, jako administrator, odpowiadamy za konta firm, stronę whisp.so, sieć firm Whisp, nasze kontakty z firmami oraz bezpieczeństwo i rozwój usługi (pkt 2).</li>
+      <li>Rozmowy z czatem firmy, która zaakceptowała nasz Regulamin, przetwarzamy w imieniu tej firmy. Sami, jako administrator, odpowiadamy za konta firm, stronę whisp.so, czaty firm, które Regulaminu nie zaakceptowały, sieć firm Whisp, nasze kontakty z firmami oraz bezpieczeństwo i rozwój usługi (pkt 2).</li>
       <li>Jeśli firma, z której czatem rozmawiasz, należy do sieci Whisp, Twoje zapytanie lub jego część może trafić do innych firm z sieci, żeby przygotowały ofertę (pkt 4).</li>
       <li>Decyzje modeli AI zapisujemy razem z danymi, na podstawie których zapadły (także z treścią rozmów), żeby sprawdzać ich jakość i wytrenować własny model Whisp.</li>
-      <li>Wiadomości z czatu usuwamy po 365 dniach. Inne dane mają własne terminy, a części nie usuwamy automatycznie (pkt 8).</li>
+      <li>Wiadomości z czatu usuwamy po {{CHAT_RETENTION_DAYS}} dniach. Inne dane mają własne terminy, a części nie usuwamy automatycznie (pkt 8).</li>
       <li>Większość naszych dostawców to firmy z USA, a dane mogą trafić także do innych krajów spoza Europejskiego Obszaru Gospodarczego (pkt 6 i 7).</li>
       <li>Możesz żądać dostępu do swoich danych i ich usunięcia oraz sprzeciwić się ich przetwarzaniu (pkt 9). Nie używamy plików cookies reklamowych. Pytania o dane: <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>.</li>
     </ul>
@@ -91,13 +92,14 @@
   <p><strong>Jesteśmy administratorem</strong> - sami decydujemy, po co i jak przetwarzamy dane - w przypadku:</p>
   <ul>
     <li>kont firm korzystających z Whisp i osób, które je obsługują, płatności oraz kontaktu z nami;</li>
-    <li>strony whisp.so: formularzy zgłoszenia, czatu na whisp.so oraz pokazowych czatów i stron firm, które nie założyły konta w Whisp (np. whisp.so/demo/...);</li>
+    <li>strony whisp.so: formularzy zgłoszenia i czatu na whisp.so;</li>
+    <li>czatów firm, które nie zaakceptowały Regulaminu: pokazowych czatów i stron takich firm (np. whisp.so/demo/...), a także ich czatu, gdy umieszczą go na swojej stronie;</li>
     <li>naszych kontaktów z firmami, którym proponujemy Whisp, i danych o tych firmach (pkt 3.4);</li>
     <li>sieci firm Whisp - przekazywania zapytań klientów innym firmom i ofert tych firm klientom (pkt 4);</li>
     <li>zapisu decyzji modeli AI, który służy do sprawdzania ich jakości i rozwijania własnego modelu Whisp;</li>
     <li>bezpieczeństwa, limitów i kosztów usługi oraz testów różnych wersji czatu.</li>
   </ul>
-  <p><strong>Działamy w imieniu firmy</strong>, gdy rozmawiasz z czatem firmy, która korzysta z Whisp na podstawie Regulaminu i umowy powierzenia przetwarzania danych - zwykle na jej własnej stronie internetowej. Administratorem Twoich danych jest wtedy ta firma, a my jesteśmy podmiotem przetwarzającym. W jej imieniu przechowujemy rozmowy, piszemy odpowiedzi, przekazujemy firmie zapytania i zamówienia, przygotowujemy wyceny i statystyki w jej panelu oraz wysyłamy Ci wynik zapytania, jeśli się na to zgodzisz. Zasady tego przetwarzania określa ta firma. Część danych z takiej rozmowy wykorzystujemy też do własnych celów opisanych w pkt 3.3 - w tym zakresie administratorem jesteśmy my. W sprawie swoich danych możesz napisać do firmy albo do nas - przekażemy sprawę firmie.</p>
+  <p><strong>Działamy w imieniu firmy</strong>, gdy rozmawiasz z czatem firmy, która zaakceptowała Regulamin i umowę powierzenia przetwarzania danych - zwykle na jej własnej stronie internetowej. Administratorem Twoich danych jest wtedy ta firma, a my jesteśmy podmiotem przetwarzającym. W jej imieniu przechowujemy rozmowy, piszemy odpowiedzi, przekazujemy firmie zapytania i zamówienia, przygotowujemy wyceny i statystyki w jej panelu oraz wysyłamy Ci wynik zapytania, jeśli się na to zgodzisz. Zasady tego przetwarzania określa ta firma. Część danych z takiej rozmowy wykorzystujemy też do własnych celów opisanych w pkt 3.3 - w tym zakresie administratorem jesteśmy my. W sprawie swoich danych możesz napisać do firmy albo do nas - przekażemy sprawę firmie.</p>
 
   <h2 id="dane">3. Jakie dane, po co i na jakiej podstawie</h2>
   <p>Podstawy prawne to przepisy art. 6 ust. 1 RODO: <strong>lit. a</strong> - zgoda, <strong>lit. b</strong> - umowa lub działania na Twoje żądanie przed jej zawarciem, <strong>lit. c</strong> - obowiązek prawny, <strong>lit. f</strong> - nasz prawnie uzasadniony interes (w tabelach podajemy, jaki).</p>
@@ -119,7 +121,7 @@
     <thead><tr><th>Dane</th><th>Po co</th><th>Podstawa</th></tr></thead>
     <tbody>
     <tr><td>Adres strony i e-mail z formularza zgłoszenia</td><td>przygotowanie czatu dla Twojej strony i e-mail z linkiem do ustawienia hasła albo do gotowego czatu</td><td>lit. b</td></tr>
-    <tr><td>Rozmowy z czatem na whisp.so i z pokazowymi czatami firm, które nie założyły konta w Whisp (dane jak w pkt 3.3)</td><td>odpowiedzi na pytania, pokaz działania usługi; zapytanie lub zamówienie złożone w takim czacie wysyłamy e-mailem na adres, który mamy dla tej firmy</td><td>lit. f - prezentacja i rozwój usługi oraz przekazanie Twojej prośby firmie, do której ją kierujesz</td></tr>
+    <tr><td>Rozmowy z czatem na whisp.so i z pokazowymi czatami firm, które nie zaakceptowały Regulaminu (dane jak w pkt 3.3)</td><td>odpowiedzi na pytania, pokaz działania usługi; zapytanie lub zamówienie złożone w takim czacie wysyłamy e-mailem na adres, który mamy dla tej firmy</td><td>lit. f - prezentacja i rozwój usługi oraz przekazanie Twojej prośby firmie, do której ją kierujesz</td></tr>
     <tr><td>Wizyty na stronach pokazowych (whisp.so/demo/...): czas, firma, adres IP, strona, z której przyszedłeś, przeglądarka</td><td>ocena zainteresowania pokazami; przy pokazach dla firm, do których pisaliśmy w kampanii e-mail, łączymy wizytę (z adresem IP) z adresem e-mail, na który pisaliśmy, żeby ocenić skuteczność naszych kontaktów</td><td>lit. f - marketing naszych usług</td></tr>
     </tbody>
   </table>
@@ -133,13 +135,14 @@
     <li>adres IP Twojego urządzenia;</li>
     <li>gdy czat prowadzi Cię przez proces na stronie firmy (np. rezerwację): adres i tytuł strony, jej widoczny tekst oraz etykiety i wartości pól formularzy (bez haseł, plików i pól ukrytych).</li>
   </ul>
-  <p>Nie musisz podawać w czacie danych osobowych. Dane kontaktowe są potrzebne tylko wtedy, gdy chcesz złożyć zapytanie lub zamówienie albo dostać powiadomienie. Link do strony statusu zapytania (whisp.so/p/...) pokazuje treść zapytania, wynik i oferty firm każdemu, kto go zna - nie udostępniaj go osobom, które nie powinny ich widzieć.</p>
-  <p><strong>W imieniu firmy</strong> (pkt 2) te dane służą do: odpowiedzi na Twoje pytania na podstawie informacji firmy; przekazania firmie Twojego zapytania lub zamówienia (e-mailem i w jej panelu) oraz pytań, na które czat nie znał odpowiedzi; statystyk w panelu firmy (np. o co najczęściej pytają klienci); wycen i dłuższych zleceń, takich jak zestawienia czy porównania; wysłania Ci wyniku zapytania, gdy się na to zgodzisz. Podstawę prawną tego przetwarzania określa firma.</p>
+  <p>Nie musisz podawać w czacie danych osobowych. Dane kontaktowe są potrzebne tylko wtedy, gdy chcesz złożyć zapytanie lub zamówienie albo dostać powiadomienie. Nie podawaj w czacie danych o zdrowiu ani innych danych szczególnych kategorii (art. 9 RODO), chyba że firma prosi o nie, żeby załatwić Twoją sprawę. Link do strony statusu zapytania (whisp.so/p/...) pokazuje treść zapytania, wynik i oferty firm każdemu, kto go zna - nie udostępniaj go osobom, które nie powinny ich widzieć.</p>
+  <p><strong>W imieniu firmy</strong> (pkt 2) te dane służą do: odpowiedzi na Twoje pytania na podstawie informacji firmy; przekazania firmie Twojego zapytania lub zamówienia (e-mailem i w jej panelu) oraz pytań, na które czat nie znał odpowiedzi; statystyk w panelu firmy (np. o co najczęściej pytają klienci); wycen i dłuższych zleceń, takich jak zestawienia czy porównania; wysłania Ci wyniku zapytania, gdy się na to zgodzisz. Podstawę prawną tego przetwarzania określa firma. Rozmowy z czatem firmy, która nie zaakceptowała Regulaminu, przetwarzamy w tych samych celach jako administrator: wynik zapytania wysyłamy na podstawie Twojej zgody (lit. a), a resztę na podstawie lit. f - prezentacja i rozwój usługi oraz przekazanie Twojej prośby firmie, do której ją kierujesz.</p>
   <p><strong>Dla naszych własnych celów:</strong></p>
   <table class="t-purpose">
     <thead><tr><th>Dane</th><th>Po co</th><th>Podstawa</th></tr></thead>
     <tbody>
-    <tr><td>Twoje zapytanie i jego części, oferty firm, kontakt do powiadomień</td><td>sieć firm Whisp: polecenie innych firm, przekazanie części zapytania firmom, które mogą je zrealizować, i przesłanie Ci ich ofert (pkt 4)</td><td>lit. f - pomoc w znalezieniu wykonawcy i dostarczenie Ci ofert</td></tr>
+    <tr><td>Twoje zapytanie i jego części, oferty firm</td><td>sieć firm Whisp: polecenie innych firm, przekazanie części zapytania firmom, które mogą je zrealizować, i pokazanie Ci ich ofert na stronie statusu zapytania (pkt 4)</td><td>lit. f - pomoc w znalezieniu wykonawcy i dostarczenie Ci ofert</td></tr>
+    <tr><td>Kontakt do powiadomień (e-mail lub numer telefonu, a w Telegramie - identyfikator czatu), treść i czas Twojej zgody</td><td>powiadomienia o ofertach firm z sieci na Twoje zapytanie</td><td>lit. a - zgoda, którą zaznaczasz, podając kontakt; możesz ją w każdej chwili wycofać (pkt 9)</td></tr>
     <tr><td>Dane, na podstawie których modele AI podejmują decyzje (m.in. treść rozmowy, informacje firmy, a przy prowadzeniu przez proces - zawartość strony i pól), razem z tymi decyzjami</td><td>sprawdzanie jakości decyzji i dane do wytrenowania własnego modelu Whisp</td><td>lit. f - rozwój i poprawa usługi</td></tr>
     <tr><td>Adres IP, identyfikator rozmowy, liczniki wiadomości i kosztów, rejestr nadużyć (z fragmentem wiadomości uznanej za próbę nadużycia), logi serwera (m.in. z początkiem wiadomości - do 60 znaków)</td><td>bezpieczeństwo, limity i kontrola kosztów, wykrywanie i naprawa błędów</td><td>lit. f - bezpieczeństwo i ciągłość usługi</td></tr>
     <tr><td>Adres IP z identyfikatorem firmy - przy pierwszej wiadomości w rozmowie, a w czasie testu także przy wejściu na stronę pokazową</td><td>testy różnych wersji czatu (np. czy ma się otwierać od razu)</td><td>lit. f - rozwój usługi</td></tr>
@@ -150,7 +153,7 @@
   <h3>3.4. Firmy, do których się zwracamy</h3>
   <p>Proponujemy Whisp firmom i przekazujemy im zapytania klientów z sieci. Przetwarzamy przy tym dane firm (także jednoosobowych działalności) i osób, które w nich pracują.</p>
   <ul>
-    <li><strong>Skąd je mamy:</strong> z publicznych stron internetowych firm, wizytówek w Google Maps, katalogów firm (np. pkt.pl, panoramafirm.pl), danych z KRS i portali branżowych; dane osób, do których pisaliśmy w kampaniach e-mail - z bazy Apollo.io.</li>
+    <li><strong>Skąd je mamy:</strong> z publicznych stron internetowych firm, wizytówek w Google Maps, publicznych rejestrów (KRS, REGON, wykaz podatników VAT, Monitor Sądowy i Gospodarczy), katalogów i serwisów z danymi firm (np. pkt.pl, panoramafirm.pl, oferteo.pl, targeo.pl, rejestr.io, aleo.com) i portali branżowych; dane osób, do których pisaliśmy w kampaniach e-mail - z bazy Apollo.io.</li>
     <li><strong>Jakie:</strong> nazwa firmy, adres, NIP, telefon, e-mail, zakres usług, oferta i ceny ze strony; imię, stanowisko i służbowy e-mail; przebieg naszych kontaktów (e-maile i informacje o ich doręczeniu, wizyty na stronie pokazowej, rozmowy telefoniczne, SMS-y).</li>
     <li><strong>Po co:</strong> przedstawienie Whisp e-mailem lub telefonicznie (a na Twoją prośbę w rozmowie - SMS z linkiem); pokazowy czat i strona Twojej firmy przygotowane z jej publicznych danych (whisp.so/demo/..., /site/..., /for/...), dostępne dla każdego, kto zna adres; włączenie Twojej firmy do sieci firm Whisp, zanim do niej dołączysz (pkt 4); odpowiedzi i wyceny dla klientów sieci przygotowane z Twojej publicznej oferty i cennika - jako dane, których nie potwierdziłeś; e-maile z zapytaniami klientów z sieci (najwyżej jeden dziennie) - z opisem zapytania i linkiem do strony, na której możesz bezpłatnie przesłać klientowi wycenę; obsługa Twoich odpowiedzi.</li>
     <li><strong>Podstawa:</strong> lit. f - marketing naszych usług wobec firm i przekazywanie zapytań firmom, które mogą je zrealizować. Możesz się temu w każdej chwili sprzeciwić (pkt 9). Jeśli napiszesz, że nie chcesz e-maili z zapytaniami, nie wyślemy kolejnych.</li>
@@ -158,11 +161,11 @@
   <p><strong>Rozmowy telefoniczne.</strong> Dzwonimy przez Twilio. Możemy odtworzyć nagrany komunikat - takie połączenia mogą być nagrywane (obie strony rozmowy); nagrania przechowuje Twilio, a my pobieramy je i zamieniamy na tekst na własnym komputerze. Rozmowę może też prowadzić automat głosowy, który na początku informuje, że rozmawiasz ze sztuczną inteligencją (AI) firmy Whisp. Twoje wypowiedzi zamienia wtedy na tekst Deepgram, odpowiedzi pisze model językowy Llama (przez OpenRouter, u Groq lub innego dostawcy tego modelu), głos tworzy ElevenLabs, a TypeSafe ocenia, czego dotyczy Twoja wypowiedź. Zapis Twoich wypowiedzi trafia do logów naszego serwera i do zapisu decyzji modeli AI (pkt 3.3). Na Twoją prośbę automat może wysłać SMS z linkiem albo przełączyć rozmowę do nas. Telefony i SMS-y na nasz numer opisujemy w pkt 3.6.</p>
 
   <h3>3.5. Osoby wymienione na stronach firm i w opiniach Google</h3>
-  <p>Publiczne strony firm i ich wizytówki w Google Maps mogą zawierać dane osób - np. imiona pracowników albo opinie klientów z imieniem lub pseudonimem autora (z wizytówki zapisujemy do 15 opinii, jeśli Google je pokaże). Zapisujemy te treści jako część wiedzy czatu danej firmy, więc czat może je przytoczyć w odpowiedzi. Z autorami opinii się nie kontaktujemy. Podstawa: lit. f - rzetelne odpowiedzi o firmie; dla czatu firmy, która korzysta z Whisp na podstawie Regulaminu, robimy to w jej imieniu. Jeśli nie chcesz, żebyśmy przetwarzali Twoje dane z takiej strony lub opinii, napisz na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>.</p>
+  <p>Publiczne strony firm i ich wizytówki w Google Maps mogą zawierać dane osób - np. imiona pracowników albo opinie klientów z imieniem lub pseudonimem autora (z wizytówki zapisujemy do 15 opinii, jeśli Google je pokaże). Zapisujemy te treści jako część wiedzy czatu danej firmy, więc czat może je przytoczyć w odpowiedzi. Z autorami opinii się nie kontaktujemy. Podstawa: lit. f - rzetelne odpowiedzi o firmie; dla czatu firmy, która zaakceptowała Regulamin, robimy to w jej imieniu. Jeśli nie chcesz, żebyśmy przetwarzali Twoje dane z takiej strony lub opinii, napisz na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>.</p>
 
   <h3>3.6. Kontakt z nami</h3>
   <p>Gdy piszesz do nas e-mailem, przetwarzamy Twój adres, treść wiadomości i załączniki, żeby odpowiedzieć i załatwić sprawę (lit. f - odpowiadanie na korespondencję; gdy sprawa dotyczy umowy - lit. b). Poczta na nasz adres w domenie whisp.so jest przekazywana przez Namecheap do naszej skrzynki w Gmailu (Google).</p>
-  <p>Na nasz numer telefonu - podajemy go m.in. w e-mailach z zapytaniami do firm i w SMS-ach o nowych ofertach - możesz zadzwonić albo wysłać SMS. Połączenie trafia do nas albo możesz nagrać wiadomość (do 2 minut), którą przechowuje Twilio. SMS-y zapisujemy (numer, treść, czas) i przesyłamy e-mailem do naszej skrzynki w Gmailu; numer z SMS-a, który zaczyna się od słowa STOP, NIE albo WYPISZ, dopisujemy do listy numerów, na które nie dzwonimy. Podstawa: lit. f - odpowiadanie na Twoje wiadomości i uwzględnienie sprzeciwu.</p>
+  <p>Na nasz numer telefonu{{PHONE}} - podajemy go m.in. w e-mailach z zapytaniami do firm i w SMS-ach o nowych ofertach - możesz zadzwonić albo wysłać SMS. Połączenie przekazujemy do nas; gdy przekierowanie nie jest włączone, możesz nagrać wiadomość (do 2 minut), którą przechowuje Twilio. SMS-y zapisujemy (numer, treść, czas) i przesyłamy e-mailem do naszej skrzynki w Gmailu; numer z SMS-a, który zaczyna się od słowa STOP, NIE albo WYPISZ, dopisujemy do listy numerów, na które nie dzwonimy i nie wysyłamy SMS-ów. Podstawa: lit. f - odpowiadanie na Twoje wiadomości i uwzględnienie sprzeciwu.</p>
   <p>O e-mailach, które wysyłamy, Resend może przekazywać nam informacje o doręczeniu (adres odbiorcy i rodzaj zdarzenia, np. doręczenie albo odrzucenie wiadomości). Zapisujemy je, żeby wiedzieć, czy nasze wiadomości docierają (lit. f).</p>
 
   <h2 id="siec">4. Sieć firm Whisp</h2>
@@ -185,44 +188,62 @@
   </ul>
 
   <h2 id="odbiorcy">6. Komu przekazujemy dane</h2>
-  <p>Dane przekazujemy firmie, z której czatem rozmawiasz, i - w zakresie z pkt 4 - innym firmom z sieci Whisp; dostawcom, którzy przetwarzają je na nasze zlecenie (tabela niżej); biuru rachunkowemu, które prowadzi naszą księgowość; organom publicznym, gdy wymaga tego prawo.</p>
+  <p>Dane przekazujemy:</p>
+  <ul>
+    <li>firmie, z której czatem rozmawiasz, i - w zakresie z pkt 4 - innym firmom z sieci Whisp; każda z nich jest odrębnym administratorem danych, które otrzyma;</li>
+    <li>dostawcom, którzy przetwarzają dane na nasze zlecenie (pierwsza tabela);</li>
+    <li>odbiorcom, którzy przetwarzają dane na własnych zasadach, jako odrębni administratorzy (druga tabela);</li>
+    <li>biuru rachunkowemu, które prowadzi naszą księgowość, oraz organom publicznym, gdy wymaga tego prawo.</li>
+  </ul>
+  <h3>Dostawcy, którzy przetwarzają dane na nasze zlecenie</h3>
   <table class="t-recipients">
     <thead><tr><th>Dostawca</th><th>Do czego</th><th>Gdzie</th></tr></thead>
     <tbody>
     <tr><td colspan="3"><strong>Serwery i przechowywanie danych</strong></td></tr>
-    <tr><td>Render (firma z USA)</td><td>serwer aplikacji, dysk z plikami, logi serwera</td><td>Frankfurt, Niemcy (UE) - od 1 listopada 2026 r.; wcześniej USA</td></tr>
+    <tr><td>Render (firma z USA)</td><td>serwer aplikacji, dysk z plikami, logi serwera</td><td>Frankfurt, Niemcy (UE) - od 1 listopada 2026 r.; kopie danych sprzed przeniesienia są na wyłączonym serwerze w USA, dopóki ich nie usuniemy</td></tr>
     <tr><td>Cloudflare (firma z USA)</td><td>baza danych, przechowywanie plików, wyszukiwarka i model do wyszukiwania, odizolowane środowisko do dłuższych zleceń z maskowaniem danych osobowych, sieć, przez którą przechodzi ruch do naszego serwera</td><td>globalna sieć centrów danych, także poza EOG</td></tr>
     <tr><td colspan="3"><strong>Modele AI</strong></td></tr>
     <tr><td>OpenRouter (firma z USA)</td><td>pośrednik, przez którego wysyłamy zapytania do modeli AI</td><td>USA i inne kraje spoza EOG</td></tr>
-    <tr><td>Dostawcy modeli AI, do których OpenRouter kieruje zapytania - m.in. Anthropic, Amazon Web Services, Google, Microsoft, OpenAI, DeepInfra, Novita, Nebius i Groq (modele Claude, DeepSeek, Qwen, MiMo, Llama i GPT-4o mini)</td><td>m.in. odpowiedzi czatu, odczyt zapytań o wycenę, tworzenie modeli wyceny z cenników, podział zapytań na części i dopasowanie ich do ofert, planowanie i wykonywanie zleceń, pomoc w przeglądzie odpowiedzi, odczyt zdjęć, pytania przy zakładaniu czatu bez strony internetowej, odpowiedzi w rozmowach telefonicznych</td><td>USA, UE i inne kraje - zależnie od dostawcy</td></tr>
+    <tr><td>Dostawcy modeli AI, do których OpenRouter kieruje zapytania - m.in. Anthropic, Amazon Web Services, Google, Microsoft, OpenAI, DeepInfra, Novita, Nebius i Groq (modele Claude, DeepSeek, Qwen, MiMo, Llama i GPT-4o mini)</td><td>m.in. odpowiedzi czatu, odczyt zapytań o wycenę, tworzenie modeli wyceny z cenników, podział zapytań na części i dopasowanie ich do ofert, planowanie i wykonywanie zleceń, pomoc w przeglądzie odpowiedzi, odczyt zdjęć, pytania przy zakładaniu czatu bez strony internetowej, odpowiedzi w rozmowach telefonicznych</td><td>USA, UE i inne kraje, m.in. Chiny i Singapur - zależnie od dostawcy</td></tr>
     <tr><td>TypeSafe (firma z USA)</td><td>model decyzyjny Jev, m.in.: kierowanie rozmową, sprawdzanie odpowiedzi, wykrywanie prób nadużyć, pomoc w formularzach i w procesach na stronie firmy, dopasowanie firm w sieci, ocena wypowiedzi w rozmowach telefonicznych</td><td>{{TYPESAFE_LOCATION}}</td></tr>
     <tr><td colspan="3"><strong>E-mail, SMS i telefon</strong></td></tr>
     <tr><td>Resend (firma z USA)</td><td>wysyłka e-maili</td><td>USA</td></tr>
     <tr><td>Twilio, a w rozmowach z automatem głosowym także jego dostawcy Deepgram i ElevenLabs</td><td>SMS-y, połączenia telefoniczne, nagrania i poczta głosowa; zamiana mowy na tekst (Deepgram) i głos automatu (ElevenLabs)</td><td>USA</td></tr>
-    <tr><td>WhatsApp (Meta, przez Twilio) i Telegram</td><td>powiadomienia - tylko gdy strona statusu zapytania oferuje taki kanał i go wybierzesz</td><td>serwery tych firm</td></tr>
     <tr><td>Namecheap (firma z USA)</td><td>domena whisp.so i przekazywanie poczty do naszej skrzynki w Gmailu</td><td>USA</td></tr>
-    <tr><td>Google (Gmail)</td><td>skrzynka, do której trafia poczta do nas i automatyczne powiadomienia z serwisu (np. SMS-y wysłane na nasz numer)</td><td>USA i globalnie</td></tr>
-    <tr><td colspan="3"><strong>Płatności</strong></td></tr>
-    <tr><td>Stripe</td><td>płatności za abonament</td><td>UE (Irlandia) i USA</td></tr>
     <tr><td colspan="3"><strong>Odczyt stron firm</strong></td></tr>
     <tr><td>Browserless (firma z USA)</td><td>odczyt publicznych stron firm i wyszukiwanie ich wizytówek w Google Maps, bez danych osób piszących na czacie</td><td>USA</td></tr>
-    <tr><td colspan="3"><strong>Pliki, które pobiera Twoja przeglądarka</strong></td></tr>
-    <tr><td>Google (Google Fonts)</td><td>czcionki, które czat i strony whisp.so pobierają z serwerów Google - Twoja przeglądarka przekazuje wtedy Google swój adres IP i adres witryny, na której jesteś</td><td>USA i globalnie</td></tr>
-    <tr><td>jsDelivr i Unsplash</td><td>biblioteka czatu na stronie przeglądu odpowiedzi (dla firm) i zdjęcie na stronie głównej whisp.so</td><td>globalne sieci serwerów</td></tr>
+    </tbody>
+  </table>
+  <h3>Odbiorcy, którzy przetwarzają dane na własnych zasadach</h3>
+  <table class="t-recipients t-independent">
+    <thead><tr><th>Odbiorca</th><th>Co otrzymuje</th><th>Gdzie</th></tr></thead>
+    <tbody>
+    <tr><td>Stripe</td><td>płatność za abonament: dane karty, dane do faktury i NIP podajesz bezpośrednio w formularzu Stripe</td><td>UE (Irlandia) i USA</td></tr>
+    <tr><td>Google (Gmail)</td><td>poczta do nas i automatyczne powiadomienia z serwisu (np. treść SMS-ów wysłanych na nasz numer) - nasza skrzynka jest w Gmailu</td><td>USA i globalnie</td></tr>
+    <tr><td>WhatsApp (Meta, przez Twilio) i Telegram</td><td>powiadomienia - tylko gdy strona statusu zapytania oferuje taki kanał i go wybierzesz</td><td>WhatsApp: serwery Meta i Twilio, także w USA; Telegram: Zjednoczone Emiraty Arabskie</td></tr>
+    <tr><td>jsDelivr i Unsplash</td><td>adres IP Twojej przeglądarki, gdy pobiera bibliotekę czatu na stronie przeglądu odpowiedzi (dla firm) albo zdjęcie na stronie głównej whisp.so</td><td>globalne sieci serwerów</td></tr>
     </tbody>
   </table>
 
   <h2 id="eog">7. Przekazywanie danych poza Europejski Obszar Gospodarczy</h2>
-  <p>Większość naszych dostawców to firmy z USA, a część przetwarza dane na serwerach w USA lub w innych krajach spoza Europejskiego Obszaru Gospodarczego (EOG) - zob. kolumnę „Gdzie” w pkt 6. Przy części modeli AI wskazujemy OpenRouterowi preferowanych dostawców; w pozostałych przypadkach, a także gdy preferowani dostawcy są niedostępni, OpenRouter sam wybiera dostawcę modelu - także w kraju, którego nie da się wskazać z góry.</p>
+  <p>Większość naszych dostawców to firmy z USA, a część przetwarza dane na serwerach w USA lub w innych krajach spoza Europejskiego Obszaru Gospodarczego (EOG) - zob. kolumnę „Gdzie” w pkt 6. Przy części modeli AI wskazujemy OpenRouterowi preferowanych dostawców; w pozostałych przypadkach, a także gdy preferowani dostawcy są niedostępni, OpenRouter sam wybiera dostawcę modelu - także w kraju, którego nie da się wskazać z góry, np. w Chinach albo w Singapurze.</p>
   <p>RODO pozwala przekazać dane poza EOG, gdy Komisja Europejska uznała, że odbiorca zapewnia odpowiedni poziom ochrony - dla firm z USA dotyczy to uczestników programu EU-US Data Privacy Framework (decyzja Komisji z 10 lipca 2023 r.; lista uczestników: <a href="https://www.dataprivacyframework.gov/list">dataprivacyframework.gov</a>) - albo gdy zastosowano odpowiednie zabezpieczenia, przede wszystkim standardowe klauzule umowne przyjęte przez Komisję Europejską.</p>
-  <p>Jeśli chcesz wiedzieć, na jakiej podstawie Twoje dane trafiają do konkretnego dostawcy, albo otrzymać kopię zabezpieczeń, które go dotyczą, napisz na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>.</p>
+  <p>Podstawy przekazania, które potwierdziliśmy:</p>
+  <ul>
+    <li>Render - uczestnik EU-US Data Privacy Framework;</li>
+    <li>Twilio - wiążące reguły korporacyjne Twilio (umowę zawieramy z Twilio Ireland Limited);</li>
+    <li>Resend - standardowe klauzule umowne w umowie powierzenia przetwarzania Resend;</li>
+    <li>OpenRouter - według jego polityki prywatności decyzje Komisji Europejskiej albo standardowe klauzule umowne;</li>
+    <li>Stripe - umowę zawieramy ze Stripe Payments Europe Limited (Irlandia).</li>
+  </ul>
+  <p>Dla pozostałych dostawców i odbiorców spoza EOG nie podajemy tu podstawy przekazania, bo jeszcze jej nie potwierdziliśmy. Jeśli chcesz o nią zapytać albo otrzymać kopię zabezpieczeń wymienionych wyżej, napisz na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>.</p>
 
   <h2 id="okresy">8. Jak długo przechowujemy dane</h2>
   <table class="t-retention">
     <thead><tr><th>Dane</th><th>Jak długo</th></tr></thead>
     <tbody>
-    <tr><td>Wiadomości z czatu</td><td>365 dni od zapisania wiadomości, potem usuwamy je automatycznie (raz dziennie)</td></tr>
-    <tr><td>Zapis decyzji modeli AI</td><td>365 dni</td></tr>
+    <tr><td>Wiadomości z czatu</td><td>{{CHAT_RETENTION_DAYS}} dni od zapisania wiadomości, potem usuwamy je automatycznie (raz dziennie)</td></tr>
+    <tr><td>Zapis decyzji modeli AI</td><td>{{CHAT_RETENTION_DAYS}} dni; podział zapytania na części, który zapamiętujemy, żeby takie samo zapytanie dzielić tak samo (model pomija w nim dane osobowe) - bez określonego terminu</td></tr>
     <tr><td>Każdą rozmowę zapisujemy też jako sprawę: dziennik rozmowy, pliki, wyniki, zapytania do firm z sieci i ich oferty, kontakt do powiadomień i zgody, link do strony statusu</td><td>usuwamy automatycznie po 30 dniach bez żadnej aktywności w sprawie (raz dziennie, partiami)</td></tr>
     <tr><td>Zapytania i zamówienia złożone w czacie</td><td>wysyłamy je e-mailem do firmy; w jej skrzynce zapytań przechowujemy 500 ostatnich, bez określonego terminu</td></tr>
     <tr><td>Pytania, na które czat nie znał odpowiedzi</td><td>bez określonego terminu - do czasu, gdy firma usunie je w panelu</td></tr>
@@ -235,11 +256,11 @@
     <tr><td>Adres IP z identyfikatorem firmy (testy wersji czatu), zdarzenia z kampanii e-mail i wizyty na stronach pokazowych powiązane z adresem e-mail</td><td>bez określonego terminu</td></tr>
     <tr><td>Lista wizyt na stronach pokazowych</td><td>2000 ostatnich wizyt</td></tr>
     <tr><td>Konto firmy, jej ustawienia i wiedza czatu</td><td>przez cały czas istnienia konta; konto nie jest usuwane automatycznie - usuniemy je na Twoją prośbę</td></tr>
-    <tr><td>Sesja logowania do panelu</td><td>7 dni</td></tr>
+    <tr><td>Sesja logowania do panelu</td><td>ważna 7 dni; wygasłe sesje usuwamy raz dziennie</td></tr>
     <tr><td>Dokumenty rozliczeniowe</td><td>tak długo, jak wymagają tego przepisy podatkowe i rachunkowe</td></tr>
     <tr><td>Pokazowe czaty i dane firm z publicznych źródeł, w tym opinie z Google Maps</td><td>bez określonego terminu; wiedzę czatu odczytujemy ze strony ponownie, gdy czat jest używany ponad 30 dni od ostatniego odczytu</td></tr>
     <tr><td>Dane z kampanii e-mail (adresy, imiona, stanowiska) i informacje o doręczeniu wysłanych przez nas e-maili</td><td>bez określonego terminu</td></tr>
-    <tr><td>Rozmowy telefoniczne: nagrania i wiadomości głosowe, ich zapis tekstowy, SMS-y na nasz numer, lista numerów, na które nie dzwonimy, i lista adresów wypisanych z e-maili</td><td>bez określonego terminu (nagrania w Twilio - do ich usunięcia)</td></tr>
+    <tr><td>Rozmowy telefoniczne: nagrania i wiadomości głosowe, ich zapis tekstowy, SMS-y na nasz numer, lista numerów, na które nie dzwonimy i nie wysyłamy SMS-ów, i lista adresów wypisanych z e-maili</td><td>bez określonego terminu (nagrania w Twilio - do ich usunięcia)</td></tr>
     <tr><td>Logi serwera - mogą zawierać m.in. adresy IP, adresy e-mail, numery telefonów, początki wiadomości z czatu (do 60 znaków), zapis rozmów telefonicznych i fragmenty wiadomości uznanych za próbę nadużycia</td><td>w podglądzie administratora 500 ostatnich wpisów; u dostawców (Render, Cloudflare) zgodnie z ich zasadami</td></tr>
     <tr><td>Korespondencja z nami</td><td>bez określonego terminu</td></tr>
     </tbody>
@@ -254,22 +275,22 @@
     <li>usunięcia danych;</li>
     <li>ograniczenia przetwarzania;</li>
     <li>przeniesienia danych, które przetwarzamy na podstawie zgody lub umowy;</li>
-    <li>cofnięcia zgody w dowolnym momencie - bez wpływu na to, co zrobiliśmy wcześniej na jej podstawie.</li>
+    <li>cofnięcia zgody w dowolnym momencie - bez wpływu na to, co zrobiliśmy wcześniej na jej podstawie. Zgodę na powiadomienia wycofasz, pisząc na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>; powiadomienia SMS zatrzymasz też, odpowiadając na nie słowem STOP.</li>
   </ul>
   <div class="note">
-    <p><strong>Prawo sprzeciwu.</strong> Możesz w każdej chwili sprzeciwić się przetwarzaniu Twoich danych na podstawie naszego prawnie uzasadnionego interesu (lit. f) - z przyczyn związanych z Twoją szczególną sytuacją. Sprzeciw wobec marketingu bezpośredniego, np. naszych e-maili i telefonów do firm, uwzględnimy zawsze. Napisz na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a> albo - jeśli chodzi o telefony - wyślij na nasz numer SMS o treści STOP.</p>
+    <p><strong>Prawo sprzeciwu.</strong> Możesz w każdej chwili sprzeciwić się przetwarzaniu Twoich danych na podstawie naszego prawnie uzasadnionego interesu (lit. f) - z przyczyn związanych z Twoją szczególną sytuacją. Sprzeciw wobec marketingu bezpośredniego, np. naszych e-maili i telefonów do firm, uwzględnimy zawsze. Napisz na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a> albo - jeśli chodzi o telefony i SMS-y - wyślij na nasz numer{{PHONE}} SMS o treści STOP.</p>
   </div>
   <p><strong>Jak skorzystać z praw:</strong> napisz na <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>, czego dotyczy prośba, i podaj, po czym możemy Cię odnaleźć w danych - np. adres e-mail lub numer telefonu, który podałeś, firmę, z której czatem rozmawiałeś, i przybliżony czas rozmowy. Odpowiemy w ciągu miesiąca; w trudnych sprawach termin może się wydłużyć o kolejne dwa miesiące - wtedy Cię o tym poinformujemy. Jeśli rozmawiałeś z czatem firmy, która korzysta z Whisp, możesz zwrócić się do niej albo do nas - przekażemy sprawę.</p>
   <p>Masz też prawo złożyć skargę do Prezesa Urzędu Ochrony Danych Osobowych (ul. Stawki 2, 00-193 Warszawa, <a href="https://uodo.gov.pl">uodo.gov.pl</a>).</p>
 
   <h2 id="cookies">10. Pliki cookies i pamięć przeglądarki</h2>
-  <p>Czat i strony whisp.so zapisują w Twojej przeglądarce kilka informacji (w pamięci strony: localStorage i sessionStorage). Nie używamy ich do reklamy ani profilowania.</p>
+  <p>Czat i strony whisp.so zapisują w Twojej przeglądarce kilka informacji (w pamięci strony: localStorage i sessionStorage). Służą tylko temu, żeby czat i strony whisp.so działały tak, jak z nich korzystasz, dlatego nie prosimy o zgodę na ich zapis. Nie używamy ich do reklamy ani profilowania.</p>
   <table class="t-storage">
     <thead><tr><th>Wpis</th><th>Po co</th><th>Jak długo</th></tr></thead>
     <tbody>
     <tr><td colspan="3"><strong>Na stronie z czatem (strona firmy albo whisp.so)</strong></td></tr>
-    <tr><td>wctx-chat:...</td><td>20 ostatnich wiadomości i identyfikator rozmowy - rozmowa nie znika po odświeżeniu strony</td><td>3 dni od ostatniej wiadomości (firma może zmienić ten czas albo wyłączyć zapis)</td></tr>
-    <tr><td>wctx-chat:...:agent</td><td>zlecenie, na którego wynik czeka czat</td><td>do otrzymania wyniku; czat przestaje czekać po 7 dniach</td></tr>
+    <tr><td>wctx-chat:...</td><td>20 ostatnich wiadomości i identyfikator rozmowy - rozmowa nie znika po odświeżeniu strony</td><td>3 dni od ostatniej wiadomości (firma może zmienić ten czas albo wyłączyć zapis); po tym czasie czat usuwa go przy następnym wejściu na stronę</td></tr>
+    <tr><td>wctx-chat:...:agent</td><td>zlecenie, na którego wynik czeka czat</td><td>do otrzymania wyniku, najwyżej 7 dni; po tym czasie czat usuwa go przy następnym wejściu na stronę</td></tr>
     <tr><td>wctx-settings</td><td>Twoje ustawienia czatu: motyw, wielkość tekstu, kolory dla osób z zaburzeniami widzenia barw</td><td>do usunięcia w przeglądarce</td></tr>
     <tr><td>wctx-onboarded</td><td>informacja, że zamknąłeś kartę powitalną czatu - zapisywana też w ukrytej ramce whisp.so, żeby karta nie pokazywała się na innych stronach z czatem Whisp</td><td>do usunięcia w przeglądarce</td></tr>
     <tr><td>wctx-owner, wctx-rt (sessionStorage)</td><td>tryb właściciela firmy i nagrywanie ścieżki przez firmę na jej stronie</td><td>do zamknięcia karty</td></tr>
@@ -280,7 +301,7 @@
     <tr><td>cookie wdemo</td><td>tylko w przeglądarce administratora Whisp: pokazy bez limitów</td><td>90 dni</td></tr>
     </tbody>
   </table>
-  <p>Czat i strony whisp.so pobierają czcionki z Google Fonts, a strona główna - zdjęcie z Unsplash; Twoja przeglądarka łączy się wtedy z serwerami tych firm i przekazuje im swój adres IP. Płatność odbywa się na stronie Stripe, która stosuje własne pliki cookies. Zapisane wpisy możesz w każdej chwili usunąć w ustawieniach przeglądarki (dane witryny) - po usunięciu czat zacznie nową rozmowę.</p>
+  <p>Strona główna whisp.so pobiera zdjęcie z Unsplash, a strona przeglądu odpowiedzi - bibliotekę czatu z jsDelivr; Twoja przeglądarka łączy się wtedy z serwerami tych firm i przekazuje im swój adres IP. Czcionki czatu i stron whisp.so pobiera z naszego serwera. Płatność odbywa się na stronie Stripe, która stosuje własne pliki cookies. Zapisane wpisy możesz w każdej chwili usunąć w ustawieniach przeglądarki (dane witryny) - po usunięciu czat zacznie nową rozmowę.</p>
 
   <h2 id="zmiany">11. Zmiany polityki</h2>
   <p>Aktualna wersja polityki jest zawsze na tej stronie, a data na górze pokazuje, od kiedy obowiązuje. Wcześniejsze wersje prześlemy na prośbę.</p>

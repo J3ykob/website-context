@@ -62,6 +62,16 @@ export async function telegramSend(chatId: string | number, text: string): Promi
 
 export interface CustomerContact { email?: string; phone?: string; whatsapp?: string; telegramChatId?: string; lang: string; at: string }
 
+// Numbers that told us to stop: a reply STOP to our number puts the sender on the server's do-not-call
+// list (scripts/serve-multi-tenant.ts /api/voice/sms-in), which the server registers here. No SMS or
+// WhatsApp goes to them. Until 2026-11-04 only the outreach calls honoured it - a customer who replied
+// STOP to a "new offer" SMS kept getting them.
+let stopped: () => Iterable<string> = () => [];
+export function setStoppedNumbers(list: () => Iterable<string>): void {
+  stopped = list;
+}
+const saidStop = (phone: string) => { const p = normalizePhone(phone) || phone; return [...stopped()].some((n) => normalizePhone(n) === p); };
+
 /** "Your result is ready" on every non-email channel the customer chose. Returns what was sent (or why not). */
 export function sendResultReady(contact: CustomerContact, vars: { brand: string; link: string }): Promise<Record<string, string>> {
   return sendUpdate(contact, "result-ready", vars, process.env.CUSTOMER_UPDATES_APPROVED === "1");
@@ -87,6 +97,7 @@ async function sendUpdate(contact: CustomerContact, name: string, vars: Record<s
     // MSG_PER_DAY_WHATSAPP 10, MSG_PER_DAY_TELEGRAM 20 - a real request gets "result ready" plus an offer per
     // business asked (MAX_REQUESTS 6), so 3 cut real updates (docs/limits.md).
     const dest = c === "sms" ? contact.phone! : c === "whatsapp" ? contact.whatsapp! : contact.telegramChatId!;
+    if (c !== "telegram" && saidStop(dest)) { out[c] = "not sent: the number asked us to stop"; continue; }
     const cap = Number(process.env[`MSG_PER_DAY_${c.toUpperCase()}`]) || (c === "sms" ? 10 : c === "whatsapp" ? 10 : 20);
     const exempt = (process.env.MSG_CAP_EXEMPT || "kubalol7982@gmail.com").split(",").map((x) => x.trim()).filter(Boolean).includes(dest);
     if (!exempt && !(await bump(`msg:${c}:${dest}`, cap))) { out[c] = "not sent: daily limit for this recipient"; logAbuse("message_cap", `${c}:${dest}`); continue; }

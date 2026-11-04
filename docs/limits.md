@@ -103,6 +103,15 @@ Spend caps (budget.ts) stay: $1 per conversation, $10 per business, $80 overall 
 OpenRouter $3.22 that day (heavy testing), $9.82 that week, $57 that month - $80/day is ~8x the busiest day, a stop
 against runaway loops only.
 
+### Privacy policy review 2026-11-04 (retention the page states, checked against the code)
+
+| Limit | Was | Now | Why |
+|---|---|---|---|
+| Expired panel sessions (D1 sessions, 7-day TTL unchanged) | removed only when the token was presented again | also removed by the daily retention job (src/security/retention.ts) | a session nobody used again kept its token and business id for good; the policy says 7 days |
+| Interview counters per IP (60/hour unchanged) | kept in memory until a restart | swept every 10 min once the hour is over, like the other per-IP counters | the policy says in-memory IP counters last up to about an hour |
+| Widget's agent watch (localStorage wctx-chat:<id>:agent, 7 days unchanged) | an expired watch, or one from an earlier conversation, stayed in the browser | removed on the next page load | the policy says at most 7 days |
+| Chat retention on the policy page | free text CHAT_RETENTION ("12 miesięcy od ostatniej wiadomości"), not linked to the job | the page shows CHAT_RETENTION_DAYS, the value the job deletes by (src/legal/pages.ts) | the page and the deletion setting had drifted apart |
+
 ## Still to measure or decide (CHECK / STALE not changed yet)
 
 - Qdrant service + disk in render.yaml - unused since 2026-06-05, still paid; removing it deletes the service (owner's call).

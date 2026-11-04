@@ -176,12 +176,13 @@
     return;
   }
 
-  // Inject font into the main document (Shadow DOM can't load fonts itself)
+  // Inject font into the main document (Shadow DOM can't load fonts itself). From our own server, not
+  // Google Fonts (until 2026-11-04): on every client's site each visitor's IP went to Google on load.
   if (!document.getElementById("wctx-font")) {
     var link = document.createElement("link");
     link.id = "wctx-font";
     link.rel = "stylesheet";
-    link.href = "https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap";
+    link.href = API_HOST + "/fonts/fonts.css";
     document.head.appendChild(link);
   }
 
@@ -1212,7 +1213,10 @@
   }
   (function() {
     var w = savedWatch();
-    if (w && w.s === sessionId && Date.now() - w.t < WATCH_MS) setTimeout(function() { pollProject(w.id); }, 1500);
+    if (!w) return;
+    // Expired, or from an earlier conversation: removed (it used to stay in the browser for good).
+    if (w.s !== sessionId || Date.now() - w.t >= WATCH_MS) { stopWatching(); return; }
+    setTimeout(function() { pollProject(w.id); }, 1500);
   })();
 
   // Stream a chat response over SSE. Calls cbs.onFirst() just before the first token

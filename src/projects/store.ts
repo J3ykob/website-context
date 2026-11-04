@@ -183,9 +183,22 @@ export async function projectDetail(id: string): Promise<{ project: Project; par
   };
 }
 
-/** A business's projects (newest first), for its dashboard. */
+/**
+ * Whether a business sees a project in its panel (list, detail, files, agent runs): its own projects, and
+ * a request it sent to another business (it joins that one as "initiator"). The other roles only record
+ * who took part and give no access - a business asked for a part works in its own business_request@1
+ * project, where the request is masked; a business chosen for an order gets the order itself
+ * (tenant-manager.ts). The customer's project holds their contact, the conversation and the other
+ * businesses' offers. Until 2026-11-04 every participant saw all of it: GET /api/dashboard/projects/<id>
+ * returned memory.customerContact and rozmowa.md to each business asked for a part (network.ts askOne).
+ */
+export function seesInPanel(project: Pick<Project, "initiatorTenantId">, participants: Participant[], tenantId: string): boolean {
+  return project.initiatorTenantId === tenantId || participants.some((p) => p.tenantId === tenantId && p.role === "initiator");
+}
+
+/** A business's projects (newest first), for its dashboard - the ones it sees (seesInPanel, the same rule in SQL). */
 export async function projectsForTenant(tenantId: string, limit = 50): Promise<(Project & { role: ParticipantRole })[]> {
   await ensureSchema();
-  const rows = await d1Query("SELECT p.*, pp.role AS role FROM projects p JOIN project_participants pp ON pp.project_id = p.id WHERE pp.tenant_id = ? ORDER BY p.updated_at DESC LIMIT ?", [tenantId, limit]);
+  const rows = await d1Query("SELECT p.*, pp.role AS role FROM projects p JOIN project_participants pp ON pp.project_id = p.id WHERE pp.tenant_id = ? AND (p.initiator_tenant = pp.tenant_id OR pp.role = 'initiator') ORDER BY p.updated_at DESC LIMIT ?", [tenantId, limit]);
   return rows.map((r: any) => ({ ...row(r), role: r.role }));
 }

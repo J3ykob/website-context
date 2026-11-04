@@ -78,8 +78,7 @@ function renderCustomHtml(tenant: SiteTenant, baseUrl: string, editToken: string
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(brand)}</title>
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="/fonts/fonts.css" rel="stylesheet">
 <style>
   :root{--accent:${accent};}
   *{box-sizing:border-box;} html,body{margin:0;padding:0;}
@@ -217,9 +216,7 @@ export function renderSitePage(tenant: SiteTenant, baseUrl: string, editToken: s
 <meta name="description" content="${escAttr(tagline)}">
 <meta name="theme-color" content="${bgLiteral}">
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="/fonts/fonts.css" rel="stylesheet">
 <script>document.documentElement.classList.add("js");</script>
 <style>
   :root{
