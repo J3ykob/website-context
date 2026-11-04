@@ -2512,10 +2512,17 @@ app.put("/api/dashboard/widget-settings", authMiddleware, (req, res) => {
   const tenantId = (req as any).tenantId;
   const tenant = getTenant(tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
+  // Only the widget's own keys: the whole body was merged into settings, so any logged-in business could set ecosystem
+  // (join any network and get its requests), ecosystemPlan or billingExempt (privacy review, 2026-11-04).
   const current = tenant.settings || {};
-  const updated = { ...current, ...req.body };
+  const b = (req.body || {}) as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  if (typeof b.startExpanded === "boolean") patch.startExpanded = b.startExpanded;
+  if (b.forceTheme === "auto" || b.forceTheme === "light" || b.forceTheme === "dark") patch.forceTheme = b.forceTheme;
+  if (typeof b.brandName === "string") patch.brandName = b.brandName.trim().slice(0, 80);
+  const updated = { ...current, ...patch };
   updateTenant(tenantId, { settings: updated });
-  res.json({ ok: true, settings: updated });
+  res.json({ ok: true, settings: { startExpanded: updated.startExpanded || false, forceTheme: updated.forceTheme || "auto", brandName: updated.brandName || tenant.brandName || "" } });
 });
 
 // Clear the knowledge-gap journal (port of DELETE /api/unknown-questions from
