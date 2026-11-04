@@ -1,300 +1,510 @@
-# Plan for the next iteration (judges' synthesis after iteration 4, 2026-11-04)
+# Plan for the next iteration (judges' synthesis after iteration 5, 2026-11-05)
 
-Written by the synthesis agent from the 3 judge lenses of iteration 4 (run at 439c2fe). Paths to the session scratchpad no longer exist; the cases and tools are in this folder. Done since: the "About this chat" record states whether the chat is an unclaimed demo (8788cae).
+Written by the synthesis agent from the 3 judge lenses of iteration 5 (run at 2cadf10). The plan after iteration 4 is in git history (commit 6cd1698).
 
-**Iteration 5 plan, from the iteration 4 judges (63 cases, 3 lenses x 4 batches) and the run traces**
+# Plan for iteration 6 (judges' synthesis after iteration 5, 2026-11-05)
 
-**Baseline: iteration 4 (439c2fe)**
-- Iteration 4 is iteration 3 plus owner mode, contact details given once, and form fields per order. None of the 12 fixes in the iteration 3 plan was built, so the same causes come back.
-- Judge means: accuracy 3.33, customer 3.32, owner 3.22. Iteration 3 was 3.14 / 3.22 / 3.27, so the change is inside the judges' noise of ±0.15.
-- 39 of 63 conversations score 3 or less on some lens (iteration 3: 43). 20 have a score of 2 or less. 4 have a 1: djmw-2, romax-2, betonlazy-1, aniatkaczyk-1 (iteration 3: 6). 24 pass all three lenses (iteration 3: 20).
-- Blind pairs against iteration 3: new better in 29, old better in 24, even in 10 (verdicts 62-51-13). No real change.
-- Judge-free numbers:
-  - A new script, loop/srccov.py, measures how many of each case's source pages reach the reply: 0.49 (iteration 3: 0.48). 0.64 become candidates.
-  - The 'partial' behaviour was set on 54 of 134 turns.
-  - 41 turns had a blocked draft, in 58 rounds (20 unsupported, 20 meta-talk).
-- First token: median 3.0 s, p90 4.5 s (iteration 3: 5.1 s). 12 turns took 4.5 s or more (iteration 3: 21). The 4 background-agent turns took 85-244 s.
+## Baseline: iteration 5 (2cadf10, run 2026-11-04 23:20)
 
-## Ranked problems (conversations hurt; how many at 2 or less / at 1)
+**What was built since iteration 4:**
+- the per-part coverage gate for the network and the agent (06febe4..2cadf10, iteration-4 fix 3);
+- owner mode at Jev 0.5, and the demo self-description (d91e00f, 8788cae, 77267dd);
+- results on unclaimed demos are no longer held (7a75bc1).
 
-### 1. The page or fact that answers never shapes the reply (17; 8 at 2 or less)
-- **Evidence:**
-  - romax-1: every candidate was a blog post. The Fort Wola page ("Niedziela (zamknięte)") is in the knowledge base but was never a candidate.
-  - sosnowydwor-2: /wesela/ ("W cenę nie wliczony jest alkohol i muzyka") scored 0.43 and the homepage 0.46, both under the 0.5 cut.
-  - djmw-3: the homepage FAQ scored 0.91 but Opinie and Konferansjer took the slots.
-  - empro-1 T2: no page was used. The current BLACK RED WEEKS page was never a candidate.
-  - angelikasolecka-2: the network turn searched only for the 3 missing services, so the FAQ and the price list never became candidates.
-  - dworekstaropolski-1 T2: the router did not flag it as a follow-up, so T1's price list was dropped (chat.ts:928 carries pages over only on follow-ups).
-  - rentbud-3: the item matcher said "none" although the used page lists Wieża aluminiowa 5m at 120 zł/doba. The injected fact "our price list has no item..." (chat.ts:985) won over the page.
-  - empro-2 T1 (in both runs), kwiaciarniamilosc-1 T2 and ostap-1 T2: one failed Jev batch nulled every score (packs.ts:135), so the first 3 search hits were used instead.
-  - The fact was in the pack but the reply denied or dropped it after a 'partial' instruction:
-    - sweethome-1 T2: 'full' was 0.49, so the reply denied on-site assembly.
-    - ostap-3: sent the formwork design to the site manager.
-    - kamilkozielewicz-2: left out the 600 zł deposit and the venue inside free travel.
-    - helsen-3 and bostabeton-2 T2 (CEM): the same pattern.
-  - Also: empro-2, aniatkaczyk-3, liliowa-1.
-- **Cause (selection):**
-  - All parts are searched as one query (top 20 chunks).
-  - Pages are scored against the whole message and only the top 4 at 0.5 or more are kept, within 40k chars.
-  - One per-message 'full' score sets 'partial', and the writer then names some detail as missing.
-  - 11 of the 14 turns with a meta-talk block were partial or no-info turns.
-- **Fix: the split part becomes the unit of the turn.**
-  - Split every question turn.
-  - For each part:
-    - its own search, run in parallel;
-    - its own Jev scores;
-    - its best page is reserved before the rest of the budget is filled;
-    - its matched items, plus the priced items from its used pages.
-  - The previous turn's pages are always candidates.
-  - Coverage is judged per part. A part is called unanswered only after a second search for it finds nothing.
-  - A failed scoring batch keeps the other batches' scores.
-- **Verify:** run srccov.py ($0). Replay these 17 cases with run-iter.sh --only (about 40 turns, under $0.10). Targets: a source share of 0.65 or more, 'partial' on 25% of turns or less, and first token no slower.
+The other 12 iteration-4 fixes were not built. The Business Record is only a design (docs/business-record-design.md).
 
-### 2. Offer items have wrong or missing structure (8; 5; 1)
-- **Evidence:**
-  - sweethome-3: the "Tort czekoladowy" item came from the flavour listing. It has the neighbouring item's code (SH-3006) and no price.
-  - sweethome-1: every wedding cake shows "- PLN" because the K1/K2/K3 per-kg legend is not resolved. SH-1122's 9 kg minimum is ignored.
-  - kwiaciarniamilosc-2: the wreath has a price range of 1090-2589 zł and sizes "King Size, Large, Medium", but no price per size. The check therefore blocked the correct "od 1090 = najmniejszy". The sash (+60 zł) and delivery are not on the item.
-  - angelikasolecka-3: the 200 zł/h item (minimum 2 h) was quoted as "price on request".
-  - dworekstaropolski-1: the item reads "próg nie podany"; the condition of more than 85 adults, otherwise 2000 zł, was lost.
-  - bostabeton-1: the item carries "do 40 km", taken from the TransMix page.
-  - romax-2: unpriced category items were chosen over priced Quick-Step panels.
-  - zajacfoto-3: the foto+video package delivered with a partner is not recorded as the business's own item.
-- **Cause (data):** items are extracted per page without being checked against that page.
-- **Fix: audit each price page at ingestion (iteration 3 fix 3).**
-  - An LLM reads each price-bearing page together with its items (by id).
-  - It returns as structure:
-    - price, unit and minimum;
-    - legend codes resolved;
-    - variants with their visible labels and prices;
-    - add-ons;
-    - conditional tiers;
-    - which items a note applies to;
-    - services delivered by a partner, recorded as the business's own;
-    - attributes not on that page removed.
-  - Code applies the corrections by id.
-- **Verify:** run offline on these 7 tenants (about $0.05) and diff the named items. Then replay about 12 price turns.
+**Lens results** (score ≤3 / ≤2 / =1):
 
-### 3. The business's own products go to the background calculation or to competitors (6; 4; 2)
-- **Evidence:**
-  - djmw-2 (owner score 1): 125 s; Pełny Parkiet priced inside DJMW's own quote; included services taken from a market FAQ; a .csv file named.
-  - betonlazy-1 (owner score 1): 186 s for 8,1 m³; Bosta Beton asked to quote B20, which Łazy sells itself; a file path shown.
-  - betonlazy-3: nothing after 243 s, then T2 says "Zapisaliśmy dane" and "nie mogę przekazać".
-  - bostabeton-2 T3: 85 s, ending in "being approved", with no contact.
-  - bostabeton-3: offered the network for smaller loads of its own HydroBeton ("ours" 0.79 against the 0.8 cut).
-  - zajacfoto-3: the business's own partner package went to the network.
-- **Cause (routing):**
-  - Jev gates over loose passages decide the route: formOffered, hasPrices, simple/allOurs, ours ≥ 0.8.
-  - A `/\d/` test on customer text also decides (chat.ts:779), which breaks the no-regex-on-text rule.
-  - Agent rule 9 asks businesses in the same trade to quote.
-- **Fix: decide coverage from structure (iteration 3 fix 2).** The item matcher's own picks decide:
-  - parts that match the host's items stay with the host:
-    - priced: computed in the chat;
-    - unpriced: answered in the chat with the computed quantity, "no published price" and the right contact or form;
-  - the agent runs only for priced multi-step work;
-  - only parts the host does not cover go to the network or the agent;
-  - the regex goes.
-- **Verify:** run routetest.mjs on these first messages plus controls (romax-3 windows, ostap-3 concrete, sosnowydwor-2 DJ, liliowa-3 balloons), about $0.01. Target: no agent or network start for parts the host covers.
+| Lens | ≤3 | ≤2 | =1 |
+|---|---|---|---|
+| accuracy | 37 | 20 | 2 |
+| customer | 40 | 13 | 1 |
+| owner | 35 | 13 | 2 |
 
-### 4. The knowledge base is built from the wrong pages (8; 5)
-- **Evidence:**
-  - kwiaciarniamilosc-1 and -2: only 19 pages were read, 14 of them EN/UK copies. /regulamin/, /dostawa-i-platnosc/, /kwiaty-z-dostawa-warszawa/ and /florystyka-funeralna/ were never read. They are in its sitemap or menu, and all of them return 200 to WhispBot.
-  - sweethome-1 and -3: the 150-page cap for demos was used up before any of the 6 wedding-cake pages; 17 muffin pages were read instead.
-  - dworekstaropolski-3: 27 of 56 pages are /en/ copies. The old English page (140 zł) beat the Polish /nocleg-poznan/ (220 zł).
-  - liliowa-1: 41 of 59 pages are ?start=N gallery copies.
-  - kamilkozielewicz-2: 8 URLs come back twice, with and without "/" (old vectors left from an earlier scrape).
-  - zajacfoto-3: the 80-question FAQ is a single page, scored 0.11.
-- **Fix: build page units from structure at ingestion.**
-  - Group copies (hreflang/canonical, rel=next or pagination, slash/www variants) and keep one primary per group.
-  - Read sitemap, menu and footer pages first. A check after the crawl fetches any that are missing. Under the page cap, take product pages in turn from each parent listing.
-  - An LLM splits FAQ and terms pages into their sections.
-  - The query keeps only URLs in the current site map.
-- **Verify:** an offline crawl report for these 6 tenants (about $0.02). Re-scrape them while the queue is empty, replay the 8 cases and run srccov.py.
+**Compared with iteration 4:**
+- any lens ≤3: 43 of 63 (was 39);
+- ≤2: 22 (was 20);
+- a 1: 3 (was 4): aniatkaczyk-1, liliowa-1, romax-3;
+- all three lenses passed: 20 (was 24).
 
-### 5. Ended promotions and changed prices are given as current (4; 4; 2)
-- **Evidence:**
-  - romax-2: on 4.11 it said "w tej chwili jest aktualna" about a promotion that ended on 31.10.
-  - empro-1: offered expired promotions instead of BLACK RED WEEKS.
-  - aniatkaczyk-1: the items were read on 2026-10-31; the page changed on 2026-11-03 to 3000/4200 zł.
-  - kwiaciarniamilosc-1: the Mother's Day 2026 page was used.
-- **Fix: dated data (iteration 3 fix 7).**
-  - The LLM stores validity (from-to, or the list's period) for every page and item.
-  - Code compares it with today and with the customer's date: ended items are dropped or marked "ended <date>".
-  - A daily lastmod/ETag/hash check re-reads price pages that changed.
-- **Verify:** a validity report for 5 tenants (about $0.02). After re-reading aniatkaczyk, Komfort must show 3000 zł. Replay the 4 cases.
+Means were not computed: only scores ≤3 were reported. Run journal2judges.py and stats.py to get them.
 
-### 6. Flagged claims still go out, and correct ones become hedges (9; 4; 1)
-- **Evidence:**
-  - Sent although flagged:
-    - romax-2: "netto + VAT", blocked twice;
-    - dworekstaropolski-1: 60 guests in a 50-guest hall;
-    - also ostap-2, ostap-3 and sweethome-1, plus whisp-3 (which still passes): "including Wix".
-  - Correct claims blocked:
-    - kwiaciarniamilosc-2: "od 1090 = najmniejszy";
-    - whisp-1: 1788 zł was blocked because the quote said 13 months;
-    - sweethome-3 and angelikasolecka-2: claims that described what the chat really does.
-- **Cause (checks):** after round 2 the last draft goes out whatever its verdict. The rewrite gets the reason but not the evidence. The check does not see the writer's items, quote or state.
-- **Fix: blocked statements become turn state (iteration 3 fix 5).**
-  - Each flagged statement carries its best-ranked pack sentences.
-  - It is re-tested every round and is never sent. After round 2, a delete-only edit removes it and is checked again.
-  - The check reads the same items, quote and state record (fix 8) as the writer.
-- **Verify:** replay these 10 turns. Targets: no draft sent with an open block, the 4 false blocks pass, rewrite rate at 31% of turns or less.
+**Where the gate worked:**
+- betonlazy-1 (owner 1 in iteration 4) now passes.
+- djmw-2 no longer goes to a 125 s calculation with a competitor inside (1 -> 2/3/3).
+- The gate also caused the only 1/1/1 (romax-3, problem 11).
 
-### 7. Site-wide terms and contact roles are missing from the business profile (10; 5, mostly together with other causes)
-- **Evidence:**
-  - dachywarszawa-3: the NIP is only in the privacy policy, so the chat said "NIP nie jest podany".
-  - empro-2: payment methods, dispatch time and free shipping from 500 zł are missing.
-  - dachywarszawa-2: "free estimate" is missing. whisp-1: "billed monthly, cancel any time" is missing.
-  - bostabeton-1, -2 and -3: the office line is given instead of sales (+48 22 50 80 990).
-  - empro-3: phone numbers regrouped ("+48 57 085 48 54").
-  - romax-1 and sweethome-1: the wrong line for the salon or for weddings.
-  - "Contact once per conversation" (77d14c9) dropped needed lines in kamilkozielewicz-1 T3 and bostabeton-2 T3.
-- **Fix:** the LLM profile extractor also stores:
-  - legal identity (also read from legal pages);
-  - standing terms: payment, prepayment, dispatch, free-shipping threshold, free estimate, service area;
-  - each contact with its role or branch and its displayed text.
+**Moves in the pass set:**
+- Left: romax-3, pelnyparkiet-3, rentbud-1, sosnowydwor-3, kwiaciarniamilosc-3, betonlazy-2, helsen-1, insanit-1, ostap-1, whisp-2.
+- Joined: betonlazy-1, dworekstaropolski-2, dworekstaropolski-3, helsen-2, helsen-3, whisp-1.
 
-  "Contact given" is tracked per contact, not per conversation.
-- **Verify:** run offline on all 21 tenants (about $0.05) against a list of expected values, then run ownertest.mts.
+**Judge-free numbers:**
+- 'partial' on 54 of 134 turns (unchanged).
+- 'full' < 0.5 on 57 of 116 judged turns.
+- Blocked drafts on 44 turns, in 57 rounds: 27 meta-talk, 15 unsupported, 10 "promises", 6 hand-off.
+- Source pages: 53% become candidates and 39% reach the reply. This is a quick re-implementation; srccov.py was lost with its scratchpad, so it is not comparable with 0.64 / 0.49. Re-create it as evals/judged/srccov.py: per case, the share of `sources` URLs among the turn candidates and the used packs.
 
-### 8. Orders and inquiries contradict themselves and use a generic form (6; 3)
-- **Evidence:**
-  - angelikasolecka-1 T2: the check blocked both "zapisałam dane" and "only information here". The sent reply mixes both and asks again for the name and e-mail just given.
-  - sweethome-3: "Mogę przyjąć zamówienie", then "nie mogę potwierdzić".
-  - betonlazy-3 T2: the same contradiction.
-  - kamilkozielewicz-2: a photographer's summary has "Miejsce lub adres dostawy" and raw customer text in the notes.
-  - rentbud-3 T2: the e-mail landed in "Telefon", and there were no Saturday hours and no 2 doby = 240 zł, because form turns retrieve no pages.
-  - insanit-2: the customer was shown a third-person ticket, and "popołudniami" was dropped.
-- **Cause (state):**
-  - The prompt says "this chat can only answer" (chat.ts:1086).
-  - Every business gets the same generic goods-order form (collect-store.ts).
-  - Values are copied raw.
-- **Fix: one inquiry state record per conversation (iteration 3 fixes 8 and 9), given to the writer and the check.** It holds:
-  - whether this chat can take the order or inquiry;
-  - the business's own form fields, derived once from its offer type, with e-mail and phone typed separately;
-  - the values, the missing fields and the stage;
-  - the calculation status.
+**First token:**
+- median 3.4 s, p90 5.7 s, max 8.9 s (iteration 4: 3.0 / 4.5 / 9.4);
+- 37 turns took 4.5 s or more (was 12). Problem 7 explains why this is mostly a measurement change.
 
-  Form turns also get the pack. The "can only answer" clause goes.
-- **Verify:** replay T1-T2 of the 6 cases. Targets: no contradiction (one Jev question against the record), nothing asked twice, no e-mail in a phone field.
+**No blind pairs this round:** iteration 4's run.json is gone. Keep evals/judged/iter5/run.json for the next pairs.
 
-### 9. The quote stops short of what was asked (5; 2 at 1)
-- **Evidence:**
-  - whisp-1: a year became 13 months (recipe.ts:133 counts a month as 720 h).
-  - aniatkaczyk-1: Komfort was quoted for 6 services although it covers 5.
-  - zajacfoto-1: the cheaper Standard + plener total (6500 zł) was not computed.
-  - liliowa-1: no total across turns.
-  - djmw-2: the deposit was only offered, and the 10 h standard was exceeded without saying so.
-- **Fix: the quote returns full structure computed by code (iteration 3 fix 6).**
-  - Durations in the price's own unit.
-  - Package capacity against the units asked, with extension lines.
-  - A total for each sibling tier.
-  - Deposit and remainder.
-  - Scope beyond the standard marked "no rate on the site".
-  - A running total across turns.
-- **Verify:** unit tests on these 7 requests ($0), then replay the price turns.
+## Ranked problems
 
-### 10. Owner demo probes, the salesperson's opening (5 of 7 probes fail; 3 at 2 or less)
-- **Evidence:**
-  - empro-3: the owner was never detected ("NIP mojej firmy" got "a nie Pana/Pani").
-  - dachywarszawa-3: detected only at T3.
-  - bostabeton-1 and helsen-2: the "About this chat" record says "the Whisp chat on the website of X". The replies turned it into "prowadzony przez firmę" and "dane wprowadzone przez właściciela w panelu", on demos nobody has claimed.
-  - bostabeton-1 T3 and liliowa-3 T3 ("what would you tell a customer..."): answered in owner mode, with no network.
-  - liliowa-3: "Pani Magdo" was taken from the e-mail address.
-- **Fix: owner mode built from state.**
-  - The router judges the speaker's role over the whole conversation, with the tenant's state (unclaimed demo or live) as context.
-  - The record states the real state: demo built from N pages read on a given date, not installed, owner answers so far.
-  - When the owner asks "what would a customer get for X", X runs through the customer pipeline.
-- **Verify:** run ownertest.mts on the 7 probes (about $0.01).
+The count is conversations hurt; how many at ≤2 and at 1 follows. A conversation can appear under more than one problem.
 
-### 11. Slow first word on price turns (12 turns in 10 conversations)
-- **Evidence:**
-  - aniatkaczyk-1 T1, 9.4 s: two quote-read calls (3.1 + 3.0 s) run one after the other before the search starts.
-  - romax-2 T1: 13.6 s in total, with 2 rewrites.
-  - angelikasolecka-3 T1: 5.9 s.
-- **Fix:** start retrieval, item matching and coverage at routing time, in parallel with the quote read.
-- **Verify:** from run.json steps. Targets: p90 first token 4.0 s or less, aniatkaczyk-1 T1 6.5 s or less.
+### 1. The answering page or item is not in the knowledge base, or lost its structure (19; 13 at ≤2; 1 at 1)
 
-### 12. Network businesses described by what they only sell (2; 1)
-- **Evidence:**
-  - angelikasolecka-2: the florist floli.pl was presented as a beauty salon, with the florist's phone.
-  - ostap-3: Bosta Beton was listed for concrete with a pump.
-- **Fix:** the capability index (LLM) tags each capability as done by the business itself or only sold or mentioned. Only the first kind is indexed.
-- **Verify:** rebuild the index for those two firms and re-run the 2 turns (about $0.01).
+**Evidence:**
+- **kwiaciarniamilosc-1, -2, -3:** 15 source pages were never a candidate in any case: /regulamin/, /dostawa-i-platnosc/, /florystyka-funeralna/, the wreaths and the orchid bouquets. Meanwhile PL/UK/EN copies of a single page filled the candidates. As a result:
+  - cash to the courier was left open;
+  - the wreath's 1090 zł was withheld;
+  - no sash (+60 zł), no zone fee (30 zł to Wola), no orchid bouquets.
+- **sweethome-1, -3:**
+  - 19 source product pages were never candidates; the 150-page demo cap went on muffins.
+  - Wedding cakes show '- PLN' because the K1/K2/K3 legend is not resolved.
+  - 'Tort czekoladowy | - PLN', although its page says 95 zł/kg.
+  - So the replies guessed K2/K3 rates, 70-90% too high.
+- **liliowa-1:** all 14 candidates were 'Torty dla dzieci' gallery copies (?start=N). /smaki was never a candidate, so the reply said 'Tak' to an alcohol-free cake for a 1-year-old.
+- **empro-1, -2:** /black-week and /regulamin were never candidates. The reply named the ended MOCNE BRZMIENIE promotion and denied the dispatch time, payment methods and free shipping.
+- **romax-2:** the Quick-Step product pages (Creo 74,95 zł/m², Impressive 144,95) were never candidates.
+- **romax-1:** 'Niedziela (handlowa)' is lost from the hours.
+- **angelikasolecka-1, -2, -3:** /faq, /rezerwuj and /malowanie-twarzy were never candidates.
+- **dworekstaropolski-1:** the homepage, /slub-i-wesele and /slub-w-dworku were never candidates, and the season tabs are not attached to their price rows.
+- **Profile gaps:**
+  - dachywarszawa-2: 'Darmowa wycena' is missing;
+  - betonlazy-2: the Saturday closure is missing from the hours;
+  - bostabeton-3: the office line is given instead of the sales or 'Produkty specjalistyczne' line.
+- **Item error:** Bosta's delivery item carries "do 40 km", taken from its TransMix page, and this reached ostap-3's customer.
+- **zajacfoto-3:** the 80-question FAQ is one page, and it scored 0.30.
 
-### 13. Language and form-of-address slips (about 10 conversations, low impact)
-- **Evidence:**
-  - Mixed-alphabet "recepцію" (dworekstaropolski-2).
-  - "cuisine" for a pâtisserie (sweethome-2).
-  - Polish words inside Ukrainian replies (dachywarszawa-2).
-  - "conférencier" (djmw-3).
-  - "Pan/Pani" slash forms and ty/Pani switches.
-- **Fix:** extend the alphabet check to a word-level Jev check, and keep the form of address as conversation state.
-- **Verify:** one Jev pass over all replies.
+**Cause (data):** nothing has been re-scraped or re-extracted since iteration 4 (fixes 2, 4 and 7 were not built).
 
-## Works well; must not break
-- **Regression set:** these 24 conversations pass all three lenses: aniatkaczyk-2, betonlazy-2, dachywarszawa-1, djmw-1, helsen-1, insanit-1, insanit-3, kamilkozielewicz-1, kamilkozielewicz-3, kwiaciarniamilosc-3, liliowa-2, ostap-1, pelnyparkiet-1, pelnyparkiet-2, pelnyparkiet-3, rentbud-1, rentbud-2, romax-3, sosnowydwor-1, sosnowydwor-3, sweethome-2, whisp-2, whisp-3, zajacfoto-2.
-- **Sums computed by code in the chat:**
-  - dworek 17 100 zł;
-  - zajacfoto 7000 zł;
-  - angelikasolecka 230 / 330 zł;
-  - romax 4030,40 zł;
-  - empro 2097 zł;
-  - betonlazy 8,1 m³;
-  - bostabeton 2,5 / 3,7 m³ against its 4 m³ minimum;
-  - liliowa 120 zł;
-  - aniatkaczyk-2 915,99 zł;
-  - sosnowydwor-1 18 085 zł.
-- **Honesty:**
-  - "no published price" with the business's own contact;
-  - no date or availability promised in any case;
-  - "nothing was sent" after every withdrawal.
-- **Other basics:**
-  - replies in EN, FR, UK and DE from Polish pages;
-  - network businesses shown as separate firms with their own contacts;
-  - exact NIP/KRS when they are on the contact page;
-  - the order summary and confirm step;
-  - owner mode where it is detected (djmw-1, kwiaciarniamilosc-3).
-- **Iteration 3 replies to make stable** (they beat iteration 4 in the blind pairs):
-  - bostabeton-2: suggested CEM for the shower;
-  - rentbud-3: quoted the tower at 120 zł/doba;
-  - sweethome-1: gave K2/K3 per kg and on-site assembly;
-  - sosnowydwor-1: gave the new total;
-  - empro-1: said "free shipping applies";
-  - ostap-3: said Ostap designs the formwork set.
+**Fix: build the Business Record, phases P0-P2, on the 21 eval tenants.** It covers:
+- listed pages first under the cap, with copies, translations and pagination grouped;
+- FAQ and terms pages split into entries;
+- dated claims with variants, resolved legends, add-ons and zone tables;
+- standing terms, legal identity and contact roles on the always-present card.
+
+**Verify:**
+- P0 crawl report ($0) shows the pages above read.
+- P1 by hand on dworekstaropolski and kwiaciarniamilosc (about $0.08).
+- P2 expected facts on the 21 tenants (about $1.8): at least 90% present and current, and every trap never current.
+
+### 2. Facts Whisp already holds are denied, hedged or dropped (18; 9 at ≤2)
+
+**Evidence: the fact was in a used page or item:**
+- dachywarszawa-3 T2: the NIP was denied, with Polityka prywatności used (0.92) and 'full' at 0.96.
+- djmw-3: the homepage FAQ says 'Mamy konferansjerów ... Francuski', but 'full' was 0.18, and the reply said "nous ne précisons pas".
+- kamilkozielewicz-2: the used '10 pytań' page says 'dojazd do 50 km (np. ... Miętowe Wzgórza)'. The reply said there is no travel price for this venue, and it left out the 600 zł deposit.
+- angelikasolecka-3: 'Malowanie twarzy na urodzinach dziecka | 200 PLN' was in the items; the reply said "wycena jest indywidualna".
+- romax-2 T1: the used Quick-Step page has prices (Bloom 189,95 zł/m²); the reply said "nie mam podanej ceny za m²".
+- betonlazy-2: the used homepage FAQ says 'W soboty firma jest nieczynna'; the reply said "Субота не вказана" (Saturday is not listed).
+
+**Evidence: in the knowledge base, but below the cut or never a candidate:**
+- sosnowydwor-2: /cennik/ ('W cenę nie wliczony jest alkohol i muzyka') scored 0.25.
+- zajacfoto-3: the FAQ scored 0.30.
+- romax-1: all 14 candidates were blog posts; the salon pages were never candidates.
+- bostabeton-2 T2: the moisture-resistant SuperFloor CEM was not searched for the new shower condition.
+- dworekstaropolski-1 T2: 'Ślub w Dworku | 500 PLN' was dropped, and "our price list has no item" was injected instead.
+
+**Also:** aniatkaczyk-1 T2, aniatkaczyk-3, helsen-1, insanit-1, dachywarszawa-2, angelikasolecka-2 (lash clusters on the used page), whisp-2.
+
+**Cause (selection and state):**
+- 'partial' is one score for the whole message. The writer is then told to "say which detail is not given", and it picks one, often one we have. 10 of these 18 conversations had 'partial' on the turn that denied the fact.
+- The 'full' judge reads `passages.join().slice(0, 40000)` (chat.ts:1055). The items, the code quote and the coverage passages come after up to 40,000 characters of pages, so they can be cut off.
+- Pages are scored whole and the top 4 at 0.5 or more are kept, so a single detail inside a long FAQ or price list loses.
+- Nothing checks a "not given" claim: the 'denies' check runs only when nothing was found.
+
+**Fix: "not given" becomes a per-question structure.**
+- The split call also returns the questions the customer asked.
+- Jev judges each question answered or not, over the whole pack, with the computed lines first. This replaces 'full'.
+- An unanswered question gets one targeted search over all chunks, items and the profile, and is judged again.
+- Only the questions still unanswered go to the writer, as the "not given" list. This replaces the free 'partial' rule.
+- The check blocks any denial of a question judged answered, and passes that question's passage to the rewrite.
+
+**Verify:**
+- A $0 unit test that the items and the quote fall inside the judged text.
+- Smoke djmw-3 alone, then replay these 18 conversations (about 40 turns, about $0.1 plus Jev).
+- Targets:
+  - "not given" on 25% of turns or fewer (now 40%);
+  - meta-talk blocks halved;
+  - source share up;
+  - first token no slower.
+
+### 3. Calculations are missing, wrong or overridden (14; 11 at ≤2; 2 at 1; 3 regressions)
+
+**Regressions (passed in iteration 4):**
+- **empro-1** (was 2097 zł): shop items never get quantities (`given: new Map()`, chat.ts:931). So the line "No total is computed ... do not work out a total" (chat.ts:1010) is most likely added, and the reply said "nie policzę sumy za 3 szt.".
+- **rentbud-1:** the quote reader turned Friday-Monday into "96 h at the cheapest mix" = 480 zł. A same-hour return is 3 doby = 360 zł.
+- **sosnowydwor-3:**
+  - The barszcz line stayed at "needs: quantity", although the customer gave 8 people and the item says 1 l = 4 portions.
+  - The check blocked the right total "40 + 72 + 80 = 192 zł".
+  - The rewrite dropped the carp line that the code had priced at 80 zł.
+
+**Not computed:**
+- angelikasolecka-3: only the girls' package was priced; face painting at 200 zł/h with a 2 h minimum gives 600 zł for 3 h.
+- zajacfoto-1: Standard + plener costs 6500 zł, less than the 7000 zł quoted.
+- pelnyparkiet-3: remainder 5500 - 800 = 4700 zł, and booking for August 2028 opens about August 2027.
+- djmw-2: 17:00-5:00 is 12 h, 2 h over the standard 10 h counted from the couple's entrance.
+- aniatkaczyk-1: her 6 services fit into Premium's 7.
+- liliowa-1: 15 x 8 zł = 120 zł, total about 610 zł.
+- rentbud-3: Saturday 8:00 to Monday = 2 doby = 240 zł.
+- sweethome-1: SH-1101 is K1 at 140 zł/kg with a 9 kg minimum, so 1260 zł.
+
+**Overridden:**
+- dworekstaropolski-1: the code said 285 zł x 60 = 17 100 zł. The reply used 305 zł (the 2028 season) = 18 300 zł, and the reworded figure passed the check.
+
+**Cause (the quote model and binding):**
+- The reader returns durations as hours, leaves per-person quantities unconverted, and picks one item per need.
+- Shops skip the reader.
+- Neither the writer nor the check is bound to the code's amounts.
+
+**Fix: the quote returns complete structure, and the reply is bound to it.**
+- **Reader (LLM):**
+  - a count for each matched item, catalogue items too;
+  - the unit conversions the item states;
+  - start and return as day + time, or "not given";
+  - the event date.
+- **Code:**
+  - every priced match, plus the sibling tiers for the same need;
+  - durations in the price's unit, with calendar arithmetic (both readings when a time is missing);
+  - package capacity against the units asked;
+  - deposit and remainder, and booking-window dates;
+  - line totals, a total, and a running total across turns.
+- **Check:**
+  - the LLM lists the draft's (item, amount) pairs, and code compares them with the quote;
+  - the draft is blocked if it states an amount the quote does not have, or says "no price" where the quote has one.
+
+**Verify:**
+- Unit tests on these 14 requests ($0).
+- Replay their price turns (about 18, about $0.05).
+- Target: every amount sent is in the quote.
+
+### 4. The check sends flagged claims and blocks correct ones (14; 7 at ≤2; 1 at 1)
+
+**Sent although flagged:**
+- dachywarszawa-3 T2: the NIP denial was flagged in both rounds, and the third wording went out.
+- dworekstaropolski-1 T1: 18 300 zł was flagged; the reworded version passed.
+
+**Unsupported claims that passed:**
+- liliowa-1 T3: "Tak, jak najbardziej. Tort bez alkoholu..." (every flavour contains alcohol);
+- pelnyparkiet-3: 'Tak', then "cannot be booked yet";
+- romax-2 T2: 'Tak, promocja ... obowiązuje' on 4.11, for a promotion that ended 31.10;
+- bostabeton-3: "raczej pod podbudowę", although the datasheet says it can be the direct finish;
+- rentbud-3: 'jezdne ... mobilne', taken from a general article;
+- bostabeton-2: one product's exclusion applied to all products;
+- insanit-2: a subsidy implied;
+- helsen-1: general advice;
+- whisp-3: "Wix included".
+
+**Correct claims blocked, with the fact lost in the rewrite:**
+- kwiaciarniamilosc-2: 'od 1090 zł' (blocked over the English size names);
+- whisp-2: the Art. 9 clause (blocked over one added clause);
+- sosnowydwor-3: the 192 zł total;
+- angelikasolecka-1: "Mogę przyjąć zgłoszenie tutaj" (true; it describes what the chat itself does).
+
+**Cause (checks):**
+- Verdicts are per statement, with no evidence.
+- The rewrite gets the reason but not the sentence.
+- After round 2 the last draft goes out whatever its verdict (chat.ts:1202).
+- A yes/no stance is not judged as a claim.
+- A general article counts as support for a specific product.
+- The check sees neither the computed lines nor the chat's own state.
+
+**Fix: claim verdicts with evidence, kept as turn state.**
+- **Verdicts:**
+  - for each flagged claim, the verifier returns the pack sentence that supports or contradicts it, and says whether that sentence is about this item or is a general article;
+  - the direct answer to a yes/no question counts as a claim.
+- **Rewrites:**
+  - the rewrite gets that sentence and keeps every claim that was not flagged;
+  - a flag stays open until no later draft contains the claim (Jev compares the claims);
+  - after round 2, an LLM edit that only deletes is checked again, and nothing with an open flag is sent.
+- **Sources:** the computed lines and the conversation record (problem 5).
+
+**Verify:**
+- Replay these 14 turns (about $0.05).
+- Targets:
+  - no draft is sent with an open flag;
+  - the 4 false blocks pass;
+  - the 9 pass-throughs are blocked;
+  - blocked drafts on 31% of turns or fewer (now 33%).
+
+### 5. Order turns skip the answer and contradict their own state (8; 4 at ≤2; 1 at 1)
+
+**Evidence:**
+- **betonlazy-3 T1:** no pages and no quote. The reply said "Zapisaliśmy zamówienie na beton ... na czwartek 12.11.2026 rano" (reads as an order already placed), and the pumps were never confirmed.
+- **liliowa-1 T2:** after 15 cupcakes were added, the form asked for "adresu dostawy" and a name. The bakery offers no delivery, and no price was given.
+- **insanit-2 T2:**
+  - 'co mam podać?' was copied into the summary;
+  - the summary reads like a third-person ticket ("Klient ma w domu ...");
+  - notes are joined with '.;'.
+- **rentbud-3 T2:**
+  - the e-mail address landed under 'Telefon', and the product is generic;
+  - no Saturday hours, and no 2 doby total.
+- **kamilkozielewicz-2 T2:** the fields "Ilość lub zakres prac" and "Miejsce lub adres zlecenia" were used for a wedding photographer, and the e-mail landed in 'Uwagi'.
+- **angelikasolecka-1 T2:** the customer was told to book by phone or e-mail while the form was open, and then asked "Czy mam dopisać coś jeszcze do zgłoszenia?".
+- **sosnowydwor-3 T1:** "Dziękujemy za zamówienie", although nothing was ordered.
+- **Withdrawals:** in the third turn of 6 cases:
+  - the form of address switched ('Janie ... będziesz gotowy'; 'gdy będzie Pani gotowa' to Jan; 'Pan/Pani ... gotowy(a)');
+  - no contact was left for later.
+
+**Cause (routing and state):**
+- An order message with orderAlsoAsks < 0.7 goes straight to the form (chat.ts:782): no pack, no quote, no facts about the business.
+- Code builds the summary from raw values (`• label: value`, collect.ts:105 and :448). This is a template, against the owner's rule.
+- Every business gets the same goods-order fields.
+- The rules still say "this chat can only answer" (chat.ts:1151).
+- The fact check has no source for the open form.
+- The withdrawal reply gets neither the form of address nor the contact.
+
+**Fix: one conversation record, and every order turn goes through the checked reply.**
+- **The record holds:**
+  - the stage (none, collecting, confirming, sent, withdrawn);
+  - typed values, with e-mail and phone separate;
+  - the missing fields;
+  - the business's own fields, derived once from its form or offer type by an LLM;
+  - whether this chat takes orders.
+- **How turns use it:**
+  - the orderAlsoAsks gate goes: the reply (pack, quote, check) answers and then asks for the missing fields;
+  - the form only reads values;
+  - the LLM writes the summary from the record;
+  - the record is a source for the check, which blocks "recorded / booked / date set" until the stage is 'sent';
+  - the "can only answer" clause goes.
+
+**Verify:**
+- Replay turns 1-3 of these 8 conversations (24 turns, about $0.06), plus one Jev pass over the replies.
+- Targets:
+  - no "recorded" claim before the customer confirms;
+  - every question answered;
+  - no e-mail in a phone field;
+  - no summary assembled by code;
+  - every order turn streamed.
+
+### 6. Ended promotions and changed prices are given as current (5; 4 at ≤2; 1 at 1)
+
+**Evidence:**
+- **romax-2 T2:** 'Tak' and 4318,40 zł for a promotion that ended 31.10, although today's date (4.11) is in the prompt.
+- **empro-1:** the ended MOCNE BRZMIENIE promotion instead of BLACK RED WEEKS.
+- **aniatkaczyk-1 (owner score 1):** the items were read on 31.10; the page now shows Komfort 3000 and Premium 4200 zł, so the reply under-quotes by 500-700 zł.
+- **ostap-1:** a 07.2011 price list given as 'Cena katalogowa'.
+- **dworekstaropolski-1:** the 2016 English price list is linked, and a 2028 rate is used for 2027.
+
+**Cause (data):** pages and items carry no dates, so the writer has to compare dates itself.
+
+**Fix:** the Business Record's validity (status against today: current, future, ended, superseded), plus the nightly freshness job (P7).
+
+**Verify:**
+- A validity report for these 5 tenants from P2 (about $0.02), then replay the 5 cases.
+- Targets:
+  - romax-2 says the promotion ended 31.10;
+  - Komfort shows 3000 zł after the re-read;
+  - no link to the 2016 list.
+
+### 7. Slow first word (23 conversations with a turn at 5 s or more)
+
+**Evidence:**
+- **The split:** it is one deepseek call, an R2 read and an awaited R2 write (broadcast.ts:99), and none of it is in the step log. It runs before the second search on every offer question:
+  - search phase: median 1.5 s on the 84 turns with parts, against 0.5 s on the 27 without;
+  - first token: median 3.8 s against 2.3 s.
+- **Why the numbers moved:** iterations 2-4 most likely replayed stored splits (cache key v2). Iteration 5 re-keyed them (v3-v5), so every turn paid the model call that production pays for every new message. So this is mostly production's real speed shown for the first time, not a new slowdown.
+- **Calculate route:** median 5.3 s, p90 8.7 s.
+  - The quote read (two calls in a row: aniatkaczyk-1 T1, 2.8 s + 2.9 s), the item match, the coverage and the simple check all run before the reply.
+  - Then the reply searches and scores again: in ostap-1 T1 the reply started only at 6.9 s.
+- **Order turns are not streamed:** liliowa-1 T2 8.7 s, betonlazy-3 T1 7.4 s.
+
+**Fix: one turn graph.**
+- The split, the searches, the item match and the quote start together.
+- Nothing on the path waits for a storage write.
+- The calculate route hands its quote, items and coverage to the reply instead of recomputing them.
+- Order turns stream (problem 5).
+
+**Verify:**
+- Read the step marks in run.json ($0).
+- Add a run variant that skips stored splits; otherwise the next run replays iteration 5's splits and looks faster with no change.
+- Replay the 10 slowest turns with that variant (about $0.03).
+- Targets: median 3.0 s or less, p90 4.5 s or less, calculate-route p90 6 s or less.
+
+### 8. What the customer said is not kept (13, mostly scores of 3)
+
+**Evidence:**
+- djmw-2: "w sierpniu 2027" became "wycenę na wrzesień 2027" in the hand-off.
+- angelikasolecka-3 and zajacfoto-3 ask again for facts already given; betonlazy-2 asks for the date again.
+- The withdrawal slips listed in problem 5.
+- pelnyparkiet-3: an assumed 'Pani'.
+- liliowa-3: 'Pani Magdo', taken from the e-mail address.
+- sosnowydwor-3: a greeting again in the middle of the conversation.
+
+**Cause (state):** the writers read the raw transcript, and the form and withdrawal paths do not get it at all.
+
+**Fix:** the record from problem 5 also holds:
+- the request's details, extracted by an LLM: date, place, guests, times, quantities, and the name the customer gave;
+- the form of address.
+
+Every writer gets the record. One check question compares the details a draft repeats, and the questions it asks, against it.
+
+**Verify:** one Jev pass over all replies of the next run (about $0.01).
+
+### 9. Owner demo probes (5; 1 at ≤2)
+
+**Evidence:**
+- **empro-3:** "podaj NIP mojej firmy" scored 0.35 as an owner message, so the reply said "a nie Pana/Pani firmy". Owner mode started only at T3.
+- **kwiaciarniamilosc-3:**
+  - T1 says "warto zapytać ... hosting" on a demo nobody installed;
+  - in T3 the orchid hypothetical is answered in the abstract, with no bouquets and no contact.
+- **dachywarszawa-3 T3:** never says what the customer would be told.
+- **bostabeton-1:** "na podstawie ... cennika" for a site with no price list. The fixed intro (chat.ts:1132) and the check's source line (chat.ts:1206) say "website and price list" for every tenant.
+- **liliowa-3:** the owner's name taken from the e-mail address.
+
+**Cause (routing and state):**
+- The owner score is per message.
+- The demo facts are prose.
+- A hypothetical customer question is answered in owner mode, with no item matching.
+
+**Fix: owner mode built from state.**
+- The router judges the role over the whole conversation, and keeps it.
+- The "About this chat" record is built from data: the pages read and when, priced items or none, and that this is a demo made by Whisp and not installed.
+- "What would you tell a customer about X" runs X through the customer pipeline and shows its answer.
+
+**Verify:**
+- ownertest.mts on the 7 probes (about $0.01).
+- Targets:
+  - owner mode by T2 in 7 of 7 probes;
+  - the hypotheticals show items and contacts.
+
+### 10. Network recommendations misdescribe the business (3; 2 at ≤2)
+
+**Evidence:**
+- **sosnowydwor-2:** a photographer was found for "DJ na wesele", and a DJ for "fotograf".
+- **ostap-3:** Bosta Beton was offered for "beton z pompą", with "8 m³, do 40 km" taken from its TransMix item.
+- **insanit-1:** photovoltaics are not in the offer, and no installer from the network was suggested.
+
+**Cause:**
+- The match reads passages that only mention the service.
+- The evidence passed to the check includes a line written by code: "<firm> offers, sells, rents or does <part> - checked against its own website" (chat.ts:1417). So a wrong match can never be caught.
+
+**Fix: capabilities carry their own evidence.**
+- The capability index stores each capability with the business's own sentence, and whether the business does it itself.
+- A business is found only for what it does itself.
+- That sentence is the only evidence for the reply and the check; the code-written line goes.
+
+**Verify:** rebuild the entries for djmw, kamilkozielewicz and bostabeton, and re-run the 2 turns (about $0.01).
+
+### 11. A need nobody covers goes to a 4-minute background job (1, scored 1/1/1; a regression caused by iteration 5's gate)
+
+**Evidence:** romax-3, "3 okna ... z montażem":
+- the coverage marked the part "foreign:none", and the calculate route called agentTurn (chat.ts:855);
+- the reply said "Obliczenie wyceny ... właśnie się rozpoczęło", which reads as Romax quoting windows;
+- the job timed out at 241.7 s, and nothing arrived.
+
+**Cause (routing):** a part we do not have starts the agent whenever a network exists, even when nobody in it has the thing.
+
+**Fix:**
+- The agent starts only when the network search has a candidate for the part, or for our own priced multi-step work.
+- Otherwise the reply says the item is not in our offer, says what we do, and offers the network check.
+- An agent timeout releases a knowledge reply.
+
+**Verify:** evals/routing/run.ts on romax-3 plus the controls betonlazy-1, djmw-2, ostap-3, sosnowydwor-2 and liliowa-3 (about $0.01).
+
+### 12. Language slips and filler openers (about 15 conversations, low impact)
+
+**Evidence:**
+- **Polish left in other languages:**
+  - kamilkozielewicz-3: '80 zdjęć po autorskiej obróbce';
+  - ostap-2: '(ramowe elewacyjne)';
+  - dachywarszawa-2: '«Wymiana rynien»';
+  - sweethome-2: 'cukiernia';
+  - dworekstaropolski-2: 'оферта'.
+- **A re-spelt place name:** 'Надарзин' for the customer's 'Надажин'.
+- **Grammar:** 'le échafaudage', 'Proszę sprawdź'.
+- **Openers that delay the answer:** about 15 replies open with lines such as 'Dziękujemy za pytanie!' or 'Congratulations...'.
+
+**Fix:** two more questions in the existing check call:
+- untranslated words or a re-spelt name: this one blocks;
+- does the first sentence answer the main question: this one is added only to a rewrite that happens anyway, so it causes no new rewrites.
+
+**Verify:** one Jev pass over all replies of the next run.
+
+## What works well; must not break
+
+**Regression set:** the 20 conversations that pass all three lenses:
+- aniatkaczyk-2, betonlazy-1, dachywarszawa-1, djmw-1;
+- dworekstaropolski-2, dworekstaropolski-3, helsen-2, helsen-3;
+- insanit-3, kamilkozielewicz-1, kamilkozielewicz-3, liliowa-2;
+- pelnyparkiet-1, pelnyparkiet-2, rentbud-2, sosnowydwor-1;
+- sweethome-2, whisp-1, whisp-3, zajacfoto-2.
+
+**The coverage gate:** the business's own products stay in the chat:
+- betonlazy-1: 8,1 m³ computed in the chat;
+- djmw-2: no competitor inside its quote;
+- bostabeton-3: no network offered for its own HydroBeton.
+
+**Sums computed by code and confirmed by the judges:**
+- zajacfoto-1: 5500 + 1500 = 7000 zł;
+- angelikasolecka-1: 230 / 330 zł;
+- romax-2: 32 x 125,95 = 4030,40 zł;
+- bostabeton-3: 2,5 and 3,7 m³ against the 4 m³ minimum, and 10,8 cm;
+- ostap-1: 2080 -> 2248 zł netto;
+- sosnowydwor-3: 40 + 72 zł;
+- whisp-1: 149 x 12 = 1788 zł;
+- dworekstaropolski-1: the code quote of 17 100 zł.
+
+**Honesty:**
+- no date or availability promised (kamilkozielewicz-2, sosnowydwor-2, sweethome-3, rentbud-3);
+- "nothing was sent" after all 6 withdrawals;
+- "no published price" with the right contact (betonlazy-1, bostabeton-1, dachywarszawa-2).
+
+**Other basics:**
+- replies in DE, FR, UK and EN from Polish pages;
+- network businesses shown as separate firms with their own contacts ("Nie są to nasi partnerzy");
+- exact NIP, KRS and REGON from the contact page or footer.
+
+**Owner mode:** detected from T1 in 6 of 7 probes, with honest demo self-descriptions.
+
+**Speed of short turns:** withdrawals 1.8-2.0 s, owner probes 1.4-3.3 s.
 
 ## Owner decisions needed
-1. **Agent rule 9 (the 2026-10-20 position):** the network is asked to price the business's own unpriced products. All three lenses score this lowest (djmw-2 and betonlazy-1 get an owner score of 1). Fix 3 needs the rule "the business's own items stay in the chat".
-2. **Calculations held for approval on demos nobody has claimed** never arrive (betonlazy-3, bostabeton-2). Either no agent on demos, or results released automatically on demos.
-3. **Demo cap of 150 pages (ONBOARD_MAX_PAGES):** sweet_home, romax and angelikasolecka hit it. Fix 4 orders the crawl within the cap; the alternative is a higher cap for demos created by a salesperson.
-4. **Hold replies until checked:** still undecided.
+
+1. **Agent for parts we don't have** (your wish of 2026-10-26). Either start it only when the network search found a business for the part (proposed, problem 11), or always.
+2. **Hold replies until checked** (open since iteration 3). 44 of 134 streamed drafts (33%) were replaced after the customer had seen them, and fixes 2 and 4 add more checking. Either keep streaming, or hold the reply until it is checked (about +1-2 s before the first word).
+3. **Business Record cap and spend.**
+   - The demo crawl cap is 150 pages; sweethome, romax and angelikasolecka hit it.
+   - The spend is about $1.8 for P2 and $25-70 for the fleet backfill.
+   - These are the design's decisions 3 and 4.
 
 ## Order and cost
-1. **First push, small code fixes from the traces:**
-   - packs.ts:135 keeps partial scores;
-   - chat.ts:928 always carries the previous turn's pages;
-   - drop candidate URLs that are not in the current site map;
-   - chat.ts:985 adds the "no item" fact only when no used page has priced items;
-   - remove the chat.ts:779 regex;
-   - fix 11.
-2. Fixes 3 (after decision 1), 1, 8 together with 6 (they share the state record), 10 and 9.
-3. Data fixes 4, 2, 5 and 7 in one re-extraction of the 21 tenants, after the last push and with the re-scrape queue empty.
-4. Fixes 12 and 13.
 
-For each fix, run one case and read it before its group. Offline and unit checks cost under $0.2. Finish with one full 63-case run with blind pairs, about $0.3 of OpenRouter plus Jev; check both balances first.
+1. **First push.** One push, with the scrape queue empty. $0 tests, then one --only smoke on romax-3, empro-1 and angelikasolecka-3 (about $0.02). It contains:
+   - fix 11;
+   - the 'full' input with the computed lines first (chat.ts:1055);
+   - quantities for catalogue items (chat.ts:931, :1010);
+   - the "no item" line (chat.ts:1024) added only when no used page has a priced item;
+   - the source description built from data (chat.ts:1132, :1206);
+   - the split's R2 write no longer awaited, and the split in the step log (broadcast.ts:99);
+   - the code that reads customer text removed: the `/\d/` test (chat.ts:809; a router question instead) and the shop's stem match (chat.ts:1348).
+2. **Code fixes, in order:**
+   - fixes 2 and 7 together (both are in the selection path);
+   - then 5 and 8 (one record);
+   - then 4, then 3.
+3. **In parallel, offline:** Business Record P0-P2 (fixes 1 and 6), then P3 with the queue empty, then the P4 reply test (about $0.75).
+4. **Last:** fixes 9, 10 and 12.
 
-**Files** (the worktree with the loop's commits, plus the new metric script):
-- /Users/kubal/Desktop/projects/website-context-packs/src/llm/chat.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/llm/packs.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/llm/router.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/offer/search.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/offer/store.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/offer/recipe.ts
+**Cost and discipline:**
+- Read one case by hand before each group.
+- The targeted replays come to about $0.4 of OpenRouter, plus Jev.
+- New limits get a docs/limits.md row in the same commit.
+
+**Milestone:**
+- One 63-case run with blind pairs against iter5/run.json: about $0.3 of OpenRouter, plus Jev, plus the judge agents.
+- Check both balances first, and run cleanup-reval.mts afterwards.
+
+## Files
+- /Users/kubal/Desktop/projects/website-context-packs/src/llm/chat.ts (lines 782, 809, 855, 931, 1010, 1024, 1055, 1132, 1151, 1202, 1206, 1348, 1417)
+- /Users/kubal/Desktop/projects/website-context-packs/src/llm/packs.ts ('partial' rule at :202, renderPacks at :155, scorePacks at :110)
+- /Users/kubal/Desktop/projects/website-context-packs/src/flows/collect.ts (:105, :448)
+- /Users/kubal/Desktop/projects/website-context-packs/src/projects/broadcast.ts (splitNeed at :67, the R2 write at :99)
+- /Users/kubal/Desktop/projects/website-context-packs/src/network/find.ts
 - /Users/kubal/Desktop/projects/website-context-packs/src/pricing/model.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/scraper/crawler.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/scraper/catalogue.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/flows/collect.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/flows/collect-store.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/projects/agent.ts
-- /Users/kubal/Desktop/projects/website-context-packs/src/context/business-profile.ts
-- /private/tmp/claude-501/-Users-kubal-Desktop-projects-website-context/033ece33-52c7-4242-8df4-d3e70a359336/scratchpad/loop/srccov.py
+- /Users/kubal/Desktop/projects/website-context-packs/src/offer/quantities.ts
+- /Users/kubal/Desktop/projects/website-context-packs/docs/business-record-design.md
+- /Users/kubal/Desktop/projects/website-context-packs/evals/judged/iter5/run.json (keep for the blind pairs)
