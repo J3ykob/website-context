@@ -77,7 +77,9 @@ async function splitOnce(need: string): Promise<Split> {
   // once and the split reused - every later step sees the same parts.
   const norm = need.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 3000);
   const { createHash } = await import("crypto");
-  const key = `decisions/split/${createHash("sha1").update(`v3\n${norm}`).digest("hex")}.json`; // v3: "of" (2026-11-04); v2: parts always in Polish
+  // v4: what the customer only mentions is no part (2026-11-04, after the coverage smoke - a v3 split stored before that
+  // wording is not reused); v3: "of"; v2: parts always in Polish.
+  const key = `decisions/split/${createHash("sha1").update(`v4\n${norm}`).digest("hex")}.json`;
   const hit = splitMemo.get(key);
   if (hit) return hit;
   const { downloadFromR2, uploadToR2 } = await import("../storage/r2.js");

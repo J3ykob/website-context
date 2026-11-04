@@ -61,6 +61,12 @@ live("a business that has not joined the network", () => {
     console.log(`[final] ${d.status}\n${d.message}\n[subs] ${JSON.stringify(subs)}`);
     expect(d.status).toBe("done");
     expect(ostap?.status).toBe("answered");
+    // The compactor is Rentbud's own: picked for Rentbud alone; OSTAP was picked for a part Rentbud does not have.
+    const b = p.memory.broadcast as { parts: string[]; own: boolean[]; picked: { tenantId: string; part: number }[] };
+    console.log(`[broadcast] ${JSON.stringify(b.parts.map((x, k) => `${b.own[k] ? "own" : "other"}: ${x}`))}`);
+    expect(b.own.some(Boolean)).toBe(true);
+    expect(b.picked.every((o) => !b.own[o.part] || o.tenantId === TENANT)).toBe(true);
+    expect(b.picked.some((o) => !b.own[o.part] && o.tenantId === OSTAP)).toBe(true);
     // OSTAP's part came from its public data, said so in the answer it gave back.
     const back = (await M.repo.listFiles(pid)).filter((f: any) => f.path.startsWith("odpowiedzi_firm/"));
     const answer = await M.repo.readFile(pid, back[0].path);

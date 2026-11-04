@@ -127,8 +127,11 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
   if (!Array.isArray(raw)) raw = [];
   // Only businesses the broadcast picked for a part the business running the project does not have (structure: the
   // agent can name any firm in its files, and a project broadcast before 2026-11-04 picked competitors for its own parts).
-  const b = parent.memory.broadcast as { own?: boolean[]; picked?: { tenantId: string; part: number }[] } | undefined;
+  const b = parent.memory.broadcast as { parts?: string[]; own?: boolean[]; picked?: { tenantId: string; part: number }[] } | undefined;
   const picked = new Set((b?.picked || []).filter((o) => !b?.own?.[o.part]).map((o) => o.tenantId));
+  // What the business running the project has itself: a request that also asks about one of these is not sent (a firm
+  // picked for the pump asked "a pump and 8 m3 of B20" would quote the business's own concrete).
+  const ownParts = (b?.parts || []).filter((_, k) => b?.own?.[k]).map((p) => String(p).slice(0, 300));
   const byTenant = new Map<string, string[]>();
   let notPicked = 0;
   for (const r of raw.slice(0, MAX_REQUESTS * 3)) {
@@ -145,13 +148,21 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
     const conversation = ((await readFile(parentId, "rozmowa.md").catch(() => null)) || (await readFile(parentId, "request.txt").catch(() => null)) || "").slice(-3000);
     const entries = [...byTenant.entries()].flatMap(([t, qs]) => qs.map((q) => ({ t, q })));
     const qs: Record<string, { type: "noul"; instructions: string }> = {};
-    entries.forEach((e, k) => { qs[`r${k}`] = { type: "noul", instructions: `A request to another business: "${e.q.slice(0, 600)}". Did the customer, in \`conversation\`, ask for the specific product, service or part this request is about? Only if the customer brought it up - an addition the customer never mentioned does not count.` }; });
-    const a = await jevAsk({ conversation }, qs, 10_000);
+    entries.forEach((e, k) => {
+      qs[`r${k}`] = { type: "noul", instructions: `A request to another business: "${e.q.slice(0, 600)}". Did the customer, in \`conversation\`, ask for the specific product, service or part this request is about? Only if the customer brought it up - an addition the customer never mentioned does not count.` };
+      if (ownParts.length) qs[`o${k}`] = { type: "noul", instructions: `A request to another business: "${e.q.slice(0, 600)}". Does it ask that business about any of \`own_parts\` (what the business sending it offers itself) - its price, supply or availability?` };
+    });
+    const a = await jevAsk({ conversation, ...(ownParts.length ? { own_parts: ownParts } : {}) }, qs, 10_000);
     if (a) {
       byTenant.clear();
-      entries.forEach((e, k) => { if ((((a as any)[`r${k}`]?.noul as number) ?? 1) >= 0.5) byTenant.set(e.t, [...(byTenant.get(e.t) || []), e.q]); });
+      let ownAsked = 0;
+      entries.forEach((e, k) => {
+        if ((((a as any)[`r${k}`]?.noul as number) ?? 1) < 0.5) return;
+        if ((((a as any)[`o${k}`]?.noul as number) ?? 0) >= 0.5) { ownAsked++; return; }
+        byTenant.set(e.t, [...(byTenant.get(e.t) || []), e.q]);
+      });
       const dropped = entries.length - [...byTenant.values()].flat().length;
-      if (dropped) await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped } });
+      if (dropped) await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped, ...(ownAsked ? { ownParts: ownAsked } : {}) } });
     }
   }
   if (!byTenant.size) return false;

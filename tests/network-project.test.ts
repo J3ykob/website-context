@@ -88,6 +88,14 @@ live("a project across businesses of one network", () => {
 
     expect(d.status).toBe("done");
     expect(subs.some((s) => s.tenantId === OSTAP && s.status === "answered")).toBe(true);
+    // Rentbud's own parts (the debris chute (3), src/network/coverage.ts) were picked for Rentbud alone, and every
+    // business asked was picked for a part Rentbud does not have - by the project's structure, whatever the split.
+    const b = p.project.memory.broadcast as { parts: string[]; own: boolean[]; picked: { tenantId: string; part: number }[] };
+    console.log(`[broadcast] ${JSON.stringify(b.parts.map((x, k) => `${b.own[k] ? "own" : "other"}: ${x}`))}`);
+    expect(b.own.some(Boolean)).toBe(true);
+    expect(b.picked.every((o) => !b.own[o.part] || o.tenantId === TENANT)).toBe(true);
+    const otherPicks = new Set(b.picked.filter((o) => !b.own[o.part]).map((o) => o.tenantId));
+    expect(subs.every((s) => otherPicks.has(s.tenantId))).toBe(true);
     // The barriers' price came from OSTAP's owner: 40 m x 8 zł x 3 weeks + 40 x 10 = 1360 zł.
     // In the reply or in the customer's files (line amounts often live in the attached cost sheet).
     let delivered_text = d.message;

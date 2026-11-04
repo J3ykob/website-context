@@ -177,7 +177,7 @@ function componentsCsv(items: OfferItem[]): string | null {
  * business running the project its whole offer too - it in firma.md, the others in firmy.md (only for the
  * parts it does not offer). Businesses that have nothing for it stay out.
  */
-async function priceLists(project: Project, adverts: Advert[], mustAsk: string[] | null, need = ""): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
+async function priceLists(project: Project, adverts: Advert[], mustAsk: string[] | null, need = "", partsOf = new Map<string, string[]>()): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
   const files: Record<string, string> = {};
   const slugs: Record<string, string> = {};
   const { networkMembers } = await import("./network.js");
@@ -197,7 +197,10 @@ async function priceLists(project: Project, adverts: Advert[], mustAsk: string[]
     return pb?.parts.length ? Promise.race([m.quoteText(pb, text).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 20000))]) : null;
   };
   const ids = [own, ...adverts.map((a) => a.tenantId).filter((id) => id !== own)];
-  const quotes = await Promise.all(ids.map((id) => (quoting && need ? quoteOf(id, need) : null)));
+  // Another firm's program prices only the parts it was picked for (partsOf): given the whole request it read the
+  // business's own products too, and their prices came into wycena_<firm>.md for the agent to compare.
+  const quoteNeed = (id: string) => (id === own ? need : (partsOf.get(id) || []).join("\n"));
+  const quotes = await Promise.all(ids.map((id) => (quoting && quoteNeed(id) ? quoteOf(id, quoteNeed(id)) : null)));
   if (quoting) console.log(`[pricing] ${project.id}: quoting models priced ${ids.filter((_, k) => quotes[k]).join(", ") || "none"} of ${ids.length}`);
   for (const [n, tenantId] of ids.entries()) {
     const ad = byTenant.get(tenantId);
@@ -349,7 +352,10 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
     }
     mustAsk = project.memory.networkAsked ? [] : [...new Set(ask)].slice(0, MUST_ASK_MAX);
   }
-  const offers = await priceLists(project, adverts, mustAsk, need);
+  // The parts each other firm was picked for (only parts the business running the project does not have).
+  const partsOf = new Map<string, string[]>();
+  for (const o of networkOffers) if (o.tenantId !== project.initiatorTenantId && !ownParts[o.part] && parts[o.part]) partsOf.set(o.tenantId, [...new Set([...(partsOf.get(o.tenantId) || []), parts[o.part]])]);
+  const offers = await priceLists(project, adverts, mustAsk, need, partsOf);
   if (networkOffers.length) {
     const net = await import("./network.js");
     offers.files["oferty_sieci.md"] = networkOffersText(parts, networkOffers, ownParts, project.initiatorTenantId, net.businessLabel, net.isListed);

@@ -196,9 +196,9 @@ export class TenantManager {
       catalogue: getTenant(tenantId)?.settings?.catalogue || null,
       // The best-ranked businesses of this tenant's ecosystem answer what its own site can't (only the parts it does not have).
       askEcosystem: ecosystemOf(getTenant(tenantId))
-        ? (messages, onStart, parts) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
+        ? (messages, onStart, parts, keep) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
             embed: (texts) => this.bgeProvider.embed(texts),
-          }, onStart, parts)
+          }, onStart, parts, keep)
         : undefined,
       // A question the assistant can't answer goes to the owner through this form - only
       // where someone owns the business on Whisp (an owner account, or an ecosystem member):
