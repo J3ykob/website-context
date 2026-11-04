@@ -957,6 +957,7 @@ export class WebsiteChat {
       // to ask the team - the network only when nothing of ours is relevant (we may well do it).
       let partial = false;
       let outOfScope = false; // our information is about something near it, not this
+      let oursScore = 1; // how clearly our information shows we do it ourselves
       if (answered && jevEnabled()) {
         const f = await jevAsk({ conversation: convo, our_information: passages.join("\n\n").slice(0, 40000) }, {
           full: { type: "noul", instructions: "Does `our_information` contain everything needed to answer the customer's LATEST message in `conversation` (every part and detail asked)?" },
@@ -965,7 +966,8 @@ export class WebsiteChat {
         noteTurn("fullOurs", [(f?.full as JevNoulAnswer | undefined)?.noul, (f?.ours as JevNoulAnswer | undefined)?.noul]);
         markTurn("fullOurs");
         partial = ((f?.full as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5;
-        outOfScope = ((f?.ours as JevNoulAnswer | undefined)?.noul ?? 1) < 0.35;
+        oursScore = (f?.ours as JevNoulAnswer | undefined)?.noul ?? 1;
+        outOfScope = oursScore < 0.35;
       }
       // Nothing of ours answers it, or our information shows it isn't ours: the network may have it. Asked
       // for recommendations elsewhere (router intent): the network too, next to what we have (W3: the venue's
@@ -993,8 +995,10 @@ export class WebsiteChat {
       if (answered && partial && !network && !searching) {
         behaviour.push(BEHAVIOUR.partial);
         // Our information on it is vague and the network has businesses for it: offer to check them (the
-        // customer decides - network last, our own answer first).
-        const netHas = net && !st.handoffDeclined ? ((await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), 1500))]))?.length ?? 0) : 0;
+        // customer decides - network last, our own answer first). Not for what we clearly do ourselves (Jev "ours"
+        // >= 0.8): a missing detail of our own product (Beton-Lazy's price per m3, Ostap's daily scaffolding rate,
+        // the florist's ribbon) offered the customer our competitors - 7 times in the 2026-11-04 eval, "ours" 0.85-0.97.
+        const netHas = net && !st.handoffDeclined && oursScore < 0.8 ? ((await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), 1500))]))?.length ?? 0) : 0;
         const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         noteTurn("partialOffer", { netHas, offerOk: !!offerOk });
         if (netHas && offerOk) { behaviour.push(BEHAVIOUR.offerNetwork); opts.handoffKind = "network"; }
