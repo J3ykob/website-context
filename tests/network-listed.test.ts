@@ -3,7 +3,8 @@ import type { ChatMessage } from "../src/llm/chat.js";
 import type { TenantManager } from "../src/multi-tenant/tenant-manager.js";
 
 // Live: a business that has not joined the network (OSTAP, treated as listed for this process only).
-// A Rentbud customer asks for something partly OSTAP's: the agent asks OSTAP, OSTAP's part is answered
+// A Rentbud customer asks for something partly OSTAP's - edge protection barriers, which Rentbud does not
+// have (its own parts never go to the network: src/network/coverage.ts): the agent asks OSTAP, OSTAP's part is answered
 // from its public data at once (no owner to wait for) and marked as not confirmed; the customer gets the
 // result; then OSTAP is invited (the invite with its full text is recorded; no email is sent without the
 // email key) and, acting as OSTAP on its link, confirms with a correction - which lands in Rentbud's project.
@@ -41,7 +42,7 @@ afterAll(async () => {
 live("a business that has not joined the network", () => {
   it("is answered from its public data, the customer does not wait, then it is invited and confirms", async () => {
     const chat = await tm.getChatForTenant(TENANT);
-    const w = await chat.chat([{ role: "user", content: "Dzień dobry, potrzebuję rusztowania fasadowego na dom (ok. 120 m2) na 2 tygodnie z montażem, i do tego zagęszczarki 130 kg na 2 doby. Ile to wszystko kosztuje?" } as ChatMessage], session);
+    const w = await chat.chat([{ role: "user", content: "Dzień dobry, potrzebuję systemowych barierek ochronnych na krawędź stropu (siatkowe, EN 13374, ok. 40 m) na 2 tygodnie z montażem, i do tego zagęszczarki 130 kg na 2 doby. Ile to wszystko kosztuje?" } as ChatMessage], session);
     expect(w.project?.agent?.status).toBe("running");
     const pid = w.project!.id;
     let d: any;
@@ -74,11 +75,11 @@ live("a business that has not joined the network", () => {
     const rv = await M.review.reviewByToken(token);
     expect(rv?.status).toBe("pending");
     // Acting as OSTAP: confirm with a correction (what POST /api/review does for a business request).
-    const correction = "Rusztowanie fasadowe: 10 zł za m2 za tydzień, montaż i demontaż 14 zł za m2.";
+    const correction = "Barierki siatkowe Steel Mesh Barrier: 7 zł za metr za tydzień, montaż i demontaż 9 zł za metr.";
     await M.review.decide(token, "approved", { final: correction });
     const { settle } = await import("../src/projects/network.js");
     await settle(ostap.id, correction, "answered");
     const after = await M.store.projectDetail(pid);
-    expect(after.events.some((e: any) => e.kind === "business_confirmed" && String(e.data.answer).includes("10 zł"))).toBe(true);
+    expect(after.events.some((e: any) => e.kind === "business_confirmed" && String(e.data.answer).includes("7 zł"))).toBe(true);
   }, 60 * 60_000);
 });

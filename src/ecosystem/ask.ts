@@ -1,8 +1,8 @@
 /**
- * The chat's side of the network: when a business's own content has nothing on a visitor's need, the
- * network's one search (src/network/find.ts - the same the customer's project uses for offers) finds the
- * businesses that offer it; the best few are relayed with their matched items, excerpts and official
- * contact, and the asking bot writes one reply from them.
+ * The chat's side of the network: for the parts of a visitor's need the business does not have itself
+ * (src/network/coverage.ts), the network's one search (src/network/find.ts - the same the customer's project
+ * uses for offers) finds the businesses that offer them; the best few are relayed with their matched items,
+ * excerpts and official contact, and the asking bot writes one reply from them.
  */
 import type { EcosystemPlan } from "./rank.js";
 import type { ChatMessage } from "../llm/chat.js";
@@ -15,6 +15,7 @@ export interface EcosystemMatch {
   vector: number;
   passages: { content: string; url: string; title: string; item?: boolean }[]; // item: one of its offer rows
   contact: string;
+  parts: string[]; // the asked parts it was found for (the reply's evidence says what each business offers)
 }
 
 const MAX_RELAYED = 3;         // businesses relayed to the visitor
@@ -51,13 +52,14 @@ export async function askEcosystem(
   messages: ChatMessage[],
   _deps: { embed: (texts: string[]) => Promise<number[][]> },
   onStart?: () => void,
+  parts?: string[], // only these parts of the need (the ones the asking business does not have); none = nothing to search
 ): Promise<EcosystemMatch[]> {
   const question = messages.findLast((m) => m.role === "user")?.content?.trim() || "";
-  if (!ecosystem || question.length < 3) return [];
+  if (!ecosystem || question.length < 3 || (parts && !parts.length)) return [];
   onStart?.();
   // The network's one search (src/network/find.ts - the same the customer's project uses for offers).
   const { findBusinesses } = await import("../network/find.js");
-  const r = await findBusinesses(question, ecosystem, { exclude: fromTenantId }).catch(() => null);
+  const r = await findBusinesses(question, ecosystem, { exclude: fromTenantId, parts }).catch(() => null);
   if (!r?.hits.length) return [];
   // The best few businesses to recommend: priced matches first, then confidence (+ plan boost) - one per business.
   const seen = new Set<string>();
@@ -71,6 +73,7 @@ export async function askEcosystem(
     // Its matched items (with prices) and its own page excerpts: what the reply may say about it.
     passages: [...h.items.slice(0, 4).map((i) => ({ content: `${i.name}${i.price_value !== null ? ` - ${i.price_value} ${i.currency}${i.price_max ? `-${i.price_max}` : ""}` : ""}${i.description ? `. ${i.description.slice(0, 200)}` : ""}`, url: i.url || "", title: i.name, item: true })), ...h.passages].slice(0, PASSAGES + 2),
     contact: await contactOf(h.tenantId),
+    parts: [...new Set(r.hits.filter((x) => x.tenantId === h.tenantId).map((x) => r.parts[x.part]))],
   })));
   console.log(`[ecosystem] ${fromTenantId}: ${r.parts.length} part(s), ${r.asked} judged -> relaying ${matches.map((x) => `${x.tenantId}${x.plan !== "free" ? `(${x.plan})` : ""}`).join(", ") || "none"} (${r.ms} ms)`);
   return matches;

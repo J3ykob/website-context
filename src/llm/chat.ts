@@ -27,11 +27,11 @@ import { type OfferLang, jevPassageRelevance, jevPickOption, jevEnabled, splitSt
 import { retrieveFromCatalog, lexicalSnippets, type KnowledgeCatalog, type CatalogChunk } from "../knowledge/catalog.js";
 import { buildLinkIndex, guardLinks, type LinkIndex } from "./link-guard.js";
 import { findOfferItems, matchItems, type ItemMatch } from "../offer/search.js";
-import type { Business } from "../projects/compare.js";
+import { coverage, type Coverage } from "../network/coverage.js";
 import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
-import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
+import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 import { noteTurn, markTurn, turnVariant, turnUsage, newTurnUsage, turnCheap, turnIp, turnExempt } from "./turn-usage.js";
 import { auditKnowledge, type AuditReport } from "../knowledge/audit.js";
 import { keyFacts } from "../knowledge/facts.js";
@@ -64,17 +64,13 @@ export interface ChatConfig {
   offerItems?: OfferItem[];
   /** A large shop whose products come from its catalogue (src/scraper/catalogue.ts): products are searched per question. */
   catalogue?: { source: "woocommerce" | "shopify" | "sitemap"; products: number; siteUrl: string } | null;
-  // The businesses of our network (this one included) that have a structured
-  // offer - for "what would this list / job cost?" projects (compare_offers@1).
-  networkOffers?: () => Promise<Business[]>;
   /** Whether the business's owner has a Whisp account (a set password); without one the chat is a demo. */
   hasOwnerAccount?: () => boolean;
-  // Ecosystem broadcast (src/ecosystem/ask.ts): when our own content has nothing
-  // on the question, the other businesses of our ecosystem each decide from their
-  // own knowledge whether they can answer; their answers come back here.
+  // Ecosystem broadcast (src/ecosystem/ask.ts): the businesses of our network that offer what we don't
+  // have - `parts`: only those parts of the need (src/network/coverage.ts); [] = nothing to search.
   // onStart fires only when there are other businesses to ask (the widget shows
   // "checking with businesses we work with" while they decide).
-  askEcosystem?: (messages: ChatMessage[], onStart?: () => void) => Promise<EcosystemMatch[]>;
+  askEcosystem?: (messages: ChatMessage[], onStart?: () => void, parts?: string[]) => Promise<EcosystemMatch[]>;
   // The business's "question for the owner" form (an in-chat collect flow), created on
   // first use: a question the assistant can't answer is passed on through it.
   ensureQuestionFlow?: () => Promise<FlowDefinition | null>;
@@ -303,8 +299,9 @@ const COLLECT_IDLE_MS = 30 * 60 * 1000;
 const LANG_OF_NAME: Record<string, OfferLang> = { polish: "pl", english: "en", ukrainian: "uk", french: "fr", german: "de" };
 
 
-// A network search started alongside our own reply (see networkStart).
-interface NetworkAsk { need: string; lang: OfferLang; matches: Promise<EcosystemMatch[]> }
+// A network search started alongside our own reply (see networkStart): only for `parts` - the parts of the need we
+// don't have (all of them on an explicit ask for other businesses); allForeign = none of the need is ours.
+interface NetworkAsk { need: string; lang: OfferLang; matches: Promise<EcosystemMatch[]>; parts: string[]; allForeign: boolean }
 
 /** How a reply was produced (recorded per turn, reported in admin traces). */
 export function routeOf(r: ChatResponse): Route {
@@ -328,8 +325,9 @@ export class WebsiteChat {
   private askEcosystem: ChatConfig["askEcosystem"];
   private ensureQuestionFlow: ChatConfig["ensureQuestionFlow"];
   // Sessions where we offered to pass the visitor's question on to the business
-  // (no answer here, or no prices for a quote): waiting for their yes.
-  private handoffOffers: Map<string, { question: string; lang: OfferLang; kind: "question" | "quote" | "network"; at: number }> = new Map();
+  // (no answer here, or no prices for a quote), or to check the network for the parts
+  // we don't have (`parts`, searched on a yes): waiting for their yes.
+  private handoffOffers: Map<string, { question: string; lang: OfferLang; kind: "question" | "quote" | "network"; parts?: string[]; at: number }> = new Map();
   // The router's decision per message (the stream path decides, the full path reuses it).
   private routeMemo: Map<string, { at: number; route: TurnRoute | null }> = new Map();
   private handoffLinks: ChatConfig["handoffLinks"];
@@ -345,7 +343,6 @@ export class WebsiteChat {
   private brandName = "";
   private offerItems: OfferItem[] = [];
   private catalogue: ChatConfig["catalogue"] = null;
-  private networkOffers?: () => Promise<Business[]>;
   private hasOwnerAccount?: () => boolean;
   private onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
 
@@ -365,7 +362,6 @@ export class WebsiteChat {
     this.brandName = config.brandName || "";
     this.offerItems = config.offerItems || [];
     this.catalogue = config.catalogue || null;
-    this.networkOffers = config.networkOffers;
     this.hasOwnerAccount = config.hasOwnerAccount;
     this.onInquiry = config.onInquiry;
     this.askEcosystem = config.askEcosystem;
@@ -509,7 +505,17 @@ export class WebsiteChat {
       const picked = await this.pickFromCandidates(message, pending.flows);
       this.pendingDisambig.delete(effectiveSessionKey);
       if (picked && picked.executionMode === "agent") return this.startAgentFlow(picked, message);
-      if (picked && picked.executionMode === "collect") return this.startCollect(picked, effectiveSessionKey, message);
+      if (picked && picked.executionMode === "collect") {
+        // The same decision as an order in the first message (packsStream): our form only when every part is ours;
+        // otherwise the agent with the network for the rest, or (without one) the answer like any question.
+        const cov = await this.coverageOf(this.turnQuery(messages, message, null).query);
+        if (!cov.own.some((o) => !o)) return this.startCollect(picked, effectiveSessionKey, message);
+        if (agentEnabled() && (await this.hasNetwork().catch(() => false))) {
+          const r = await this.agentTurn(messages, message, effectiveSessionKey, { coverage: cov });
+          if (r) { this.packStateOf(effectiveSessionKey).calcStarted = true; return r; }
+        }
+        return null;
+      }
       if (picked) {
         const started = this.beginFlowSession(effectiveSessionKey, picked);
         return { message: started.message, sources: [], flowSession: { active: true, status: "choosing", flowId: picked.id, complete: false } };
@@ -678,7 +684,7 @@ export class WebsiteChat {
       if (answer === "what") return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.explainHandoff], packs: [], keepOffer: true });
       this.handoffOffers.delete(sessionKey);
       // Agreed that we check the network (offered when our information on it was vague): the search, then the reply.
-      if (answer === "yes" && offer.kind === "network") return this.packsReply(sanitizedMessages, sessionKey, onToken, { packs: [], networkNeed: offer.question, rt: { lang: offer.lang } as TurnRoute });
+      if (answer === "yes" && offer.kind === "network") return this.packsReply(sanitizedMessages, sessionKey, onToken, { packs: [], networkNeed: offer.question, networkParts: offer.parts, rt: { lang: offer.lang } as TurnRoute });
       if (answer === "yes") {
         const flow = await this.ensureQuestionFlow?.().catch(() => null);
         if (flow) {
@@ -734,9 +740,11 @@ export class WebsiteChat {
     if (rt && rt.intent === "order" && rt.flow >= 0) {
       const flows = this.routableFlows();
       const picked = rt.flowAmbiguous.length > 1 ? rt.flowAmbiguous.slice(0, 2).map((i) => flows[i]).filter(Boolean) : [flows[rt.flow]].filter(Boolean);
-      // An order form only for what the business clearly offers: "not clearly not offered" started a form
-      // for paving at a renovation firm (Jev: offered 0.02, unknown 0.57); otherwise it is answered.
-      const elsewhere = picked.length === 1 && picked[0].executionMode === "collect" ? !(await this.offeredForForm(question).catch(() => true)) : false;
+      // An order form only when every part of the order is ours (src/network/coverage.ts): "not clearly not offered"
+      // started a form for paving at a renovation firm (Jev: offered 0.02, unknown 0.57), and one matching part
+      // ("wiertnica" in "wiertnica + korona") kept the rest from the network (chain test 2026-10-29).
+      const cov = picked.length === 1 && picked[0].executionMode === "collect" ? await this.coverageOf(this.turnQuery(sanitizedMessages, question, rt).query) : null;
+      const elsewhere = !!cov && cov.own.some((o) => !o);
       if (picked.length > 1) {
         this.pendingDisambig.set(sessionKey, { flows: picked.slice(0, 3), at: Date.now() });
         return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.whichAction(picked.map((f) => `"${f.name}"`))], packs: [], rt });
@@ -744,7 +752,7 @@ export class WebsiteChat {
       // Not ours to take: the order goes to the network businesses that have it (agent), as the form's
       // hand-over did before 2026-10-26 (since then such orders were only answered).
       if (elsewhere && agentEnabled() && (await this.hasNetwork().catch(() => false))) {
-        const r = await this.agentTurn(messages, question, sessionKey);
+        const r = await this.agentTurn(messages, question, sessionKey, { coverage: cov! });
         if (r) { st.calcStarted = true; onToken(r.message); return r; }
       }
       if (picked.length === 1 && !elsewhere) {
@@ -777,26 +785,30 @@ export class WebsiteChat {
       }
       // Not offered here (or nothing to start): answered like any question - the network may have it.
     }
-    // A calculation: with the customer's own prices or quantities only -> straight to the calculation;
-    // prices needed that we don't have -> said so, with a quote offer; otherwise the calculation with our prices.
+    // A calculation. The business's own quote for the whole request, and quantities only (pure), decide as before;
+    // otherwise which parts are ours (src/network/coverage.ts): a part we don't have and a network -> the agent, the
+    // network asked for that part only; everything ours -> a simple one answered here, priced multi-step work by the
+    // agent on our own data (nobody else asked), the rest answered here with a quote request to our team. The guessed
+    // gates before ("we have prices" counted the network's prices as ours, "every item ours?") sent our own products to
+    // a 2-4 minute calculation and to competitors (betonlazy-1: Bosta asked to quote Łazy's own B20; djmw-2, 2026-11-04 eval).
     if (rt && rt.intent === "calculate" && agentEnabled()) {
       // A calculation needs figures in the conversation; "how much for a bathroom?" is a quote question.
       const figures = /\d/.test(sanitizedMessages.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join(" "));
       const pure = (rt.price < 0.5 || rt.ownPrices >= 0.5) && figures;
       if (!figures) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0 });
-      // No prices of ours for it: with a network the businesses are asked for their estimates (the agent's
-      // network requests - the owner's wish 2026-10-26: reach out to the companies); without one, a quote offer.
-      // (Until 2026-10-29 it was always the quote offer, so mixed orders never reached the network.)
       // The business's quoting model starts first (its two model calls took 3.2 s after a 4.2 s price check - Zajacfoto's
       // first word at 10.5 s): a quote that prices the whole request decides alone, without waiting for the checks below.
       const quoting = process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing");
       const routeQuoteP = quoting ? this.quoteResultWithModel(sanitizedMessages.slice(-8).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 700)}`).join("\n")).catch(() => null) : Promise.resolve(null);
       // Our passages for the "simple calculation?" check below are read at the same time (they were read after it, +0.5-1 s).
       const oursP = this.knowledgePassages(question, 8).catch(() => [] as string[]);
+      const { query } = this.turnQuery(sanitizedMessages, question, rt);
       // Our price list's items for this request - the same match the reply makes (same query and options: the
-      // matcher's cache answers it there). The "every item ours?" check saw only 8 loose passages: Ostap's trestles +
+      // matcher's cache answers it there). The simple check saw only 8 loose passages before: Ostap's trestles +
       // posts (2080 + 4 x 42 zl, simple 0.92) were judged "not all ours" (0.17) and sent to a 47 s calculation.
-      const itemsP: Promise<ItemMatch | null> = !this.catalogue && this.offerItems.length ? matchItems(this.turnQuery(sanitizedMessages, question, rt).query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: rt.price >= 0.5, alternatives: rt.specific >= 0.5 }).catch(() => null) : Promise.resolve(null);
+      const itemsP: Promise<ItemMatch | null> = !this.catalogue && this.offerItems.length ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: rt.price >= 0.5, alternatives: rt.specific >= 0.5 }).catch(() => null) : Promise.resolve(null);
+      // Which parts are ours, at the same time (quantities only involve nobody else: not needed).
+      const covP: Promise<Coverage | null> = pure ? Promise.resolve(null) : this.coverageOf(query);
       // The business's own quoting model priced every part of the request (its program computes the amounts): answered
       // here, like the simple calculation. Zajacfoto's "6 h package + 4 extra hours + a session" (5500 + 1500 zl, computed)
       // went to a 75 s calculation held for approval because the guessed gates fell to simple 0.26 / ours 0.12 (2026-11-04).
@@ -804,39 +816,40 @@ export class WebsiteChat {
       markTurn("quotedForRoute");
       noteTurn("quoteCovered", !!routeQuote?.covered);
       if (routeQuote?.covered) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
-      const pricedItems = ((await itemsP)?.items || []).filter((i) => i.price_value != null);
-      const hasPrices = pure || pricedItems.length > 0 || (await this.hasPricesFor(question));
-      markTurn("hasPrices");
-      if (!hasPrices) {
-        if (await this.hasNetwork().catch(() => false)) {
-          const r = await this.agentTurn(messages, question, sessionKey);
-          if (r) { st.calcStarted = true; onToken(r.message); return r; }
-        }
-        return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
-      }
-      // Listed unit prices times the customer's quantities: answered here (the owner's decision 2026-10-26);
-      // anything more (measuring, unlisted work, discounts, many items) goes to the calculation and its approval.
-      {
+      // Listed unit prices times the customer's quantities: answered here (the owner's decision 2026-10-26); asked next to
+      // the coverage (a part we don't have does not wait for it).
+      const simpleP = (async () => {
         const convoText = sanitizedMessages.slice(-6).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 500)}`).join("\n");
-        // Simple AND every item priced by us: a mixed order (concrete from another business + our rental)
-        // passed the first question alone and never reached the network (chain test 2026-10-29).
+        const pricedItems = ((await itemsP)?.items || []).filter((i) => i.price_value != null);
         const ours = [...pricedItems.map((p) => `- ${renderItem(p)}`), ...(await oursP)].join("\n\n").slice(0, 20000);
         const s = await jevAsk({ conversation: convoText, our_information: ours }, {
           // Up to three listed options (a hall's packages per person x the guests) are the owner's "at most three unit
           // prices" too: "options to compare" sent "a wedding for 100 on a Saturday" to a 1.5-minute calculation (2026-11-04).
           simple: { type: "noul", instructions: "Is the customer's LATEST request in `conversation` a simple calculation: at most three unit prices (listed by the business or given by the customer) times quantities the customer gave - also when they are up to three listed options or packages, each priced for the same quantities - or a simple quantity from dimensions they gave, with no measuring on site, design, discount or unlisted work?" },
-          allOurs: { type: "noul", instructions: "Does `our_information` (this business's own offer and prices) give a unit price for EVERY product or service the customer's LATEST request in `conversation` asks to price (or did the customer give the prices themselves)?" },
         }, 4000).catch(() => null);
-        markTurn("simpleCheck");
-        const simple = ((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.4, allOurs = ((s?.allOurs as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.5;
-        noteTurn("simpleCalc", { simple: (s?.simple as JevNoulAnswer | undefined)?.noul, allOurs: (s?.allOurs as JevNoulAnswer | undefined)?.noul });
-        // "Every price ours?" only matters when a price is asked: "with another 12 m2 path, is it enough?" (a quantity against the
-        // minimum order, no price) went to the background calculation because Bosta lists no prices ("ours" 0.04), and came back
-        // as "3.7 m3 meets the 4 m3 minimum" (2026-11-04 eval).
-        if (simple && (allOurs || rt.price < 0.5 || !(await this.hasNetwork().catch(() => false)))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
+        const p = (s?.simple as JevNoulAnswer | undefined)?.noul;
+        noteTurn("simpleCalc", p);
+        return (p ?? 0) >= 0.4;
+      })();
+      const cov = await covP;
+      markTurn("coverage");
+      // A part we don't have: the agent with the network for it - the owner's wish 2026-10-26 to reach out to the companies
+      // (until 2026-10-29 such orders got only a quote offer and never reached the network).
+      if (cov?.own.some((o) => !o) && (await this.hasNetwork().catch(() => false))) {
+        const r = await this.agentTurn(messages, question, sessionKey, { coverage: cov });
+        if (r) { st.calcStarted = true; onToken(r.message); return r; }
       }
-      const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : undefined);
-      if (r) { st.calcStarted = true; onToken(r.message); return r; }
+      const simple = await simpleP;
+      markTurn("simpleCheck");
+      if (simple) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
+      // More than a simple calculation (measuring, unlisted work, discounts, many items): quantities only, or every part of
+      // ours priced -> the calculation and its approval; ours without prices -> answered here (partial: a quote request).
+      const ownPriced = !!cov && cov.own.some(Boolean) && cov.own.every((o, k) => !o || cov.priced[k]);
+      if (pure || ownPriced) {
+        const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : { coverage: cov! });
+        if (r) { st.calcStarted = true; onToken(r.message); return r; }
+      }
+      return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0 });
     }
     if (rt?.intent === "chitchat") return { ...(await this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.smalltalk], rt })), turnKind: "chitchat" };
     return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0 });
@@ -848,7 +861,7 @@ export class WebsiteChat {
    * turn's instructions; without them the turn is decided here (answer / no information + hand-off /
    * network).
    */
-  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; t0?: number; formOpen?: boolean }): Promise<ChatResponse> {
+  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; networkParts?: string[]; t0?: number; formOpen?: boolean }): Promise<ChatResponse> {
     const st = this.packStateOf(sessionKey);
     const question = messages.findLast((m) => m.role === "user")?.content || "";
     const rt = opts.rt ?? null;
@@ -860,6 +873,7 @@ export class WebsiteChat {
     let answered = true;
     let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[]; partners: { tenantId: string; label: string }[] } | null = null;
     let searching: { matches: Promise<EcosystemMatch[]>; need: string } | null = null;
+    let offered: NetworkAsk | null = null; // the network offered for the parts we don't have (searched on a yes)
     let productLinks: string[] = [];
     const owner = !!st.owner;
     // Our own phone numbers / e-mails, and whether an earlier reply of this conversation already gave one.
@@ -869,7 +883,8 @@ export class WebsiteChat {
     const contactGiven = messages.slice(0, -1).some((m) => m.role === "assistant" && hasContact(m.content));
     st.contactGiven = contactGiven;
     if (opts.networkNeed && this.askEcosystem) {
-      const found = await Promise.race([this.askEcosystem([{ role: "user", content: opts.networkNeed }]).catch(() => [] as EcosystemMatch[]), new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 15000))]);
+      // Exactly the parts we offered to check (the ones we don't have).
+      const found = await Promise.race([this.askEcosystem([{ role: "user", content: opts.networkNeed }], undefined, opts.networkParts).catch(() => [] as EcosystemMatch[]), new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 15000))]);
       if (found.length) network = await this.networkBlock(found, opts.networkNeed);
       behaviour.push(network ? BEHAVIOUR.networkAccepted : BEHAVIOUR.networkNone);
     }
@@ -882,9 +897,10 @@ export class WebsiteChat {
     if (opts.packs === undefined && !opts.noFacts && !opts.behaviour?.length) {
       if (this.packIndex === undefined) this.packIndex = buildPackIndex(this.knowledgeCatalog, new Set(this.context.siteMap.filter((p) => p.type === "article").map((p) => p.url)));
       const { query, followup } = this.turnQuery(messages, question, rt);
-      // A real need we can't meet may go to the network: started now, used below if our packs don't answer.
+      // A real need we can't meet may go to the network: started now (its coverage and search run next to our own
+      // search and scoring), used below for the parts we don't have.
       // Over a spend cap or from a site the business does not own: no network search (src/security/budget.ts).
-      const net = rt && !behaviour.length && !turnCheap() ? await this.networkStart(question, messages, rt) : null;
+      const netP = rt && !behaviour.length && !turnCheap() ? this.networkStart(question, messages, rt).catch(() => ({ cov: null, net: null })) : Promise.resolve({ cov: null, net: null });
       // Key facts (src/knowledge/facts.ts): the site's single sentences, found by meaning and kept by Jev - in parallel.
       // Our offer items for this message: a shop's catalogue (or its live search), otherwise the items read
       // from our pages and the owner's offer - the same item matcher the network search uses. Pages alone
@@ -996,28 +1012,34 @@ export class WebsiteChat {
         packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Our offer and prices (from our price list)\n${line}${altText}`;
         passages = [...passages, line, ...alt];
       }
+      // Which parts of the need are ours (the network start's coverage, src/network/coverage.ts). A part that is ours by
+      // our own pages brings those passages: the reply cannot say "no information" about what the coverage just confirmed.
+      const { cov, net } = await netP;
+      markTurn("coverage");
+      const pageParts = cov ? cov.parts.map((_, k) => k).filter((k) => cov.own[k] && cov.how[k] === "page") : [];
+      const pagePassages = [...new Set(pageParts.flatMap((k) => cov!.passages[k]))].filter((t) => !passages.includes(t));
+      if (pagePassages.length) {
+        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Our pages on ${pageParts.map((k) => cov!.parts[k]).join("; ")}\n${pagePassages.join("\n\n")}`;
+        passages = [...passages, ...pagePassages];
+      }
       answered = passages.length > 0;
-      // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer
-      // to ask the team - the network only when nothing of ours is relevant (we may well do it).
+      // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer to ask the team.
       let partial = false;
-      let outOfScope = false; // our information is about something near it, not this
-      let oursScore = 1; // how clearly our information shows we do it ourselves
       if (answered && jevEnabled()) {
         const f = await jevAsk({ conversation: convo, our_information: passages.join("\n\n").slice(0, 40000) }, {
           full: { type: "noul", instructions: "Does `our_information` contain everything needed to answer the customer's LATEST message in `conversation` (every part and detail asked)?" },
-          ours: { type: "noul", instructions: "Does `our_information` show that this business itself does, sells or rents what the customer asks for (not only related or neighbouring work)?" },
         }, 5000).catch(() => null);
-        noteTurn("fullOurs", [(f?.full as JevNoulAnswer | undefined)?.noul, (f?.ours as JevNoulAnswer | undefined)?.noul]);
-        markTurn("fullOurs");
+        noteTurn("full", (f?.full as JevNoulAnswer | undefined)?.noul);
+        markTurn("full");
         partial = ((f?.full as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5;
-        oursScore = (f?.ours as JevNoulAnswer | undefined)?.noul ?? 1;
-        outOfScope = oursScore < 0.35;
       }
-      // Nothing of ours answers it, or our information shows it isn't ours: the network may have it. Asked
-      // for recommendations elsewhere (router intent): the network too, next to what we have (W3: the venue's
-      // 120 zł "photographer service" fee was judged ours and the photographers found were dropped).
-      const alsoNetwork = answered && !outOfScope && rt?.intent === "elsewhere";
-      if ((!answered || outOfScope || alsoNetwork) && net && !owner) {
+      // The network only for the parts we don't have (net.parts; the coverage replaced a whole-message "is it ours?" score -
+      // < 0.35 relayed at once, < 0.8 offered - that sent our own products to competitors 7 times in the 2026-11-04 eval).
+      // At once when nothing of ours answers, when none of the need is ours, or when the customer asks for other
+      // businesses (router intent; W3: the venue's 120 zł "photographer service" fee was judged ours and the
+      // photographers found were dropped).
+      const alsoNetwork = !!net && answered && !net.allForeign && rt?.intent === "elsewhere";
+      if (net && !owner && (!answered || net.allForeign || alsoNetwork)) {
         // Matches already there: one reply. Still searching and the widget can show it: say so now, show the
         // search, continue the message when the matches come (the owner's wish 2026-10-27, like Gemini's search).
         const quick = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), this.statusOf.has(sessionKey) ? 400 : 10000))]); // no live status (API / tests): wait for the network search (3-8 s since it splits the need into parts)
@@ -1029,24 +1051,27 @@ export class WebsiteChat {
           behaviour.push(alsoNetwork ? BEHAVIOUR.networkAlso : BEHAVIOUR.network);
         }
       }
+      // Offered at most once per question: again only for a new question two or more turns later, never after a decline.
+      const offerOk = !!rt && !owner && !!this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
       if (!answered && !network && !searching) {
         behaviour.push(owner || contactGiven ? BEHAVIOUR.noInfoBare : BEHAVIOUR.noInfo);
-        // Offered at most once per question: again only for a new question two or more turns later, never after a decline.
-        const offerOk = rt && !owner && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
-      if (answered && !network && !searching) behaviour.unshift(BEHAVIOUR.answer);
-      if (answered && partial && !network && !searching) {
-        behaviour.push(owner || contactGiven ? BEHAVIOUR.partialBare : BEHAVIOUR.partial);
-        // Our information on it is vague and the network has businesses for it: offer to check them (the
-        // customer decides - network last, our own answer first). Not for what we clearly do ourselves (Jev "ours"
-        // >= 0.8): a missing detail of our own product (Beton-Lazy's price per m3, Ostap's daily scaffolding rate,
-        // the florist's ribbon) offered the customer our competitors - 7 times in the 2026-11-04 eval, "ours" 0.85-0.97.
-        const netHas = net && !st.handoffDeclined && oursScore < 0.8 ? ((await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), 1500))]))?.length ?? 0) : 0;
-        const offerOk = rt && !owner && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
-        noteTurn("partialOffer", { netHas, offerOk: !!offerOk });
-        if (netHas && offerOk) { behaviour.push(BEHAVIOUR.offerNetwork); opts.handoffKind = "network"; }
-        else if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
+      if (answered && !network && !searching) {
+        behaviour.unshift(BEHAVIOUR.answer);
+        // A mixed turn: our parts answered, the parts we don't have only offered to check in the network when it has
+        // businesses for them - our own answer first, the customer decides.
+        const netHas = net && !owner && !st.handoffDeclined ? ((await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), 1500))]))?.length ?? 0) : 0;
+        if (netHas && offerOk) { offered = net; opts.handoffKind = "network"; }
+        // A missing detail of ours goes to our own team, never to the network; a price asked that nothing here gives: a quote request.
+        const pricedHere = !!modelQuote || products.some((p) => p.price_value != null || p.components.some((c) => c.price_value != null));
+        if (partial && rt && rt.price >= 0.5 && !pricedHere && offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.quote); opts.handoffKind = "quote"; }
+        else if (partial) {
+          behaviour.push(owner || contactGiven ? BEHAVIOUR.partialBare : BEHAVIOUR.partial);
+          if (offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
+        }
+        if (offered) behaviour.push(BEHAVIOUR.offerNetwork(offered.parts));
+        noteTurn("partialOffer", { netHas, offerOk, partial, pricedHere, kind: opts.handoffKind || null });
       }
     }
     behaviour.push(...(opts.extra || []));
@@ -1171,7 +1196,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const finish = (final: string, offers: number): ChatResponse => {
       const cleaned = this.guardReplyLinks(final.replace(/\[\[[^\]]*\]\]/g, "").trim());
       // State for the next turn.
-      if ((opts.handoffKind || opts.keepOffer) && rt && offers >= 0.5) { this.handoffOffers.set(sessionKey, { question, lang: rt.lang, kind: opts.handoffKind || "question", at: Date.now() }); st.handoffOfferedAt = st.turns; }
+      // An offer to check the network keeps what it offered: the need and the parts we don't have (searched on a yes).
+      const what = opts.handoffKind === "network" && offered ? { question: offered.need, parts: offered.parts } : { question };
+      if ((opts.handoffKind || opts.keepOffer) && rt && offers >= 0.5) { this.handoffOffers.set(sessionKey, { ...what, lang: rt.lang, kind: opts.handoffKind || "question", at: Date.now() }); st.handoffOfferedAt = st.turns; }
       if (network) st.referred = [...new Set([...(st.referred || []), ...network!.labels])];
       if (used.length) st.lastPacks = used.map((p) => p.id);
       // A page title can hold markup as text (an SEO plugin's "Sala weselna ... <time datetime="2026">2026</time>" was shown to
@@ -1345,7 +1372,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const text = found.map((f) => `### ${f.label}${links[f.tenantId] ? ` | link for the customer: ${links[f.tenantId]}` : ""}\nContact: ${f.contact || "no phone or e-mail known - only the link"}\n${f.passages.map((p) => p.content.replace(/\s+/g, " ").slice(0, p.title === "quote" ? 2500 : 900)).join("\n")}`).join("\n\n---\n\n");
     const evidence = [
       { content: `Businesses from our network checked for the customer: ${found.map((f) => f.label).join(", ")}.` },
-      ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }, { content: `${f.label} offers, sells, rents or does what the customer asked for ("${need.slice(0, 300)}") - checked against its own website.` }]),
+      // What each business was found for - its matched parts, not the whole need (that said each one offers all of it).
+      ...found.flatMap((f) => [...f.passages.map((p) => ({ content: `${f.label}: ${p.content}` })), { content: `${f.label} contact: ${f.contact}` }, { content: `${f.label} offers, sells, rents or does ${f.parts?.length ? f.parts.map((x) => `"${x.slice(0, 200)}"`).join(", ") : `what the customer asked for ("${need.slice(0, 300)}")`} - checked against its own website.` }]),
     ];
     return { text, evidence, labels: found.map((f) => f.label), links: found.map((f) => links[f.tenantId]).filter(Boolean), partners: found.map((f) => ({ tenantId: f.tenantId, label: f.label })) };
   }
@@ -1361,6 +1389,11 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
   private async hasNetwork(): Promise<boolean> {
     const { networkMembers } = await import("../projects/network.js");
     return (await networkMembers(this.context.tenantId).catch(() => [])).length > 1;
+  }
+
+  /** Which parts of a request we have ourselves (src/network/coverage.ts): the one decision every network path follows. */
+  private coverageOf(text: string): Promise<Coverage> {
+    return coverage(this.context.tenantId, text, { items: this.offerItems });
   }
 
   /** Passages of this business's own site for a query (for its answers inside projects). */
@@ -1391,26 +1424,12 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     return r;
   }
 
-  /** Are there prices to work from: our priced offer items, the network's, or prices on our site? */
-  private async hasPricesFor(message: string): Promise<boolean> {
-    const priced = (items: OfferItem[]) => items.filter((i) => i.price_value != null);
-    if (priced(this.offerItems).length && (await findOfferItems(message, priced(this.offerItems), 3).catch(() => [])).length) return true;
-    if (this.networkOffers) {
-      const net = (await this.networkOffers().catch(() => [])).flatMap((b) => priced(b.items));
-      if (net.length && (await findOfferItems(message, net, 3).catch(() => [])).length) return true;
-    }
-    const chunks = this.filterContextChunks(await this.retrieveContext(message), message);
-    if (!chunks.length) return false;
-    const rel = await jevPassageRelevance(`${message}\n(Does this passage give a price for at least one of these items?)`, chunks.slice(0, 12).map((c) => (c.content || "").slice(0, 1500)));
-    return !!rel && Math.max(0, ...rel) >= 0.5;
-  }
-
   /**
    * Hands the message to the project agent and answers at once that the work is under way; the result
    * reaches the visitor through the widget (GET /api/chat/agent). Null without a project record (D1
    * down): the turn falls back to the knowledge answer.
    */
-  private async agentTurn(messages: ChatMessage[], message: string, sessionKey: string, opts?: { pureCalc?: boolean }): Promise<ChatResponse | null> {
+  private async agentTurn(messages: ChatMessage[], message: string, sessionKey: string, opts?: { pureCalc?: boolean; coverage?: Coverage }): Promise<ChatResponse | null> {
     // Costly background work is rationed against scripted abuse (2026-10-29; docs/limits.md): none over a
     // spend cap or from a foreign site, and per day at most AGENT_RUNS_SESSION per conversation (10),
     // AGENT_RUNS_IP per visitor IP (30 - offices and mobile carriers share IPs) and AGENT_RUNS_TENANT per
@@ -1423,8 +1442,10 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const countRun = () => { if (!turnExempt()) for (const [k, cap] of caps) void bump(k, cap); };
     const projectId = await conversationProject(this.context.tenantId, sessionKey, message);
     if (!projectId) return null;
-    // Quantities only (no prices, no commitments): delivered without the owner's approval.
-    await setProjectMemory(projectId, { pureCalc: !!opts?.pureCalc }).catch(() => {});
+    // Quantities only (no prices, no commitments): delivered without the owner's approval. The chat's coverage goes with
+    // the request: the project's broadcast asks the network only for the parts we don't have (items as ids).
+    const c = opts?.coverage;
+    await setProjectMemory(projectId, { pureCalc: !!opts?.pureCalc, coverage: c ? { parts: c.parts, own: c.own, priced: c.priced, items: c.items.map((l) => l.map((i) => i.id)) } : null }).catch(() => {});
     const knowledge = await this.knowledgePassages(message);
     const [begun, lang] = await Promise.all([
       beginConversationAgent(projectId, messages, knowledge),
@@ -1476,28 +1497,6 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       : undefined;
   }
 
-  /** Whether the business clearly offers what the request asks for (its offer items, or its own pages) - for starting an order form. */
-  private async offeredForForm(message: string): Promise<boolean> {
-    const { offerMatches } = await import("../projects/network.js");
-    const own = this.offerItems.length ? await offerMatches(this.context.tenantId, this.offerItems, message) : null;
-    if (own && own.length) {
-      // Every part ours? One matching part ("wiertnica" in "wiertnica + korona", a floor tool for "vinyl
-      // floor + primer") opened our form and the rest never reached the network (chain test 2026-10-29).
-      const a = await jevAsk({ customer_message: message, our_items: own.slice(0, 15).map((i) => `${i.name}${i.category ? ` (${i.category})` : ""}`) }, {
-        all: { type: "noul", instructions: "Do `our_items` (this business's offer) cover EVERY product or service the customer wants in `customer_message` (not only one part of it)?" },
-      }, 4000).catch(() => null);
-      const all = ((a?.all as JevNoulAnswer | undefined)?.noul ?? 1) >= 0.5;
-      noteTurn("formOffered", { ownItems: own.length, all: (a?.all as JevNoulAnswer | undefined)?.noul });
-      return all;
-    }
-    // The site's own passages: by meaning (search) and by words, so "kostka brukowa" without its letters still finds pages.
-    const knowledge = this.collectKnowledge();
-    const lexical = knowledge ? (await knowledge(message)).slice(0, 4) : [];
-    const hits = await searchContext(message, this.embeddingProvider, this.store, { topK: 6 }).catch(() => []);
-    const passages = [...hits.map((h) => (h.content || "").slice(0, 1500)), ...lexical].slice(0, 10);
-    return (await offeredHere(message, passages, true)) === "ok";
-  }
-
   private startCollect(flow: FlowDefinition, sessionKey: string, message: string, via?: CollectVia, context?: string): Promise<ChatResponse> {
     const remembered = this.sessionVia.get(sessionKey);
     const s = startSession(flow, via || (remembered && Date.now() - remembered.at < 30 * 60 * 1000 ? remembered.via : undefined));
@@ -1510,19 +1509,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const llm = (system: string, user: string, maxTokens = 700) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
     const status = (stage: NonNullable<ChatResponse["collect"]>["stage"]) => ({ flowId: flow.id, stage, missing: stage === "collecting" || stage === "confirming" ? missingLabels(flow, s) : [] });
     try {
-      const handOver = !!this.offerItems.length && agentEnabled() && (await this.hasNetwork().catch(() => false));
-      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge(), handOver, questionAnswered);
-      if ("handover" in r) {
-        // Not ours to take as an order: the agent (this business's offer and the network) answers it.
-        this.collectSessions.delete(sessionKey);
-        console.log(`[flows] ${this.context.tenantId}: "${flow.name}" handed over - not in the offer: ${r.handover.join(", ")}`);
-        const viaAgent = await this.agentTurn([{ role: "user", content: message } as ChatMessage], message, sessionKey);
-        if (viaAgent) return viaAgent;
-        const s2 = startSession(flow, s.via);
-        this.collectSessions.set(sessionKey, s2);
-        const again = await collectTurn(flow, s2, message, this.brandName, llm, this.collectKnowledge(), false);
-        return { message: again.reply, sources: [], collect: status(s2.stage) };
-      }
+      // Whether the order is ours to take was decided before the form opened (coverage); the form only takes it.
+      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge(), questionAnswered);
       if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [], collect: status("cancelled") }; }
       if ("inquiry" in r) {
         this.collectSessions.delete(sessionKey);
@@ -1571,48 +1559,33 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     };
   }
 
-  // We don't have an answer. Only a real need goes to the network (Jev, one call):
-  // the visitor explicitly asks to find it elsewhere, or asks for one specific
-  // product or service - never a broad category or a follow-up. The search starts
-  // at once; the reply uses its matches. null = nothing is asked.
-  private async networkStart(question: string, messages: ChatMessage[], rt: TurnRoute | null): Promise<NetworkAsk | null> {
-    if (!this.askEcosystem || !rt) return null;
+  // Only a real need goes to the network (Jev, the router): the visitor explicitly asks to find it elsewhere,
+  // or asks for one specific product or service - never a broad category or a follow-up. Then only the parts
+  // we don't have ourselves are searched (src/network/coverage.ts); on an explicit ask for other businesses,
+  // every part of that ask (the owner's decision). The search starts as soon as the coverage is known; the
+  // reply uses its matches. cov: the coverage of the need (null when not asked); net: null = nothing searched.
+  private async networkStart(question: string, messages: ChatMessage[], rt: TurnRoute | null): Promise<{ cov: Coverage | null; net: NetworkAsk | null }> {
+    if (!this.askEcosystem || !rt) return { cov: null, net: null };
     const ask = rt.intent === "elsewhere" || (rt.intent !== "chitchat" && rt.specific >= 0.5 && rt.need >= 0.5 && rt.followup < 0.5);
     if (!ask) {
       console.log(`[ecosystem] ${this.context.tenantId}: not asked (${rt.intent}, specific ${rt.specific.toFixed(2)}, need ${rt.need.toFixed(2)}, follow-up ${rt.followup.toFixed(2)}): "${question.slice(0, 60)}"`);
-      return null;
+      return { cov: null, net: null };
     }
     // "Where else can I get it?" names nothing: the need is in the previous message.
     const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
     const need = rt.specific < 0.5 && prevUser ? `${prevUser}\n${question}` : question;
-    const matches = this.askEcosystem([{ role: "user", content: need }]).catch((e) => {
+    const cov = await this.coverageOf(need);
+    const foreign = cov.parts.filter((_, k) => !cov.own[k]);
+    const parts = rt.intent === "elsewhere" ? cov.parts : foreign;
+    if (!parts.length) {
+      console.log(`[ecosystem] ${this.context.tenantId}: not asked - ${cov.parts.length ? "every part is ours" : "no part to search"}: "${question.slice(0, 60)}"`);
+      return { cov, net: null };
+    }
+    const matches = this.askEcosystem([{ role: "user", content: need }], undefined, parts).catch((e) => {
       console.warn(`[ecosystem] ${this.context.tenantId}: broadcast failed: ${(e as Error).message}`);
       return [] as EcosystemMatch[];
     });
-    return { need, lang: rt.lang, matches };
-  }
-
-  // The chunks that actually become answerable context: relevant score, not
-  // navigation, and (unless asked) not privacy pages (the price check and project passages).
-  private filterContextChunks(
-    chunks: { content: string; metadata: Record<string, unknown>; score: number }[],
-    userQuery?: string
-  ): typeof chunks {
-    const queryLower = (userQuery || "").toLowerCase();
-    const isPrivacyQuery = queryLower.includes("privacy") || queryLower.includes("polityka") || queryLower.includes("policy") || queryLower.includes("rodo") || queryLower.includes("gdpr");
-    return chunks
-      .filter((c) => c.score > 0.005) // RRF scores are small (~0.01-0.03), cosine is larger (~0.3-0.9)
-      .filter((c) => (c.metadata.type as string) !== "navigation")
-      .filter((c) => {
-        // Filter out privacy/policy pages unless the user is asking about privacy
-        if (isPrivacyQuery) return true;
-        const title = ((c.metadata.title as string) || "").toLowerCase();
-        const url = ((c.metadata.url as string) || "").toLowerCase();
-        const content = c.content.toLowerCase().slice(0, 200);
-        return !title.includes("privacy") && !title.includes("polityka") && !title.includes("prywatno")
-          && !url.includes("privacy") && !url.includes("polityka") && !url.includes("prywatno")
-          && !content.includes("polityka prywatności") && !content.includes("privacy policy");
-      });
+    return { cov, net: { need, lang: rt.lang, matches, parts, allForeign: foreign.length === cov.parts.length } };
   }
 
 

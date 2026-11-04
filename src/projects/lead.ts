@@ -169,10 +169,10 @@ export async function passExpiredLeads(): Promise<number> {
     const parentId = sub?.memory.parentId as string | undefined;
     const parent = parentId ? await getProject(parentId) : null;
     if (!sub || !parent) continue;
-    // The next pick for the same part, not asked yet.
-    const b = parent.memory.broadcast as { picked: { tenantId: string; part: number }[] } | undefined;
+    // The next pick for the same part, not asked yet - only for a part the business running the project does not have.
+    const b = parent.memory.broadcast as { own?: boolean[]; picked: { tenantId: string; part: number }[] } | undefined;
     const asked = new Set(((parent.memory.subRequests as any[]) || []).map((x) => x.tenantId));
-    const parts = new Set((b?.picked || []).filter((o) => o.tenantId === inv.tenant_id).map((o) => o.part));
+    const parts = new Set((b?.picked || []).filter((o) => o.tenantId === inv.tenant_id && !b?.own?.[o.part]).map((o) => o.part));
     const next = (b?.picked || []).find((o) => parts.has(o.part) && !asked.has(o.tenantId) && o.tenantId !== parent.initiatorTenantId);
     await addEvent(parent.id, { kind: "lead_passed", actor: "system", data: { from: inv.tenant_id, to: next?.tenantId || null } });
     if (!next) continue;

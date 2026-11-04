@@ -41,13 +41,12 @@ export interface Inquiry {
   at: string;
 }
 
+// No hand-over to the network from inside the form (removed 2026-11-04): whether an order is ours to take is decided
+// once, before a form opens (src/network/coverage.ts in chat.ts); inside it the offer check only notes or suggests.
 export type CollectResult =
   | { reply: string }
   | { reply: string; cancelled: true }
-  | { reply: string; inquiry: Inquiry }
-  // First message, and what the customer wants is not in this business's offer: someone else should
-  // answer it (the network), not this order form.
-  | { reply: string; handover: string[] };
+  | { reply: string; inquiry: Inquiry };
 
 // Free-form questions the customer asks along the way are kept here for the team.
 const NOTES: FlowInput = { name: "notes", label: "Uwagi / pytania klienta", type: "text", required: false, description: "Anything else the customer wants the team to know or answer." };
@@ -278,7 +277,7 @@ export async function quickAnswer(s: CollectSession, message: string, prior: str
   return c.choice === "confirm" || c.choice === "cancel" || c.choice === "pause" ? c.choice : null;
 }
 
-export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, handOver = false, questionAnswered = false): Promise<CollectResult> {
+export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, questionAnswered = false): Promise<CollectResult> {
   s.at = Date.now();
   const fields = fieldsOf(flow);
   const prior = s.transcript.slice(-12).join("\n");
@@ -349,8 +348,6 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}, 
         if (exact) { s.values[f.name] = exact; s.offerChecked[f.name] = exact; }
         continue;
       }
-      // The opening message asks for something this business does not have: hand it over.
-      if (handOver && s.transcript.length <= 1 && (verdict.status === "not_seen" || verdict.status === "not_offered")) return { reply: "", handover: verdict.missing.length ? verdict.missing : [v] };
       if (verdict.status === "not_seen") {
         offerNote = `Say briefly that you can't see ${verdict.missing.length ? verdict.missing.join(", ") : v} in the offer, so the team will confirm whether they can provide it.`;
         continue;

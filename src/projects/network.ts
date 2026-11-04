@@ -125,13 +125,20 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
   let raw: RawRequest[] = [];
   try { raw = JSON.parse((await readFile(parentId, REQUESTS_FILE)) || "[]"); } catch { raw = []; }
   if (!Array.isArray(raw)) raw = [];
+  // Only businesses the broadcast picked for a part the business running the project does not have (structure: the
+  // agent can name any firm in its files, and a project broadcast before 2026-11-04 picked competitors for its own parts).
+  const b = parent.memory.broadcast as { own?: boolean[]; picked?: { tenantId: string; part: number }[] } | undefined;
+  const picked = new Set((b?.picked || []).filter((o) => !b?.own?.[o.part]).map((o) => o.tenantId));
   const byTenant = new Map<string, string[]>();
+  let notPicked = 0;
   for (const r of raw.slice(0, MAX_REQUESTS * 3)) {
     const tenantId = slugs[String(r?.firma || "").trim()];
     const q = String(r?.pytanie || "").trim();
     if (!tenantId || tenantId === parent.initiatorTenantId || q.length < 5) continue;
+    if (!picked.has(tenantId)) { notPicked++; continue; }
     byTenant.set(tenantId, [...(byTenant.get(tenantId) || []), q.slice(0, 2000)]);
   }
+  if (notPicked) await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped: notPicked, notPicked: true } });
   // Only parts the customer asked for (the agent tends to add extras: materials nobody mentioned, etc.).
   if (byTenant.size) {
     const { jevAsk } = await import("../llm/jev.js");

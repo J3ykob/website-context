@@ -3,9 +3,10 @@ import type { ChatMessage } from "../src/llm/chat.js";
 import type { TenantManager } from "../src/multi-tenant/tenant-manager.js";
 
 // Live: a customer of Rentbud (network "warszawa-budowlanka") asks for a project that spans several
-// businesses. The agent prices what the offers settle, asks the other businesses for the rest; each
-// answers inside its own project under its own settings:
-//   OSTAP (scaffolding, no prices in its offer)  - approves first: the test acts as its owner and answers;
+// businesses. The agent prices what the offers settle, asks the other businesses for the rest - only for
+// the parts Rentbud does not have itself (src/network/coverage.ts; Rentbud rents scaffolding and debris
+// chutes, so those stay its own); each answers inside its own project under its own settings:
+//   OSTAP (edge protection barriers, no prices in its offer) - approves first: the test acts as its owner and answers;
 //   BUDOMAT ŁAZY (concrete)                      - sends automatically: its agent answers from its site;
 //   Perfekt Dach (roofing)                       - approves first, owner never answers: deadline -> to be quoted.
 // The customer gets one final result; no customer personal data reaches the other businesses.
@@ -41,7 +42,7 @@ afterAll(async () => {
   }
 }, 180_000);
 
-const REQUEST = "Dzień dobry, nazywam się Tomasz Wiśniewski, tel. 604 555 321. Remontuję dom jednorodzinny (budynek 8 m wysokości). Potrzebuję: (1) wymiany pokrycia dachu na blachodachówkę, ok. 120 m2 dachu; (2) rusztowania elewacyjnego wokół domu, ok. 150 m2, na 3 tygodnie razem z montażem i demontażem; (3) zsypu na gruz na całą wysokość budynku na 3 tygodnie; (4) betonu na wylewkę pod taras, 3 m3 z dowozem. Przygotuj mi zestawienie kosztów całości.";
+const REQUEST = "Dzień dobry, nazywam się Tomasz Wiśniewski, tel. 604 555 321. Remontuję dom jednorodzinny (budynek 8 m wysokości). Potrzebuję: (1) wymiany pokrycia dachu na blachodachówkę, ok. 120 m2 dachu; (2) systemowych zabezpieczeń krawędzi stropu (barierki siatkowe EN 13374) na obwód stropu ok. 40 m, na 3 tygodnie razem z montażem i demontażem; (3) zsypu na gruz na całą wysokość budynku na 3 tygodnie; (4) betonu na wylewkę pod taras, 3 m3 z dowozem. Przygotuj mi zestawienie kosztów całości.";
 
 live("a project across businesses of one network", () => {
   it("asks the other businesses, each answers under its own settings, the customer gets one result", async () => {
@@ -64,9 +65,9 @@ live("a project across businesses of one network", () => {
         const rv = run ? await M.review.reviewForRun(ostap.id, run.runId) : null;
         if (rv?.status === "pending") {
           console.log(`[ostap request]\n${await M.repo.readFile(ostap.id, "request.txt")}\n[ostap draft]\n${rv.draft}`);
-          await M.review.decide(rv.token, "approved", { final: "Rusztowanie elewacyjne (system Plettac): 12 zł za m2 za tydzień. Montaż i demontaż: 15 zł za m2 (jednorazowo). Termin montażu do uzgodnienia." });
+          await M.review.decide(rv.token, "approved", { final: "Barierki siatkowe Steel Mesh Barrier (EN 13374): 8 zł za metr bieżący za tydzień. Montaż i demontaż: 10 zł za metr bieżący (jednorazowo). Termin montażu do uzgodnienia." });
           const { settle } = await import("../src/projects/network.js"); // what POST /api/review does after approval
-          await settle(ostap.id, "Rusztowanie elewacyjne (system Plettac): 12 zł za m2 za tydzień. Montaż i demontaż: 15 zł za m2 (jednorazowo). Termin montażu do uzgodnienia.", "answered");
+          await settle(ostap.id, "Barierki siatkowe Steel Mesh Barrier (EN 13374): 8 zł za metr bieżący za tydzień. Montaż i demontaż: 10 zł za metr bieżący (jednorazowo). Termin montażu do uzgodnienia.", "answered");
           ostapAnswered = true;
         }
       }
@@ -87,13 +88,13 @@ live("a project across businesses of one network", () => {
 
     expect(d.status).toBe("done");
     expect(subs.some((s) => s.tenantId === OSTAP && s.status === "answered")).toBe(true);
-    // The scaffolding price came from OSTAP's owner: 150 m2 x 12 zł x 3 weeks + 150 x 15 = 7650 zł.
+    // The barriers' price came from OSTAP's owner: 40 m x 8 zł x 3 weeks + 40 x 10 = 1360 zł.
     // In the reply or in the customer's files (line amounts often live in the attached cost sheet).
     let delivered_text = d.message;
     for (const f of d.files || []) delivered_text += "\n" + ((await M.repo.readFile(pid, f).catch(() => "")) || "");
     const nums = M.numbersIn(delivered_text);
     const has = (v: number) => nums.some((n: number) => Math.abs(n - v) < 0.5);
-    expect(has(7650) || (has(5400) && has(2250))).toBe(true);
+    expect(has(1360) || (has(960) && has(400))).toBe(true);
     // No customer personal data went to any business.
     for (const s of subs) {
       const req = (await M.repo.readFile(s.id, "request.txt")) || "";
