@@ -191,6 +191,7 @@ export class TenantManager {
       systemPromptExtra,
       brandName: getTenant(tenantId)?.brandName || new URL(meta.siteUrl).hostname.replace(/^www\./, ""),
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
+      hasOwnerAccount: () => !!getTenant(tenantId)?.ownerPasswordHash,
       offerItems: (await loadOffer(tenantId).catch(() => null))?.items || [],
       catalogue: getTenant(tenantId)?.settings?.catalogue || null,
       networkOffers: () => networkOffers(tenantId),

@@ -67,6 +67,8 @@ export interface ChatConfig {
   // The businesses of our network (this one included) that have a structured
   // offer - for "what would this list / job cost?" projects (compare_offers@1).
   networkOffers?: () => Promise<Business[]>;
+  /** Whether the business's owner has a Whisp account (a set password); without one the chat is a demo. */
+  hasOwnerAccount?: () => boolean;
   // Ecosystem broadcast (src/ecosystem/ask.ts): when our own content has nothing
   // on the question, the other businesses of our ecosystem each decide from their
   // own knowledge whether they can answer; their answers come back here.
@@ -344,6 +346,7 @@ export class WebsiteChat {
   private offerItems: OfferItem[] = [];
   private catalogue: ChatConfig["catalogue"] = null;
   private networkOffers?: () => Promise<Business[]>;
+  private hasOwnerAccount?: () => boolean;
   private onInquiry?: (inquiry: Inquiry) => Promise<boolean>;
 
   constructor(
@@ -363,6 +366,7 @@ export class WebsiteChat {
     this.offerItems = config.offerItems || [];
     this.catalogue = config.catalogue || null;
     this.networkOffers = config.networkOffers;
+    this.hasOwnerAccount = config.hasOwnerAccount;
     this.onInquiry = config.onInquiry;
     this.askEcosystem = config.askEcosystem;
     this.ensureQuestionFlow = config.ensureQuestionFlow;
@@ -1059,10 +1063,14 @@ export class WebsiteChat {
     // For the owner: what this chat is, from data (pages read, the date, the price list, the panel's answers, where inquiries go).
     const priced = this.offerItems.filter((i) => i.price_value != null).length;
     const readOn = (() => { const d = Date.parse(this.context.lastUpdated || ""); return Number.isFinite(d) ? new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", day: "numeric", month: "long", year: "numeric" }).format(new Date(d)) : ""; })();
+    // Without an owner account it is a demo nobody has claimed: "the chat run by the firm" and "the owner's data in the panel"
+    // were told to owners of such demos (iteration-4 judges, bostabeton-1, helsen-2).
+    const account = this.hasOwnerAccount ? this.hasOwnerAccount() : true;
     const about = owner ? [
-      `- This is the Whisp chat on the website of ${brand}${this.getAllowedDomain() ? ` (${this.getAllowedDomain()})` : ""}. It answers from ${this.context.pages?.length || this.context.siteMap?.length || 0} pages of that website${readOn ? `, read on ${readOn}` : ""}${this.offerItems.length ? `, with ${this.offerItems.length} offer items read from them (${priced} with a price)` : ", which show no price list"}${this.contextNotes.length ? `, and ${this.contextNotes.length} answers the owner added in the Whisp panel` : ""}.`,
-      "- It cannot change its information itself: the owner corrects it or adds answers in the Whisp panel; changes on the website reach the chat when the website is read again.",
-      "- When a customer wants it, the chat takes their question or order with their contact details and, once they confirm, sends it to the business by e-mail and to the inquiries in the Whisp panel.",
+      `- This is ${account ? "the Whisp chat" : "a Whisp demo chat, made by Whisp and not yet on the business's website and with no owner account,"} for ${brand}${this.getAllowedDomain() ? ` (${this.getAllowedDomain()})` : ""}. It answers from ${this.context.pages?.length || this.context.siteMap?.length || 0} pages of that website${readOn ? `, read on ${readOn}` : ""}${this.offerItems.length ? `, with ${this.offerItems.length} offer items read from them (${priced} with a price)` : ", which show no price list"}${this.contextNotes.length ? `, and ${this.contextNotes.length} answers the owner added in the Whisp panel` : ""}.`,
+      account ? "- It cannot change its information itself: the owner corrects it or adds answers in the Whisp panel; changes on the website reach the chat when the website is read again."
+        : "- It cannot change its information itself: with a Whisp account the owner corrects it or adds answers in the Whisp panel; changes on the website reach the chat when the website is read again.",
+      `- ${account ? "" : "On the website, "}when a customer wants it, the chat takes their question or order with their contact details and, once they confirm, sends it to the business by e-mail and to the inquiries in the Whisp panel.`,
     ].join("\n") : "";
     let system = `You are the website chat assistant of ${brand}. You speak for the business as "we". You answer from ${brand}'s own website and price list${this.contextNotes.length ? " and what the business added in its Whisp panel" : ""}.${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
 ${renderOfficialInfo(this.context.businessProfile)}${notes ? `\n## Answers from the owner\n${notes}\n` : ""}${about ? `\n## About this chat\n${about}\n` : ""}
