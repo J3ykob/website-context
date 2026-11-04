@@ -95,6 +95,9 @@ export interface ChatResponse {
   // ([[gap: ...]] marker or the log_unknown action) — the server logs it to the
   // D1 gap journal that the dashboard's knowledge-gap view reads.
   unknownQuestion?: string;
+  // Not a question to the business (form answers, small talk, a blocked attempt): logged, but not counted in the
+  // owner's "what people ask about" (contact details and "super" ranked as top questions - 2026-11-04).
+  turnKind?: "question" | "form" | "chitchat" | "blocked";
   navigateTo?: string;
   suggestedAction?: { flowId: string; flowName: string; description: string };
   // An "in chat" flow (order / inquiry) in progress: where it stands, for a
@@ -647,7 +650,7 @@ export class WebsiteChat {
     const st = this.packStateOf(sessionKey);
     st.turns++;
     const question = sanitizedMessages.findLast((m) => m.role === "user")?.content || "";
-    if (blocked) return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.blocked], packs: [], noFacts: true });
+    if (blocked) return { ...(await this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.blocked], packs: [], noFacts: true })), turnKind: "blocked" };
 
     // A form left for 30 min is over (as on the other paths) - without falling back to their texts.
     const cs = this.collectSessions.get(sessionKey);
@@ -697,7 +700,7 @@ export class WebsiteChat {
     }
     // An open form / flow / pending choice: its next step (the form's replies are the model's).
     const next = await this.continueSession(sanitizedMessages, sessionKey, formState);
-    if (next) { onToken(next.message); return next; }
+    if (next) { onToken(next.message); return { ...next, turnKind: "form" }; }
 
     const rt = await this.routeTurn(sanitizedMessages, question);
     markTurn(`routed ${rt?.intent || "-"}`);
@@ -705,7 +708,7 @@ export class WebsiteChat {
     if (rt && rt.injection >= (Number(process.env.JEV_INJECTION_MIN) || 0.8)) {
       noteTurn("injection", rt.injection);
       (await import("../security/quota.js")).logAbuse("injection", sessionKey, this.context.tenantId, question.slice(0, 200));
-      return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.blocked], packs: [], noFacts: true });
+      return { ...(await this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.blocked], packs: [], noFacts: true })), turnKind: "blocked" };
     }
     // Starting one of our actions: decided here, so nothing falls back to the other path's texts.
     if (rt && rt.intent === "order" && rt.flow >= 0) {
@@ -776,7 +779,7 @@ export class WebsiteChat {
       const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true } : undefined);
       if (r) { st.calcStarted = true; onToken(r.message); return r; }
     }
-    if (rt?.intent === "chitchat") return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.smalltalk], rt });
+    if (rt?.intent === "chitchat") return { ...(await this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.smalltalk], rt })), turnKind: "chitchat" };
     return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0 });
   }
 

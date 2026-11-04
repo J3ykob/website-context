@@ -127,7 +127,7 @@ export async function logMessage(
   sessionId: string,
   role: "user" | "assistant",
   content: string,
-  meta: { flowInvoked?: string | null; navigatedTo?: string | null; hadToolCall?: boolean; sourcePages?: string[]; domain?: string } = {}
+  meta: { flowInvoked?: string | null; navigatedTo?: string | null; hadToolCall?: boolean; sourcePages?: string[]; domain?: string; intentId?: string | null } = {}
 ): Promise<void> {
   try {
     // id is INTEGER PRIMARY KEY AUTOINCREMENT — do NOT supply it. Passing a UUID
@@ -135,8 +135,8 @@ export async function logMessage(
     // catch below silently swallowed it: conversation logging was dead fleet-wide
     // from 2026-06-05 until this fix (only unknown_questions kept logging).
     await query(
-      "INSERT INTO chat_messages (tenant_id, session_id, role, content, domain, created_at, flow_invoked) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [tenantId, sessionId, role, content, meta.domain || null, new Date().toISOString(), meta.flowInvoked || null]
+      "INSERT INTO chat_messages (tenant_id, session_id, role, content, domain, created_at, flow_invoked, intent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [tenantId, sessionId, role, content, meta.domain || null, new Date().toISOString(), meta.flowInvoked || null, meta.intentId || null]
     );
   } catch (e: any) {
     // Never break chat — but surface it so a silent logging failure can't hide
@@ -332,7 +332,8 @@ export async function assignMessagesToIntent(tenantId: string, messageIds: strin
 export async function getIntentClusters(tenantId: string, limit = 40): Promise<IntentClusterRow[]> {
   try {
     const rows = await query(
-      "SELECT intent_id AS iid, COUNT(*) AS cnt FROM chat_messages WHERE tenant_id = ? AND role = 'user' AND intent_id IS NOT NULL GROUP BY intent_id ORDER BY cnt DESC LIMIT ?",
+      // NOT_A_QUESTION ("-"): form answers, small talk, blocked attempts - logged, never clustered or counted.
+      "SELECT intent_id AS iid, COUNT(*) AS cnt FROM chat_messages WHERE tenant_id = ? AND role = 'user' AND intent_id IS NOT NULL AND intent_id != '-' GROUP BY intent_id ORDER BY cnt DESC LIMIT ?",
       [tenantId, limit]
     );
     return rows.map((r: any) => ({ intentId: String(r.iid), count: Number(r.cnt || 0) }));

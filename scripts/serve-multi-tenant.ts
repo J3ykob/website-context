@@ -1444,7 +1444,8 @@ app.post("/api/chat", async (req, res) => {
       // Single D1 writer for chat messages (logMessage -> chat_messages). Skip
       // self-chat / internal probes so they don't pollute analytics.
       if (!isSelfChat) {
-        logMessage(tenantId, sessionKey, "user", lastUserContent, { domain: tenant.domain }).catch(() => {});
+        // A form answer, small talk or a blocked attempt is not "what people ask about" (intent "-", never clustered).
+        logMessage(tenantId, sessionKey, "user", lastUserContent, { domain: tenant.domain, intentId: response.turnKind && response.turnKind !== "question" ? "-" : null }).catch(() => {});
         logMessage(tenantId, sessionKey, "assistant", response.message, {
           flowInvoked: response.flowSession?.flowId || null,
           navigatedTo: response.navigateTo || null,
