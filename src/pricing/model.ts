@@ -423,8 +423,14 @@ export async function quoteText(pb: PricingBusiness, convo: string): Promise<str
     perNeed.set(l.need || "", n);
     return n <= ALTERNATIVES_MAX;
   });
-  const lines = kept.map((l) => `- ${name(l.item)}${l.alternative ? " (an alternative - not in the total)" : ""}: ${l.status === "price" ? `${zl(l.amount!)} for this request (the customer's quantities, everything in the note included)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
+  // A need with several options (a hall's full wedding vs the shorter "until midnight" package): the options are
+  // given as equals and no total is made of the cheapest - Sosnowy Dwór's chat led with the 5-hour package's
+  // 15 110 zl for "a wedding for 85" (2026-11-04 eval; the wedding itself is 18 085 zl).
+  const several = new Set(kept.filter((l) => l.alternative).map((l) => l.need || ""));
+  const tag = (l: QuoteLine) => (several.has(l.need || "") ? (l.alternative ? " (another option for the same thing)" : " (one option)") : "");
+  const lines = kept.map((l) => `- ${name(l.item)}${tag(l)}: ${l.status === "price" ? `${zl(l.amount!)} for this request (the customer's quantities, everything in the note included)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer"}${l.note ? ` (${l.note})` : ""}`);
   lines.unshift("Each amount already includes everything its note lists (e.g. travel) - nothing of it is added again.");
-  if (q.total) lines.push(`Total (the cheapest option for each thing asked): ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
+  if (several.size) lines.push("No single total: some things asked have several options above - give the options as they are and let the customer choose (or ask which one they mean).");
+  else if (q.total) lines.push(`Total: ${zl(q.total.min)}${q.total.max != null && q.total.max !== q.total.min ? ` - ${zl(q.total.max)}` : ""}`);
   return lines.join("\n");
 }
