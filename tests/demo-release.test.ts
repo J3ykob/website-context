@@ -49,9 +49,13 @@ afterAll(async () => {
 live("a demo nobody has claimed", () => {
   it("gets its calculation without anyone approving it, and nobody is e-mailed", async () => {
     // The case only means something on an unclaimed demo; a member with an owner could hold its part.
-    expect(M.reg.hasOwnerAccount(TENANT), `${TENANT} has an owner account - pick another unclaimed demo`).toBe(false);
+    expect(M.review.hasReviewer(TENANT), `${TENANT} has an owner account - pick another unclaimed demo`).toBe(false);
     expect(M.review.reviewMode(TENANT)).toBe("auto"); // the start notice gets calcStarted, not calcReviewed
-    const owned = (await M.net.networkMembers(TENANT)).filter((m: any) => m.tenantId !== TENANT && M.reg.hasOwnerAccount(m.tenantId)).map((m: any) => m.tenantId);
+    // Every member the broadcast can ask (network/find.ts: all active members of the ecosystem - networkMembers
+    // lists only the 40 newest), except a business that has not joined: its part never waits (ownerFirst).
+    const eco = M.reg.getTenant(TENANT)?.settings?.ecosystem;
+    const members = eco ? M.reg.listTenants().filter((t: any) => t.status === "active" && t.settings?.ecosystem === eco) : [];
+    const owned = members.filter((t: any) => t.id !== TENANT && !M.net.isListed(t.id) && M.review.hasReviewer(t.id)).map((t: any) => t.id);
     expect(owned, "network members with an owner could hold their part for review").toEqual([]);
 
     const chat = await tm.getChatForTenant(TENANT);
@@ -65,9 +69,12 @@ live("a demo nobody has claimed", () => {
       if (k === TURNS.length - 1) {
         expect(r.project?.agent?.status, `T3 did not start the agent: ${r.message}`).toBe("running");
         // Text -> structure by Jev: the notice must not tell the customer that the business checks it first.
-        const a: any = await M.jevAsk({ notice: r.message }, { checks: { type: "noul", instructions: "`notice` is a chat message to a customer whose calculation has just been started. Does it say or imply that the business will check or approve the result before the customer gets it?" } }, 8000);
+        // Asked twice at most: Jev unreachable is not a verdict on the notice.
+        const judge = () => M.jevAsk({ notice: r.message }, { checks: { type: "noul", instructions: "`notice` is a chat message to a customer whose calculation has just been started. Does it say or imply that the business will check or approve the result before the customer gets it?" } }, 8000);
+        const a: any = (await judge()) || (await judge());
         console.log(`[T3 notice] P(the business checks it first) = ${a?.checks?.noul}`);
-        expect(a?.checks?.noul).toBeLessThan(0.5);
+        expect(a?.checks?.noul, "Jev unreachable: the start notice was not judged").toBeTypeOf("number");
+        expect(a.checks.noul).toBeLessThan(0.5);
       }
       if (r.project?.agent?.status !== "running") continue;
       // The run this turn started is delivered (or fails) - never held for an owner.

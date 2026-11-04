@@ -431,6 +431,12 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
       return { status: "review", message: text, projectId };
     }
   }
+  // Going out without its review: the review is closed first, so a link sent earlier answers "already
+  // decided" instead of acting on what the customer gets (releaseReview). First, not once the message is
+  // chosen: a decline with an own message taken on the link in between was dropped - the draft went out
+  // while the page told the owner the customer got their message (2026-11-04 review). A decision that
+  // came first is what goes out.
+  if (rv?.status === "pending" && !(await releaseReview(rv.token).catch(() => false))) rv = (await reviewForRun(projectId, s.runId).catch(() => null)) || rv;
   if (rv?.status === "approved") message = (rv.final || rv.draft || draft).trim();
   else if (rv?.status === "declined") { message = rv.final.trim(); files = []; }
   // Nobody holds it and nobody approved it: not a version the owner sent back for changes (its rework
@@ -445,9 +451,6 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
     const l = await replyLanguage(projectId);
     message = await wordNotice(projectId, s.runId, "couldnot", l, COULD_NOT[l] || COULD_NOT.en, "We could not prepare the result this time. Suggest asking again or contacting the business directly. Promise nothing.");
   }
-  // A review left open by a result that goes out without it is closed, so a link sent earlier answers
-  // "already decided" instead of acting on what the customer already has (review.ts releaseReview).
-  if (rv?.status === "pending") await releaseReview(rv.token).catch(() => {});
   if (!delivered && (await claimMemory(projectId, "delivered", s.runId))) {
     await setMemory(projectId, { ownerLoop: false });
     await onDeliver(message).catch(() => {});

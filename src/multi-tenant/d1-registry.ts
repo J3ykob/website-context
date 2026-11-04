@@ -139,9 +139,11 @@ export function getTenant(id: string): TenantRecord | null {
   return byId.get(id) || null;
 }
 /**
- * Someone owns the business on Whisp: a set password, or a subscription paid for it (the lead-page /
- * panel checkout stores settings.stripeSubscription without a password - src/projects/lead.ts:107-111,
- * src/billing/plan.ts:78). Without either, its chat is a demo nobody has claimed.
+ * Someone owns the business on Whisp: a set password, or a stored subscription id (the lead-page / panel
+ * checkout stores settings.stripeSubscription without a password - src/projects/lead.ts:107-111,
+ * src/billing/plan.ts:78). The id stays after the subscription lapses (only an admin's clearBilling
+ * removes it): whoever paid is still the owner, reachable by e-mail. Whether it is paid now is
+ * plan.ts subscribed(). Without either, its chat is a demo nobody has claimed.
  */
 export function hasOwnerAccount(id: string): boolean {
   const t = byId.get(id);

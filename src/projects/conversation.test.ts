@@ -41,12 +41,16 @@ import { writeFile } from "./repo.js";
 import { ownerFirst, agentDelivery, onRunFinished, CONVERSATION } from "./conversation.js";
 import { openReview, decide, reviewForRun, reviewsForProject, remindLateReviews } from "./review.js";
 import { BUSINESS_REQUEST } from "./network.js";
-import type { AgentRunState } from "./agent.js";
+import { checkOutcome, type AgentRunState } from "./agent.js";
 
 let mem: Database.Database;
+// Once, just before the first statement it matches: something else happening at that moment (a decision on
+// a review link, a D1 read that fails).
+let before: { match: (sql: string, params: any[]) => boolean; run: () => Promise<void> } | null = null;
 // Injected D1 query: statements that return rows (SELECT, ... RETURNING) give them back.
 function makeQuery(db: Database.Database) {
   return async (sql: string, params: any[] = []): Promise<any[]> => {
+    if (before?.match(sql, params)) { const b = before; before = null; await b.run(); }
     const stmt = db.prepare(sql);
     if (stmt.reader) return stmt.all(...params) as any[];
     stmt.run(...params);
@@ -81,6 +85,7 @@ afterAll(() => {
 afterEach(() => {
   delete process.env.AGENT_REVIEW_FORCE;
   delete process.env.AGENT_OWNER_FORCE;
+  before = null;
 });
 
 const run = (over: Partial<AgentRunState> = {}): AgentRunState =>
@@ -209,6 +214,17 @@ describe("agentDelivery: what the customer gets", () => {
     expect((await poll(h.pid)).chat).toEqual([]); // delivered once
   });
 
+  it("a decision taken on the link while a held result goes out: that decision is what the customer gets", async () => {
+    registry.createTenant("demo@race.pl", "https://race.pl");
+    const r = await finished("race_pl");
+    const rv = await openReview(r.pid, "race_pl", r.runId, DRAFT, [SHEET]);
+    // The reviewer declines with an own message after the poll read the review, before it is closed.
+    before = { match: (sql) => sql.includes("status = 'released'"), run: async () => { await decide(rv.token, "declined", { final: "THE REVIEWER'S OWN MESSAGE" }); } };
+    expect(await poll(r.pid)).toEqual({ status: "done", message: "THE REVIEWER'S OWN MESSAGE", files: [], chat: ["THE REVIEWER'S OWN MESSAGE"] });
+    expect(before).toBeNull(); // the decision did land in between
+    expect((await reviewForRun(r.pid, r.runId))?.status).toBe("declined");
+  });
+
   it("a reply flagged as speaking to the business, held before: could not prepare, as no one reviewed it", async () => {
     registry.createTenant("demo@flagged.pl", "https://flagged.pl");
     const f = await finished("flagged_pl", { needsOwner: true });
@@ -278,6 +294,83 @@ describe("the review e-mail and the late-review sweep", () => {
     } finally {
       delete process.env.AGENT_REVIEW_LATE_MIN;
     }
+  });
+
+  // A request to another business of the network: its own project, answered from its data.
+  async function memberAnswer(member: string, memory: Record<string, unknown> = {}) {
+    if (!registry.getTenant("netasker_pl")) registry.createTenant("demo@netasker.pl", "https://netasker.pl");
+    const parent = await conversation("netasker_pl", { networkContinued: true }); // no continuation run here
+    const sub = (await createProject(BUSINESS_REQUEST, { customerSession: `project:${parent}`, initiatorTenantId: member, memory: { parentId: parent, question: "Ile kosztuje wylewka 60 m2?", ...memory } })).id;
+    await writeFile(sub, "odpowiedz.txt", "Wylewka 60 m2: 4 200 zł netto.", "txt", "agent");
+    const runId = `run-${sub}`;
+    await setMemory(sub, { agentRun: run({ runId, files: ["odpowiedz.txt"] }) });
+    await setMemory(parent, { subRequests: [{ id: sub, tenantId: member, label: member, question: "?", status: memory.settled || "waiting", at: new Date().toISOString() }] });
+    return { parent, sub, runId };
+  }
+
+  it("a member business nobody has claimed: its held answer goes back to the asking business once, no e-mail", async () => {
+    process.env.AGENT_REVIEW_LATE_MIN = "0.0001";
+    try {
+      registry.createTenant("biuro@heldmember.pl", "https://heldmember.pl");
+      const m = await memberAnswer("heldmember_pl");
+      await openReview(m.sub, "heldmember_pl", m.runId, "Wylewka 60 m2: 4 200 zł netto.", []); // held before 2026-11-04
+      await new Promise((ok) => setTimeout(ok, 20));
+      await remindLateReviews();
+      await remindLateReviews();
+      expect((await getProject(m.sub))?.memory.settled).toBe("answered");
+      expect(((await getProject(m.parent))?.memory.subRequests as any[])[0].status).toBe("answered");
+      expect((await kinds(m.parent)).filter((k) => k === "business_answered").length).toBe(1);
+      expect((await reviewForRun(m.sub, m.runId))?.status).toBe("released");
+      expect(await kinds(m.sub)).not.toContain("review_late");
+      expect([...sent.review, ...sent.quote]).not.toContain("biuro@heldmember.pl");
+    } finally {
+      delete process.env.AGENT_REVIEW_LATE_MIN;
+    }
+  });
+
+  it("a business that has not joined: its invite page is never taken for a demo's held result, also when its project can't be read", async () => {
+    process.env.AGENT_REVIEW_LATE_MIN = "0.0001";
+    try {
+      registry.createTenant("biuro@invited.pl", "https://invited.pl");
+      // Answered from its public data and settled at once; the invite page is a review opened without an e-mail (invite.ts).
+      const m = await memberAnswer("invited_pl", { listed: true, settled: "answered" });
+      const rv = await openReview(m.sub, "invited_pl", m.runId, "Wylewka 60 m2: 4 200 zł netto.", [], false);
+      await new Promise((ok) => setTimeout(ok, 20));
+      const remindedAt = () => (mem.prepare("SELECT reminded_at FROM project_reviews WHERE token = ?").get(rv.token) as any).reminded_at;
+      // The sweep's read of the project fails (a D1 timeout): left for the next sweep, nothing decided.
+      before = { match: (sql, params) => sql.startsWith("SELECT * FROM projects WHERE id = ?") && params[0] === m.sub, run: async () => { throw new Error("D1 timeout"); } };
+      await remindLateReviews();
+      expect(before).toBeNull();
+      expect(remindedAt()).toBeNull();
+      // Read: an invite, not a result the customer waits for - claimed once and left as it is.
+      await remindLateReviews();
+      expect(remindedAt()).not.toBeNull();
+      expect((await reviewForRun(m.sub, m.runId))?.status).toBe("pending");
+      // Never the assistant's answer recorded as the business's own confirmation.
+      expect(await kinds(m.parent)).not.toContain("business_confirmed");
+      expect((await getProject(m.sub))?.memory.confirmedAt).toBeUndefined();
+    } finally {
+      delete process.env.AGENT_REVIEW_LATE_MIN;
+    }
+  });
+});
+
+describe("checkOutcome: a reply flagged as speaking to the business", () => {
+  // Two failed checks: the customer-only check and one of the planner's own criteria (never fails a run).
+  const flagged = { failed: 2, customerOnlyFailed: true, specFailed: 1 };
+  it("a customer's result on a demo nobody has claimed: a failed check - the repair pass, then could not prepare", () => {
+    expect(checkOutcome(flagged, true, false)).toEqual({ hard: 1, needsOwner: false });
+  });
+  it("a customer's result of a business with an owner: not a failed run, the owner sees it first", () => {
+    expect(checkOutcome(flagged, true, true)).toEqual({ hard: 0, needsOwner: true });
+  });
+  it("an answer to another business's request: unchanged, whoever owns the business", () => {
+    expect(checkOutcome(flagged, false, false)).toEqual({ hard: 0, needsOwner: true });
+    expect(checkOutcome(flagged, false, true)).toEqual({ hard: 0, needsOwner: true });
+  });
+  it("other checks and no verification", () => {
+    expect(checkOutcome({ failed: 1, customerOnlyFailed: false, specFailed: 0 }, true, false)).toEqual({ hard: 1, needsOwner: false });
+    expect(checkOutcome(null, true, true)).toEqual({ hard: 0, needsOwner: false });
   });
 });
 

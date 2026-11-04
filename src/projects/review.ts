@@ -169,8 +169,10 @@ export const reviewLateMs = () => (Number(process.env.AGENT_REVIEW_LATE_MIN) || 
  * customer has left the page (they see it when they come back; the result follows once decided).
  * A business with no owner account is not reminded: a result it held (before 2026-11-04) is released
  * instead, through the server's own delivery (the e-mail / SMS the customer chose). Only reviews not
- * reminded yet come here - those already reminded are released when the customer's chat or status page
- * next asks for the result (agentDelivery).
+ * reminded yet come here. Of those already reminded, a customer's result is released when their chat or
+ * status page next asks for it (agentDelivery, without e-mail or SMS); a business's answer to another
+ * business's request is not - the customer's request counts that part as unanswered once its 24 h
+ * deadline has passed (network.ts checkDeadlines, on the customer's next poll).
  */
 export async function remindLateReviews(): Promise<number> {
   await ensureSchema();
@@ -178,21 +180,30 @@ export async function remindLateReviews(): Promise<number> {
   const since = new Date(Date.now() - REVIEW_TTL_DAYS * 86_400_000).toISOString();
   const late = (await d1Query("SELECT * FROM project_reviews WHERE status = 'pending' AND reminded_at IS NULL AND created_at < ? AND created_at > ? LIMIT 20", [before, since])).map(row);
   for (const r of late) {
+    // The project first, before the claim: a read that failed is tried again at the next sweep. Read as no
+    // project, a listed business's invite or an owner-quote review would pass for a demo's held result -
+    // the assistant's answer recorded as the business's confirmation, or sent to the customer as its offer
+    // (network.ts settle; 2026-11-04 review).
+    const project = await getProject(r.projectId).catch(() => undefined);
+    if (project === undefined) continue;
     const claimed = await d1Query("UPDATE project_reviews SET reminded_at = ? WHERE token = ? AND reminded_at IS NULL RETURNING token", [new Date().toISOString(), r.token]);
     if (!claimed.length) continue; // another instance took it
     // Not a result the customer waits for: an invite's page (a business that has not joined - its own
     // email and lead page) or an owner asked for a price after the customer's result. The "awaiting
     // approval" reminder would be wrong there (it went to listed businesses' invite reviews until 2026-10-29).
-    const pm = (await getProject(r.projectId).catch(() => null))?.memory;
-    if ((pm?.listed && !pm.ownerLoop) || pm?.ownerQuote) continue;
+    // A project that no longer exists has nothing to remind of.
+    const pm = project?.memory;
+    if (!pm || (pm.listed && !pm.ownerLoop) || pm.ownerQuote) continue;
     // A demo nobody has claimed has nobody to remind (its results were held only before the 2026-11-04
     // rule): decided again now - a customer's result delivered, a business's answer settled - once
-    // (reminded_at is claimed above), with no review_late and no e-mail. The review is closed here too:
-    // a business's answer, or a run the project has since moved past, has no delivery that closes it.
-    if (!pm?.listed && !hasReviewer(r.tenantId)) {
-      const { onRunFinished } = await import("./conversation.js");
-      await onRunFinished(r.projectId).catch(() => {});
-      await releaseReview(r.token).catch(() => {});
+    // (reminded_at is claimed above), with no review_late and no e-mail. The review is closed first: a
+    // business's answer, or a run the project has since moved past, has no delivery that closes it, and a
+    // decision taken on the link in the meantime is then carried out by its own route, not dropped.
+    if (!pm.listed && !hasReviewer(r.tenantId)) {
+      if (await releaseReview(r.token).catch(() => false)) {
+        const { onRunFinished } = await import("./conversation.js");
+        await onRunFinished(r.projectId).catch(() => {});
+      }
       continue;
     }
     await addEvent(r.projectId, { kind: "review_late", actor: "system", data: { runId: r.runId, waitedMin: Math.round((Date.now() - Date.parse(r.createdAt)) / 60_000) } }).catch(() => {});
@@ -207,12 +218,14 @@ export async function remindLateReviews(): Promise<number> {
  * A result went out without waiting for its review (nobody to wait for, or the customer already has it):
  * the review is closed, so a link sent earlier answers "already decided" instead of acting on it - an
  * approval or own message sent nothing, "ask for changes" sent a second, reworked result (2026-11-04:
- * review links had gone to demos' addresses before demos stopped waiting). Once per review.
+ * review links had gone to demos' addresses before demos stopped waiting). Once per review: false when it
+ * was no longer pending - decided on its link (decide takes the same row) or closed by another caller.
  */
-export async function releaseReview(token: string): Promise<void> {
+export async function releaseReview(token: string): Promise<boolean> {
   await ensureSchema();
   const rows = await d1Query("UPDATE project_reviews SET status = 'released', decided_at = ? WHERE token = ? AND status = 'pending' RETURNING project_id, run_id", [new Date().toISOString(), token]);
   if (rows[0]) await addEvent(rows[0].project_id, { kind: "review_released", actor: "system", data: { runId: rows[0].run_id } }).catch(() => {});
+  return rows.length > 0;
 }
 
 export async function decide(token: string, status: Exclude<ReviewStatus, "pending" | "released">, fields: { final?: string; note?: string }): Promise<Review | null> {

@@ -23,7 +23,7 @@ import { projectsForTenant, projectDetail } from "./store.js";
 import { listFiles, listRequirements, readFile, readFileBuffer, writeFile } from "./repo.js";
 import { agentEnabled, agentStatus } from "./agent.js";
 import { agentDelivery, reworkWithGuidance, businessQuestions, deliverNow, setCustomerContact, projectByLink, NOTIFY, CUSTOMER_DIR } from "./conversation.js";
-import { reviewByToken, decide, timeline } from "./review.js";
+import { reviewByToken, decide, timeline, hasReviewer } from "./review.js";
 import { getTenant, updateTenant } from "../multi-tenant/d1-registry.js";
 import { resolve } from "path";
 import { getProject } from "./store.js";
@@ -112,9 +112,11 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
   });
 
   // The stored choice: reviewMode reads "auto" until the business has an owner account, so an "approve"
-  // an admin saved on a demo would read back as unsaved.
+  // an admin saved on a demo would read back as unsaved. `owner`: whether the choice applies now - only an
+  // admin's session opens the panel of a business without an owner account, and it showed "I approve
+  // first" as active while its results went out unreviewed (2026-11-04 review).
   app.get("/api/dashboard/agent-review", deps.auth, (req, res) => {
-    res.json({ mode: getTenant(tid(req))?.settings?.agentReview === "approve" ? "approve" : "auto" });
+    res.json({ mode: getTenant(tid(req))?.settings?.agentReview === "approve" ? "approve" : "auto", owner: hasReviewer(tid(req)) });
   });
 
   app.put("/api/dashboard/agent-review", deps.auth, (req, res) => {

@@ -811,6 +811,7 @@
           <p style="margin:0 0 12px;color:#94a3b8;font-size:14px" data-i18n="review.intro">When a customer asks for real work - a calculation, a comparison, a plan or a document - the assistant prepares it. Choose whether it reaches the customer right away or after you approve it.</p>
           <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0;cursor:pointer"><input type="radio" name="agent-review" value="auto" onchange="saveAgentReview(this.value)"> <span><b data-i18n="review.auto">Send automatically</b><br><span style="color:#94a3b8;font-size:13px" data-i18n="review.autoHint">After the automatic checks (numbers, language, completeness).</span></span></label>
           <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0;cursor:pointer"><input type="radio" name="agent-review" value="approve" onchange="saveAgentReview(this.value)"> <span><b data-i18n="review.approve">I approve first</b><br><span style="color:#94a3b8;font-size:13px" data-i18n="review.approveHint">You get an email with a link: send as is, edit, ask the assistant for changes, or reply in your own words.</span></span></label>
+          <p id="review-unclaimed" style="display:none;margin:10px 0 0;color:var(--amber);font-size:13px" data-i18n="review.unclaimed">Nobody has claimed this business's account yet (no password, no subscription): its results reach customers after the automatic checks, and this choice applies once the account is claimed.</p>
         </div>
       </div>
     </div>
@@ -988,6 +989,7 @@
         "review.autoHint": "After the automatic checks (numbers, language, completeness).",
         "review.approve": "I approve first",
         "review.approveHint": "You get an email with a link: send as is, edit, ask the assistant for changes, or reply in your own words.",
+        "review.unclaimed": "Nobody has claimed this business's account yet (no password, no subscription): its results reach customers after the automatic checks, and this choice applies once the account is claimed.",
         "kb.title": "Knowledge Base",
         "kb.searchPh": "Search knowledge...",
         "kb.noMatch": function(p) { return 'No knowledge matches "' + p.q + '".'; },
@@ -1151,6 +1153,7 @@
         "review.autoHint": "Po automatycznym sprawdzeniu (liczby, język, kompletność).",
         "review.approve": "Najpierw akceptuję",
         "review.approveHint": "Dostajesz e-mail z linkiem - możesz wysłać bez zmian, poprawić, poprosić czat o zmiany albo odpowiedzieć własnymi słowami.",
+        "review.unclaimed": "Nikt jeszcze nie przejął konta tej firmy (brak hasła i subskrypcji): wyniki trafiają do klientów po automatycznym sprawdzeniu, a ten wybór zacznie obowiązywać po przejęciu konta.",
         "kb.title": "Wiedza",
         "kb.searchPh": "Szukaj w wiedzy...",
         "kb.noMatch": function(p) { return "Nic w wiedzy nie pasuje do „" + p.q + "”."; },
@@ -1535,6 +1538,8 @@
         var res = await authFetch(API + "/api/dashboard/agent-review");
         var d = await res.json();
         document.querySelectorAll('input[name="agent-review"]').forEach(function (r) { r.checked = r.value === d.mode; });
+        // No owner account (only an admin's session gets here): the choice waits for the claim.
+        document.getElementById("review-unclaimed").style.display = d.owner === false ? "" : "none";
       } catch (e) {}
     }
     async function saveAgentReview(mode) {
