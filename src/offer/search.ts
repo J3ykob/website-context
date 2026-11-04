@@ -86,7 +86,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
     const near = (text: string, k: number) => (opts.tenant ? v.nearestItems(opts.tenant, items, text, k) : v.nearestOf(items, text, k));
     const [whole, parts] = await Promise.all([
       near(question, SHORTLIST),
-      opts.onePart ? Promise.resolve([] as string[]) : import("../projects/broadcast.js").then((b) => b.splitNeed(question)).catch(() => [] as string[]),
+      opts.onePart ? Promise.resolve([] as string[]) : import("../projects/broadcast.js").then((b) => b.splitNeed(question, opts.tenant)).catch(() => [] as string[]),
     ]);
     if (!whole) return null;
     // A one-part request too: the part is in Polish, the language of the items - a Ukrainian "віброплита"

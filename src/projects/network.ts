@@ -49,6 +49,16 @@ export function businessLabel(tenantId: string): string {
   return t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId;
 }
 
+/**
+ * The business's one-line description - its site card's "place · kind" label and tagline ("Warszawa · DJ, wodzirej i
+ * konferansjer - DJ, wodzirej i konferansjer na wesela..."): whom a customer writes to, for reading what they ask for
+ * (the split, src/network/coverage.ts). "" when it has no site card.
+ */
+export function businessLine(tenantId: string): string {
+  const card = getTenant(tenantId)?.settings?.siteCard || {};
+  return [card.eyebrow, card.tagline].filter((x: unknown): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim()).join(" - ").slice(0, 300);
+}
+
 /** The network the business belongs to (itself included), with what each member does. */
 export async function networkMembers(tenantId: string): Promise<NetworkMember[]> {
   const self = getTenant(tenantId);
@@ -153,6 +163,12 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
       if (ownParts.length) qs[`o${k}`] = { type: "noul", instructions: `A request to another business: "${e.q.slice(0, 600)}". Does it ask that business about any of \`own_parts\` (what the business sending it offers itself) - its price, supply or availability?` };
     });
     const a = await jevAsk({ conversation, ...(ownParts.length ? { own_parts: ownParts } : {}) }, qs, 10_000);
+    // Fail closed: whether a request also asks about the business's own parts could not be checked - none goes out (those
+    // parts stay to be quoted; a later round asks again). Without own parts, as before: sent unchecked.
+    if (!a && ownParts.length) {
+      await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped: entries.length, unchecked: true } });
+      return false;
+    }
     if (a) {
       byTenant.clear();
       let ownAsked = 0;

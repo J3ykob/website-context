@@ -184,9 +184,16 @@ Output {"name": "..."}: the name of the ONE specific product or service from the
  * Whether what the customer asks for is part of this business's own offer, judging only by its own
  * information: Jev's distribution over offered / several / not_offered / unknown, null when it could not be asked.
  * Whether it is offered is a classification: Jev (stable across runs; the answer model flip-flopped).
+ * message: the customer's own words, when `request` is one part of them (src/network/coverage.ts).
+ * The kind, not the amount (2026-11-04): Bosta's six passages were all about its HydroBeton, yet "permeable concrete for
+ * a driveway, 25 m², 2.5 m³" came out not_offered 0.44-0.53 (the small amount; the customer's "taką małą ilość" pushed it
+ * to 0.58); asked about the kind with the customer's words, offered 0.95-1.00 - while photovoltaics at a solar-thermal
+ * installer went from not_offered 0.60 to 0.77-0.90, and a venue's photographer, a formwork firm's concrete, a bathroom
+ * salon's windows and a photographer's DJ stayed below offered 0.25 (probe, 13 parts).
  */
-export async function offeredOdds(request: string, passages: string[]): Promise<Record<string, number> | null> {
-  const a = await jevAsk({ business_information: passages, customer_request: request }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` part of the business's offer?", criteria: {
+export async function offeredOdds(request: string, passages: string[], message?: string): Promise<Record<string, number> | null> {
+  const asked = message ? `${request}\n(słowa klienta: "${message.slice(0, 1500)}")` : request;
+  const a = await jevAsk({ business_information: passages, customer_request: asked }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` - that kind of product or service, whatever the quantity, date or place - part of the business's offer?", criteria: {
     // A fee, a rule or a mention connected with it is not the offer: a venue's "Obsługa (np. foto, kamera) 120 zł" (a charge per
     // vendor) was read as its own photographer - by the old "ours" question in chain test W3, and by this one in the
     // 2026-11-04 coverage smoke ("usługa fotografa": offered 0.80).

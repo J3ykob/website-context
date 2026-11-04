@@ -11,14 +11,16 @@ import type { OfferItem } from "../offer/store.js";
 const MODEL = () => process.env.NETWORK_MODEL || "deepseek/deepseek-v4.1-flash";
 const PICKS = 3;   // offers picked per part
 const MAX_PARTS = 8;
+// The project's own coverage (when the chat gave none): a cold offer's vectors took 19.6-23.2 s (romax-3, 2026-11-04);
+// a hung page search has no timeout of its own. Late = every part the business's (src/network/coverage.ts).
+const BROADCAST_COVERAGE_MS = 60_000;
 
 export interface NetworkOffer { tenantId: string; part: number; precise: boolean; text: string; items: OfferItem[] }
 /** own[k]: part k is the business's own (coverage) - its picks are that business alone. */
 export interface Broadcast { parts: string[]; own: boolean[]; answered: number; declined: number; picked: NetworkOffer[]; ms: number }
-/** The request as parts; of[k] = the part whose product part k only goes with (its delivery, assembly...), else null. */
-export interface Split { parts: string[]; of: (number | null)[] }
 
-async function llmJson(system: string, user: string, maxTokens = 1200): Promise<any> {
+/** One JSON answer of the network's model (the split, a hand-off's request); null when it could not be asked. */
+export async function llmJson(system: string, user: string, maxTokens = 1200): Promise<any> {
   for (let k = 0; k < 2; k++) {
     try {
       const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -36,75 +38,68 @@ async function llmJson(system: string, user: string, maxTokens = 1200): Promise<
 
 // "po polsku" alone left a Ukrainian request Ukrainian ("Оренда віброплити...") - and the businesses' offers are Polish
 // (2026-11-04: 9 messages in 6 languages, all Polish with the sentence on other languages).
-// "of" (2026-11-04): a part that only goes with another part's product is the same business's when the product is
-// (src/network/coverage.ts) - Łazy's delivery and pump for its own concrete, a florist's sash and delivery for its wreath.
-// Agent rule 9 said it only as prompt text, and the chat had no way to know it.
-// What the customer says a thing is for stays in its part, and what they only mention is no part (2026-11-04 smoke of the
-// coverage): "panele słoneczne - chodzi mi o prąd" lost the "prąd" that tells photovoltaics from Insanit's solar thermal
-// (insanit-1); "wchodzimy na salę o 17" became a wedding hall to find for a DJ's customer (djmw-2) in 3 of 3 splits with
-// "only what they ask for, not what they only mention", 0 of 3 with "what they want to get - buy, rent or have done";
-// "robicie też dj-a?" (asking whether the business does it) is a request too - one wording returned no parts for it.
-const SPLIT = `Rozpisujesz prośbę klienta na części, o które sieć firm ma złożyć oferty. Zwróć JSON {"parts": ["..."], "of": [...]}:
+// What the customer says a thing is for stays in its part: "panele słoneczne - chodzi mi o prąd" lost the "prąd" that tells
+// photovoltaics from Insanit's solar thermal (insanit-1, 2026-11-04 smoke).
+// Whom the customer writes to (the business's one-line description, the user message's first line) settles what is asked
+// (2026-11-04, deepseek-v4.1-flash pinned, probe draws + smoke runs of this wording): a DJ's customer's "wchodzimy na salę
+// o 17 i chcemy żeby grało do 5 rano" was a hall to find, or "organizacja wesela", in 3 of 7 splits without it - one DJ
+// part in 5 of 5 with it; "new floors with underfloor heating" no more an installer at a screed maker (0 of 5). "od tej
+// firmy albo od innej": without it a photographer's "robicie też dj-a? a jak nie, polecicie kogoś?" got no parts in 1 of 5
+// (in 11 of 11 with the description elsewhere in the prompt), with it 0 of 5. The add-on index ("of": a part's delivery,
+// assembly, pumping...) is no longer asked here: its sentence and example list added parts nobody asked for (a heating
+// installer 4-6 of 6, a pump for "z dowozem" 5-6 of 6, 0 of 6 without it) - src/network/coverage.ts asks Jev instead.
+const SPLIT = `Rozpisujesz prośbę klienta do firmy na części, o które sieć firm ma złożyć oferty. Zwróć JSON {"parts": ["..."]}:
 jedna część = jeden produkt lub usługa, z ilościami, wymiarami, czasem i tym, co klient mówi o jego rodzaju lub
 przeznaczeniu (przelicz oczywiste: wymiary -> powierzchnia lub objętość, dni tygodnia -> liczba dób). Części piszesz
 zawsze po polsku, także gdy klient pisze w innym języku: produkty i usługi nazywasz tak, jak nazywają je polskie firmy
 w swoich ofertach. Bez danych osobowych klienta (imię, nazwisko, telefon, e-mail, dokładny adres - zostaw najwyżej
 miejscowość lub dzielnicę).
-Tylko to, co klient chce dostać - kupić, wynająć albo zlecić (także gdy pyta, czy firma to ma lub robi); nie to, co już
-ma albo tylko wspomina (np. salę, w której będzie impreza, dom, w którym trwa remont).
-Gdy wiadomość nie prosi o żaden produkt ani usługę: {"parts": [], "of": []}.
-"of" - dla każdej części numer (od 0) części, z której produktem ta część tylko idzie (jego dowóz, montaż, instalacja,
-transport, pompowanie, akcesorium), inaczej null.`;
+Tylko to, co klient chce dostać - kupić, wynająć albo zlecić - od tej firmy albo od innej (także gdy pyta, czy firma to
+ma lub robi). Gdy wiadomość nie prosi o żaden produkt ani usługę: {"parts": []}.`;
 
-/** The request as parts the network can quote (neutral, without personal data). */
-export async function splitNeed(need: string): Promise<string[]> {
-  return (await splitParts(need)).parts;
-}
+const normNeed = (need: string) => need.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 3000);
 
-/** The parts with the add-on index (see Split). */
-export async function splitParts(need: string): Promise<Split> {
-  // The chat's page search, its item matcher and the coverage ask for the same split at the same moment: one model call.
-  const k = need.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 3000);
+/**
+ * The request as parts the network can quote (neutral, without personal data). tenantId: the business the customer
+ * writes to - its one-line description frames the reading. Rejects when the model could not be asked (nothing is
+ * stored, the next call asks again), so a failure is never read as "asks for nothing".
+ */
+export async function splitNeed(need: string, tenantId?: string): Promise<string[]> {
+  const about = tenantId ? (await import("./network.js")).businessLine(tenantId) : "";
+  // The chat's page search, its item matcher, the coverage and the network search ask for the same split at the same
+  // moment: one model call.
+  const k = `${about}\n${normNeed(need)}`;
   let p = splitInFlight.get(k);
-  if (!p) { p = splitOnce(need).finally(() => splitInFlight.delete(k)); splitInFlight.set(k, p); }
+  if (!p) { p = splitOnce(need, about).finally(() => splitInFlight.delete(k)); splitInFlight.set(k, p); }
   return p;
 }
-const splitInFlight = new Map<string, Promise<Split>>();
+const splitInFlight = new Map<string, Promise<string[]>>();
 
-async function splitOnce(need: string): Promise<Split> {
-  // Stored per normalised request: hosted models are not repeatable even at temperature 0 with a fixed
-  // provider and seed (measured 2026-10-30: 2 different splits in 4 calls), so the same request is split
-  // once and the split reused - every later step sees the same parts.
-  const norm = need.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 3000);
+async function splitOnce(need: string, about: string): Promise<string[]> {
+  // Stored per business description + normalised request: hosted models are not repeatable even at temperature 0 with a
+  // fixed provider and seed (measured 2026-10-30: 2 different splits in 4 calls), so the same request is split once and
+  // the split reused - every later step sees the same parts.
   const { createHash } = await import("crypto");
-  // v4: what the customer only mentions is no part (2026-11-04, after the coverage smoke - a v3 split stored before that
-  // wording is not reused); v3: "of"; v2: parts always in Polish.
-  const key = `decisions/split/${createHash("sha1").update(`v4\n${norm}`).digest("hex")}.json`;
+  // v5: the business's description, no "of" (2026-11-04); v4: "what the customer wants to get"; v3: "of"; v2: Polish.
+  const key = `decisions/split/${createHash("sha1").update(`v5\n${about}\n${normNeed(need)}`).digest("hex")}.json`;
   const hit = splitMemo.get(key);
   if (hit) return hit;
   const { downloadFromR2, uploadToR2 } = await import("../storage/r2.js");
   const stored = await downloadFromR2(key).then((b) => (b ? JSON.parse(b.toString("utf-8")) : null)).catch(() => null);
-  if (Array.isArray(stored?.parts) && Array.isArray(stored?.of) && stored.of.length === stored.parts.length) { splitMemo.set(key, stored); return stored; }
-  const j = await llmJson(SPLIT, need.slice(0, 3000), 800);
-  if (!j) return { parts: [], of: [] }; // the model failed: nothing stored, the next call tries again
-  const raw: unknown[] = Array.isArray(j?.parts) ? j.parts : [];
-  const rawOf: unknown[] = Array.isArray(j?.of) ? j.of : [];
-  // The parts kept (and their indices in the model's list): "of" points into the model's list, so it is mapped
-  // onto the kept parts; a pointer to a dropped part, to itself or out of range is null.
-  const kept: number[] = [];
-  raw.forEach((p, i) => { if (typeof p === "string" && p.trim().length > 2 && kept.length < MAX_PARTS) kept.push(i); });
-  const at = new Map(kept.map((i, k) => [i, k]));
-  const split: Split = {
-    parts: kept.map((i) => (raw[i] as string).trim().slice(0, 300)),
-    of: kept.map((i, k) => { const t = rawOf[i]; const m = typeof t === "number" && Number.isInteger(t) ? at.get(t) : undefined; return m !== undefined && m !== k ? m : null; }),
-  };
+  if (Array.isArray(stored?.parts) && stored.parts.length) { splitMemo.set(key, stored.parts); return stored.parts; }
+  const j = await llmJson(SPLIT, about ? `Klient pisze do firmy: ${about}\n\n${need.slice(0, 3000)}` : need.slice(0, 3000), 800);
+  if (!j) throw new Error("the split model could not be asked");
+  const parts = (Array.isArray(j?.parts) ? j.parts : []).filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 2).map((p: string) => p.trim().slice(0, 300)).slice(0, MAX_PARTS);
+  (await import("../llm/decision-log.js")).logDecision("split", MODEL(), { need: need.slice(0, 3000), about }, parts);
+  // "Asks for nothing" is not kept as the decision: one draw left a real request without parts (above), and kept it
+  // would decide that request for good.
+  if (!parts.length) return parts;
   if (splitMemo.size > 5000) splitMemo.clear();
-  splitMemo.set(key, split);
-  (await import("../llm/decision-log.js")).logDecision("split", MODEL(), { need: need.slice(0, 3000) }, split);
-  await uploadToR2(key, JSON.stringify(split), "application/json").catch(() => {});
-  return split;
+  splitMemo.set(key, parts);
+  await uploadToR2(key, JSON.stringify({ parts }), "application/json").catch(() => {});
+  return parts;
 }
-const splitMemo = new Map<string, Split>();
+const splitMemo = new Map<string, string[]>();
 
 /**
  * The chat's coverage of the request (src/network/coverage.ts), as agentTurn keeps it in the project's memory:
@@ -134,14 +129,18 @@ export async function broadcastNeed(need: string, tenantIds: string[], ownFirst?
   const { loadOffer, renderItem } = await import("../offer/store.js");
   const offer = (await loadOffer(host).catch(() => null))?.items || [];
   let parts: string[], own: boolean[], items: OfferItem[][];
-  if (usable(given)) {
+  if (given) {
+    // The chat's decision, also when it has no parts (the request named nothing, or it was not decided in time): no
+    // network then - the project does what the chat's turn decided.
+    if (!usable(given)) return none();
     // Its confirmed items by id, from its offer as it is now (an item removed since is gone).
     const byId = new Map(offer.map((i) => [i.id, i]));
     ({ parts, own } = given);
     items = parts.map((_, k) => (own[k] ? (given.items?.[k] || []).map((id) => byId.get(id)).filter((i): i is OfferItem => !!i) : []));
   } else {
+    // In the background nobody waits on the first word: the decision may take longer than in the chat (BROADCAST_COVERAGE_MS).
     const { coverage } = await import("../network/coverage.js");
-    const c = await coverage(host, need, { items: offer }).catch(() => null);
+    const c = await coverage(host, need, { items: offer, maxMs: BROADCAST_COVERAGE_MS }).catch(() => null);
     if (!c?.parts.length) return none();
     ({ parts, own, items } = c);
   }
