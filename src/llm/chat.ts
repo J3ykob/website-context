@@ -721,7 +721,8 @@ export class WebsiteChat {
     const rt = await this.routeTurn(sanitizedMessages, question);
     markTurn(`routed ${rt?.intent || "-"}`);
     // The owner or staff testing their chat (kept for the conversation once Jev is sure): answered as their chat, not as a customer.
-    if (rt && rt.owner >= (Number(process.env.JEV_OWNER_MIN) || 0.6)) st.owner = true;
+    // 0.5: the commonest owner opening ("co to jest? skąd wiesz rzeczy o mojej firmie?") scored 0.52-0.66 across runs.
+    if (rt && rt.owner >= (Number(process.env.JEV_OWNER_MIN) || 0.5)) st.owner = true;
     if (rt) noteTurn("owner", { score: rt.owner, owner: !!st.owner });
     // An attempt on the assistant itself (any language, Jev): answered as a blocked message - no facts, no tools.
     if (rt && rt.injection >= (Number(process.env.JEV_INJECTION_MIN) || 0.8)) {
