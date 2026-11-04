@@ -63,7 +63,7 @@ export async function jevAsk(state: unknown, questions: Record<string, JevQuesti
     if (!answers || typeof answers !== "object") throw new Error("no answers");
     const u = jevUsage.getStore();
     if (u) { u.inputTokens += Number(json?.usage?.input_tokens) || 0; u.calls++; }
-    countJev(Number(json?.usage?.input_tokens) || 0, t0);
+    countJev(Number(json?.usage?.input_tokens) || 0, t0, Object.keys(questions).slice(0, 4).join(","));
     jevOutcome(true);
     logDecision("jev", String(json?.model || process.env.JEV_MODEL || "jev-latest"), { state, questions }, answers);
     return answers;

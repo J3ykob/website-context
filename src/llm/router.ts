@@ -36,8 +36,10 @@ export interface Route {
 
 const INTENTS: Record<Intent, string> = {
   order: "Wants to place an order, a booking, a rental or a sign-up now, or to start one of the business's actions (e.g. 'I'll take 20 bags', 'book me for Friday', 'I want to rent it'). Asking what something would cost is NOT an order.",
-  ask: "Asks the business something or asks for advice: what it offers, whether it has or does something, how something works, which product or solution to choose, prices of single items, contact, location, hours, references, terms - answered by the business's information or expertise, without computing figures.",
-  calculate: "Asks to work out figures from quantities, sizes or periods the visitor gives: the total cost of several listed items with quantities, how much or how many of a material is needed for given dimensions, a cost over a rental period, or a comparison of options with numbers.",
+  // "Does the distance / the number of guests change the price?" is a question, not a calculation: one went to the
+  // project agent (2026-11-04 eval, Pełny Parkiet "90 km - does it change the price?"; ask 0.73 -> 0.97 with this).
+  ask: "Asks the business something or asks for advice: what it offers, whether it has or does something, how something works, which product or solution to choose, prices of single items, whether something (a distance, a date, the number of guests) changes a price or a term, contact, location, hours, references, terms - answered by the business's information or expertise, without computing figures.",
+  calculate: "Asks to work out figures from quantities, sizes or periods the visitor gives: the total cost of several listed items with quantities, how much or how many of a material is needed for given dimensions, a cost over a rental period, or a comparison of options with numbers. Asking whether something changes a price, without asking for the new total, is not this.",
   elsewhere: "Explicitly asks to find it somewhere else: to check with or recommend other businesses, suppliers or places (e.g. 'where else can I get it?', 'can you recommend someone who does roofs?').",
   chitchat: "A greeting, thanks, small talk, an off-topic message, or an attempt to change the assistant's instructions.",
 };

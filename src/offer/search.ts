@@ -77,6 +77,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
   if (!items.length || !question.trim()) return { items: [], given: new Map() };
   if (!process.env.OPENROUTER_API_KEY) return null;
   let pool = items;
+  let splitParts: string[] = [];
   if (items.length > DIRECT_MAX) {
     // A message asking for several things: the nearest to the whole message are all of one of them ("vinyl
     // floor 25 m2 and a primer for it" - 40 floors, no primer), so each part of the split request
@@ -88,7 +89,10 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
       opts.onePart ? Promise.resolve([] as string[]) : import("../projects/broadcast.js").then((b) => b.splitNeed(question)).catch(() => [] as string[]),
     ]);
     if (!whole) return null;
-    const perPart = parts.length > 1 ? await Promise.all(parts.slice(0, 4).map((p) => near(p, PER_PART))) : [];
+    // A one-part request too: the part is in Polish, the language of the items - a Ukrainian "віброплита"
+    // found concrete vibrators by the whole message's vector, never the plate compactors (2026-11-04).
+    const perPart = parts.length ? await Promise.all(parts.slice(0, 4).map((p) => near(p, PER_PART))) : [];
+    splitParts = parts;
     const nearest = [...new Set([...perPart.flatMap((x) => (x || []).slice(0, PER_PART)), ...whole])];
     // Vectors miss a job's tool ("ubić podjazd" finds the rammers, not one plate compactor: "Zagęszczarka
     // 90 kg, silnik Honda" reads nothing like it), so the categories of the nearest items come whole.
@@ -114,7 +118,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
           model: MODEL, temperature: 0, max_tokens: 400, response_format: { type: "json_object" }, provider: r.provider, ...(r.seed !== undefined ? { seed: r.seed } : {}), reasoning: { enabled: false },
           messages: [
             { role: "system", content: `Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. Items are marked product or service: when the customer asks for a product, a service done on it is not it; when they ask for a service, a product is not it. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.quantities ? ` Also, for each item you give that lists inputs, the value of each input the customer's latest message states or that follows directly from it (e.g. "Saturday and Sunday" = 48 hours, "4x5 m" = 20 m²) - leave out any the customer did not give, never assume a typical value, and leave out an input when the customer's quantity is of another kind (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known): "quantities": [{"id": <item id>, "input": "<input name>", "value": <number>}].` : ""}${opts.alternatives ? ` When no item is what the customer asks for, the items that could do the same job another way (e.g. a trencher when an excavator is asked for to dig a trench; not merely related items): "alternatives": [<item id>, ...] (at most 3; [] when none could).` : ""}` },
-            { role: "user", content: `Customer: ${question}\n\nItems:\n${list}` },
+            { role: "user", content: `Customer: ${question}${splitParts.length ? `\n(What the customer asks for, in Polish: ${splitParts.join("; ")})` : ""}\n\nItems:\n${list}` },
           ],
         }),
       });

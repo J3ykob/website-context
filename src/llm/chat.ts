@@ -32,7 +32,7 @@ import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { collectTurn, startSession, missingLabels, offeredHere, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
-import { noteTurn, turnVariant, turnUsage, newTurnUsage, turnCheap, turnIp, turnExempt } from "./turn-usage.js";
+import { noteTurn, markTurn, turnVariant, turnUsage, newTurnUsage, turnCheap, turnIp, turnExempt } from "./turn-usage.js";
 import { auditKnowledge, type AuditReport } from "../knowledge/audit.js";
 import { keyFacts } from "../knowledge/facts.js";
 
@@ -700,6 +700,7 @@ export class WebsiteChat {
     if (next) { onToken(next.message); return next; }
 
     const rt = await this.routeTurn(sanitizedMessages, question);
+    markTurn(`routed ${rt?.intent || "-"}`);
     // An attempt on the assistant itself (any language, Jev): answered as a blocked message - no facts, no tools.
     if (rt && rt.injection >= (Number(process.env.JEV_INJECTION_MIN) || 0.8)) {
       noteTurn("injection", rt.injection);
@@ -743,7 +744,11 @@ export class WebsiteChat {
       // No prices of ours for it: with a network the businesses are asked for their estimates (the agent's
       // network requests - the owner's wish 2026-10-26: reach out to the companies); without one, a quote offer.
       // (Until 2026-10-29 it was always the quote offer, so mixed orders never reached the network.)
-      if (!pure && !(await this.hasPricesFor(question))) {
+      // Our passages for the "simple calculation?" check below are read at the same time (they were read after it, +0.5-1 s).
+      const oursP = this.knowledgePassages(question, 8).catch(() => [] as string[]);
+      const hasPrices = pure || (await this.hasPricesFor(question));
+      markTurn("hasPrices");
+      if (!hasPrices) {
         if (await this.hasNetwork().catch(() => false)) {
           const r = await this.agentTurn(messages, question, sessionKey);
           if (r) { st.calcStarted = true; onToken(r.message); return r; }
@@ -756,11 +761,14 @@ export class WebsiteChat {
         const convoText = sanitizedMessages.slice(-6).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 500)}`).join("\n");
         // Simple AND every item priced by us: a mixed order (concrete from another business + our rental)
         // passed the first question alone and never reached the network (chain test 2026-10-29).
-        const ours = (await this.knowledgePassages(question, 8).catch(() => [] as string[])).join("\n\n").slice(0, 20000);
+        const ours = (await oursP).join("\n\n").slice(0, 20000);
         const s = await jevAsk({ conversation: convoText, our_information: ours }, {
-          simple: { type: "noul", instructions: "Is the customer's LATEST request in `conversation` a simple calculation: at most three unit prices (listed by the business or given by the customer) times quantities the customer gave, or a simple quantity from dimensions they gave - with no measuring on site, design, discount, unlisted work or options to compare?" },
+          // Up to three listed options (a hall's packages per person x the guests) are the owner's "at most three unit
+          // prices" too: "options to compare" sent "a wedding for 100 on a Saturday" to a 1.5-minute calculation (2026-11-04).
+          simple: { type: "noul", instructions: "Is the customer's LATEST request in `conversation` a simple calculation: at most three unit prices (listed by the business or given by the customer) times quantities the customer gave - also when they are up to three listed options or packages, each priced for the same quantities - or a simple quantity from dimensions they gave, with no measuring on site, design, discount or unlisted work?" },
           allOurs: { type: "noul", instructions: "Does `our_information` (this business's own offer and prices) give a unit price for EVERY product or service the customer's LATEST request in `conversation` asks to price (or did the customer give the prices themselves)?" },
         }, 4000).catch(() => null);
+        markTurn("simpleCheck");
         const simple = ((s?.simple as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.4, allOurs = ((s?.allOurs as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.5;
         noteTurn("simpleCalc", { simple: (s?.simple as JevNoulAnswer | undefined)?.noul, allOurs: (s?.allOurs as JevNoulAnswer | undefined)?.noul });
         if (simple && (allOurs || !(await this.hasNetwork().catch(() => false)))) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
@@ -818,12 +826,38 @@ export class WebsiteChat {
       // missed them: "ubić podjazd" ranked paving guides above the compactor price list (chain C1).
       // null: the items could not be judged (Jev down) - then nothing is said about them.
       // A price question also reads the customer's quantities for the items (priced in code below).
+      // A question about hours, contact, terms or the business itself (no price, product or need - router) has no
+      // offer items to match: the model call that picks them (~1 s) was in front of every such reply.
+      const aboutOffer = !rt || rt.price >= 0.3 || rt.specific >= 0.3 || rt.need >= 0.3 || rt.followup >= 0.5;
       const productsP: Promise<ItemMatch | null> = this.catalogue ? this.shopProducts(query, question, rt).then((items) => ({ items, given: new Map() }), () => ({ items: [], given: new Map() }))
-        : this.offerItems.length && rt?.intent !== "chitchat" ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: !!rt && rt.price >= 0.5, alternatives: !!rt && rt.specific >= 0.5 }).catch(() => null) : Promise.resolve({ items: [], given: new Map() });
+        : this.offerItems.length && rt?.intent !== "chitchat" && aboutOffer ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: !!rt && rt.price >= 0.5, alternatives: !!rt && rt.specific >= 0.5 }).catch(() => null) : Promise.resolve({ items: [], given: new Map() });
       const factsP = turnVariant().includes("facts")
         ? this.embeddingProvider.embed([query]).then((v) => keyFacts(this.context.tenantId, v[0] || null, convo, question)).catch(() => null)
         : Promise.resolve(null);
-      const hits = await searchContext(query, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: search failed - ${(e as Error).message}`); return []; });
+      // The business's own quoting model (src/pricing/model.ts), when it has one and it is switched on: the
+      // conversation read into a request in its terms, its program quotes it - replaces the recipe computation.
+      // Started now, next to the search and the page scoring (it needs neither); was awaited after them (+1-2 s).
+      const quoteP = rt && rt.price >= 0.5 && (process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing")) ? this.quoteWithModel(convo).catch(() => null) : Promise.resolve(null);
+      markTurn("reply");
+      // The request's parts in Polish (the network's split - a model, stored per request; the item matcher asks
+      // for the same one): a second search with them finds the pages that the customer's own words or language
+      // miss - a Ukrainian "віброплита" found no compactor page (2026-11-04). Only for questions about the offer.
+      const partsP: Promise<string[]> = rt?.intent !== "chitchat" && aboutOffer ? import("../projects/broadcast.js").then((b) => b.splitNeed(query)).catch(() => [] as string[]) : Promise.resolve([] as string[]);
+      const search = (q: string) => searchContext(q, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: search failed - ${(e as Error).message}`); return [] as Awaited<ReturnType<typeof searchContext>>; });
+      const [first, parts] = await Promise.all([search(query), partsP]);
+      let hits = first;
+      if (parts.length) {
+        // Both searches' hits by rank, taken in turn (each list keeps its order), each passage once.
+        const more = await search(parts.join("\n"));
+        const seen = new Set<string>();
+        hits = [];
+        for (let k = 0; k < Math.max(first.length, more.length); k++) for (const h of [first[k], more[k]]) {
+          const id = h ? String(h.metadata.id || h.content.slice(0, 80)) : "";
+          if (h && !seen.has(id)) { seen.add(id); hits.push(h); }
+        }
+        noteTurn("parts", parts);
+      }
+      markTurn("searched");
       let scored: { p: Pack; s: number }[] = [];
       let hitIds: string[] | undefined;
       if (this.packIndex) {
@@ -834,6 +868,7 @@ export class WebsiteChat {
         if (followup) for (const id of st.lastPacks || []) { const p = this.packIndex.packs.get(id); if (p && !cands.includes(p)) cands.push(p); }
         hitIds = hits.map((h) => String(h.metadata.id || "")).filter(Boolean);
         const scores = await scorePacks(convo, cands, hitIds);
+        markTurn("packsScored");
         noteTurn("candidates", cands.map((p, i) => `${scores ? scores[i].toFixed(2) : "?"} ${p.title.slice(0, 60)}${p.url ? ` | ${p.url}` : ""}`));
         if (scores) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.5).sort((a, b) => b.s - a.s).slice(0, 4);
         // Jev unavailable: the search's best pages instead of "no information" for everything.
@@ -852,12 +887,12 @@ export class WebsiteChat {
         packText = `### Key facts from our pages (word for word)\n${facts.map((f) => `- ${f.s}`).join("\n")}${packText ? `\n\n---\n\n${packText}` : ""}`;
         passages = [...facts.map((f) => f.s), ...passages];
       }
-      // The business's own quoting model (src/pricing/model.ts), when it has one and it is switched on: the
-      // conversation read into a request in its terms, its program quotes it - replaces the recipe computation.
-      const modelQuote = rt && rt.price >= 0.5 && (process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing")) ? await this.quoteWithModel(convo).catch(() => null) : null;
+      const modelQuote = await quoteP;
+      markTurn("quoted");
       if (modelQuote) noteTurn("modelQuote", modelQuote.slice(0, 600));
       // The products / offer items this message is about.
       const judged = await productsP;
+      markTurn("itemsMatched");
       const products = judged?.items || [];
       if (products.length) {
         noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
@@ -907,6 +942,7 @@ export class WebsiteChat {
           ours: { type: "noul", instructions: "Does `our_information` show that this business itself does, sells or rents what the customer asks for (not only related or neighbouring work)?" },
         }, 5000).catch(() => null);
         noteTurn("fullOurs", [(f?.full as JevNoulAnswer | undefined)?.noul, (f?.ours as JevNoulAnswer | undefined)?.noul]);
+        markTurn("fullOurs");
         partial = ((f?.full as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5;
         outOfScope = ((f?.ours as JevNoulAnswer | undefined)?.noul ?? 1) < 0.35;
       }
@@ -1000,6 +1036,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     noteTurn("behaviour", behaviour.map((b) => Object.entries(BEHAVIOUR).find(([, v]) => v === b)?.[0] || b.slice(0, 40)));
     if (network) noteTurn("network", network.labels);
     let raw = "";
+    markTurn("stream");
     await this.backend.generateStream!(system, messages, this.maxTokens, (d) => { raw += d; onToken(d); });
     // Searching the network: the status line while it runs, then the same message continues with what was found.
     if (searching) {
@@ -1024,6 +1061,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     // Checks; a failed one blocks the reply and sends it back to the model with the reasons. Every
     // rewrite is checked again (twice at most); the last one is sent.
     const sources = [...passages.map((content) => ({ content })), ...(network?.evidence || []),
+      // What this chat is, so a reply describing itself ("I'm the chat on X's website...", asked by owners testing their
+      // demo) is not blocked as unsupported - it was, in 3 of 14 fact-check blocks of the 2026-11-04 eval.
+      { content: `This is the chat on the website of ${brand}${this.getAllowedDomain() ? ` (${this.getAllowedDomain()})` : ""}: it answers customers' questions for the business from the business's own website and price list and what the business added.` },
       // Offering to check the network is something this chat really does (on a yes it searches) - not a claim about the business.
       ...(opts.handoffKind === "network" ? [{ content: "This chat can check businesses from our local Whisp network for the customer's question, if the customer wants that." }] : [])];
     const factsText = `${renderOfficialInfo(this.context.businessProfile)}\n${passages.join("\n")}`;
@@ -1066,7 +1106,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
           contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)? Saying we have no information on something and recommending another business for it is NOT a contradiction." },
           callUs: { type: "noul", instructions: "Does `reply` tell the customer to call us, phone us, or e-mail us (or mention our phone number or e-mail as a way to reach us)?" },
           promises: { type: "noul", instructions: "Does `reply` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call them back, send them something? (Offering to explain, describe or advise more in this chat, asking the customer for details, offering to pass the question on to the team, offering to check businesses from our local network, or inviting them to contact us does not count.)" },
-          meta: { type: "noul", instructions: "Does `reply` refer to an internal resource it was given - 'in our information', 'w dostępnych informacjach', 'w naszych materiałach', 'in the information provided', 'according to the data/sources'? Plain statements like 'I don't have that information', 'nie mam tej informacji' or 'we don't list it on our website' are NOT this." },
+          // The business's own documents are not meta-talk: "z naszego cennika wynika" / "our price list shows" blocked about
+          // half of 22 meta-blocked drafts in the 2026-11-04 eval (0.93 -> 0.05), and one rewrite turned a right total wrong.
+          meta: { type: "noul", instructions: "Does `reply` talk about an internal resource it was given instead of speaking as the business - e.g. 'in our information', 'w dostępnych informacjach', 'z naszych informacji wynika', 'w naszych materiałach / danych / źródłach', 'in the information provided', 'according to the data I have'? NOT this: naming the business's own website, price list, menu, offer, terms or regulations ('z naszego cennika wynika', 'na naszej stronie', 'our price list shows', 'w regulaminie'), or plain 'I don't have that information' / 'nie mam tej informacji' / 'we don't list it on our website'." },
           unanswered: { type: "noul", instructions: "Does the customer's latest message in `conversation` ask about several things, and does `reply` skip one of them without saying anything about it?" },
           claimsSent: { type: "noul", instructions: "Does `reply` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered (already done, not offered)?" },
           vouches: { type: "noul", instructions: "Does `reply` praise or vouch for another company (e.g. 'reliable', 'trusted', 'experienced', 'sprawdzona')?" },
@@ -1110,10 +1152,11 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     };
     let final = raw;
     let verdict = await check(raw);
+    markTurn("checked");
     for (let round = 0; round < 2 && verdict.problems.length; round++) {
       noteTurn(`blocked${round + 1}`, { problems: verdict.problems, draft: final.slice(0, 1500) });
       console.log(`[packs] ${this.context.tenantId}: reply blocked (round ${round + 1}, ${verdict.problems.length}): ${verdict.problems.map((p) => p.slice(0, 90)).join(" | ")}`);
-      const fix = `${system}\n\n## CORRECTION\nYour previous reply was:\n"""\n${final.slice(0, 2500)}\n"""\nIt cannot be sent because ${verdict.problems.join("; and ")}. Write the reply again, keeping everything that was right.`;
+      const fix = `${system}\n\n## CORRECTION\nYour previous reply was:\n"""\n${final.slice(0, 2500)}\n"""\nIt cannot be sent because ${verdict.problems.join("; and ")}. Write the reply again, keeping everything that was right - as the only reply: never mention, correct or apologise for an earlier version.`;
       let again = "";
       try { again = (await this.backend.generate(fix, messages, this.maxTokens)).trim(); } catch {}
       if (!again) break;

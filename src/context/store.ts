@@ -65,6 +65,22 @@ function extractHeaderFooterText(html: string): string[] {
   }
 }
 
+// A page's whole visible text with its line structure - side boxes included; navigation, header/footer (kept
+// separately), scripts and forms left out. A contact page's address and opening hours often sit in a side box that
+// the main-content pick drops (liliowa.pl: "Kontakt z nami" - phone, ul. Izbicka 1, hours - never reached the chat).
+function pageVisibleText(html: string): string {
+  try {
+    const $ = cheerio.load(html);
+    $("script, style, noscript, iframe, svg, template, nav, header, footer, form, [role='navigation'], [role='banner'], [role='contentinfo']").remove();
+    const c = $("body");
+    c.find("br").replaceWith("\n");
+    c.find("p,div,li,td,tr,h1,h2,h3,h4,h5,h6,section,address,aside").each((_: any, e: any) => { $(e).append("\n"); });
+    return c.text().replace(/[ \t\u00a0]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n").trim();
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Incremental context builder: each crawled page is converted to sections and
  * chunks as soon as it arrives (addPage), and its HTML is dropped right away.
@@ -98,7 +114,7 @@ export function createContextBuilder() {
     }
     if (!firstUrl) firstUrl = scrapedPage.url;
     const markdown = htmlToMarkdown(fetchResult);
-    if (/\/(kontakt|contact|kontakty|contacts?-us|kontakt-z-nami)(\.\w+)?\/?$/i.test(new URL(scrapedPage.url).pathname) && contactPages.length < 2) contactPages.push({ url: scrapedPage.url, text: markdown.fullMarkdown.slice(0, 2500) });
+    if (/\/(kontakt|contact|kontakty|contacts?-us|kontakt-z-nami)(\.\w+)?\/?$/i.test(new URL(scrapedPage.url).pathname) && contactPages.length < 2) contactPages.push({ url: scrapedPage.url, text: (pageVisibleText(fetchResult.html) || markdown.fullMarkdown).slice(0, 2500) });
     for (const line of markdown.fullMarkdown.split("\n")) {
       // Sentence by sentence (a 24h line is often one sentence of a long paragraph), table cells as text.
       for (const sentence of line.replace(/\|/g, " ").replace(/^[#>*\s-]+/, "").split(/(?<=[.!?])\s+/)) {

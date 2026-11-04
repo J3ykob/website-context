@@ -21,6 +21,11 @@ export function countLlm(inTok = 0, outTok = 0, started?: number, detail = "", u
   if (started) u.steps.push(`llm @${sec(started - u.at)}s ${sec(Date.now() - started)}s${detail ? ` ${detail}` : ""}`);
 }
 /** Admin test of the no-Jev safe mode (header x-test-no-jev): Jev counts as unavailable for this request. */
+/** A point in the turn's timeline (admin trace: where the time before the first word goes). */
+export function markTurn(label: string): void {
+  const u = turnUsage.getStore();
+  if (u) u.steps.push(`mark @${sec(Date.now() - u.at)}s ${label}`);
+}
 /** Admin trace detail for this turn (what was selected, why a reply was blocked) - for evals. */
 export function noteTurn(key: string, value: unknown): void {
   const u = turnUsage.getStore();
@@ -31,11 +36,11 @@ export const turnVariant = (): string => turnUsage.getStore()?.variant || "";
 export const jevOffForTurn = (): boolean => !!turnUsage.getStore()?.noJev;
 
 
-export function countJev(inTok = 0, started?: number): void {
+export function countJev(inTok = 0, started?: number, detail = ""): void {
   const u = turnUsage.getStore();
   if (!u) return;
   u.jevCalls++; u.jevIn += inTok;
-  if (started) u.steps.push(`jev @${sec(started - u.at)}s ${sec(Date.now() - started)}s`);
+  if (started) u.steps.push(`jev @${sec(started - u.at)}s ${sec(Date.now() - started)}s${detail ? ` ${detail}` : ""}`);
 }
 /** Jev calls made so far in this turn (the per-turn cap in jev.ts). */
 export const jevTurnCount = (): number => turnUsage.getStore()?.jevCalls || 0;

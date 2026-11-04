@@ -30,20 +30,32 @@ async function llmJson(system: string, user: string, maxTokens = 1200): Promise<
   return null;
 }
 
+// "po polsku" alone left a Ukrainian request Ukrainian ("Оренда віброплити...") - and the businesses' offers are Polish
+// (2026-11-04: 9 messages in 6 languages, all Polish with the sentence on other languages).
 const SPLIT = `Rozpisujesz prośbę klienta na części, o które sieć firm ma złożyć oferty. Zwróć JSON {"parts": ["..."]}:
-jedna część = jeden produkt lub usługa, po polsku, z ilościami, wymiarami i czasem z prośby (przelicz oczywiste:
-wymiary -> powierzchnia lub objętość, dni tygodnia -> liczba dób). Bez danych osobowych klienta (imię, nazwisko,
-telefon, e-mail, dokładny adres - zostaw najwyżej miejscowość lub dzielnicę). Tylko to, o co klient prosi.
-Gdy wiadomość nie prosi o żaden produkt ani usługę: {"parts": []}.`;
+jedna część = jeden produkt lub usługa, z ilościami, wymiarami i czasem z prośby (przelicz oczywiste:
+wymiary -> powierzchnia lub objętość, dni tygodnia -> liczba dób). Części piszesz zawsze po polsku, także gdy klient
+pisze w innym języku: produkty i usługi nazywasz tak, jak nazywają je polskie firmy w swoich ofertach. Bez danych
+osobowych klienta (imię, nazwisko, telefon, e-mail, dokładny adres - zostaw najwyżej miejscowość lub dzielnicę).
+Tylko to, o co klient prosi. Gdy wiadomość nie prosi o żaden produkt ani usługę: {"parts": []}.`;
 
 /** The request as parts the network can quote (neutral, without personal data). */
 export async function splitNeed(need: string): Promise<string[]> {
+  // The chat's page search and its item matcher ask for the same split at the same moment: one model call.
+  const k = need.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 3000);
+  let p = splitInFlight.get(k);
+  if (!p) { p = splitNeedOnce(need).finally(() => splitInFlight.delete(k)); splitInFlight.set(k, p); }
+  return p;
+}
+const splitInFlight = new Map<string, Promise<string[]>>();
+
+async function splitNeedOnce(need: string): Promise<string[]> {
   // Stored per normalised request: hosted models are not repeatable even at temperature 0 with a fixed
   // provider and seed (measured 2026-10-30: 2 different splits in 4 calls), so the same request is split
   // once and the split reused - every later step sees the same parts.
   const norm = need.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 3000);
   const { createHash } = await import("crypto");
-  const key = `decisions/split/${createHash("sha1").update(`v1\n${norm}`).digest("hex")}.json`;
+  const key = `decisions/split/${createHash("sha1").update(`v2\n${norm}`).digest("hex")}.json`; // v2: parts always in Polish
   const hit = splitMemo.get(key);
   if (hit) return hit;
   const { downloadFromR2, uploadToR2 } = await import("../storage/r2.js");

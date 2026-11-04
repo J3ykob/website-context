@@ -61,6 +61,19 @@ The tables below show each limit as audited; these rows were then changed:
 | turnKind (conversation.ts), MUST_ASK_MAX duplicate | dead code / hard-coded 4 | removed / one constant | unused since 2026-10-22 |
 | tests/self-hosted.test.ts | tested the GPU box + Qdrant | removed | infrastructure gone |
 
+### Judged eval 2026-11-04 (63 realistic cases on 21 businesses + 9 on fresh /claim demos; 3 judge lenses)
+
+| Limit | Was | Now | Why |
+|---|---|---|---|
+| Meta-talk check (chat.ts check) | flagged naming our own price list / website ("z naszego cennika wynika" 0.93) | same threshold 0.6, the instruction says the business's own website, price list, menu, offer, terms are not meta-talk | 22 meta-blocked drafts re-checked: false alarms 0.93/0.89/0.86 -> 0.05-0.14, real ones ("z naszych informacji", "w danych") still 0.81-0.97, 0/25 passed replies flagged; one rewrite turned a right total (18 085 zł) wrong |
+| Offer items matched per turn (chat.ts aboutOffer) | every turn except small talk | only when the router's price, specific or need >= 0.3 (or a follow-up >= 0.5, or no router answer) | the item-picking model call (~1 s) was in front of every hours/contact/terms reply |
+| Request split (broadcast.ts SPLIT, key v2) | "po polsku" in the prompt | parts always in Polish, the businesses' own names for things; stored splits under v2 | a Ukrainian request stayed Ukrainian ("Оренда віброплити") - its items and pages were never found; 9 messages in 6 languages all Polish with the sentence |
+| Second page search with the split's parts (chat.ts) | - | when the split has parts (questions about the offer): one more search, hits merged rank by rank | the customer's own words / language missed the right pages ("віброплита" found no compactor page) |
+| Item matcher, one-part requests (search.ts) | the split's parts used for nearest items only when 2+ | also for 1 part; the picker sees the parts in Polish | same Ukrainian case: concrete vibrators picked instead of plate compactors |
+| Simple calculation (chat.ts simple) | "no ... options to compare" | up to three listed options or packages, each for the same quantities, count as simple | "a wedding for 100 on a Saturday" (3 packages x guests) went to a 1.5-min project calculation |
+| Router: price changes (router.ts) | - | "whether something changes a price" is ask, not calculate | "the hall is 90 km away - does it change the price?" went to the project agent (ask 0.73 -> 0.97) |
+| Contact page text for the official info (store.ts) | main-content markdown, 2500 chars | the page's whole visible text (side boxes in; nav, header/footer, forms out), 2500 chars | liliowa.pl's address and hours sat in a side box - "we don't list our hours" |
+
 ### Network capability index (src/network/capability-index.ts, added 2026-10-29)
 
 | Limit | Value | Where | Why (trace) |
