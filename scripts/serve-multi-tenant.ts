@@ -2086,6 +2086,21 @@ app.get("/api/dashboard/knowledge-audit", authMiddleware, async (req, res) => {
   res.json(buf ? JSON.parse(buf.toString("utf-8")) : { items: [] });
 });
 
+// The inquiries and orders customers confirmed in the chat (tenants/<id>/inquiries.json, kept by recordInquiry),
+// newest first - until now only e-mailed: the owners' first ask in the 2026-11-04 panel review.
+app.get("/api/dashboard/inquiries", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  try {
+    const { downloadFromR2 } = await import("../src/storage/r2.js");
+    const buf = await downloadFromR2(`tenants/${tenantId}/inquiries.json`);
+    const list: any[] = buf ? JSON.parse(buf.toString("utf-8")) : [];
+    res.json(list.slice(-50).reverse().map((q) => ({ flowName: q.flowName, at: q.at, fields: q.fields || [], transcript: (q.transcript || []).slice(-16) })));
+  } catch (e: any) {
+    console.warn(`[dashboard:inquiries] ${tenantId}: ${e?.message || e}`);
+    res.json([]);
+  }
+});
+
 app.get("/api/dashboard/unknown-questions", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   res.json(await getUnknownQuestions(tenantId));

@@ -32,7 +32,8 @@ export interface Inquiry {
   flowId: string;
   flowName: string;
   via?: CollectVia;
-  fields: { label: string; value: string }[];
+  // type: the field's kind (phone, email...) - the panel makes a phone or e-mail tappable without reading the value.
+  fields: { label: string; value: string; type?: FlowInput["type"] }[];
   transcript: string[];
   at: string;
 }
@@ -248,7 +249,7 @@ function inquiryOf(flow: FlowDefinition, s: CollectSession, fields: FlowInput[])
     flowId: flow.id,
     flowName: flow.name,
     ...(s.via ? { via: s.via } : {}),
-    fields: fields.filter((f) => (s.values[f.name] || "").trim()).map((f) => ({ label: f.label, value: s.values[f.name] })),
+    fields: fields.filter((f) => (s.values[f.name] || "").trim()).map((f) => ({ label: f.label, value: s.values[f.name], type: f.type })),
     transcript: s.transcript.slice(-30),
     at: new Date().toISOString(),
   };

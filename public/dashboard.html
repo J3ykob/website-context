@@ -283,6 +283,18 @@
 
     /* ─── Activity ─── */
     .activity-list { max-height: 400px; overflow-y: auto; }
+    .inq-item { padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .inq-item:last-child { border-bottom: none; }
+    .inq-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 6px; }
+    .inq-name { font-weight: 600; color: #f1f5f9; }
+    .inq-date { color: #94a3b8; font-size: 13px; white-space: nowrap; }
+    .inq-fields { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 14px; }
+    .inq-fields dt { color: #94a3b8; }
+    .inq-fields dd { margin: 0; color: #e2e8f0; overflow-wrap: anywhere; }
+    .inq-fields a { color: #60a5fa; }
+    .inq-chat { display: none; margin-top: 10px; padding: 10px 12px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 13px; color: #cbd5e1; white-space: pre-wrap; }
+    .inq-item.open .inq-chat { display: block; }
+    .inq-toggle { margin-top: 8px; background: none; border: 0; padding: 0; color: #60a5fa; font-size: 13px; cursor: pointer; }
     .activity-item {
       display: flex;
       align-items: flex-start;
@@ -757,6 +769,13 @@
       </div>
     </div>
 
+    <div class="inquiries-section" style="margin-bottom:32px">
+      <div class="section-head">
+        <span class="section-title"><span data-i18n="inq.title">Customer inquiries</span><span class="badge badge-blue" id="inq-badge" style="display:none">0</span></span>
+      </div>
+      <div class="card" id="inquiries-panel"><div class="loading"></div></div>
+    </div>
+
     <div class="intents-section" style="margin-bottom:32px">
       <div class="section-head">
         <span class="section-title"><span data-i18n="intents.title">What People Ask About</span><span class="badge badge-blue" id="intents-badge" style="display:none">0</span></span>
@@ -942,6 +961,11 @@
         "gaps.answerPh": "Type the answer...",
         "gaps.resolved": "Resolved",
         "activity.title": "Recent Activity",
+        "inq.title": "Customer inquiries",
+        "inq.empty": "When a customer sends an inquiry or an order in the chat, it shows up here (you also get it by e-mail).",
+        "inq.loadError": "Could not load inquiries.",
+        "inq.showChat": "Show the conversation",
+        "inq.hideChat": "Hide the conversation",
         "activity.loadError": "Could not load recent activity.",
         "activity.empty": "No conversations yet - messages from your site visitors will show up here.",
         "activity.visitor": "Visitor:",
@@ -1099,6 +1123,11 @@
         "gaps.answerPh": "Wpisz odpowiedź...",
         "gaps.resolved": "Uzupełnione",
         "activity.title": "Ostatnie rozmowy",
+        "inq.title": "Zapytania od klientów",
+        "inq.empty": "Gdy klient wyśle w czacie zapytanie albo zamówienie, zobaczysz je tutaj (dostajesz je też mailem).",
+        "inq.loadError": "Nie udało się wczytać zapytań.",
+        "inq.showChat": "Pokaż rozmowę",
+        "inq.hideChat": "Ukryj rozmowę",
         "activity.loadError": "Nie udało się wczytać ostatnich rozmów.",
         "activity.empty": "Nie ma jeszcze rozmów - tutaj pojawią się wiadomości od klientów z Twojej strony.",
         "activity.visitor": "Klient:",
@@ -1368,7 +1397,7 @@
     var chunksSearch = "";
 
     async function loadAll() {
-      await Promise.all([loadSiteInfo(), loadStats(), loadIntents(), loadGaps(), loadActivity(), loadSkills(), loadChunks(), loadOffer(), loadAgentReview()]);
+      await Promise.all([loadSiteInfo(), loadStats(), loadInquiries(), loadIntents(), loadGaps(), loadActivity(), loadSkills(), loadChunks(), loadOffer(), loadAgentReview()]);
     }
 
     // "select_automotive_pl" -> "Select Automotive PL" (display fallback when the
@@ -1446,6 +1475,48 @@
       } catch (e) {
         panelMsg("gaps-panel", function() { return emptyState('alert', 'amber', t('gaps.loadError'), t('common.retry'), 'loadGaps()'); });
       }
+    }
+
+    async function loadInquiries() {
+      try {
+        var res = await authFetch(API + "/api/dashboard/inquiries");
+        renderInquiries(await res.json());
+      } catch (e) {
+        panelMsg("inquiries-panel", function() { return emptyState('alert', 'amber', t('inq.loadError'), t('common.retry'), 'loadInquiries()'); });
+      }
+    }
+
+    // A phone or e-mail field (by its type, set by the form) is a link the owner can tap.
+    function inqValue(f) {
+      var v = String(f.value || "");
+      if (f.type === "phone") return '<a href="tel:' + escAttr(v.replace(/[^0-9+]/g, "")) + '">' + esc(v) + '</a>';
+      if (f.type === "email") return '<a href="mailto:' + escAttr(v) + '">' + esc(v) + '</a>';
+      return esc(v);
+    }
+
+    // The form's transcript lines carry our own fixed prefixes ("Customer: ", "Assistant: ") - shown in the panel's language.
+    function inqLine(l) {
+      l = String(l || "");
+      if (l.indexOf("Customer: ") === 0) return t('activity.visitor') + " " + l.slice(10);
+      if (l.indexOf("Assistant: ") === 0) return t('activity.bot') + " " + l.slice(11);
+      return l;
+    }
+
+    function renderInquiries(list) {
+      REDRAW["inquiries-panel"] = function() { renderInquiries(list); };
+      var panel = document.getElementById("inquiries-panel");
+      var badge = document.getElementById("inq-badge");
+      badge.style.display = list.length ? "" : "none";
+      badge.textContent = fmtNum(list.length);
+      if (!list.length) { panel.innerHTML = emptyState('chat', '', t('inq.empty')); return; }
+      panel.innerHTML = list.map(function(q) {
+        var when = q.at ? new Date(q.at).toLocaleString(currentLang === "pl" ? "pl-PL" : undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+        return '<div class="inq-item">' +
+          '<div class="inq-head"><span class="inq-name">' + esc(q.flowName || "") + '</span><span class="inq-date">' + esc(when) + '</span></div>' +
+          '<dl class="inq-fields">' + (q.fields || []).map(function(f) { return '<dt>' + esc(f.label) + '</dt><dd>' + inqValue(f) + '</dd>'; }).join("") + '</dl>' +
+          ((q.transcript || []).length ? '<button class="inq-toggle" onclick="var i=this.parentNode;i.classList.toggle(\'open\');this.textContent=i.classList.contains(\'open\')?t(\'inq.hideChat\'):t(\'inq.showChat\')">' + t('inq.showChat') + '</button><div class="inq-chat">' + esc(q.transcript.map(inqLine).join("\n")) + '</div>' : '') +
+        '</div>';
+      }).join("");
     }
 
     async function loadActivity() {
