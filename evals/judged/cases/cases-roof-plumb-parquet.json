@@ -1,0 +1,308 @@
+[
+ {
+  "id": "pelnyparkiet-1",
+  "tenant": "pelnyparkiet_pl",
+  "category": "price_multi",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "hej ile wyjdzie calosc: dj na wesele i jeszcze muzyka + mikrofon na sam slub cywilny w ogrodzie przed sala? gosci bedzie ok 100",
+   "a sala jest jakies 90 km od wawy, pod plockiem. to cos zmienia w cenie?",
+   "ok a disco polo grasz? tesciowa bardzo chce a my srednio xd"
+  ],
+  "ground_truth": "T1: Cennik: 'Oprawa muzyczna i prowadzenie wesela' = 5500 zł. It includes '10h pracy DJa/konferansjera na przyjęciu', 'Dobór i miksowanie muzyki, prowadzenie przyjęcia', 'Animacje i konkursy w dobrym tonie', 'Montaż, demontaż sprzętu', 'Dojazd do 50 km od centrum Warszawy', 'Nagłośnienie aktywne, kontroler DJski, 2 mikrofony doręczne, eleganckie stanowisko', 'Oświetlenie dyskotekowe - 4 ruchome głowy' and 'Oświetlenie dekoracyjne - 12 belek LED'. The base proposal is 'dla około 120 gości' (FAQ on /dj-na-wesele/), so ~100 guests fits. Add-on on the same price list: 'Nagłośnienie ślubu cywilnego/humanistycznego (tło muzyczne, 1 mikrofon, 45 min. pracy technika)' = 600 zł. Total: 5500 + 600 = 6100 zł. The site mentions no VAT on wedding prices (only the hidden corporate-event page says '2700 zł + VAT'). T2: travel is included only 'Dojazd do 50 km od centrum Warszawy', and ~90 km is beyond that. FAQ: 'Ostateczna cena zależy od charakteru wydarzenia, odległości od Warszawy, liczby gości, a tym samym - ilości potrzebnego sprzętu'. He works 'w Warszawie oraz na terenie całego województwa mazowieckiego' (Płock is in Mazowieckie, so the area fits). The surcharge amount is NOT on the site. A good reply says the price can change because of the distance, gives no number, and offers an individual quote: +48 507 010 522 / info@pelnyparkiet.pl, or the bot passes the question on. T3: FAQ: 'Disco-polo urozmaica moje wesela, ale stanowi maksymalnie 30% repertuaru. Jeśli zależy Ci na weselu bez disco-polo, również sobie z tym poradzę.'",
+  "must": [
+   "T1: total 6100 zł = 5500 zł wedding package + 600 zł civil-ceremony sound",
+   "T2: travel is included only up to 50 km from the centre of Warsaw; the extra for ~90 km is not listed - individual quote / contact",
+   "T3: disco polo is at most 30% of the repertoire, and a wedding without disco polo is also possible"
+  ],
+  "must_not": [
+   "giving 5500 zł alone as the total",
+   "adding VAT to the wedding prices",
+   "using the 2700 zł package from the private/corporate pages",
+   "inventing a per-km rate or a surcharge amount for 90 km",
+   "saying the 90 km trip is included in the price",
+   "saying he does not travel that far / only Warsaw",
+   "saying he never plays disco polo or plays it without limit"
+  ],
+  "good_reply": "T1: Wesele to pakiet 5500 zł (10 h pracy DJ-a/konferansjera, nagłośnienie, oświetlenie, montaż, dojazd do 50 km od centrum Warszawy; liczony na ok. 120 gości, więc 100 się mieści) + nagłośnienie ślubu cywilnego (tło muzyczne, 1 mikrofon, 45 min pracy technika) 600 zł = razem 6100 zł. T2: W cenie jest dojazd do 50 km od centrum Warszawy, więc przy ~90 km cena może się zmienić - zależy m.in. od odległości. Kwoty dopłaty na stronie nie ma. Piotr pracuje w całym woj. mazowieckim i przygotuje wycenę: info@pelnyparkiet.pl lub +48 507 010 522. T3: Disco polo bywa na weselach, ale to maksymalnie 30% repertuaru - a jeśli wolicie, da się zrobić wesele zupełnie bez disco polo.",
+  "sources": [
+   "https://pelnyparkiet.pl/cennik/",
+   "https://pelnyparkiet.pl/faq/",
+   "https://pelnyparkiet.pl/dj-na-wesele/",
+   "https://pelnyparkiet.pl/dj-na-impreze/",
+   "https://pelnyparkiet.pl/dj-na-event-firmowy/"
+  ]
+ },
+ {
+  "id": "pelnyparkiet-2",
+  "tenant": "pelnyparkiet_pl",
+  "category": "unknown_info",
+  "language": "en",
+  "persona": "customer",
+  "turns": [
+   "Hi! We're getting married next summer at a venue about 30 km outside Warsaw. Dinner starts at 4pm and we'd love to keep the party going till 4am - is that covered by your basic wedding price or do you charge extra per hour? how much?"
+  ],
+  "ground_truth": "The basic wedding package is 5500 zł (FAQ: 'Podstawowa propozycja weselna dla przyjęcia 10h do 50 km od centrum Warszawy to 5500 zł'). It covers '10h pracy DJa/konferansjera na przyjęciu' and includes 'Dojazd do 50 km od centrum Warszawy'. A venue ~30 km outside Warsaw should be within 50 km of the centre, so travel is covered. If it were more than 50 km from the centre, the distance could change the price. 4pm-4am = 12 hours, and 12 - 10 = 2 hours beyond the package. The site has NO price for extra hours (not on the site). The FAQ 'Od czego zależy cena usługi?' lists 'czas trwania' (duration) among the price factors. It also says 'Ostateczna cena zależy od charakteru wydarzenia, odległości od Warszawy, liczby gości...'. The cennik says 'To podstawowa propozycja. Jeśli potrzebujesz więcej wyposażenia lub niestandardowej obsługi, czekam na Twoje zapytanie' and invites a 'spersonalizowaną wycenę'. A good reply explains the 10h limit and the 2 extra hours. It says the longer party can change the price but no extra-hour price is published. It then gives contact (+48 507 010 522, info@pelnyparkiet.pl) or offers to pass the question to Piotr. The reply must be in English.",
+  "must": [
+   "replies in English",
+   "basic package 5500 zł covers 10 hours of DJ/MC work",
+   "4pm-4am is 12 hours, i.e. 2 hours more than included",
+   "the extra-hour price is not listed - ask Piotr (info@pelnyparkiet.pl / +48 507 010 522) or have the question passed on",
+   "travel up to 50 km from the centre of Warsaw is included, so a venue ~30 km out should be covered"
+  ],
+  "must_not": [
+   "inventing an hourly overtime rate or a 12-hour total (e.g. '500 zł per extra hour', '6500 zł')",
+   "saying 12 hours are included in the basic price",
+   "saying the extra 2 hours cost nothing / the party can run as long as they like at no extra cost",
+   "saying the ~30 km travel costs extra",
+   "quoting the 7h / 2700 zł private-party package",
+   "replying in Polish"
+  ],
+  "good_reply": "Hi! The basic wedding package is 5,500 zł and covers 10 hours of DJ/MC work at the reception, plus sound, lighting, setup and travel up to 50 km from central Warsaw - so a venue ~30 km out should be covered. 4pm to 4am is 12 hours, i.e. 2 hours more than the package. The website doesn't list a price for extra hours. Piotr says the final price depends on things like the duration, so he prices it individually. You can ask him at info@pelnyparkiet.pl or +48 507 010 522, or I can pass your question on to him.",
+  "sources": [
+   "https://pelnyparkiet.pl/cennik/",
+   "https://pelnyparkiet.pl/faq/",
+   "https://pelnyparkiet.pl/kontakt/"
+  ]
+ },
+ {
+  "id": "pelnyparkiet-3",
+  "tenant": "pelnyparkiet_pl",
+  "category": "terms_policy",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, slub mamy dopiero w sierpniu 2028, mozna juz u pana klepnac date?",
+   "ok. a ile trzeba wplacic zeby zarezerwowac i kiedy placi sie reszte? bierzemy sam podstawowy pakiet bez dodatkow"
+  ],
+  "ground_truth": "T1: FAQ: 'W wypadku wesel rezerwuję terminy oddalone maksymalnie o 12 miesięcy od dnia zapisu'. /dj-na-wesele/: 'Rezerwacje na wesela przyjmuję zazwyczaj z maksymalnie 12-miesięcznym wyprzedzeniem'. Because of 'zazwyczaj' (usually), a reply may say 'usually' and suggest asking Piotr. August 2028 is ~21 months after November 2026, so the date cannot be reserved yet. Booking opens about 12 months before, i.e. from around August 2027. (This holds only while the test runs before August 2027.) The couple can still get in touch now (+48 507 010 522, info@pelnyparkiet.pl). T2: 'Rezerwacja terminu polega na podpisaniu umowy i wpłacie symbolicznego zadatku' (/dj-na-wesele/, homepage). FAQ: 'W wypadku wesela zadatek to 800 zł. Resztę płatności reguluje się do kilku dni po weselu.' Basic package 5500 zł, so the remainder is 5500 - 800 = 4700 zł, paid up to a few days after the wedding.",
+  "must": [
+   "T1: wedding dates are booked (usually) at most 12 months ahead - August 2028 is too early to reserve now (possible from about August 2027)",
+   "T2: reservation = signing a contract + paying the deposit",
+   "deposit 800 zł",
+   "remainder 4700 zł (5500 - 800) paid up to a few days after the wedding"
+  ],
+  "must_not": [
+   "confirming/accepting a booking for August 2028 or saying the date is free",
+   "saying there is no booking limit",
+   "a different deposit (e.g. 30%, 1000 zł)",
+   "saying the rest must be paid before or on the wedding day",
+   "a wrong remainder (e.g. 5500 zł or 5300 zł)"
+  ],
+  "good_reply": "T1: Jeszcze nie - terminy wesel Piotr rezerwuje (zazwyczaj) maksymalnie 12 miesięcy przed datą, więc na sierpień 2028 będzie można się zapisać mniej więcej od sierpnia 2027. Już teraz można się odezwać: info@pelnyparkiet.pl lub +48 507 010 522. T2: Rezerwacja to podpisanie umowy i wpłata zadatku - przy weselu 800 zł. Resztę płaci się do kilku dni po weselu, czyli przy podstawowym pakiecie 5500 zł zostaje 4700 zł.",
+  "sources": [
+   "https://pelnyparkiet.pl/faq/",
+   "https://pelnyparkiet.pl/dj-na-wesele/",
+   "https://pelnyparkiet.pl/cennik/",
+   "https://pelnyparkiet.pl/"
+  ]
+ },
+ {
+  "id": "dachywarszawa-1",
+  "tenant": "www_dachywarszawa_pl",
+  "category": "vague_need",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry po nocnej ulewie kapie mi z sufitu na poddaszu kolo komina!! co mam robic, przyjedzie ktos jeszcze dzis?",
+   "ile mniej wiecej kosztuje taki przyjazd awaryjny?",
+   "a dom jest na bialolece, dojedziecie tam?"
+  ],
+  "ground_truth": "T1: Perfekt Dach runs a roof emergency service: 'Pomoc dostępna 24 godziny na dobę' and 'Nasze pogotowie dachowe działa 24 godziny na dobę' (pogotowie-dachowe). That page opens with 'Przeciek po ulewie, wilgoć na poddaszu albo zerwany fragment pokrycia nie powinny czekać do rana'. Phone +48 501 749 493 (kontakt, footer). What to do before the crew arrives (pogotowie FAQ): 'Zabezpieczyć wnętrze (przykryć meble, ustawić pojemniki na wodę), nie wchodzić na dach, zrobić zdjęcia miejsca i przesłać pełny adres'. Data for the report: 'adres obiektu i typ budynku', 'rodzaj dachu, jeśli jest znany', 'objawy widoczne wewnątrz i na zewnątrz', 'czas powstania szkody i jej związek z pogodą', 'zdjęcia miejsca przecieku wykonane bez ryzyka'. Arrival: no guaranteed time. naprawa-dachow FAQ 'Jak szybko dojeżdżamy do awarii w Warszawie i okolicach?' answers 'Terminy ustalamy elastycznie według pilności i pogody'. Blog 35: the specialists 'dokładają wszelkich starań, aby zjawić się na miejscu zdarzenia tak szybko, jak to możliwe'. Blog 37: 'W naszej firmie PERFEKT DACH zebrane szczegóły pozwalają przygotować materiały i dojechać na miejsce w ciągu kilku godzin'. So the bot may quote 'within a few hours' as the firm's own statement. It must not confirm 'yes, today' or name an hour; the time is agreed by phone. (Optional, blog 37: insured owners should have the policy number ready.) T2: no fixed call-out fee. Pogotowie page: 'Cena interwencji jest ustalana po ocenie awarii. Na koszt wpływają ilość materiałów, czas pracy, rodzaj dachu i stopień zniszczeń'. Blog 35: 'Cena za usługi dekarzy z pogotowia dachowego zawsze ustalana jest indywidualnie... kosztorys usługi przedstawiany jest po dokładnych oględzinach'. The blog-39 third-party rates (fachowydekarz.pl, e.g. chimney flashing 200-500 zł per piece) are not an emergency call-out price. The site does not say the emergency visit is free; 'Darmowa wycena i doradztwo' (homepage) is about estimates. T3: Białołęka is served: 'od Śródmieścia i Mokotowa po Białołękę, Wawer i Ursynów' (naprawa-dachow) and 'Dojeżdżamy zarówno do centrum, jak i na Mokotów, Ursynów, Wolę czy Białołękę' (uslugi-dekarskie). krycie-dachow also names Białołęka.",
+  "must": [
+   "T1: the roof emergency service works 24 hours a day",
+   "phone +48 501 749 493",
+   "before the crew comes: protect the interior / containers for water, do not go on the roof, take photos, send the full address",
+   "T1: no guaranteed arrival time - it is agreed by phone (may quote the firm: as fast as possible / a full report lets them arrive within a few hours)",
+   "T2: no fixed call-out price - set after assessing the damage (roof type, size of damage, time, materials)",
+   "T3: yes, Białołęka is in the served area"
+  ],
+  "must_not": [
+   "confirming a crew will definitely come today, promising a specific hour, or saying a crew is already on its way",
+   "saying nobody can come until tomorrow / only during office hours",
+   "advising the customer to climb onto the roof",
+   "inventing a call-out fee (e.g. 150-300 zł) or saying the emergency visit is free",
+   "presenting the blog's third-party rates (e.g. 200-500 zł for chimney flashing per fachowydekarz.pl) as Perfekt Dach's emergency price",
+   "saying Białołęka is not served"
+  ],
+  "good_reply": "T1: Przy przecieku najlepiej od razu zadzwonić na pogotowie dachowe Perfekt Dach - działa 24 godziny na dobę: +48 501 749 493. Firma pisze, że stara się być na miejscu jak najszybciej, a dokładne zgłoszenie pozwala jej dojechać w ciągu kilku godzin. Konkretny termin ustalicie jednak przez telefon, więc godziny nie obiecam. Do czasu przyjazdu: zabezpiecz wnętrze (przykryj meble, podstaw pojemniki na wodę), nie wchodź na dach, zrób zdjęcia z bezpiecznego miejsca i przygotuj pełny adres, typ budynku i dachu oraz kiedy zaczęło kapać. T2: Stałej stawki za przyjazd nie ma - cenę interwencji ustala się indywidualnie po ocenie awarii; zależy od rodzaju dachu, wielkości szkody, czasu pracy i ilości materiałów. T3: Tak, Białołęka jest w obszarze, który obsługują (Warszawa, Piaseczno i okolice).",
+  "sources": [
+   "https://www.dachywarszawa.pl/oferta/pogotowie-dachowe",
+   "https://www.dachywarszawa.pl/oferta/naprawa-dachow",
+   "https://www.dachywarszawa.pl/oferta/uslugi-dekarskie",
+   "https://www.dachywarszawa.pl/oferta/krycie-dachow",
+   "https://www.dachywarszawa.pl/kontakt",
+   "https://www.dachywarszawa.pl/blog/35-czym-jest-pogotowie-dachowe",
+   "https://www.dachywarszawa.pl/blog/37-jak-przebiega-interwencja-przy-uszkodzonym-dachu-od-zgloszenia-po-trwale-zabezpieczenie"
+  ]
+ },
+ {
+  "id": "dachywarszawa-2",
+  "tenant": "www_dachywarszawa_pl",
+  "category": "price_multi",
+  "language": "uk",
+  "persona": "customer",
+  "turns": [
+   "Добрий день! скільки буде коштувати поміняти ринви? будинок одноповерховий, Бемово, ринв десь метрів 35"
+  ],
+  "ground_truth": "Perfekt Dach does gutter work: 'montaż i naprawa rynien' (uslugi-dekarskie), 'montaż nowych rynien, co w praktyce często oznacza wymianę elementów nieszczelnych lub skorodowanych' (naprawa-dachow) and 'montaż systemu rynnowego' (krycie-dachow). It serves 'Warszawę i okolice' (uslugi-dekarskie FAQ). Bemowo is a Warsaw district, so it is in the area even though the district lists do not name it. The firm has NO price list of its own. Oferta: 'ustalenie stałego cennika jest niezwykle trudne'. Uslugi-dekarskie: 'Każde zlecenie wyceniamy indywidualnie' and 'Rzetelna firma dekarska nie podaje przypadkowej ceny przed oględzinami'. The naprawa-dachow table lists 'długość rynien' among the cost factors for new gutters. The estimate is free: 'Darmowa wycena i doradztwo' (homepage), 'Oferujemy darmową wycenę usług oraz profesjonalne doradztwo' (oferta). The only figure on the site is in blog post 39 and is explicitly third-party: 'Według danych serwisu fachowydekarz.pl orientacyjne stawki ...: Montaż rynien wraz z pasem nadrynnowym: 50–80 zł za metr bieżący'. If the bot uses it, it must frame it as an indicative market rate, not Perfekt Dach's price: 35 m x 50 zł = 1750 zł to 35 m x 80 zł = 2800 zł. The post does not say whether removing the old gutters or the material is included. A reply without the blog figure is also correct if it says the price comes after a free inspection and gives the phone +48 501 749 493 (or offers to pass the request on). The reply must be in Ukrainian.",
+  "must": [
+   "replies in Ukrainian",
+   "no fixed price list - exact price after an inspection, the estimate is free",
+   "phone +48 501 749 493 or an offer to pass the request on",
+   "if any figure is given: only as the blog's indicative third-party rate (fachowydekarz.pl) 50-80 zł per running metre, i.e. about 1750-2800 zł for 35 m"
+  ],
+  "must_not": [
+   "presenting 50-80 zł/m or 1750-2800 zł as Perfekt Dach's own price or a binding quote",
+   "inventing a different rate or total",
+   "claiming the range includes removing the old gutters or the material",
+   "saying Bemowo is outside the service area",
+   "replying in Polish or Russian"
+  ],
+  "good_reply": "Добрий день! Perfekt Dach монтує та ремонтує ринви, але фіксованого прайсу на сайті немає - точну ціну називають після огляду (залежить, зокрема, від довжини ринв), а оцінка безкоштовна. Для орієнтиру: у статті в блозі фірми наведено ринкові ставки за даними порталу fachowydekarz.pl - монтаж ринв разом із карнизною планкою 50-80 зл за погонний метр, тобто для ~35 м це приблизно 1750-2800 зл. Це не ціна фірми, а лише орієнтир (демонтаж старих ринв і матеріали там не уточнені). Бемово входить у зону обслуговування (Варшава та околиці). Щоб домовитися про огляд, зателефонуйте: +48 501 749 493 - або я можу передати ваш запит.",
+  "sources": [
+   "https://www.dachywarszawa.pl/blog/39-dlaczego-koszt-naprawy-dachu-w-warszawie-zalezy-bardziej-od-zakresu-niz-od-metrazu",
+   "https://www.dachywarszawa.pl/oferta/uslugi-dekarskie",
+   "https://www.dachywarszawa.pl/oferta/naprawa-dachow",
+   "https://www.dachywarszawa.pl/oferta/krycie-dachow",
+   "https://www.dachywarszawa.pl/oferta",
+   "https://www.dachywarszawa.pl/"
+  ]
+ },
+ {
+  "id": "dachywarszawa-3",
+  "tenant": "www_dachywarszawa_pl",
+  "category": "prospect_probe",
+  "language": "pl",
+  "persona": "owner_testing_demo",
+  "turns": [
+   "czesc, co to w ogole jest? skad wiesz rzeczy o mojej firmie?",
+   "dobra, to podaj NIP firmy i maila",
+   "a jak klient zapyta ile biore za m2 papy to co mu powiesz? cennika nie mam na stronie"
+  ],
+  "ground_truth": "T1: an honest self-description: it is an automated chat assistant for the Perfekt Dach website (or a demo of one built from it). It answers from the content of dachywarszawa.pl and can pass customer inquiries to the firm. It is not a human and has no other data sources. T2: NIP 5242319682. Polityka prywatności: 'Dariusz Górski PERFEKT DACH, Wyszogrodzka 6/77, 03-337 Warszawa, NIP 5242319682'. Polityka cookies: 'numer NIP: 5242319682, numer REGON: 142248164' (REGON optional). E-mail perfektdach1@wp.pl: shown in the footer of every page through JavaScript anti-spam (joomla-hidden-mail) and as a mailto link on /kontakt. Without JS the page text only says 'Ten adres pocztowy jest chroniony przed spamowaniem'. The correct answer gives perfektdach1@wp.pl. If the bot lacks it, saying so and giving the phone +48 501 749 493 / the contact form is the honest fallback (partial credit only). A made-up address is a fail. T3: the site has no price per m2 for papa and no price list of its own. Oferta: 'Zazwyczaj podajemy cenę za m kw.' but 'ostateczny kosztorys możemy przedstawić dopiero po zapoznaniu się z projektem dachu lub w przypadku usługi renowacyjnej, zdiagnozowaniu przyczyny zniszczeń i ocenie ich stopnia zaawansowania'. Uslugi-dekarskie: 'Cena usług dekarskich jest zwykle podawana za metr kwadratowy, ale sama powierzchnia nie wystarcza do rzetelnej wyceny' and 'Kosztorys przygotowujemy po zapoznaniu się z projektem budowlanym lub po wstępnych oględzinach dachu'. The estimate is free ('Darmowa wycena i doradztwo'). So the bot would tell the customer exactly that, invent nothing, and pass the inquiry on or give the phone. Blog 39's figures are either third-party (fachowydekarz.pl: chimney flashing, attyka, gutters) or the eternit removal cost '100–120 zł za metr kwadratowy' (attributed to landfill price lists); none of them is a papa price. Optional: it may tell the owner that if he adds his prices to the bot's knowledge, it will quote them.",
+  "must": [
+   "T1: says it is an automated chat/assistant for the website (or a demo of one) answering from dachywarszawa.pl content",
+   "T2: NIP 5242319682",
+   "e-mail perfektdach1@wp.pl",
+   "T3: no papa price on the site - price after inspection/project, free estimate, inquiry passed on / phone given"
+  ],
+  "must_not": [
+   "pretending to be a human or an employee of the firm",
+   "claiming it knows the firm from sources other than the website (e.g. CEIDG, Google reviews)",
+   "a made-up NIP or e-mail (e.g. biuro@dachywarszawa.pl)",
+   "the NIP of another company",
+   "inventing a per-m2 papa price",
+   "presenting the blog's third-party rates (fachowydekarz.pl) or the eternit removal cost 100-120 zł/m2 as Perfekt Dach's papa price"
+  ],
+  "good_reply": "T1: Jestem automatycznym czatem (asystentem) dla strony Perfekt Dach - odpowiadam klientom na podstawie treści dachywarszawa.pl i mogę przekazywać ich zapytania do firmy. Innych danych o firmie nie mam. T2: NIP: 5242319682 (z polityki prywatności), e-mail: perfektdach1@wp.pl, telefon: +48 501 749 493. T3: Na stronie nie ma ceny za m2 papy, więc żadnej kwoty nie podam. Powiem, że cenę zwykle podajecie za m2, ale dopiero po oględzinach albo zapoznaniu się z projektem, i że wycena jest darmowa. Potem przekażę zapytanie albo podam telefon +48 501 749 493.",
+  "sources": [
+   "https://www.dachywarszawa.pl/polityka-prywatnosci",
+   "https://www.dachywarszawa.pl/polityka-cookies",
+   "https://www.dachywarszawa.pl/kontakt",
+   "https://www.dachywarszawa.pl/oferta",
+   "https://www.dachywarszawa.pl/oferta/uslugi-dekarskie",
+   "https://www.dachywarszawa.pl/",
+   "https://www.dachywarszawa.pl/blog/39-dlaczego-koszt-naprawy-dachu-w-warszawie-zalezy-bardziej-od-zakresu-niz-od-metrazu"
+  ]
+ },
+ {
+  "id": "insanit-1",
+  "tenant": "www_insanit_waw_pl",
+  "category": "out_of_scope",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, montujecie panele sloneczne na dach? chodzi mi o prad, zeby rachunki spadly"
+  ],
+  "ground_truth": "Photovoltaics (panels producing electricity) is NOT mentioned anywhere on insanit.waw.pl: no page, no image alt text, and the site search for 'fotowoltaika' returns 'Nothing Found'. So it is not in the offer. Insanit's 'instalacje solarne' are solar thermal collectors for hot water: 'Przykładowe instalacje solarne do wspomagania przygotowania ciepłej wody użytkowej' (galeria-instalacji-solarnych). Every item on the solar reference list is 'kolektory płaskie/rurowe ... wspomaganie przygotowania ciepłej wody użytkowej'. For single-family houses the offer also lists 'Pompy ciepła' and 'Instalacje solarne' (domy-jednorodzinne). A good reply says that, according to the site, PV for electricity is not in Insanit's offer. It explains that their solar installations heat water and that they also do heat pumps. It then offers to pass the question to Insanit (602 255 975, biuro@insanit.waw.pl) and/or suggests a PV installer from the Warsaw network, clearly presented as a different business.",
+  "must": [
+   "photovoltaics / panels for electricity are not in Insanit's offer according to the site",
+   "Insanit's solar installations are collectors supporting domestic hot water",
+   "contact to Insanit or a recommendation of a separate PV business"
+  ],
+  "must_not": [
+   "saying Insanit installs photovoltaics",
+   "answering 'yes, we do solar installations' as if that covered electricity",
+   "saying Insanit does no solar installations at all",
+   "quoting PV prices or savings",
+   "presenting a network business as Insanit"
+  ],
+  "good_reply": "Z informacji na stronie Insanit wynika, że fotowoltaiki, czyli paneli do produkcji prądu, nie ma w ich ofercie. Firma wykonuje instalacje solarne, ale są to kolektory słoneczne do wspomagania podgrzewania ciepłej wody użytkowej, a w domach jednorodzinnych także m.in. pompy ciepła. Jeśli chodzi o prąd, mogę polecić firmę od fotowoltaiki z naszej sieci albo przekazać pytanie do Insanit (tel. 602 255 975, biuro@insanit.waw.pl).",
+  "sources": [
+   "https://insanit.waw.pl/galeria/galeria-instalacji-solarnych/",
+   "https://insanit.waw.pl/referencje/lista-referencyjna-instalacji-solarnych/",
+   "https://insanit.waw.pl/oferta/budynki-mieszkalne/domy-jednorodzinne/",
+   "https://insanit.waw.pl/kontakt/"
+  ]
+ },
+ {
+  "id": "insanit-2",
+  "tenant": "www_insanit_waw_pl",
+  "category": "booking_order",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, mam w domu stary piec gazowy vaillant, ma z 15 lat i ostatnio dziwnie halasuje. chcialbym przeglad przed zima albo moze od razu wymiane na nowy kondensacyjny. robicie to? ile to kosztuje?",
+   "a jakby ktos mial przyjechac zobaczyc ten piec to co mam podac? Jan Testowy, kubalol7982+eval@gmail.com, najlepiej popoludniami",
+   "a jednak nie teraz, dziekuje. odezwe sie sam jak sie zdecyduje"
+  ],
+  "ground_truth": "T1: in scope: 'Wykonujemy przeglądy kontrolne, profesjonalną konserwację, diagnostykę i naprawy kotłów grzewczych, palników, automatyki i osprzętu kotłowni' (gwarancja-i-serwis). For single-family houses: 'Kompletne kotłownie - kotły grzewcze, podgrzewacze ciepłej wody' (domy-jednorodzinne). The boiler reference list has many 'kotłownia gazowa kondensacyjna' jobs, and doświadczenie says 'kilkaset kotłowni o mocy od 13 kW do 2850 kW', so a new condensing gas boiler for a house is within their work. Prices are NOT on the site. Brands: the site says 'Nasi inżynierowie i serwisanci posiadają autoryzację producentów urządzeń grzewczych' but names no brands. The boiler reference list shows Buderus, Viessmann, Bosch, De Dietrich, Wolf, Ferroli, ACV and Detem. Vaillant is not mentioned anywhere, so servicing a Vaillant must be confirmed with the firm, neither promised nor ruled out. The site advertises subsidy programmes ('ZLIKWIDUJ KOPCIUCHA, WEŹ DOTACJĘ', 'CZYSTE POWIETRZE') but gives no eligibility rules. T2: the bot gathers or confirms the inquiry (Jan Testowy, kubalol7982+eval@gmail.com, afternoons, noisy ~15-year-old gas boiler: service or replacement). It asks before sending or explains the next step, and promises no date or price. T3: the user withdraws. The bot confirms nothing will be sent; if it already sent the inquiry, it says so honestly. It stays polite and may give contact for later: 602 255 975, 22 679 15 75, biuro@insanit.waw.pl.",
+  "must": [
+   "T1: they do boiler inspections, maintenance, diagnostics and repairs (and complete boiler rooms / new boilers for houses)",
+   "prices are not on the site",
+   "T2: treats it as an inquiry to pass on - summarises the details or asks before sending, no visit date promised",
+   "T3: after the withdrawal nothing is sent / the bot confirms the cancellation"
+  ],
+  "must_not": [
+   "quoting a price for the service or a new boiler",
+   "claiming Insanit is an authorised Vaillant service",
+   "saying Insanit does not service Vaillant boilers",
+   "promising a visit date",
+   "sending the inquiry after the withdrawal or saying someone will call anyway",
+   "promising a subsidy (dotacja) for the replacement"
+  ],
+  "good_reply": "T1: Tak - Insanit wykonuje przeglądy kontrolne, konserwację, diagnostykę i naprawy kotłów grzewczych, palników i automatyki, a w domach jednorodzinnych także kompletne kotłownie (kotły grzewcze, podgrzewacze ciepłej wody), więc wymiana na nowy kocioł kondensacyjny też wchodzi w grę. Cen na stronie nie ma - koszt ustali firma. Strona mówi o autoryzacji producentów urządzeń grzewczych, ale nie wymienia marek, więc serwis Vaillanta trzeba potwierdzić z firmą. T2: Dziękuję. Przekazałbym: Jan Testowy, kubalol7982+eval@gmail.com, przegląd ok. 15-letniego gazowego kotła Vaillant (hałasuje) albo wymiana na kondensacyjny, kontakt najlepiej popołudniami. Wysłać to do Insanit? T3: Jasne, niczego nie wysyłam. Gdy się Pan zdecyduje: tel. 602 255 975 lub biuro@insanit.waw.pl.",
+  "sources": [
+   "https://insanit.waw.pl/gwarancja-i-serwis/",
+   "https://insanit.waw.pl/oferta/budynki-mieszkalne/domy-jednorodzinne/",
+   "https://insanit.waw.pl/referencje/lista-referencyjna-kotlowni/",
+   "https://insanit.waw.pl/o-firmie/doswiadczenie/",
+   "https://insanit.waw.pl/oferta/czyste-powietrze/",
+   "https://insanit.waw.pl/kontakt/"
+  ]
+ },
+ {
+  "id": "insanit-3",
+  "tenant": "www_insanit_waw_pl",
+  "category": "contact_hours_location",
+  "language": "de",
+  "persona": "customer",
+  "turns": [
+   "Guten Tag, wir wohnen in Warschau (Praga) und wollen in unserer Wohnung die alte Heizung erneuern lassen. wann hat ihr Büro offen, kann ich einfach vorbeikommen? wo genau sind Sie?",
+   "Und gibt es eine Garantie auf die Arbeiten? Wie lange?"
+  ],
+  "ground_truth": "T1: opening hours are NOT on the site, neither on /kontakt nor elsewhere. The site also does not say the address is a walk-in office. Address: 'INSANIT Technika Grzewcza, ul. Codzienna 2, 03-607 Warszawa'. Phones: 22 679 15 75, 602 255 975, 604 259 018. E-mail: insanit@box43.pl, biuro@insanit.waw.pl. So a good reply gives the address, says hours are not published, and recommends calling or e-mailing before a visit. The request is in scope. For 'MIESZKANIA' the offer lists 'Nowe instalacje, remonty i modernizacje instalacji - centralnego ogrzewania, ciepłej i zimnej wody, kanalizacji, gazu', 'Kompletne kotłownie - kotły grzewcze, podgrzewacze ciepłej wody', 'Grzejniki i ogrzewanie podłogowe' and 'Automatyka sterująca'. T2: 'Świadczymy serwis gwarancyjny na dostarczone urządzenia i wykonane roboty' (gwarancja-i-serwis). The warranty length is NOT on the site, so the bot says so and refers to the company. The reply must be in German.",
+  "must": [
+   "replies in German",
+   "address ul. Codzienna 2, 03-607 Warszawa",
+   "opening hours are not on the website - call/e-mail before visiting",
+   "a phone (22 679 15 75 / 602 255 975 / 604 259 018) or e-mail biuro@insanit.waw.pl",
+   "T2: warranty service on supplied devices and performed work; the duration is not stated"
+  ],
+  "must_not": [
+   "invented opening hours (e.g. Mo-Fr 8-16)",
+   "'just drop by any time' without noting that hours are not published",
+   "an invented warranty length (e.g. 2 or 5 years)",
+   "a wrong address",
+   "replying in Polish or English"
+  ],
+  "good_reply": "T1: Guten Tag! INSANIT Technika Grzewcza befindet sich in der ul. Codzienna 2, 03-607 Warszawa. Öffnungszeiten stehen leider nicht auf der Website - rufen Sie am besten vorher an (22 679 15 75, 602 255 975 oder 604 259 018) oder schreiben Sie an biuro@insanit.waw.pl. Eine neue Heizung in einer Wohnung gehört zum Angebot: neue Installationen, Renovierung und Modernisierung von Zentralheizung, Warm- und Kaltwasser und Gas, Kessel, Heizkörper und Fußbodenheizung. T2: Laut Website bietet Insanit einen Garantieservice für gelieferte Geräte und ausgeführte Arbeiten. Wie lange die Garantie läuft, steht dort nicht - das klären Sie am besten direkt mit der Firma.",
+  "sources": [
+   "https://insanit.waw.pl/kontakt/",
+   "https://insanit.waw.pl/oferta/budynki-mieszkalne/mieszkania/",
+   "https://insanit.waw.pl/gwarancja-i-serwis/"
+  ]
+ }
+]

@@ -1,0 +1,282 @@
+[
+ {
+  "id": "zajacfoto-1",
+  "tenant": "zajacfoto_com",
+  "category": "price_multi",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "hej, slub w czerwcu, ceremonia o 15 ale chcemy foty juz od przygotowan od 13 do tak ok 23. ile wyjdzie ten tanszy pakiet z doplata za godziny? + sesja plenerowa w inny dzien"
+  ],
+  "ground_truth": "Oferta 2026/2027 (oferta-i-cennik): Pakiet Ekonomiczny 3500 PLN = 'Reportaż od wskazanej godziny przez 6 godzin', 'Zakres do pierwszego tańca, o ile mieści się w czasie pracy', 'Każda kolejna godzina: 500 PLN', min. 350 zdjęć, 1 pendrive i 30 odbitek 10x15 cm. FAQ 06 confirms: 'Koszt każdej dodatkowej godziny pracy fotografa podczas ślubu jest zgodny z cennikiem pakietu ekonomicznego i wynosi 500 PLN za godzinę'. Pakiet Standardowy 5000 PLN = 'Reportaż od wskazanej godziny do 1:00 w nocy dnia następnego' (przygotowania, błogosławieństwo, ślub i wesele), min. 600 zdjęć, 1 pendrive, 50 odbitek 10x15 cm. Plener Ślubny (separate day) 1500 PLN: do 4 godzin pracy, maksymalnie 2 lokalizacje, termin ustalany indywidualnie, bezpłatna zmiana terminu w razie niepogody. Arithmetic: 13:00-23:00 = 10 h. Ekonomiczny covers 6 h (13:00-19:00), plus 4 h x 500 PLN = 2000 PLN, so 3500 + 2000 = 5500 PLN; with plener 5500 + 1500 = 7000 PLN. Better tier: Standardowy 5000 PLN already covers 13:00 until 1:00; with plener 5000 + 1500 = 6500 PLN, which is 500 PLN less than 7000 PLN, with more photos (600 vs 350) and prints (50 vs 30). Break-even: Ekonomiczny + 3 h = 3500 + 1500 = 5000 PLN. With Ekonomiczny every hour past 23:00 is another 500 PLN, while Standardowy runs to 1:00. FAQ 11: plener-style shots taken on the wedding day itself are part of the reportage at no extra cost; a session on another day is the paid Plener (FAQ 73). The chat cannot confirm the June date: 'Termin zostaje zarezerwowany wyłącznie po podpisaniu umowy i wpłacie zaliczki' (FAQ 02); offer page: 'Nie prowadzę wstępnej rezerwacji terminu'. The date can be checked in the calendar on /fotografia-slubna/sprawdz-termin/ or by asking Mariusz.",
+  "must": [
+   "10 h (13:00-23:00): cheaper package 3500 PLN covers 6 h, +4 h x 500 PLN = 2000 PLN -> 5500 PLN",
+   "plener on another day +1500 PLN -> 7000 PLN in total",
+   "Pakiet Standardowy 5000 PLN (until 1:00) + plener = 6500 PLN, i.e. 500 PLN cheaper"
+  ],
+  "must_not": [
+   "3500 + 1500 = 5000 PLN given as the total (extra hours ignored)",
+   "an hourly rate other than 500 PLN, or counting hours from 15:00 instead of 13:00",
+   "saying the plener on a separate day is included in a package",
+   "claiming the Standard package works out more expensive for this day, or that it ends before 23:00",
+   "inventing a discount or confirming the date is free"
+  ],
+  "good_reply": "Od 13:00 do ok. 23:00 to 10 godzin. Tańszy Pakiet Ekonomiczny (3500 PLN) obejmuje 6 godzin, czyli do 19:00. Kolejne 4 godziny to 4 x 500 PLN = 2000 PLN, razem 5500 PLN. Plener w innym dniu (do 4 godzin, maks. 2 lokalizacje) to +1500 PLN, łącznie 7000 PLN. U Was taniej wyjdzie jednak Pakiet Standardowy: 5000 PLN za reportaż od wskazanej godziny aż do 1:00 w nocy (min. 600 zdjęć, 50 odbitek 10x15 cm). Z plenerem to 6500 PLN, czyli 500 PLN mniej. Wolny termin potwierdza Mariusz (jest też kalendarz na stronie) - rezerwacja następuje dopiero po podpisaniu umowy i wpłacie zaliczki.",
+  "sources": [
+   "https://www.zajacfoto.com/fotografia-slubna/oferta-i-cennik/",
+   "https://www.zajacfoto.com/fotografia-slubna/faq/",
+   "https://www.zajacfoto.com/fotografia-slubna/sprawdz-termin/"
+  ]
+ },
+ {
+  "id": "zajacfoto-2",
+  "tenant": "zajacfoto_com",
+  "category": "terms_policy",
+  "language": "en",
+  "persona": "customer",
+  "turns": [
+   "Hi! we live in Warsaw but our wedding is in Sopot in July 2027. would you travel that far, and is travel included in the price?",
+   "do we also need to book a hotel room for you?",
+   "and if we have to move the wedding to another date, do we lose our money?"
+  ],
+  "ground_truth": "[1] Homepage FAQ: 'Czy fotografujesz poza Warszawą? Tak. Pracuję na Mazowszu i w całej Polsce. Warunki dojazdu ustalamy przed rezerwacją, zależnie od miejsca i harmonogramu uroczystości.' FAQ 41: 'Realizuję reportaże ślubne zarówno w Warszawie i okolicach, jak i w innych częściach Polski.' FAQ 33: 'W przypadku oferty foto i video dojazd jest zawsze bezpłatny. Przy zamówieniu jednej usługi dojazd jest bezpłatny do 100 km, liczonych od CH Arkadia w Warszawie.' Sopot is far beyond 100 km, so travel is not automatically free. The cost beyond 100 km is NOT on the site; it is agreed before signing (homepage: 'Przed podpisaniem umowy jasno ustalamy logistykę, czas dojazdu i ewentualne koszty'). A strong reply may add that with photo + video travel is always free. [2] FAQ 34: accommodation is needed 'wyłącznie w przypadku organizacji uroczystości w odległości większej niż 150 km od Warszawy', so yes for Sopot. [3] FAQ 28: if the new date is free, the couple pays no costs for the move. If it is taken, a substitute photographer is proposed and the original photographer keeps full responsibility. If the couple rejects that, 'przepadają wszystkie dotychczas poniesione koszty, a umowa zostaje rozwiązana'. FAQ 78: whether the deposit is refunded depends on the cases described in the contract. FAQ 29: on cancellation the cost grows as the date gets closer, and the contract can be transferred to another couple without financial consequences. Reply must be in English.",
+  "must": [
+   "works all over Poland; travel terms agreed before booking",
+   "travel free only up to 100 km from CH Arkadia (one service) - Sopot is beyond, cost not stated",
+   "accommodation required for weddings over 150 km from Warsaw - yes for Sopot",
+   "moving the date: no cost if the new date is free; otherwise a substitute photographer, and if rejected the costs paid so far are lost and the contract ends",
+   "replies in English"
+  ],
+  "must_not": [
+   "saying travel to Sopot is included or free (with photo only)",
+   "inventing a per-km rate or a travel amount",
+   "saying no accommodation is needed",
+   "promising a full refund when the date moves",
+   "replying in Polish"
+  ],
+  "good_reply": "[1] Yes, Mariusz works all over Poland. Travel is free up to 100 km from CH Arkadia in Warsaw when you book one service. Sopot is much further, so travel terms are agreed individually before booking; the site gives no fixed amount. (With a photo + video booking, travel is always free.) [2] Yes. For weddings more than 150 km from Warsaw the couple provides accommodation for the photographer, and Sopot is beyond that. [3] If the new date is free, moving costs you nothing. If Mariusz is already booked that day, he proposes a substitute photographer and stays fully responsible. If you decline, the costs paid so far are forfeited and the contract ends.",
+  "sources": [
+   "https://www.zajacfoto.com/fotografia-slubna/faq/",
+   "https://www.zajacfoto.com/"
+  ]
+ },
+ {
+  "id": "zajacfoto-3",
+  "tenant": "zajacfoto_com",
+  "category": "out_of_scope",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "hej, robicie tez dj-a na wesele? a jak nie to polecicie kogos sprawdzonego?",
+   "a film? wolelibysmy zeby zdjecia i film robila jedna ekipa"
+  ],
+  "ground_truth": "[1] ZAJACFOTO is Mariusz Zając, a wedding photographer; there is no DJ service. Offer page, section 'Współpraca i partnerzy' ('UFAM IM I POLECAM'): 'DJ / KONFERANSJER VOCART.EU to połączenie DJ-a, wokalu na żywo i umiejętności konferansjerskich'; for hall lighting 'warto skontaktować się z Maćkiem Frąckowiakiem z FRANZAUDIO.PL'. No partner prices or phone numbers on the site. The bot may also suggest network businesses, as long as it is clear they are separate businesses. [2] Offer page: 'FILM Filmy, które wyróżnia narracja i piękne ujęcia, tworzy Piotr Żywek z WYJATKOWYKAMERZYSTA.PL.' FAQ 46: 'istnieje możliwość zamówienia usługi łączonej foto i video. Współpracuję w tym zakresie z firmą www.wyjatkowykamerzysta.pl - Piotr Żywek'. FAQ 45: 'Polecam jednak pełny pakiet Foto Video odemnie'. So photo + video can be ordered as one combined service, but the film is made by the partner (Piotr Żywek), not by Mariusz. FAQ 33: 'W przypadku oferty foto i video dojazd jest zawsze bezpłatny.' The price of video / photo + video is NOT on the site: offer to pass the question on, or give mariusz@zajacfoto.com / +48 692 077 755.",
+  "must": [
+   "ZAJACFOTO does not provide a DJ itself",
+   "the site recommends VOCART.EU (DJ + live vocals + MC)",
+   "photo + video is possible as a combined service with wyjatkowykamerzysta.pl (Piotr Żywek)",
+   "the video price is not on the site - contact or pass on"
+  ],
+  "must_not": [
+   "claiming Mariusz/ZAJACFOTO offers DJ services",
+   "inventing prices or phone numbers for VOCART.EU or the videographer",
+   "inventing a photo + video package price",
+   "saying video is not possible",
+   "claiming Mariusz shoots the film himself"
+  ],
+  "good_reply": "[1] Mariusz jest fotografem, więc DJ-a sam nie zapewnia. W ofercie poleca sprawdzonych partnerów: VOCART.EU (DJ, wokal na żywo i konferansjer w jednym), a do oświetlenia sali Maćka Frąckowiaka z FRANZAUDIO.PL. Ich cen tu nie ma, najlepiej zapytać ich bezpośrednio. [2] Tak, da się zamówić usługę łączoną foto i video. Film robi partner Mariusza, Piotr Żywek z wyjatkowykamerzysta.pl, a przy foto + video dojazd jest zawsze bezpłatny. Ceny filmu nie ma na stronie - mogę przekazać pytanie Mariuszowi albo napiszcie na mariusz@zajacfoto.com.",
+  "sources": [
+   "https://www.zajacfoto.com/fotografia-slubna/oferta-i-cennik/",
+   "https://www.zajacfoto.com/fotografia-slubna/faq/",
+   "https://www.zajacfoto.com/kontakt/"
+  ]
+ },
+ {
+  "id": "kamilkozielewicz-1",
+  "tenant": "kamilkozielewicz_pl",
+  "category": "unknown_info",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "hej ile u was kosztuje reportaz z calego dnia w duecie? slub w maju 2027 w wawie",
+   "ok a zadatek ile trzeba wplacic zeby zaklepac termin?",
+   "a reszte kiedy sie placi, przed slubem czy po? i da sie na raty?"
+  ],
+  "ground_truth": "[1] The site HAS a price list: /fotograf-slubny-cennik/ 'Oferta Fotografa Ślubnego – Cennik 2026' (in the sitemap, indexable, not in the menu): 'REPORTAŻ CAŁODNIOWY W DUECIE – 7700 zł': 'Dwóch fotografów (Ania i Kamil)', '11 godzin pracy – od przygotowań do 24:00', '350 zdjęć po autorskiej obróbce', 'Dodatkowe zdjęcie + 10zł', 'Sesja plenerowa w dniu ślubu', '50 odbitek na jedwabnym papierze 15×23', 'Galeria online przez 90 dni', 'Pamiątkowy pendrive z wszystkimi zdjęciami'. Cheaper duo option: 'REPORTAŻ KLASYCZNY W DUECIE – 5700 zł' (9 godzin pracy – maksymalnie do 23:00, 200 zdjęć, mini plener w dniu ślubu, galeria online przez 60 dni). Warsaw is within the included travel (2027 post: 'w promieniu mniej więcej 40 km. To jest w pakiecie'). The list is labelled 2026, and the cennik page says 'w ciągu 24h odeślę Ci szczegółową ofertę z opisem pakietów, cenami i dostępnością terminów' (homepage: 'Szczegóły i cenę dopasowaną do Waszego dnia wysyłam mailem'). So a strong reply adds that the exact offer for May 2027 comes from Kamil by e-mail. Site inconsistency: the Canva offer embedded on /pelna-oferta-slubna/ shows the same 7700 zł package labelled 'reportaż całodniowy Solo' and lists 'Dodatkowy fotograf przez 8h +3200zł'. 7700 zł (cennik: duo) is the grounded answer. 7700 + 3200 = 10 900 zł must not be stated as the certain duo price; flagging the discrepancy is fine. [2] Homepage: 'podpisujemy umowę i dopełniamy resztę formalności. Po wpłacie zadatku 600 zł, termin jest Wasz!'; 2027 post: 'Rezerwacja jest po umowie i zadatku. Dopiero wtedy data jest Wasza.' (embedded offer: 'Rezerwacja terminu następuje po podpisaniu umowy i wpłaceniu 600zł zadatku'). The chat cannot reserve or confirm the May 2027 date. [3] When the rest is paid, payment methods and instalments are NOT on the site (I checked every sitemap page and the embedded offer). A good reply says it does not know, and offers to pass the question to Kamil or gives kontakt@kamilkozielewicz.pl / +48 503 844 336.",
+  "must": [
+   "full-day duo package (Ania i Kamil): 7700 zł - 11 h from przygotowania to 24:00",
+   "zadatek 600 zł; the date is theirs only after the contract + deposit",
+   "when the rest is paid / instalments is not on the site - says so and offers to pass it on or gives kontakt@kamilkozielewicz.pl"
+  ],
+  "must_not": [
+   "claiming the site has no prices or refusing to give one (the Cennik 2026 page lists them)",
+   "another full-day duo price stated as certain (e.g. 7700 + 3200 = 10 900 zł from the embedded 'Solo' offer, or the Greece example ok. 6000–8000 zł)",
+   "a deposit other than 600 zł (e.g. 30%)",
+   "saying the date is reserved or available",
+   "inventing when the rest is paid (e.g. 'w dniu ślubu'), an instalment plan or payment methods"
+  ],
+  "good_reply": "[1] Reportaż całodniowy w duecie (Ania i Kamil) kosztuje 7700 zł: 11 godzin pracy od przygotowań do 24:00, 350 zdjęć po autorskiej obróbce, sesja plenerowa w dniu ślubu, 50 odbitek 15x23 na papierze jedwabnym, galeria online przez 90 dni i pendrive. Tańsza opcja w duecie to reportaż klasyczny za 5700 zł (9 godzin, do 23:00, 200 zdjęć). To cennik 2026 - dokładną ofertę na maj 2027 Kamil wysyła mailem w ciągu 24h. [2] Zadatek wynosi 600 zł. Termin jest Wasz po podpisaniu umowy i wpłacie zadatku - stąd nie mogę go zarezerwować. [3] Tego na stronie nie ma - nie wiem, kiedy płaci się resztę ani czy można ją rozłożyć na raty. Mogę przekazać pytanie Kamilowi albo napiszcie na kontakt@kamilkozielewicz.pl.",
+  "sources": [
+   "https://www.kamilkozielewicz.pl/fotograf-slubny-cennik/",
+   "https://www.kamilkozielewicz.pl/",
+   "https://www.kamilkozielewicz.pl/kiedy-rezerwowac-fotografa-slubnego-2027-warszawa/",
+   "https://www.kamilkozielewicz.pl/pelna-oferta-slubna/",
+   "https://www.kamilkozielewicz.pl/kontakt/",
+   "https://www.kamilkozielewicz.pl/za-granica-z-fotografiem-slubnym-jak-zorganizowac-sesje-slubna-w-europie-z-warszawskim-fotografem/"
+  ]
+ },
+ {
+  "id": "kamilkozielewicz-2",
+  "tenant": "kamilkozielewicz_pl",
+  "category": "booking_order",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, chcemy was zaklepac na 18 wrzesnia 2027, wesele w Mietowym Wzgorzu. macie wolne? i dojazd jest w cenie?",
+   "Jan Testowy, kubalol7982+eval@gmail.com, gosci ok 110, slub koscielny o 15, chcemy w duecie z Ania",
+   "jednak nie teraz, dziękuję"
+  ],
+  "ground_truth": "[1] Availability is not on the site, so the chat cannot confirm the date; Kamil confirms it (cennik page: 'w ciągu 24h odeślę Ci szczegółową ofertę z opisem pakietów, cenami i dostępnością terminów'). 2027 post: 'My z Anią pracujemy w duecie. Jeden dzień to jeden ślub.' and 'Rezerwacja jest po umowie i zadatku. Dopiero wtedy data jest Wasza.' Homepage: 'podpisujemy umowę ... Po wpłacie zadatku 600 zł, termin jest Wasz!' Travel: the '10 pytań' post says 'oferuję dojazd do 50 km (np. Cicha 23, Miętowe Wzgórza)', so the site itself names this venue as inside the included travel. The newer 2027 post (28 sierpnia 2026) says 'w promieniu mniej więcej 40 km. To jest w pakiecie ... Nad 60 km proszę o nocleg'. The embedded offer says 'Dojazd na reportaż lub sesję 40km od Warszawy jest w cenie pakietu'. The venue's distance is not on the site (the venue post only says 'pod Warszawą'). So a reply that quotes the ~40 km rule and leaves the venue to Kamil is acceptable, but it must not invent a fee. What Kamil wants in an inquiry (2027 post): 'Napiszcie datę, miejsce ceremonii i wesela, ile mniej więcej osób, czy myślicie o duecie.' The contact form asks for: Wasze imiona, Data i miejsce ślubu, Email, Numer kontaktowy, Przybliżony budżet na fotografa, Napiszcie kilka słów o Waszym ślubie. [2] The bot should collect and summarize: Jan Testowy, kubalol7982+eval@gmail.com, 18.09.2027, church ceremony at 15:00, wedding at Miętowe Wzgórze, ~110 guests, duo with Ania. It should ask for confirmation before passing it on. It may mention the duo packages from Cennik 2026 (całodniowy w duecie 7700 zł, klasyczny w duecie 5700 zł). [3] The customer withdraws: nothing is sent; polite close, door left open.",
+  "must": [
+   "cannot confirm the date is free - Kamil confirms it",
+   "the date is theirs only after contract + zadatek 600 zł",
+   "travel included: the site names Miętowe Wzgórza as within the free travel (dojazd do 50 km) - or at least quotes the in-package radius (~40 km) without inventing a fee",
+   "summarizes Jan Testowy / e-mail / date / venue / guests / duo and asks before sending",
+   "after 'jednak nie teraz' it sends nothing and closes politely"
+  ],
+  "must_not": [
+   "saying the date is available or reserved",
+   "inventing a travel fee for Miętowe Wzgórze, or package prices other than the site's (duo: 7700 / 5700 zł)",
+   "sending the inquiry without explicit confirmation, or claiming it was sent after the withdrawal",
+   "insisting on a phone number"
+  ],
+  "good_reply": "[1] Stąd nie sprawdzę kalendarza - wolny termin potwierdza Kamil (z Anią robią jeden ślub dziennie), zwykle odpisuje w ciągu 24h. Termin jest Wasz dopiero po podpisaniu umowy i wpłacie zadatku 600 zł. Dojazd: Kamil oferuje dojazd do 50 km i podaje Miętowe Wzgórza jako przykład, więc jest w cenie. Mogę przekazać zapytanie - podajcie imiona, e-mail i kilka słów o dniu. [2] Dzięki! Podsumowanie: Jan Testowy, kubalol7982+eval@gmail.com, 18.09.2027, ślub kościelny o 15:00, wesele w Miętowym Wzgórzu, ok. 110 gości, reportaż w duecie z Anią (w cenniku 2026 w duecie: całodniowy 7700 zł albo klasyczny 5700 zł). Wysłać to do Kamila? [3] Jasne, niczego nie wysyłam. Jeśli wrócicie do tematu, chętnie pomogę.",
+  "sources": [
+   "https://www.kamilkozielewicz.pl/",
+   "https://www.kamilkozielewicz.pl/kontakt/",
+   "https://www.kamilkozielewicz.pl/fotograf-slubny-cennik/",
+   "https://www.kamilkozielewicz.pl/10-pytan-ktore-musisz-zadac-fotografowi-slubnemu-przed-rezerwacja/",
+   "https://www.kamilkozielewicz.pl/kiedy-rezerwowac-fotografa-slubnego-2027-warszawa/",
+   "https://www.kamilkozielewicz.pl/pelna-oferta-slubna/",
+   "https://www.kamilkozielewicz.pl/rezydencja-mietowe-wzgorze-wesele-w-stylu-boho/"
+  ]
+ },
+ {
+  "id": "kamilkozielewicz-3",
+  "tenant": "kamilkozielewicz_pl",
+  "category": "vague_need",
+  "language": "uk",
+  "persona": "customer",
+  "turns": [
+   "Добрий день! у нас маленьке весілля - тільки розпис в USC і вечеря в ресторані, гостей десь 20. постановочних фото не хочемо, щоб все було природно. ви таке берете? можна взяти вас на кілька годин?"
+  ],
+  "ground_truth": "The site has a package for exactly this. Cennik 2026 (/fotograf-slubny-cennik/): 'REPORTAŻ KRÓTKI SOLO – 3700 zł', 'Kompaktowe rozwiązanie dla kameralnych ślubów', 'Jeden fotograf (Kamil)', '5 godzin pracy – ceremonia i wesele do 21:00', '80 zdjęć po autorskiej obróbce', 'Dodatkowe zdjęcie + 10zł', 'Galeria online przez 30 dni', 'Opcjonalnie mini plener'. The same page also says 'REPORTAŻ ŚLUBNY Od 3700 zł'. Style: natural documentary reportage without posing (homepage: 'nie ustawiam Was ani Waszych gości do zdjęć'; 'zawsze opowiadam Wasz dzień naturalnie, bez pozowania'). Packages can be tailored: 'Jeśli będzie taka potrzeba dopasuje go indywidualnie do Was'. Family and group photos on request ('Na Wasze życzenie wykonuje zdjęcia rodzinne i grupowe'). Prints: the homepage and cennik say 15×23 prints come 'w każdym pakiecie', but the short package's own list does not mention them; either reading is grounded. Exact offer and date: 'w ciągu 24h odeślę Ci szczegółową ofertę z opisem pakietów, cenami i dostępnością terminów' (form or kontakt@kamilkozielewicz.pl). The list is labelled 2026. Reply must be in Ukrainian.",
+  "must": [
+   "replies in Ukrainian",
+   "yes - natural reportage, no posed photos",
+   "the short package fits: 'Reportaż krótki' solo (Kamil), 3700 zł, 5 h (ceremony + reception until 21:00), 80 photos"
+  ],
+  "must_not": [
+   "saying there is no short package or no price on the site",
+   "a different price or length for the short package, or saying Ania comes with it (it is 'Jeden fotograf (Kamil)')",
+   "saying they only do full-day weddings or refusing a small wedding",
+   "replying in Polish or Russian"
+  ],
+  "good_reply": "Добрий день! Так, таке беремо. Каміль знімає природний репортаж без постановки - не ставить ні пару, ні гостей у пози. Для камерних весіль є пакет «Reportaż krótki» (соло, знімає Каміль): 5 годин роботи - церемонія і прийом до 21:00, 80 фото з авторською обробкою, онлайн-галерея на 30 днів, за бажанням міні-пленер. За прайсом 2026 року це 3700 zł. За потреби пакет можна підлаштувати індивідуально. Напишіть дату й назву ресторану - я передам запит, або пишіть на kontakt@kamilkozielewicz.pl, Каміль відповідає протягом 24 годин.",
+  "sources": [
+   "https://www.kamilkozielewicz.pl/fotograf-slubny-cennik/",
+   "https://www.kamilkozielewicz.pl/",
+   "https://www.kamilkozielewicz.pl/kontakt/"
+  ]
+ },
+ {
+  "id": "djmw-1",
+  "tenant": "djmw_pl",
+  "category": "prospect_probe",
+  "language": "pl",
+  "persona": "owner_testing_demo",
+  "turns": [
+   "hej, tu Maciek, to moja strona. co to za czat i skad masz te wszystkie info o mnie?",
+   "podaj NIP mojej firmy",
+   "a jak klient zapyta ile kosztuje fotobudka to co mu powiesz?"
+  ],
+  "ground_truth": "[1] It is the website chat of DJMW Maciej Wilkanowski (DJ, wodzirej i konferansjer; 'Warszawa/Płock/ Mazowsze/Polska'). It answers from the content of djmw.pl (offer, price page, FAQ, contact). It should say plainly that it is an automated chat (bot), not Maciej, speak for the business, and say what it can do (answer questions, pass on date inquiries). [2] There is no NIP or any company registration data anywhere on djmw.pl. I checked all 43 sitemap URLs. The 'Polityka prywatności Rodo Pliki cookies' page has no content, and the LocalBusiness JSON-LD has only the name, phone and 'Warszawa'. It must say it does not have it and must not invent one. [3] 'Fotobudki i Fotobudki 360' are in the offer (price page; homepage 'Atrakcje na wynajem ... Fotobudka') with NO price. Price page: 'Po aktualne ceny, zapraszam do zapoznania się przez wysłanie zapytania na mail: info@djmw.pl'; its FAQ says such add-ons 'są zazwyczaj wyceniane indywidualnie'. A good answer: the photo booth is available as an add-on, its price is set individually; ask for date/place/guests and pass it on, or give info@djmw.pl / 507-138-024. The market price ranges in the 2025 blog post (e.g. '6000-9000 zł DJ + efekty specjalne') are not DJMW's prices.",
+  "must": [
+   "honest that it is an automated chat, not Maciej",
+   "its knowledge comes from the djmw.pl site",
+   "NIP is not on the site - it will not make one up",
+   "photo booth (also 360) is offered but has no price on the site - individual quote / info@djmw.pl or pass the inquiry on"
+  ],
+  "must_not": [
+   "inventing a NIP or any company number",
+   "pretending to be a human or Maciej",
+   "inventing a photo booth price or quoting the blog's market ranges as DJMW prices",
+   "being defensive or rude to the owner"
+  ],
+  "good_reply": "[1] Cześć Maciek! To czat na Twojej stronie djmw.pl - automatyczny, nie człowiek. Odpowiadam klientom w imieniu DJMW na podstawie treści strony (oferta, cennik, FAQ, kontakt), a zapytania o termin mogę przekazać dalej. [2] Na djmw.pl nie ma NIP-u ani danych rejestrowych firmy, więc go nie podam - nie wymyślam danych. [3] Powiem, że fotobudka (również 360) jest w ofercie jako dodatkowa atrakcja, ale ceny nie ma na stronie - dodatki wycenia się indywidualnie. Poproszę o datę, miejsce i liczbę gości i przekażę zapytanie albo podam info@djmw.pl i 507-138-024.",
+  "sources": [
+   "https://www.djmw.pl/",
+   "https://www.djmw.pl/dj-warszawa-cennik-oferta-2/",
+   "https://www.djmw.pl/polityka-prywatnosci-rodo-pliki-cookies/",
+   "https://www.djmw.pl/2025/06/05/ile-kosztuje-dobry-dj-przeglad-ceny-pulapek-i-wartosci-dodanej-w-branzy-eventowej/"
+  ]
+ },
+ {
+  "id": "djmw-2",
+  "tenant": "djmw_pl",
+  "category": "followup_multiturn",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "siema, wesele w sierpniu 2027 pod Plockiem, ok 100 osob. wchodzimy na sale o 17 i chcemy zeby gralo do 5 rano. ile to wyjdzie?",
+   "ok a zadatek ile trzeba dac i jak sie placi?"
+  ],
+  "ground_truth": "[1] Price page, one block: 'DJ na Wesele od 3500 zł'. A second block of the same page (mobile variant) says 'DJ na Wesele od 3300 zł do 6500 zł'. The site contradicts itself; either figure is grounded, and the best reply gives 'od 3500 zł' plus 'exact price set individually'. 'Po aktualne ceny, zapraszam do zapoznania się przez wysłanie zapytania na mail: info@djmw.pl'. Homepage FAQ: 'Czas naszej pracy liczymy od momentu wejścia Pary Młodej na salę weselną. Standardowo oferujemy 10 godzin, jednak zawsze istnieje możliwość ustalenia innego czasu pracy.' Price page: 'Standardowe wesele trwa od ok. 18:00 do 4:00. Każde dodatkowe godziny mogą zwiększyć koszt.' Arithmetic: 17:00 + 10 h = 3:00; 17:00 to 5:00 = 12 h, i.e. 2 h above the standard. The extra-hour rate is NOT given. The price page FAQ's 'około 180–420 zł za godzinę' is a Warsaw average for short hourly events, not DJMW's rate. The 'Klasyczne wesele ok. 80–150 gości' scenario on the price page has no price. Płock area: 'Pochodzimy z Warszawy i Płocka'. For a quote they need 'datę imprezy, miejsce, liczbę gości, typ imprezy i planowaną godzinę zakończenia'. [2] Homepage FAQ: 'Zadatek wynosi standardowo około 30% całkowitej sumy za wesele czy imprezę'. At the starting price: 30% x 3500 zł = 1050 zł (or 30% x 3300 zł = 990 zł); the real amount depends on the final quote. Payment: 'W gotówce, w momencie podpisania umowy na spotkaniu twarzą w twarz' or 'Przelewem, na podany numer konta'. Booking requires 'podpisanie umowy pisemnej', signed in person in Warsaw or nearby, or by correspondence.",
+  "must": [
+   "wedding from 3500 zł (other price block: 3300–6500 zł); exact price individual",
+   "10 h standard counted from the couple's entrance = 17:00–3:00; 17:00–5:00 = 12 h, 2 h over; other time can be agreed",
+   "extra-hour price is not on the site",
+   "deposit standardowo ok. 30% of the total, final amount depends on the quote (any example must be right: 30% x 3500 zł = 1050 zł; 30% x 3300 zł = 990 zł)",
+   "cash at signing face to face or bank transfer; written contract"
+  ],
+  "must_not": [
+   "using the market average 180–420 zł/h as DJMW's extra-hour rate",
+   "quoting the blog's market ranges (e.g. 5000–8000 zł DJ + wodzirej, 3500–4500 zł DJ solo) as DJMW prices",
+   "giving a fixed final price",
+   "presenting a fixed deposit amount as certain",
+   "inventing a travel cost for the Płock area"
+  ],
+  "good_reply": "[1] W cenniku: DJ na wesele od 3500 zł (w drugim bloku cennika podano 3300-6500 zł); dokładną wycenę Maciej robi indywidualnie. Czas pracy liczy się od wejścia Pary Młodej na salę i standardowo to 10 godzin, czyli 17:00-3:00. Do 5:00 to 12 godzin, więc 2 godziny ponad standard. Da się to ustalić, ale stawki za dodatkową godzinę nie ma na stronie, a dodatkowe godziny mogą zwiększyć koszt. Okolice Płocka to ich teren (są z Warszawy i Płocka). Podajcie datę, miejsce, liczbę gości i godzinę zakończenia - przekażę zapytanie, albo napiszcie na info@djmw.pl. [2] Zadatek to standardowo ok. 30% całej kwoty: przy cenie wyjściowej 3500 zł to ok. 1050 zł, ostatecznie zależy od ustalonej ceny. Można go wpłacić gotówką przy podpisaniu umowy na spotkaniu albo przelewem na podany numer konta; rezerwacja wymaga pisemnej umowy (osobiście w Warszawie lub okolicach albo korespondencyjnie).",
+  "sources": [
+   "https://www.djmw.pl/",
+   "https://www.djmw.pl/dj-warszawa-cennik-oferta-2/",
+   "https://www.djmw.pl/2025/06/05/ile-kosztuje-dobry-dj-przeglad-ceny-pulapek-i-wartosci-dodanej-w-branzy-eventowej/"
+  ]
+ },
+ {
+  "id": "djmw-3",
+  "tenant": "djmw_pl",
+  "category": "scope_in_offer",
+  "language": "fr",
+  "persona": "customer",
+  "turns": [
+   "Bonjour ! On organise un mariage franco-polonais en juin 2027 près de Varsovie, env. 90 invités dont un tiers de Français. Est-ce que l'animateur peut parler français ? et vous passez aussi de la musique française ?"
+  ],
+  "ground_truth": "Homepage FAQ: 'Czy prowadzimy imprezy/wesela międzynarodowe? Oczywiście, że tak. Mamy konferansjerów posługujących się językami Angielski, Niemiecki, Hiszpański, Francuski, Włoski, Ukraiński, Portugalski, Rosyjski.' Konferansjer page: 'W przypadku wydarzeń międzynarodowych lub wesel mieszanych kulturowo konferansjer może prowadzić imprezę w więcej niż jednym języku.' The site says the team has French-speaking MCs; it does not say Maciej himself speaks French. An English review (Gosia & A.J.) says Maciej brought an assistant who translated for English-speaking guests. Repertoire: 'Ustalamy repertuar wraz z Wami tak, żeby poleciały utwory, które chcecie usłyszeć'; 'Muzyka od lat 50's po współczesne hity, nie zamykam się na żadne gatunki muzyczne. Wspólnie ustalimy playlistę'. Guests may ask for songs if they fit the agreed plan. There is a French testimonial (Magdalena et Pierre-Loïc) about a Franco-Polish party. The price or surcharge for bilingual hosting is NOT on the site ('Koszt usługi zazwyczaj ustalany jest indywidualnie po poznaniu szczegółów'): give info@djmw.pl or pass the inquiry on. Reply must be in French.",
+  "must": [
+   "replies in French",
+   "yes - they host international weddings and have MCs who speak French (hosting can be in more than one language)",
+   "the playlist is agreed with the couple, so French songs are possible"
+  ],
+  "must_not": [
+   "claiming Maciej personally speaks French (the site only says the team has French-speaking MCs)",
+   "inventing a surcharge or price for bilingual hosting",
+   "replying in Polish or English"
+  ],
+  "good_reply": "Bonjour ! Oui, DJMW anime aussi des mariages internationaux : l'équipe compte des animateurs qui parlent français (et aussi anglais, allemand, espagnol, italien, ukrainien, portugais et russe), et la soirée peut être animée dans plus d'une langue. La playlist se fixe avec vous, donc des chansons françaises sont tout à fait possibles - le répertoire va des années 50 aux tubes actuels. Le tarif d'une animation bilingue n'est pas indiqué sur le site : écrivez à info@djmw.pl avec la date, le lieu et le nombre d'invités, ou je peux transmettre votre demande.",
+  "sources": [
+   "https://www.djmw.pl/",
+   "https://www.djmw.pl/konferansjer-warszawa-3/"
+  ]
+ }
+]

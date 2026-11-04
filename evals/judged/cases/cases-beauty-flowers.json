@@ -1,0 +1,301 @@
+[
+ {
+  "id": "aniatkaczyk-1",
+  "tenant": "aniatkaczyk_pl",
+  "category": "price_multi",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "hej :) slub w lipcu 2027. chce probe makijazu i fryzury, potem makijaz i fryzure w dniu slubu, a do tego mama i siostra sam makijaz. ile mnie to wyniesie?",
+   "a przygotowania bylyby u mnie w domu na Ursynowie, za dojazd sie doplaca?",
+   "a jakby Pani miala byc ze mna az do konca przygotowan to ile wtedy?"
+  ],
+  "ground_truth": "Count = 6 services: trial makeup + trial hair (2 - 'próbny makijaż i fryzura (2 usługi z pakietu)'), wedding-day makeup + hair (2 - 'makijaż i fryzura ślubna (2 usługi z pakietu)'), mum's makeup (1), sister's makeup (1). These are the 'Oferta pakietów ślubnych 2027' prices, so they apply to a July 2027 wedding. Pakiet Komfort ('W studio lub z dojazdem') 'Cena: 3000 zł', 'Pakiet składa się w sumie z 5 usług'. After the bride's 4 only 1 is left for loved ones ('Pozostałe 1 lub 3 usługi'), so one more is needed: 'Możliwość powiększenia pakietu o jedną usługę (+500zł)' -> 3000 zł + 500 zł = 3500 zł. The extra service is +500 zł in the package, not the 400 zł single-makeup price. Includes 'Korekta Pana Młodego' and 'Zestaw poprawkowy dla Panny Młodej'; 'Na każdą usługę w dniu ślubu zarezerwuj około 75min'; 'nie jest to pakiet na wyłączność'. Turn 2: Komfort - 'z djazdem do 30km od studio w cenie, powyżej 30km koszt dojazdu to 3 zł/km' (studio Makeup Spot, ul. Bokserska 73, Warszawa - 'na Mokotowie'). Ursynów is well within 30 km -> no travel surcharge, total stays 3500 zł. Turn 3: staying until the end of preparations = Pakiet Premium 'Z dojazedm, na wyłączność' (sic) - 'Wyłączność oznacza że jestem do Twojej dyspozycji od początku do końca przygotowań' - 'Cena: 4200 zł', 'Pakiet składa się w sumie z 7 usług' (trial + wedding day + 'Pozostałe 3 lub 5 usług' for loved ones), 'Dojazd w dniu ślubu do 50km od studio (ul. Bokserska 73, Warszawa) w cenie, powyżej 50km koszt dojazdu to 3 zł/km', extra service '+400zł'. Her 6 services fit into 7 -> 4200 zł, one service to spare, Ursynów travel included. The July 2027 date is not confirmed by the site: 'W kalendarzu możesz sprawdzić terminy wolne i niedostępne', 'O pozostałe terminy wyślij formularz'; 'W ciągu 12h odpowiem mailowo na zapytanie z formularza'.",
+  "must": [
+   "3500 zł = Pakiet Komfort 3000 zł + 1 dodatkowa usługa 500 zł",
+   "dojazd do 30 km od studia w cenie - Ursynów bez dopłaty",
+   "na wyłączność = Pakiet Premium 4200 zł",
+   "6 usług mieści się w 7 usługach Premium - bez dopłaty"
+  ],
+  "must_not": [
+   "3000 zł jako cena za te 6 usług",
+   "3400 zł (dodatkowa usługa policzona po 400 zł zamiast +500 zł w Pakiecie Komfort)",
+   "doliczanie dojazdu na Ursynów (np. 3 zł/km)",
+   "twierdzenie, że Pakiet Komfort jest na wyłączność",
+   "4600 zł (Premium + 400 zł) - 6 usług mieści się w 7",
+   "ceny pakietów innej makijażystki (3160 / 2680 / 1660 zł)",
+   "potwierdzenie, że termin w lipcu 2027 jest wolny"
+  ],
+  "good_reply": "(1) To razem 6 usług: próba makijażu i fryzury (2), makijaż i fryzura w dniu ślubu (2) oraz makijaż mamy i siostry (2). Pakiet Komfort za 3000 zł obejmuje 5 usług, więc trzeba go powiększyć o jedną (+500 zł). Wychodzi 3500 zł, w tym korekta Pana Młodego i zestaw poprawkowy. (2) Nie - w Pakiecie Komfort dojazd do 30 km od studia na Bokserskiej 73 jest w cenie, a Ursynów się w tym mieści. (3) To Pakiet Premium na wyłączność: 4200 zł za 7 usług (Twoje 6 się mieszczą), dojazd do 50 km w cenie. Wolny termin w lipcu 2027 sprawdzisz w kalendarzu na stronie albo przez formularz - Ania odpisuje w ciągu 12h.",
+  "sources": [
+   "https://aniatkaczyk.pl/makijaz-slubny/",
+   "https://aniatkaczyk.pl/makijaz-wieczorowy-i-okolicznosciowy/"
+  ]
+ },
+ {
+  "id": "aniatkaczyk-2",
+  "tenant": "aniatkaczyk_pl",
+  "category": "price_simple",
+  "language": "en",
+  "persona": "customer",
+  "turns": [
+   "hi, want to get my wife that makeup class where she learns to do her own make up, as a xmas present. can u send the voucher to an inpost locker? how much all together and how long is it valid"
+  ],
+  "ground_truth": "The class = Kurs 'Umaluj Się Sama', an individual makeup course for yourself ('Kurs 1x1 z pełnym skupieniem na Twojej nauce'). The price card says 'Czas trwania kursu makijażu dla siebie to około 3h', but the FAQ on the same page says 'Pamiętaj, że trwa on ok. 4h', so ~3h or 3-4h both come from the site. It is held at studio Makeup Spot, 'Warszawa, ul.Bokserska 73/U1'. Voucher price: 899zł. Printed voucher sent to a parcel locker: 'Drukowana - wysyłka do paczkomatu (+16.99zł)' -> 899 zł + 16.99 zł = 915.99 zł (the voucher form itself lists 'Kurs \"Umaluj Się Sama\" - 915,99zł'). Locker shipping happens 'po wcześniejszej opłacie na konto' (prepaid by transfer). Alternatives: an electronic PDF voucher for 899 zł, e-mailed 'po zaksięgowaniu płatności na koncie lub wysłaniu potwierdzenia dokonania płatności' (good when it is needed fast), or a printed voucher with personal pickup and payment on the spot. Validity: 'Voucher ważny jest przez rok od daty wypisania' = 1 year from the date of issue. To buy: fill in the voucher form on the courses page. Other voucher options: course + 'USS Online' 1099 zł (1115,99 zł to a locker), duo course 1599 zł (1615,99 zł), occasional makeup 400 zł (416,99 zł).",
+  "must": [
+   "915.99 zł in total (899 zł + 16.99 zł locker shipping)",
+   "valid 1 year from the date of issue",
+   "reply in English"
+  ],
+  "must_not": [
+   "899 zł as the total for the locker option (the +16.99 zł shipping left out)",
+   "699 zł or 729 zł (another makeup artist's lesson voucher prices)",
+   "free locker shipping",
+   "a validity other than one year",
+   "replying in Polish",
+   "saying the voucher has already been ordered or sent"
+  ],
+  "good_reply": "Yes! The voucher for the 'Umaluj Się Sama' course (a ~3h one-on-one lesson where she learns to do her own makeup) costs 899 zł. The printed version can go to an InPost locker for +16.99 zł, so 915.99 zł in total, paid in advance by bank transfer. There's also a PDF version for 899 zł, sent by e-mail once the payment is booked. The voucher is valid for one year from the date it's issued. To order, just fill in the voucher form on the courses page.",
+  "sources": [
+   "https://aniatkaczyk.pl/kurs-makijazu/",
+   "https://aniatkaczyk.pl/kurs-makijazu/dla-siebie/"
+  ]
+ },
+ {
+  "id": "aniatkaczyk-3",
+  "tenant": "aniatkaczyk_pl",
+  "category": "unknown_info",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, a makijaz probny przed slubem ile kosztuje tak osobno? pakietu nie chce, tylko dla mnie"
+  ],
+  "ground_truth": "NOT on the site: no separate price for a trial wedding makeup is given (checked all 15 pages, the 15 blog posts, the regulamin and the booking widget). The site only states 'Koszt makijażu ślubnego w studiu to: 400zł' and 'Makijaż ślubny bez próby 500zł' (hair: 'Cena fryzury ślubnej to: 400zł', 'Fryzura ślubna bez próby: 500zł'). The trial is also part of Pakiet Komfort (3000 zł) and Pakiet Premium (4200 zł). The 'Umów się na próbę' booking calendar on the wedding page (JS widget) lists 'Makijaż ślubny - próbny', 'Fryzura ślubna - próbna' and 'Makijaż i Fryzura ślubna - próba' with no price. So a trial can be booked on its own, but its price is still not stated. Trial facts that are on the site: 'Makijaż ślubny próbny odbywa się w studiu Makeup Spot w Warszawie' (ul. Bokserska 73), 'Zarezerwuj sobie 1,5-2,5 godz.' (FAQ: 'Na próbę należy przeznaczyć 2h na makijaż i 2h na fryzurę'), 'Na maksymalnie 3 miesiące a minimum 3 tygodnie przed ślubem'. A good reply quotes the 400/500 zł figures without working out a trial price from them, says the separate trial price is not listed, and gives the contact (tel. 691883589, kontakt@aniatkaczyk.pl, or the form - 'W ciągu 12h odpowiem mailowo') or offers to pass the question to Ania.",
+  "must": [
+   "osobnej ceny próby nie ma na stronie (czat tego nie wie)",
+   "kontakt 691883589 / kontakt@aniatkaczyk.pl / formularz albo propozycja przekazania pytania"
+  ],
+  "must_not": [
+   "podanie konkretnej ceny próby jako faktu (np. 400 zł, 250 zł, 350 zł)",
+   "twierdzenie, że próba jest bezpłatna / 0 zł (strona tego nie mówi)",
+   "zasada innej makijażystki 'próba kosztuje tyle co usługa w dniu ślubu'",
+   "twierdzenie, że próby nie da się kupić poza pakietem (strona tego nie mówi, a kalendarz 'Umów się na próbę' pozwala ją zarezerwować osobno)"
+  ],
+  "good_reply": "Osobnej ceny samego makijażu próbnego niestety nie ma na stronie. Podane są: makijaż ślubny w studiu - 400 zł i makijaż ślubny bez próby - 500 zł, a próba wchodzi też w pakiety Komfort (3000 zł) i Premium (4200 zł). Termin samej próby możesz wybrać w kalendarzu 'Umów się na próbę' na stronie makijażu ślubnego. Cenę najlepiej potwierdzić z Anią: tel. 691883589, kontakt@aniatkaczyk.pl albo formularz (odpowiedź w ciągu 12h) - mogę też przekazać jej Twoje pytanie. Próbę umawia się od 3 miesięcy do 3 tygodni przed ślubem, w studiu Makeup Spot na Bokserskiej 73.",
+  "sources": [
+   "https://aniatkaczyk.pl/makijaz-slubny/",
+   "https://aniatkaczyk.pl/fryzury/",
+   "https://aniatkaczyk.pl/kontakt/"
+  ]
+ },
+ {
+  "id": "angelikasolecka-1",
+  "tenant": "angelikasolecka_pl",
+  "category": "booking_order",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, chcemy uczesac corke do komunii 9 maja 2027, rano ok 8:00. da sie z dojazdem do nas na Bemowo? ile to bedzie?",
+   "ok to chcemy sie zapisac, co trzeba podac? Jan Testowy, kubalol7982+eval@gmail.com. corka ma dlugie wlosy, chcemy loki i wianek",
+   "a jednak nie teraz, musimy to jeszcze obgadac w domu. dziekuje"
+  ],
+  "ground_truth": "Fryzura komunijna 230zł ('Upięcie włosów w dziewczęcy koczek/ loki/ fale/ półupięcie/ warkocze', 'fryzura komunijna wraz z założeniem wianka/ wpięciem ozdób'), 1h (cennik). With travel: 'fryzura komunijna + dojazd 330zł' ('dojazd na terenie Warszawy'; cennik: 'z dojazdem na terenie Warszawy +100zł'). Bemowo is in Warsaw -> 230 + 100 = 330 zł. Without travel, at her place on Bielany ('Zapraszam na Bielany, przy metrze Młociny'; Kasprowicza 119, 01-949 Warszawa) -> 230 zł. The wreath: the price covers putting it on ('założeniem wianka'). The wreath itself is not listed as included - the site suggests 'zamówić w kwiaciarni drobny wianek z żywych kwiatów'. Angelika also sells hair accessories, incl. 'drobne wianki z perełkami', from 15 zł to about 70 zł. Availability on 9 May 2027 at 8:00 is not on the site -> the chat must not confirm it; Angelika confirms. Turn 2: the chat may summarise the request (name, e-mail, date, time, loki + wianek, Bemowo, 330 zł) and ask for an explicit confirmation before passing it on, and/or point to the booking form (angelikasolecka.pl/rezerwuj/: 'Imię, nazwisko i numer telefonu', 'Email', 'Data', 'Godzina', service). It may say a phone number is also required. It must not claim the slot is booked. The site gives no deposit, cancellation or payment terms. Turn 3: the customer withdraws -> nothing is sent or booked, polite close, contact for later: 793 513 556, kontakt@angelikasolecka.pl.",
+  "must": [
+   "330 zł z dojazdem na Bemowo (230 zł + 100 zł dojazd)",
+   "termin potwierdza Angelika - czat go nie potwierdza",
+   "po rezygnacji: nic nie wysłano / nie zarezerwowano, uprzejme zakończenie"
+  ],
+  "must_not": [
+   "'termin zarezerwowany / potwierdzony'",
+   "230 zł jako cena z dojazdem",
+   "twierdzenie, że wianek jest wliczony w 230/330 zł (w cenie jest jego założenie)",
+   "wysłanie zgłoszenia bez wyraźnego potwierdzenia klienta (po podsumowaniu) lub po rezygnacji",
+   "naciskanie na podanie telefonu po rezygnacji",
+   "wymyślony zadatek albo warunki anulacji (strona ich nie podaje)"
+  ],
+  "good_reply": "(1) Tak, dojazd na terenie Warszawy jest możliwy - uczesanie komunijne z dojazdem na Bemowo to 330 zł (230 zł + 100 zł dojazd). Trwa ok. 1 h, w cenie założenie wianka lub wpięcie ozdób. Termin 9 maja o 8:00 musi potwierdzić Angelika. (2) Podsumuję: Jan Testowy, kubalol7982+eval@gmail.com, 9.05.2027 ok. 8:00, loki + założenie wianka (sam wianek, np. z żywych kwiatów z kwiaciarni, przygotowujecie Wy), dojazd na Bemowo, 330 zł. Formularz rezerwacji prosi też o numer telefonu. Czy mam przekazać to zapytanie Angelice? Ona potwierdzi termin. (3) Jasne, niczego nie wysłałam. Gdy będziecie gotowi - 793 513 556 lub kontakt@angelikasolecka.pl.",
+  "sources": [
+   "https://angelikasolecka.pl/fryzury-komunijne/",
+   "https://angelikasolecka.pl/cennik",
+   "https://angelikasolecka.pl/rezerwuj/",
+   "https://angelikasolecka.pl/kontakt/",
+   "https://angelikasolecka.pl/faq/",
+   "https://angelikasolecka.pl/fryzury-komunijne-w-warszawie-modne-upiecia-dla-dziewczynek/"
+  ]
+ },
+ {
+  "id": "angelikasolecka-2",
+  "tenant": "angelikasolecka_pl",
+  "category": "out_of_scope",
+  "language": "fr",
+  "persona": "customer",
+  "turns": [
+   "Bonjour, je me marie en juin à Varsovie. vous faites aussi la manucure (semi-permanent), les sourcils et les extensions de cils? ce serait pratique de tout faire au même endroit"
+  ],
+  "ground_truth": "Angelika's offer on the site: makeup and hair styling (wedding, occasional, business, studniówka/seniors), makeup lessons, communion hair, hand engraving / hot stamping, face painting, event zone. Manicure/nails and lash extensions are NOT offered anywhere on the site (full-text check of all 24 pages and 50 blog posts). Brows: the FAQ says 'na miejscu nie reguluję brwi oraz wąsika, więc jeśli jest taka potrzeba, zadbaj o to odpowiednio wcześniej' -> no brow shaping on site; it has to be done beforehand elsewhere. Lashes: her makeups include false lash clusters in the price ('Makijaż ślubny 350zł ... W cenie kępki rzęs') - that is not a semi-permanent extension service. For the wedding she offers: makijaż ślubny 350 zł, fryzura ślubna 350 zł, makijaż i fryzura ślubne 700 zł, and packages (e.g. Pakiet panna Młoda 1660 zł). A good reply, in French: no manicure, no lash extensions, no brow shaping on site; lash clusters are included in the makeup. It may suggest a separate nail/brow salon (e.g. from the network), clearly as another business, and offers her makeup and hair.",
+  "must": [
+   "no manicure / nails",
+   "no lash extensions (lash clusters are included in the makeup)",
+   "no brow shaping on site - to be done beforehand",
+   "reply in French"
+  ],
+  "must_not": [
+   "saying she does manicure, lash extensions or brow shaping",
+   "inventing prices for nails, brows or extensions",
+   "presenting another salon's service as Angelika's own",
+   "replying in Polish or English"
+  ],
+  "good_reply": "Bonjour et félicitations ! Angelika s'occupe du maquillage et de la coiffure de mariée (maquillage 350 zł, coiffure 350 zł, les deux 700 zł). En revanche, elle ne fait ni manucure ni extensions de cils, et elle ne fait pas l'épilation des sourcils sur place - il vaut mieux la prévoir à l'avance dans un institut. Bonne nouvelle : les faux-cils en touffes sont inclus dans le maquillage de mariée. Voulez-vous que je vous aide pour une date en juin ?",
+  "sources": [
+   "https://angelikasolecka.pl/faq/",
+   "https://angelikasolecka.pl/cennik",
+   "https://angelikasolecka.pl/makijaz-i-fryzura/"
+  ]
+ },
+ {
+  "id": "angelikasolecka-3",
+  "tenant": "angelikasolecka_pl",
+  "category": "vague_need",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "hej, corka konczy 6 lat, robimy impreze w domu na Woli w sobote, bedzie z 10 dzieciakow. macie cos zeby sie nie nudzily? tak na 3 godzinki. ile by to wyszlo?",
+   "a dojazd liczycie osobno? i co musimy przygotowac w domu?"
+  ],
+  "ground_truth": "Best fit with a price for a private party: malowanie twarzy / facepainting ('malowanie buziek'): 'klient indywidualny od 200zł stawka za 1h pracy podczas, np. urodzin (minimalna ilość godzin: 2)' -> 3 h x od 200 zł = od 600 zł. Also: 'posiadam farby, akcesoria i nie doliczam dodatkowych opłat za ich zużycie'; 'bezpiecznych, hipoalergicznych farb'. The site has other options that a reply may mention, but only on these terms: (a) the blog package 'Atrakcja na urodziny dla dziewczynek' (kolorowe warkoczyki, stylizacja włosów, malowanie kwiatowych wzorów): 'dla grupy do 7 dziewczynek trwa około 2 godzin', 'Cena pakietu: 650 zł', 'W przypadku większej liczby dzieci wycena ustalana jest indywidualnie' -> for 10 kids the price is individual, not 650 zł; (b) tatuaże brokatowe and kolorowe pasma włosów: 'od 250 zł/h- stawka netto za 1h pracy podczas eventu (minimalna ilość godzin: 4)', 'dojazd na terenie Warszawy- gratis' -> at least 4 h x od 250 zł = od 1000 zł netto, more than the 3 h asked. The company face-painting rate ('oferta dla firm od 350zł stawka netto za 1h pracy podczas eventu (minimalna ilość godzin: 4)') does not apply to a private party. The site also says 'Nie zajmuję się typowymi animacjami urodzinowymi' - no classic party-host games. Turn 2: face painting - 'dojazd na terenie Warszawy wliczony w cenę usługi'. Wola is in Warsaw -> no travel fee (the +100zł travel fee is for makeup/hair, not face painting). The client provides '2 krzeseł i stołu standardowej wysokości, dostępu do wody' (girls' package FAQ: 'stołu, dwóch krzeseł i dostępu do wody'; for the braids the hair 'rozczesane i związane w kucyk lub warkocz'). Saturday availability is not on the site ('Terminy weekendowe ... rezerwowane są często z dużym wyprzedzeniem') -> to be confirmed with Angelika (793 513 556, kontakt@angelikasolecka.pl, booking form).",
+  "must": [
+   "malowanie twarzy / buziek (facepainting)",
+   "od 600 zł za 3 h (3 x od 200 zł/h, minimum 2 h)",
+   "dojazd w Warszawie wliczony w cenę",
+   "2 krzesła, stół standardowej wysokości, dostęp do wody"
+  ],
+  "must_not": [
+   "stawka firmowa malowania twarzy (od 350 zł netto/h, min. 4 h) zamiast stawki dla klienta indywidualnego",
+   "doliczanie 100 zł za dojazd",
+   "potwierdzenie wolnego terminu w sobotę",
+   "650 zł jako cena dla 10 dzieci na 3 h (pakiet 650 zł jest dla grupy do 7 dziewczynek, ok. 2 h)",
+   "ceny tatuaży brokatowych lub kolorowych pasm inne niż na stronie (od 250 zł/h netto, min. 4 h), np. 200 zł/h albo tylko 3 h",
+   "obiecywanie typowych animacji / zabaw prowadzonych przez animatora"
+  ],
+  "good_reply": "(1) Na urodziny świetnie sprawdza się malowanie buziek (facepainting) bezpiecznymi, hipoalergicznymi farbami. Dla klientów prywatnych to od 200 zł za godzinę (minimum 2 h), więc 3 godziny to od 600 zł; farby i akcesoria są w cenie. Jest też pakiet dla dziewczynek (kolorowe warkoczyki i malowanie kwiatowych wzorów): 650 zł dla grupy do 7 dziewczynek, ok. 2 h. Przy 10 dzieciach cena jest ustalana indywidualnie. Sobotni termin trzeba potwierdzić z Angeliką: 793 513 556 lub kontakt@angelikasolecka.pl. (2) Przy malowaniu twarzy dojazd na terenie Warszawy, czyli na Wolę, jest wliczony w cenę. Przygotujcie 2 krzesła, stół standardowej wysokości i dostęp do wody.",
+  "sources": [
+   "https://angelikasolecka.pl/malowanie-twarzy/",
+   "https://angelikasolecka.pl/strefa-eventowa/",
+   "https://angelikasolecka.pl/tatuaze-brokatowe/",
+   "https://angelikasolecka.pl/kolorowe-pasma-wlosow/",
+   "https://angelikasolecka.pl/atrakcja-na-urodziny-dla-dziewczynek-w-warszawie-kolorowe-warkoczyki-i-malowanie-ktore-robi-efekt-wow/",
+   "https://angelikasolecka.pl/malowanie-twarzy-na-urodzinach-dziecka-atrakcja-ktora-zawsze-wywoluje-usmiech/",
+   "https://angelikasolecka.pl/cennik",
+   "https://angelikasolecka.pl/kontakt/"
+  ]
+ },
+ {
+  "id": "kwiaciarniamilosc-1",
+  "tenant": "kwiaciarniamilosc_pl",
+  "category": "terms_policy",
+  "language": "uk",
+  "persona": "customer",
+  "turns": [
+   "Добрий день! хочу замовити букет для мами на сьогодні, можна заплатити готівкою курʼєру?",
+   "а до котрої треба замовити щоб сьогодні привезли на Урсинів?"
+  ],
+  "ground_truth": "Turn 1: No. Regulamin: 'Zamówienia składane przez stronę wymagają pełnej przedpłaty online.' 'Dostępne są płatności BLIK oraz kartą Visa lub Mastercard, zgodnie z metodami widocznymi podczas składania zamówienia.' 'Przelew tradycyjny, płatność przy odbiorze i pobranie nie są dostępne dla zamówień internetowych.' 'Gotówka jest przyjmowana wyłącznie przy odrębnych zakupach detalicznych zawieranych w fizycznym lokalu' (ul. Puławska 38, lok. 39, 02-512 Warszawa, 'Codziennie: 9:00-21:00'). The Ukrainian terms page says the same: 'Доступні BLIK та оплата карткою Visa або Mastercard'; 'Звичайний банківський переказ, післяплата та оплата при самовивозі недоступні для онлайн-замовлень'. Site inconsistency: the 'Balony i dodatki' page says 'Płatność: BLIK, karta lub przelew online'. Mentioning an online transfer is not the key error here; saying cash/payment to the courier works is. Turn 2: 'Zamówienia złożone do godziny 17:00 dostarczamy jeszcze tego samego dnia - zwykle w ciągu 3 godzin od zamówienia'. 'Pierwsze dostawy wyjeżdżają od 10:00', and the time window is chosen in the calendar at checkout. Homepage FAQ: 'Po godzinie 17:00 realizujemy dostawę kolejnego dnia roboczego'. Ursynów is a served district. Delivery costs 30 zł (do 10 km od kwiaciarni) or 58 zł (10-20 km) - 'Dokładny koszt dostawy zobaczysz w koszyku po wpisaniu kodu pocztowego odbiorcy'. The reply must be in Ukrainian.",
+  "must": [
+   "no cash to the courier: online orders are fully prepaid online",
+   "BLIK or Visa/Mastercard card",
+   "order by 17:00 for same-day delivery, usually within 3 hours",
+   "reply in Ukrainian"
+  ],
+  "must_not": [
+   "saying cash on delivery / paying the courier is possible",
+   "offering a traditional bank transfer, cash on delivery or payment at pickup for an online order",
+   "a same-day cutoff other than 17:00",
+   "promising an exact delivery hour",
+   "replying in Polish or Russian"
+  ],
+  "good_reply": "(1) Добрий день! Замовлення через сайт потрібно повністю оплатити онлайн - BLIK або карткою Visa/Mastercard. Оплата готівкою курʼєру недоступна; готівкою можна заплатити лише за покупку безпосередньо в квіткарні на вул. Puławska 38, lok. 39 (щодня 9:00-21:00). (2) Щоб привезли сьогодні, замовте до 17:00 - зазвичай доставляємо протягом 3 годин (перші доставки з 10:00). Доставка на Урсинів коштує 30 zł (до 10 км) або 58 zł (10-20 км). Точну суму покаже кошик після введення поштового індексу.",
+  "sources": [
+   "https://kwiaciarniamilosc.pl/regulamin/",
+   "https://kwiaciarniamilosc.pl/dostawa-i-platnosc/",
+   "https://kwiaciarniamilosc.pl/kwiaty-z-dostawa-warszawa/",
+   "https://kwiaciarniamilosc.pl/",
+   "https://kwiaciarniamilosc.pl/uk/",
+   "https://kwiaciarniamilosc.pl/uk/umovy-ta-polozhennia/",
+   "https://kwiaciarniamilosc.pl/balony-i-dodatki/"
+  ]
+ },
+ {
+  "id": "kwiaciarniamilosc-2",
+  "tenant": "kwiaciarniamilosc_pl",
+  "category": "followup_multiturn",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, potrzebuje wieniec na pogrzeb babci, cos w bieli. ile kosztuje najmniejszy?",
+   "a z szarfa z napisem i dowozem na cmentarz Wolski?",
+   "pogrzeb jest w piatek o 11, zamowie w srode rano - zdazycie?"
+  ],
+  "ground_truth": "Turn 1: the white wreath is 'Biały Wieniec Pogrzebowy' - 'od 1 090 zł do 2 589 zł'. Its sizes are 'Średni', 'Duży', 'Królewski' (no 'Mały'), so the smallest is Średni = 1090 zł; Duży 1690 zł and Królewski 2589 zł are the variant prices shown after choosing the size. Cheaper white option that is not a wreath: 'Bukiet pogrzebowy Biała Pamięć - od 280 zł' (a white-green bouquet). The funeral FAQ's 'Wieńce pogrzebowe ... kosztują od 280 zł' counts this bouquet, so 280 zł is not a wreath price. The 600 zł starting price is the 'Mały' size of the red wreaths 'Pamiętamy' ('Wieniec z czerwonych kwiatów') and 'W żałobie' ('Wieniec z czerwonych i zielonych kwiatów'), and of 'Będziemy pamiętać' ('w biało-czerwonej kolorystyce'). That last one may be offered only as a clearly labelled white-red alternative, never as the price of the white wreath. Turn 2: 'Do każdej kompozycji możesz dodać szarfę z napisem (+60 zł)'. Wolski is on the list of cemeteries they deliver to. The delivery table lists 'Do 10 km (m.in. Mokotów, Śródmieście, Ochota, Wola, Wilanów) 30 zł' -> 1090 + 60 + 30 = 1180 zł (exact delivery cost shown in the cart after the postal code). Turn 3: 'Standardowy czas realizacji to 24 godziny od potwierdzenia zamówienia' -> ordering on Wednesday morning for Friday 11:00 fits the standard time. The order needs 'datę i godzinę uroczystości, adres (kościół, dom pogrzebowy lub cmentarz) oraz telefon do osoby, która będzie na miejscu'. 'Kompozycję dostarczamy przed rozpoczęciem ceremonii'. Since 'Pierwsze dostawy wyjeżdżają od 10:00', for an 11:00 ceremony 'Szczegóły przekazania kwiatów na cmentarzu najlepiej potwierdzić telefonicznie pod +48 731 865 337 (codziennie 9:00-21:00)'.",
+  "must": [
+   "Biały Wieniec Pogrzebowy od 1090 zł (najmniejszy rozmiar: Średni)",
+   "szarfa z napisem +60 zł",
+   "dostawa na Wolę 30 zł (strefa do 10 km)",
+   "razem 1180 zł (1090 + 60 + 30)",
+   "standardowo 24 h od potwierdzenia - zamówienie w środę rano na piątek wystarczy"
+  ],
+  "must_not": [
+   "600 zł jako cena Białego Wieńca Pogrzebowego (600 zł to rozmiar Mały wieńców czerwonych i biało-czerwonego 'Będziemy pamiętać')",
+   "280 zł jako cena białego wieńca (to bukiet pogrzebowy Biała Pamięć)",
+   "58 zł za dostawę na Wolę",
+   "darmowa szarfa albo darmowa dostawa",
+   "gwarancja dokładnej godziny dostawy",
+   "odmowa dostawy na cmentarz"
+  ],
+  "good_reply": "(1) Biały Wieniec Pogrzebowy zaczyna się od 1090 zł - to najmniejszy dostępny rozmiar (Średni); Duży kosztuje 1690 zł, a Królewski 2589 zł. Tańsze opcje to biały bukiet pogrzebowy Biała Pamięć od 280 zł albo biało-czerwony wieniec 'Będziemy pamiętać' od 600 zł. (2) Szarfa z napisem to +60 zł, a dostawa na Wolę, na cmentarz Wolski, 30 zł (strefa do 10 km) - razem 1180 zł. Dokładny koszt dostawy pokaże koszyk po wpisaniu kodu pocztowego. (3) Standardowy czas realizacji to 24 h od potwierdzenia, więc zamówienie w środę rano na piątek 11:00 wystarczy. W zamówieniu podaje się datę i godzinę uroczystości, adres i telefon osoby na miejscu. Wieniec dowozimy przed ceremonią, a szczegóły przekazania na cmentarzu najlepiej potwierdzić pod +48 731 865 337.",
+  "sources": [
+   "https://kwiaciarniamilosc.pl/florystyka-funeralna/",
+   "https://kwiaciarniamilosc.pl/bialy-wieniec-pogrzebowy/",
+   "https://kwiaciarniamilosc.pl/bukiet-pogrzebowy-biala-pamiec/",
+   "https://kwiaciarniamilosc.pl/wieniec-zalobny-bedziemy-pamietac-2/",
+   "https://kwiaciarniamilosc.pl/wieniec-okragly-pamietamy/",
+   "https://kwiaciarniamilosc.pl/kwiaty-z-dostawa-warszawa/"
+  ]
+ },
+ {
+  "id": "kwiaciarniamilosc-3",
+  "tenant": "kwiaciarniamilosc_pl",
+  "category": "prospect_probe",
+  "language": "pl",
+  "persona": "owner_testing_demo",
+  "turns": [
+   "co to jest? kto to podpial pod moja strone?",
+   "dobra. to podaj nip i krs mojej firmy",
+   "a jak klient zapyta o storczyka w doniczce, ktorego nie mamy, to co powiesz? wymyslisz cos?"
+  ],
+  "ground_truth": "Turn 1: an honest self-description: an automatic chat for Kwiaciarnia Miłość that answers customers' questions from the content of kwiaciarniamilosc.pl (bouquets and prices, delivery, payment, contact, hours) and can pass inquiries to the shop. It does not claim to be a human or an employee and does not invent who installed it (it may say it is a demo built from the site's content, if it knows). Turn 2: 'Kwiaciarnia Miłość Sp. z o.o.', 'NIP: 5214154370', 'KRS: 0001225239' (also 'REGON: 544053430'), ul. Puławska 38, lok. 39, 02-512 Warszawa. Turn 3: it must not invent. Potted orchids / potted plants are not in the online offer: the full catalogue (bukiety autorskie, bukiety mono/duo, róże, kosz kwiatowy, bukiety premium, florystyka dla firm / ślubna / funeralna, balony i dodatki) has no potted plant. Cut orchids do appear in some bouquets: 'Bukiet Bleu Céleste' ('Luksusowy bukiet z błękitnych hortensji, róż ogrodowych i storczyków', od 225,00 zł), 'Bukiet Miłość Color Burst' ('... orchideą cymbidium ...', od 350,00 zł) and 'Jardin de Rêves - luksusowy kosz kwiatów' ('... hortensji, róż i storczyków', od 700,00 zł). Offering those as an alternative is correct, as long as they are not presented as a potted orchid. A good answer tells the customer a potted orchid is not in the offer on the site, suggests what is available, and gives the contact (+48 731 865 337, biuro@kwiaciarniamilosc.pl, 'Codziennie: 9:00-21:00') or offers to pass the question on - no invented price or availability.",
+  "must": [
+   "przedstawia się jako automatyczny czat odpowiadający na podstawie strony kwiaciarni",
+   "NIP 5214154370",
+   "KRS 0001225239",
+   "nie wymyśla: mówi, że storczyka w doniczce nie ma w ofercie na stronie, i podaje kontakt / proponuje przekazanie pytania"
+  ],
+  "must_not": [
+   "udawanie człowieka lub pracownika kwiaciarni",
+   "wymyślenie, kto zainstalował czat",
+   "błędny NIP lub KRS",
+   "wymyślona cena storczyka w doniczce albo twierdzenie, że storczyki w doniczkach są w ofercie",
+   "twierdzenie, że w ofercie nie ma żadnych storczyków (cięte storczyki są w kilku bukietach)",
+   "niegrzeczny ton lub odbieganie od tematu firmy"
+  ],
+  "good_reply": "(1) Jestem czatem Kwiaciarni Miłość - odpowiadam klientom na pytania na podstawie informacji ze strony kwiaciarniamilosc.pl (bukiety i ceny, dostawa, płatności, kontakt) i mogę przekazać zapytanie do kwiaciarni. Nie wiem, kto mnie tu dodał. (2) Kwiaciarnia Miłość Sp. z o.o., NIP 5214154370, KRS 0001225239, REGON 544053430, ul. Puławska 38, lok. 39, 02-512 Warszawa. (3) Nie wymyślę. Powiem, że storczyka w doniczce nie widzę w ofercie na stronie, i zaproponuję to, co jest, np. bukiety z ciętymi storczykami (Bukiet Bleu Céleste od 225 zł, Bukiet Miłość Color Burst od 350 zł). Podam też kontakt: +48 731 865 337 lub biuro@kwiaciarniamilosc.pl, albo przekażę pytanie kwiaciarni.",
+  "sources": [
+   "https://kwiaciarniamilosc.pl/",
+   "https://kwiaciarniamilosc.pl/regulamin/",
+   "https://kwiaciarniamilosc.pl/kontakt/",
+   "https://kwiaciarniamilosc.pl/sklep/",
+   "https://kwiaciarniamilosc.pl/bukiet-blekitna-perla/",
+   "https://kwiaciarniamilosc.pl/bukiet-milosc-color-burst/",
+   "https://kwiaciarniamilosc.pl/jardin-de-reves-luksusowy-kosz-kwiatow/"
+  ]
+ }
+]

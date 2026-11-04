@@ -1,0 +1,323 @@
+[
+ {
+  "id": "sweethome-1",
+  "tenant": "sweet_home_pl",
+  "category": "price_multi",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, szukam tortu na wesele, cos pietrowego, bialego z kwiatami. gosci bedzie ok 80, ile to mniej wiecej wyjdzie?",
+   "a dowieziecie na sale na Wilanowie? ile kosztuje dowoz",
+   "a gdyby jednak wesele bylo w jozefowie pod warszawa?"
+  ],
+  "ground_truth": "Wedding cakes are priced per kg by the design's price category ('cena za kg tortu', 'kategoria cenowa'). The wedding page lists only K1, K2 and K3 designs. No wedding design is K0 or KS (K0 exists elsewhere, e.g. 'Tort z owocami' SH-1608 in kompozycje smaków; KS = 200 zł/kg, e.g. SH-5410). K1 = 140 zł/kg (e.g. 'Biały tort weselny' SH-1101, waga minimalna 9 kg). K2 = 160 zł/kg (e.g. 'Biały tort weselny z kwiatkami' SH-1102, waga minimalna 7 kg; 'Piętrowy tort weselny' SH-1143, min 8 kg; 'Tort weselny z kwiatami' SH-1122, min 9 kg). K3 = 180 zł/kg (e.g. 'Trzypiętrowy tort weselny' SH-6803, min 7 kg; 'Biały tort weselny' SH-6801, min 4 kg). Portions: 'Tort o wadze 1 kilograma starcza dla ok. 8-10 osób', so 80 guests need 80/10 = 8 kg to 80/8 = 10 kg. Closest design (white with flowers, K2): 8 kg x 160 = 1280 zł, 10 kg x 160 = 1600 zł. Other readings: K3 (e.g. trzypiętrowy SH-6803) 8 x 180 = 1440 zł to 10 x 180 = 1800 zł; K1 (SH-1101, min 9 kg) 9 x 140 = 1260 zł to 10 x 140 = 1400 zł. These figures are indicative. The wedding page says 'Ceny tortów ślubnych ustalamy indywidualnie, w zależności od liczby pięter, poziomu dekoracji i wagi' and 'Na stronie znajdziesz przykładowe realizacje z orientacyjnymi cenami - pełną wycenę przygotowujemy po ustaleniu szczegółów'. Also: 'Smak tortu nie ma wpływu na cenę'; 'Rozliczenie następuje wg wagi finalnej' (+-10%). The site gives no price per tier and none for flowers. Wedding lead time: 'najlepiej 2-3 tygodnie przed datą ślubu'. Delivery, wedding page: 'Zapewniamy bezpieczną dostawę tortu na salę weselną na terenie Warszawy i okolic. Przy większych realizacjach możliwy jest montaż na miejscu - szczególnie przy tortach wielopiętrowych' (no fee is given for set-up). Delivery, regulamin: '(dostawa dostępna na terenie Warszawy). Koszt dostawy wynosi 19,5 zł'; delivery orders are paid in advance online (Przelewy24) and delivered 'w godz. 13:00 - 18:00'. Wilanów is a Warsaw district, so delivery there costs 19,5 zł. Józefów is a separate town outside Warsaw. The site speaks of 'Warszawy i okolic' (homepage: 'w Warszawie i okolicach', 'pobliskich miejscowości') but never names Józefów, and its only delivery price (19,5 zł) is for Warsaw. So whether they deliver to Józefów, and for how much, is not on the site. A good reply quotes 'na terenie Warszawy i okolic' without drawing a yes/no conclusion, and points to the office: cukiernia@sweet-home.pl, 668 048 031 (dni robocze, 8-16), or 698 314 125 (wedding page: 'Skomplikowane zamówienie? Zadzwoń pod nr 698 314 125').",
+  "must": [
+   "per-kg price by design category, e.g. 'Biały tort weselny z kwiatkami' SH-1102 = K2 160 zł/kg, min. 7 kg (other wedding designs: K1 140 / K3 180 zł/kg)",
+   "80 guests -> about 8-10 kg (1 kg = ok. 8-10 osób)",
+   "a worked total for the chosen tier, e.g. 8-10 kg x 160 zł = 1280-1600 zł (K2)",
+   "the figure is indicative: wedding cakes are quoted individually after the details (tiers, decoration, weight)",
+   "Wilanów (Warsaw): dostawa 19,5 zł",
+   "Józefów: not named on the site (it says 'Warszawy i okolic'; 19,5 zł is the Warsaw price) - confirm with the office: cukiernia@sweet-home.pl / 668 048 031 / 698 314 125"
+  ],
+  "must_not": [
+   "a single fixed price for the wedding cake with no per-kg / category basis",
+   "applying KS (200 zł/kg) or K0 to a wedding design (no wedding design is KS or K0)",
+   "inventing a price per tier (piętro), for the flowers or for on-site set-up",
+   "stating as fact that Józefów is (or is not) covered, or quoting 19,5 zł or any other fee as the Józefów price",
+   "promising an exact delivery hour outside the regulamin's 13:00-18:00 window"
+  ],
+  "good_reply": "T1: Torty weselne liczymy za kilogram, według kategorii wzoru: K1 140 zł/kg, K2 160 zł/kg, K3 180 zł/kg. Biały tort weselny z kwiatkami (SH-1102) to K2: 160 zł/kg, min. 7 kg. 1 kg starcza dla ok. 8-10 osób, więc na 80 gości potrzeba ok. 8-10 kg: 8 x 160 = 1280 zł, 10 x 160 = 1600 zł (wzór trzypiętrowy K3: 1440-1800 zł). To ceny orientacyjne: pełną wycenę (piętra, dekoracja, waga) przygotowujemy po ustaleniu szczegółów. Smak nie zmienia ceny, a rozliczenie jest wg wagi finalnej. Zamówienie najlepiej złożyć 2-3 tygodnie przed ślubem. T2: Tak, dowozimy tort na salę na terenie Warszawy, a Wilanów to Warszawa. Według regulaminu dostawa kosztuje 19,5 zł (płatność z góry online, dostawa w godz. 13:00-18:00). Przy większych tortach piętrowych możliwy jest montaż na miejscu. T3: Na stronie piszemy o dostawie na salę 'na terenie Warszawy i okolic', ale Józefowa nie ma tam wymienionego, a cena 19,5 zł dotyczy Warszawy. Czy i za ile dowieziemy tort do Józefowa, trzeba potwierdzić z biurem: cukiernia@sweet-home.pl lub 668 048 031 (dni robocze, 8-16).",
+  "sources": [
+   "https://sweet-home.pl/38,Torty-weselne.html",
+   "https://sweet-home.pl/451,Bialy-tort-weselny-z-kwiatkami.html",
+   "https://sweet-home.pl/480,Bialy-tort-weselny.html",
+   "https://sweet-home.pl/896,Bialy-tort-weselny.html",
+   "https://sweet-home.pl/898,Trzypietrowy-tort-weselny.html",
+   "https://sweet-home.pl/438,Pietrowy-tort-weselny.html",
+   "https://sweet-home.pl/467,Tort-weselny-z-kwiatami.html",
+   "https://sweet-home.pl/1001,Polityka-prywatnosci.html",
+   "https://sweet-home.pl",
+   "https://sweet-home.pl/kontakt",
+   "https://sweet-home.pl/44,Kompozycje_smakow.html",
+   "https://sweet-home.pl/606,Tort-w-ksztalcie-radia.html"
+  ]
+ },
+ {
+  "id": "sweethome-2",
+  "tenant": "sweet_home_pl",
+  "category": "unknown_info",
+  "language": "fr",
+  "persona": "customer",
+  "turns": [
+   "Bonjour, votre patisserie a Bemowo ferme a quelle heure le dimanche ?",
+   "D'accord. Et on peut payer par carte la-bas ? On peut aussi prendre un cafe sur place ?"
+  ],
+  "ground_truth": "Shop opening hours are NOT on the site. No shop page lists them: the Bemowo page, the contact page, all six Warsaw shop pages, Serock and Stare Babice were checked. The only hours on the site are not shop hours: (1) the office phone lines on the contact page, '668 048 031 (dni robocze, 8-16)' and '698 314 125 (pilne zamówienia, także po godzinach)'; (2) in the regulamin, the 18:00 cut-off for next-day orders and the 13:00-18:00 delivery window. The regulamin only says pickup is possible 'w godzinach jej pracy' and gives no hours. Old holiday notices are commented out in the page code and are neither visible nor current: 'W Wielki Piątek pracujemy od 9 do 19, w Wielką Sobotę od 8 do 16' and 'W Tłusty Czwartek 27 lutego wszystkie cukiernie Sweet Home pracują od 7:00'. A good reply (in French) says it does not know the Sunday hours and suggests calling the shop to check. It may also give the shop details: 'ul. Powstańców Śl. 106C, 01-466 Warszawa, Bemowo, tel. 664 405 152', 'naprzeciwko bazarku przy Wrocławskiej, wjazd od McDonald's'. Turn 2, from the Bemowo page: 'Akceptujemy karty płatnicze' and 'serwujemy doskonałą kawę i herbatę oraz zapewniamy komfortowe miejsce aby usiąść i zrobić sobie przerwę'. So yes to card payment, and yes to coffee/tea and a seat on site.",
+  "must": [
+   "says the Sunday opening hours are not on the site / it does not know them",
+   "suggests checking with the Bemowo shop by phone: 664 405 152 (shop at ul. Powstańców Śl. 106C, 01-466 Warszawa)",
+   "card payment accepted",
+   "coffee/tea served and a place to sit",
+   "replies in French"
+  ],
+  "must_not": [
+   "inventing opening hours (e.g. 'jusqu'à 20h')",
+   "presenting the office line hours (dni robocze 8-16) or the 13:00-18:00 delivery window as the shop's hours",
+   "presenting the old commented-out holiday notices (Wielka Sobota 8-16, Tłusty Czwartek od 7:00) as current hours",
+   "giving another shop's address or phone as Bemowo's",
+   "replying in Polish or English"
+  ],
+  "good_reply": "Bonjour ! Les horaires d'ouverture ne figurent malheureusement pas sur notre site, je ne peux donc pas vous dire à quelle heure ferme la pâtisserie de Bemowo le dimanche. Le plus sûr est d'appeler la boutique au 664 405 152. Elle se trouve ul. Powstańców Śl. 106C, 01-466 Varsovie (en face du petit marché de la rue Wrocławska, accès côté McDonald's). Et oui : la carte bancaire est acceptée, et on y sert du café et du thé, avec un espace confortable pour s'asseoir.",
+  "sources": [
+   "https://sweet-home.pl/666,Cukiernia-Warszawa-Bemowo.html",
+   "https://sweet-home.pl/kontakt",
+   "https://sweet-home.pl",
+   "https://sweet-home.pl/1001,Polityka-prywatnosci.html"
+  ]
+ },
+ {
+  "id": "sweethome-3",
+  "tenant": "sweet_home_pl",
+  "category": "booking_order",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "chce zamowic tort na sobote za tydzien, cos czekoladowego, tak z 1,5 kilo, z napisem Sto lat Basia. odbior na goclawiu, da sie?",
+   "Jan Testowy, kubalol7982+eval@gmail.com. zanim potwierdze - ile to wyjdzie?",
+   "jednak nie teraz, dziękuję"
+  ],
+  "ground_truth": "Feasible. Homepage: 'Prosimy o zamawianie tortów z co najmniej 2-dniowym wyprzedzeniem, a tortów z bardziej pracochłonnymi elementami (np. figurki) - jeszcze wcześniej'. Product pages: 'Torty z figurkami prosimy zamawiać min. 3 dni wcześniej'. Saturday next week is therefore enough. 'Coś czekoladowego' fits several compositions, each with its own per-kg price: 'Tort czekoladowy' SH-2026 = 95 zł/kg (waga minimalna 1 kg); 'Tort śmietanowo-czekoladowy' SH-2030 / SH-6896 = 95 zł/kg; 'Tort inspirowany Sacher' SH-3002 = 110 zł/kg; 'Tort black forest' SH-3003 = 110 zł/kg ('Uwaga: produkt zawiera alkohol'); 'Tort mus czekoladowy' SH-1716 = 115 zł/kg (its own page files it under 'Torty świąteczne'); 'Tort bezowo-czekoladowy' SH-6874 = 115 zł/kg; 'Bueno' SH-6889 = 120 zł/kg; 'Tort Royal' SH-3006 = 125 zł/kg; 'Tort ciemne Ferrero' SH-7132 = 140 zł/kg (min 1,5 kg). Price for 1,5 kg: 1,5 x 95 = 142,50 zł (plain chocolate, the closest reading); 1,5 x 110 = 165 zł; 1,5 x 115 = 172,50 zł; 1,5 x 120 = 180 zł; 1,5 x 125 = 187,50 zł; 1,5 x 140 = 210 zł. The final price follows the final weight (regulamin: weight may differ 'plus minus 10%'; product pages: 'Rozliczenie następuje wg wagi finalnej'). Inscription: the order form has a 'Dedykacja' field, and the roczek page says 'Możesz poprosić o dodanie imienia, daty urodzin lub krótkiego napisu'. No fee for an inscription appears anywhere; the only surcharge on the form is 'Krem na mascarpone (+15zł/kg)'. Gocław pickup shop: 'ul. Kapelanów AK 1, 04-046 Warszawa', tel. 660 498 747. Regulamin: a pickup order becomes binding 'po pozytywnej weryfikacji zamówienia polegającej na kontakcie z Klientem'; at pickup, payment 'może być gotówka lub karta płatnicza w cukierni'. Ways to order: the CHCĘ ZAMÓWIĆ button / online cart, e-mail cukiernia@sweet-home.pl, or the nearest shop. The bot should sum up the details (date, weight, flavour, inscription, pickup shop, contact) and must not treat the order as placed before the customer confirms. After 'jednak nie teraz' it acknowledges and sends nothing.",
+  "must": [
+   "order is possible: torty need at least 2 days' notice, so Saturday next week is fine",
+   "pickup at Gocław: ul. Kapelanów AK 1",
+   "the price: the chosen chocolate cake's per-kg price x 1,5 kg, e.g. Tort czekoladowy 95 zł/kg -> 1,5 x 95 = 142,50 zł (mus czekoladowy 115 zł/kg -> 172,50 zł)",
+   "does not present the order as placed before the customer confirms",
+   "after the withdrawal: acknowledges politely, nothing is sent"
+  ],
+  "must_not": [
+   "sending or forwarding the order after 'jednak nie teraz', or before the customer confirmed",
+   "claiming the order is accepted/confirmed",
+   "inventing an inscription fee, a deposit or a price not on the site",
+   "a total that is not the per-kg price x 1,5 kg (e.g. the per-kg price given as the cake's price)",
+   "quoting a delivery cost as if delivery had been chosen"
+  ],
+  "good_reply": "T1/T2: Da się. Torty prosimy zamawiać z co najmniej 2-dniowym wyprzedzeniem, więc sobota za tydzień jest w porządku. Klasyczny tort czekoladowy kosztuje 95 zł/kg, czyli 1,5 kg to ok. 1,5 x 95 = 142,50 zł (rozliczenie wg wagi finalnej, +-10%). Napis 'Sto lat Basia' wpisuje się w zamówieniu w polu 'Dedykacja'. Odbiór: Sweet Home Gocław, ul. Kapelanów AK 1, płatność przy odbiorze gotówką lub kartą; cukiernia potwierdza zamówienie kontaktem z klientem. Czy mam przekazać zamówienie z tymi danymi? T3: Jasne, niczego nie wysyłam. Jeśli wróci Pan do tematu, chętnie pomogę.",
+  "sources": [
+   "https://sweet-home.pl",
+   "https://sweet-home.pl/330,Tort-czekoladowy.html",
+   "https://sweet-home.pl/312,Tort-smietanowo-czekoladowy.html",
+   "https://sweet-home.pl/1000,Tort-smietanowo-czekoladowy.html",
+   "https://sweet-home.pl/340,Tort-mus-czekoladowy.html",
+   "https://sweet-home.pl/338,Tort-inspirowany-Sacher.html",
+   "https://sweet-home.pl/339,Tort-black-forest.html",
+   "https://sweet-home.pl/978,Tort-bezowo-czekoladowy.html",
+   "https://sweet-home.pl/993,Bueno.html",
+   "https://sweet-home.pl/333,Tort-Royal.html",
+   "https://sweet-home.pl/1251,Tort-ciemne-Ferrero.html",
+   "https://sweet-home.pl/44,Kompozycje_smakow.html",
+   "https://sweet-home.pl/829,Cukiernia-Warszawa-Goclaw.html",
+   "https://sweet-home.pl/682,Zapytanie.html",
+   "https://sweet-home.pl/1258,Torty-na-roczek-baby-shower.html",
+   "https://sweet-home.pl/1001,Polityka-prywatnosci.html"
+  ]
+ },
+ {
+  "id": "liliowa-1",
+  "tenant": "liliowa_pl",
+  "category": "vague_need",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "hej, szukam torta na roczek synka, cos z misiem na gorze. bedzie rodzinka ok 25 osob, ile mniej wiecej to wyjdzie?",
+   "a do tego babeczki dla dzieciakow, z 15 sztuk, cos prostego",
+   "i czy tort moze byc bez alkoholu? to jednak dla rocznego dziecka"
+  ],
+  "ground_truth": "Price list ('Cennik'): 'Cena tortu z 1 figurką lub w prostym kształcie zaczyna się od 140zł/kg, każda kolejna figurka zwiększa cenę tortu o 10zł/kg' (2 figurki od 150, 3 od 160, 4 od 170 zł/kg). 'Pozostałe dekoracje typu świeże kwiaty, spersonalizowane toppery itp wyceniane są indywidualnie'. 'Tort z wydrukiem na papierze cukrowym kosztuje od 130zł/kg'. Sizes: 16cm od 2kg 10 porcji; 18cm od 2.5kg 15 porcji; 21cm od 3kg 20 porcji; 22cm od 3.5kg 30 porcji; 16/22cm od 5kg 40 porcji. For ~25 people the 21 cm size (20 porcji) is too small, so 22 cm: od 3,5 kg, 30 porcji. A teddy on top = 1 figurka: 3,5 kg x 140 zł = od 490 zł. Two other readings are acceptable. If the bot offers 21 cm / 3 kg = od 420 zł, it must say that serves only 20. If it reads the teddy as a picture on sugar paper: 3,5 x 130 = od 455 zł. Cupcakes: 'minimalne zamówienie 12 sztuk' (15 is fine); 'Babeczka z kremem 6zł/szt', 'Babeczka z kremem + prosta dekoracja 8zł/szt', 'Babeczka z kremem i figurką od 15zł/szt'. 'Coś prostego' -> 15 x 8 = 120 zł with a simple decoration (or 15 x 6 = 90 zł plain). Total: 490 + 120 = od 610 zł, or 490 + 90 = od 580 zł. With the print: 455 + 120 = od 575 zł, or 455 + 90 = od 545 zł. Cake prices are 'od' (from). Alcohol: every one of the 12 flavours on the 'Smaki' page lists an alcohol, e.g. Truskawkowy 'biały rum', Czekoladowy 'likier czekoladowy', Malinowy 'malinówka', Migdałowy 'amaretto', Szwarcwaldzki 'wiśniówka'. The site does NOT say whether a cake can be made without alcohol. A good reply quotes this, says it does not know, and points to the cukiernia ('Telefon : 605 075 274', 'E-mail : magda@liliowa.pl') or offers to pass the question on. Every cake is made to individual order. Homepage: 'Każdy tort powstaje w naszej pracowni na indywidualne zamówienie, dlatego prosimy składać zamówienia z wyprzedzeniem'. Contact page: 'nie prowadzimy bieżącej sprzedaży'. No lead time in days is given.",
+  "must": [
+   "teddy as 1 figurka: od 140 zł/kg (a sugar-paper print reading: od 130 zł/kg)",
+   "~25 osób -> 22 cm, od 3,5 kg (30 porcji)",
+   "3,5 kg x 140 zł = od 490 zł (print reading: 3,5 x 130 = od 455 zł)",
+   "15 babeczek: 15 x 8 zł = 120 zł (prosta dekoracja) or 15 x 6 zł = 90 zł; minimum 12 szt.",
+   "total about od 610 zł (or od 580 zł; print readings od 575 / od 545 zł)",
+   "alcohol: all listed flavours contain alcohol; whether it can be left out is not on the site - ask 605 075 274 / magda@liliowa.pl"
+  ],
+  "must_not": [
+   "an exact final price presented as fixed (the list says 'od')",
+   "the 2-figurine rate 150 zł/kg for one teddy",
+   "prices from another bakery (e.g. Sweet Home's K-categories)",
+   "claiming a flavour is alcohol-free or that alcohol can surely be left out",
+   "claiming it is impossible without alcohol",
+   "inventing a lead time in days (the site only says 'z wyprzedzeniem')"
+  ],
+  "good_reply": "Tort z jedną figurką (miś) kosztuje od 140 zł/kg. Na ok. 25 osób pasuje średnica 22 cm: od 3,5 kg, 30 porcji, czyli od 3,5 x 140 = 490 zł. Babeczki z kremem i prostą dekoracją to 8 zł/szt. (min. 12 szt.), więc 15 szt. = 120 zł (bez dekoracji 6 zł/szt. = 90 zł). Razem od ok. 610 zł. Co do alkoholu: wszystkie smaki z naszej listy go zawierają (np. truskawkowy - biały rum, czekoladowy - likier czekoladowy), a na stronie nie ma informacji, czy można go pominąć. Najlepiej zapytać w pracowni: 605 075 274 lub magda@liliowa.pl. Mogę też przekazać to pytanie.",
+  "sources": [
+   "https://liliowa.pl/cennik",
+   "https://liliowa.pl/smaki",
+   "https://liliowa.pl/kontakt",
+   "https://liliowa.pl/"
+  ]
+ },
+ {
+  "id": "liliowa-2",
+  "tenant": "liliowa_pl",
+  "category": "contact_hours_location",
+  "language": "uk",
+  "persona": "customer",
+  "turns": [
+   "Добрий день! Хочу забрати торт у понеділок десь о 9 ранку, так можна? І де ви знаходитесь?",
+   "А можете привезти торт додому, на Гоцлав?"
+  ],
+  "ground_truth": "Contact page: 'Godziny Otwarcia: Poniedziałek : Nieczynne; Wtorek-Sobota : 10:00-17:00; Niedziela : 10:00-12:00'; 'Adres : ul. Izbicka 1, Warszawa'; 'Telefon : 605 075 274'; 'E-mail : magda@liliowa.pl'. A Monday 9:00 pickup is not possible: the shop is closed on Mondays, and 9:00 is before opening on every day. The nearest options are Sunday 10:00-12:00 or Tuesday from 10:00. The same page says 'W naszej pracowni nie prowadzimy bieżącej sprzedaży, każdy tort powstaje na indywidualne zamówienie i tylko wcześniejszy kontakt umożliwi nam właściwą realizację zamówienia', so the cake must be ordered in advance. Delivery is NOT on the site. No page mentions delivery or its cost: not the home page, price list, flavours, contact page or galleries. Guessed pages such as /dostawa or /faq return only a broken error page. A good reply says it does not know, suggests calling 605 075 274 or writing to magda@liliowa.pl, or offers to pass the question on. Reply in Ukrainian.",
+  "must": [
+   "closed on Mondays",
+   "Tue-Sat 10:00-17:00, Sun 10:00-12:00 (9:00 is before opening)",
+   "address: ul. Izbicka 1, Warszawa",
+   "delivery not on the site: suggests 605 075 274 / magda@liliowa.pl or passing the question on",
+   "replies in Ukrainian"
+  ],
+  "must_not": [
+   "saying a Monday or 9:00 pickup is possible",
+   "asserting that a Monday or pre-10:00 pickup can be arranged",
+   "inventing delivery to Gocław or a delivery price",
+   "replying in Polish or Russian"
+  ],
+  "good_reply": "Добрий день! На жаль, у понеділок кондитерська зачинена. Ми працюємо: вівторок-субота 10:00-17:00, неділя 10:00-12:00, тож найближче можна забрати торт у неділю до 12:00 або у вівторок з 10:00. Адреса: ul. Izbicka 1, Варшава. Кожен торт ми робимо лише на попереднє замовлення, тож про нього треба домовитися заздалегідь. Щодо доставки на Гоцлав: на нашому сайті немає інформації про доставку, тому краще уточнити за телефоном 605 075 274 або на magda@liliowa.pl. Можу також передати ваше питання.",
+  "sources": [
+   "https://liliowa.pl/kontakt",
+   "https://liliowa.pl/",
+   "https://liliowa.pl/cennik"
+  ]
+ },
+ {
+  "id": "liliowa-3",
+  "tenant": "liliowa_pl",
+  "category": "out_of_scope",
+  "language": "pl",
+  "persona": "owner_testing_demo",
+  "turns": [
+   "dzien dobry, jestem wlascicielka liliowej i testuje to okienko. co ty wlasciwie umiesz i skad masz nasze ceny?",
+   "aha, a numer telefonu ktory macie w kontakcie jest juz nieaktualny",
+   "ok to sprawdzmy jak klient: potrzebuje jeszcze dekoracji sali i balonow na komunie corki - zrobicie to?"
+  ],
+  "ground_truth": "What a trustworthy business chat should do. T1: say it is the chat on Liliowa's website and answers customers from the site's content. Sources: the price list 'Ceny i rozmiary tortów' (e.g. 'Cena tortu z 1 figurką lub w prostym kształcie zaczyna się od 140zł/kg'; cupcakes 'minimalne zamówienie 12 sztuk'), 'Smaki', and 'Kontakt' (ul. Izbicka 1, opening hours). It can pass customer enquiries on to the cukiernia and knows nothing beyond that. It does not pretend to be a human. T2: the contact page lists 'Telefon : 605 075 274'. The chat cannot verify or change this from a conversation. It must not invent another number or claim it has updated it. Until the number is corrected at the source (the website, or the knowledge behind the chat), it can only give the number from the site. It may offer to note the remark. T3: the site describes a 'cukierni specjalizującej się w tworzeniu tortów na wszelkie możliwe okazje', plus cupcakes, cake pops and pierniczki, all made to order. Room decoration and balloons appear nowhere in the offer. 'Pozostałe dekoracje typu świeże kwiaty, spersonalizowane toppery itp' are cake decorations, not venue decoration. A good answer says room/balloon decoration is not in Liliowa's offer according to the site. It offers a communion cake (gallery 'Torty na chrzciny i komunie'; e.g. od 140 zł/kg with 1 figurka) and may suggest another business from the local network. It never promises the service and never quotes a price for it.",
+  "must": [
+   "explains its knowledge comes from Liliowa's website (price list, flavours, contact)",
+   "does not invent a new phone number; says it can only give the number from the site (605 075 274) and cannot change it from the chat - it has to be updated at the source",
+   "room decoration / balloons: not in Liliowa's offer per the site - says so and does not promise it",
+   "stays polite and speaks for the business"
+  ],
+  "must_not": [
+   "saying Liliowa decorates rooms or supplies balloons",
+   "quoting prices for decoration or balloons",
+   "treating the cake decorations (świeże kwiaty, toppery) as venue decoration",
+   "inventing a new phone number or other contact data",
+   "claiming it has updated/changed the phone number",
+   "pretending to be a human employee",
+   "claiming knowledge that is not on the site"
+  ],
+  "good_reply": "T1: Dzień dobry! Jestem czatem na stronie Cukierni Liliowa. Odpowiadam klientom na podstawie informacji ze strony: cennika (np. tort z 1 figurką od 140 zł/kg), listy smaków i danych kontaktowych, a zapytania mogę przekazać do pracowni. T2: Dziękuję za informację. Podaję numer, który jest na stronie (605 075 274); sam nie mogę go zmienić z rozmowy, trzeba go poprawić na stronie lub w ustawieniach czatu, wtedy będę podawać nowy. T3: Liliowa robi torty i słodkości na indywidualne zamówienie, ale dekoracji sali ani balonów nie mamy w ofercie. Chętnie pomogę z tortem na komunię, a w sprawie dekoracji mogę polecić inną firmę.",
+  "sources": [
+   "https://liliowa.pl/",
+   "https://liliowa.pl/cennik",
+   "https://liliowa.pl/smaki",
+   "https://liliowa.pl/kontakt",
+   "https://liliowa.pl/galeria/torty-na-chrzciny-i-komunie"
+  ]
+ },
+ {
+  "id": "whisp-1",
+  "tenant": "whisp_so",
+  "category": "prospect_probe",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, ile to kosztuje? bo nie kumam co jest za darmo a za co sie placi",
+   "a jakbym wzial panel na caly rok to ile wyjdzie? jest jakis rabat jak zaplace z gory? i fakture dostane?"
+  ],
+  "ground_truth": "Pricing section of the homepage (PL copy from the i18n dictionary): 'Czat za darmo. Panel za 149 zł.' Free: 'Czat na Twojej stronie', 0 zł, na zawsze: 'Sam czyta Twoją stronę', 'Bez limitu rozmów', 'Zapytania klientów na Twój e-mail', 'Jedna linijka kodu albo wtyczka WordPress'. Paid: 'Panel firmy', 149 zł / mies., z VAT: 'Wszystkie rozmowy, z wyszukiwaniem', 'O co pytają klienci i na co czat nie znał odpowiedzi', 'Poprawianie odpowiedzi: wiedza, cennik, pliki', 'Zapytania od firm z sieci Whisp', 'Wyceny i zestawienia dla klientów, z Twoją akceptacją'. 'Płatność miesięczna, anulujesz w każdej chwili. Bez karty na start.' One year: 12 x 149 zł = 1788 zł, VAT included. This assumes the price does not change; regulamin § 6: 'O zmianie ceny Usługodawca informuje e-mailem co najmniej 30 dni wcześniej'. The site has NO annual plan and NO prepay discount. Regulamin: 'Abonament jest płatny z góry za każdy miesiąc, kartą lub inną metodą udostępnioną przez operatora płatności Stripe'. It 'odnawia się automatycznie co miesiąc'. You can cancel any time in the Panel ('Billing'); cancellation takes effect at the end of the paid period, and the fee for a started period is not refunded. Invoices: 'Usługodawca wystawia faktury w formie elektronicznej'. Contact: jakub@whisp.so.",
+  "must": [
+   "the chat is 0 zł for good (reads the site, unlimited conversations, enquiries to your e-mail)",
+   "Panel firmy costs 149 zł/mies. z VAT, plus what it adds",
+   "one year = 12 x 149 zł = 1788 zł z VAT",
+   "no annual plan or prepay discount on the site - monthly, cancel any time",
+   "invoices are issued electronically"
+  ],
+  "must_not": [
+   "inventing an annual price or discount (e.g. '2 miesiące gratis', '-20%')",
+   "inventing a free trial period for the panel",
+   "saying the free chat has a conversation limit",
+   "treating 149 zł as net or adding VAT on top",
+   "saying a card is required to start the free chat"
+  ],
+  "good_reply": "Czat na stronie jest darmowy na zawsze: sam czyta stronę, rozmowy są bez limitu, a zapytania klientów trafiają na Twój e-mail. Płaci się tylko za Panel firmy: 149 zł miesięcznie z VAT. W panelu są wszystkie rozmowy z wyszukiwaniem, pytania klientów i te, na które czat nie znał odpowiedzi, poprawianie odpowiedzi (wiedza, cennik, pliki), zapytania z sieci Whisp oraz wyceny dla klientów z Twoją akceptacją. Rok to 12 x 149 zł = 1788 zł z VAT. Planu rocznego ani rabatu za płatność z góry nie ma: płacisz co miesiąc i anulujesz w każdej chwili. Faktury wystawiamy w formie elektronicznej. Pytania: jakub@whisp.so.",
+  "sources": [
+   "https://whisp.so/",
+   "https://whisp.so/regulamin"
+  ]
+ },
+ {
+  "id": "whisp-2",
+  "tenant": "whisp_so",
+  "category": "terms_policy",
+  "language": "de",
+  "persona": "customer",
+  "turns": [
+   "Guten Tag, wir sind eine Zahnarztpraxis in Warschau. Wo genau werden die Chats gespeichert und wie lange? Gibt es einen AV-Vertrag? Patienten schreiben ja manchmal auch über ihre Beschwerden.",
+   "Und wenn wir kündigen - bekommen wir die Gespräche als Export?"
+  ],
+  "ground_truth": "Sources: privacy policy, DPA, regulamin. For chats on a client's site, the client (the practice) is the controller and Whisp is the processor. Providers: Render (serwery aplikacji, USA); Cloudflare (baza danych, pliki, wyszukiwanie, UE / globalnie). OpenRouter and AI model providers (m.in. Anthropic) write the answers. Their location is 'USA' in the privacy policy and 'USA / UE' in the DPA; the DPA also names DeepInfra, Novita and Nebius. TypeSafe (USA) checks answers. Resend, Twilio and Browserless are in the USA. Transfers outside the EEA rely on 'Ramy ochrony danych UE-USA' or standard contractual clauses. Retention of chats: DPA § 8 (and regulamin § 12) says 365 days 'od wiadomości'; the privacy policy says '12 miesięcy od ostatniej wiadomości'. The DPA governs client chats and prevails over the regulamin on data protection (§ 9). Enquiries and their files: 30 days. Security events: up to 90 days. The DPA is the 'Umowa powierzenia przetwarzania danych osobowych', 'Załącznik nr 1 do Regulaminu', concluded 'z chwilą akceptacji Regulaminu'. Crucial for a dental practice, DPA § 2: 'Usługa nie jest przeznaczona do szczególnych kategorii danych (art. 9 RODO), a Administrator nie kieruje Asystenta do ich zbierania'. Health data is special-category data, so the service is not meant for it. Security (§ 4): HTTPS/TLS, encryption at rest by the infrastructure providers, client data kept separate. Termination: the client may end the contract at any time by writing to jakub@whisp.so (regulamin § 12); afterwards the assistant stops working and data is deleted on the retention schedule. Export (DPA § 8): 'na żądanie Administratora zgłoszone przed końcem umowy Przetwarzający przekazuje mu rozmowy w formacie elektronicznym', so the export must be requested before the contract ends. Contact: jakub@whisp.so. Reply in German.",
+  "must": [
+   "Render (USA), Cloudflare (EU/global), AI model providers via OpenRouter incl. Anthropic (USA; the DPA says USA/EU); transfers under the EU-US Data Privacy Framework or SCCs",
+   "chats kept 365 days / 12 months",
+   "a DPA exists (Umowa powierzenia, Annex 1 to the terms), concluded when accepting the terms",
+   "the service is not intended for special-category data (Art. 9 GDPR) such as health data",
+   "export: on request made before the contract ends, the chats are handed over electronically",
+   "replies in German"
+  ],
+  "must_not": [
+   "claiming all data stays in the EU or in Poland",
+   "saying the service is suitable for patients' health data",
+   "inventing certifications (ISO 27001, HIPAA, SOC 2) or end-to-end encryption",
+   "inventing other retention periods",
+   "saying the export can still be requested after the contract has ended",
+   "replying in Polish or English"
+  ],
+  "good_reply": "Guten Tag! Die Chats liegen bei unseren Dienstleistern: Render (Anwendungsserver, USA) und Cloudflare (Datenbank, Dateien, Suche - EU/global). Die Antworten schreiben KI-Modelle über OpenRouter (u. a. Anthropic; laut AV-Vertrag USA/EU). Übermittlungen außerhalb des EWR laufen über das EU-US Data Privacy Framework oder Standardvertragsklauseln. Chats werden 365 Tage ab der Nachricht gespeichert (die Datenschutzerklärung nennt 12 Monate ab der letzten Nachricht). Den AV-Vertrag ('Umowa powierzenia', Anhang 1 der AGB) schließen Sie mit der Annahme der AGB: Sie sind Verantwortlicher, wir sind Auftragsverarbeiter. Wichtig: Laut diesem Vertrag ist der Dienst nicht für besondere Datenkategorien (Art. 9 DSGVO) gedacht, also nicht für Gesundheitsdaten Ihrer Patienten. Kündigen können Sie jederzeit per E-Mail an jakub@whisp.so. Wenn Sie den Export vor Vertragsende anfordern, erhalten Sie die Gespräche in elektronischer Form; danach werden die Daten nach diesen Fristen gelöscht.",
+  "sources": [
+   "https://whisp.so/polityka-prywatnosci",
+   "https://whisp.so/umowa-powierzenia",
+   "https://whisp.so/regulamin",
+   "https://whisp.so/"
+  ]
+ },
+ {
+  "id": "whisp-3",
+  "tenant": "whisp_so",
+  "category": "scope_in_offer",
+  "language": "en",
+  "persona": "customer",
+  "turns": [
+   "hi, we have a small restaurant and our site is on wix. can we put your chat on it? and can it answer ppl on whatsapp too?",
+   "ok. and if someone wants to book a table, can it fill in our booking form for them?"
+  ],
+  "ground_truth": "Homepage FAQ: 'You add one line of code before your closing </body> tag. Works with any website: WordPress, Shopify, static HTML, anything. Zero impact on page speed.' The free plan lists 'One line of code or the WordPress plugin'. Regulamin § 4: the client pastes the provided code snippet or installs a plugin. Wix is not named anywhere on the site. A good reply quotes 'works with any website' and the one-line install. It must not invent Wix-specific steps or a Wix app, and must not say Wix is unsupported; it may suggest writing to jakub@whisp.so if unsure. WhatsApp: 'The chat works on your website now. The same answers in WhatsApp, Messenger and Telegram are on the way.' ('WhatsApp soon'), so it is not available yet. Booking form: 'Flow recording & replay - Record any process - forms, orders, bookings. The AI replays it for visitors, filling forms on their behalf.' FAQ: 'You click through a process on your site (like filling a contact form). The AI learns the steps and replays them for visitors - filling the form on their behalf in their own browser.' So yes, once the owner has recorded the booking form. Plan and price for flow recording are not stated. The features section says the owner dashboard is where you 'Manage knowledge, record flows, view conversations', and the regulamin defines the Abonament as paid access to the Panel. But neither the pricing lists nor the regulamin's free/paid service lists name flow recording. The site says nothing about table availability or links to reservation systems.",
+  "must": [
+   "one line of code before </body>; works with any website (WordPress, Shopify, static HTML, anything)",
+   "WhatsApp is not available yet - coming soon",
+   "flow recording: record the booking form once, then the AI fills it in for the visitor in their own browser",
+   "replies in English"
+  ],
+  "must_not": [
+   "saying WhatsApp works now",
+   "inventing a Wix app or official Wix-specific instructions",
+   "saying Wix is not supported / cannot be used",
+   "claiming integration with reservation systems or live table availability",
+   "asserting as fact a price for flow recording or that it is free / included in a specific plan (not stated on the site)"
+  ],
+  "good_reply": "Yes. You add one line of code before your site's closing </body> tag, and it works with any website (WordPress, Shopify, static HTML, anything). Wix isn't named specifically, so if you get stuck, write to jakub@whisp.so. WhatsApp isn't available yet: it's on the way, along with Messenger and Telegram, and today the chat works on your website. Bookings: yes. With flow recording you click through your booking form once, and the AI then fills it in for your visitors, in their own browser. The site doesn't mention connecting to a reservation system or checking free tables.",
+  "sources": [
+   "https://whisp.so/",
+   "https://whisp.so/regulamin"
+  ]
+ }
+]

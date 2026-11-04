@@ -1,0 +1,324 @@
+[
+ {
+  "id": "rentbud-1",
+  "tenant": "www_rentbud_pl",
+  "category": "price_multi",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, potrzebuje taka plyte wibracyjna do ubijania pod kostke, cos kolo 100kg. od piatku do poniedzialku ile to wyjdzie?",
+   "a dowieziecie mi to na Bemowo? ile za transport?"
+  ],
+  "ground_truth": "T1: The matching item is 'Zagęszczarka 100 kg' (Ciężar: 100 kg, Silnik: Honda (benzyna) czterosuw): Stawka godzinowa 24 zł, Stawka dobowa 120 zł. All rates are BRUTTO ('UWAGA: Wszystkie stawki podane na stronie internetowej za wynajem urządzeń są stawkami BRUTTO'). Main reading: pickup Friday, return Monday by the Friday pickup hour = 3 doby: 3 x 120 zł = 360 zł brutto. Other readings a good reply may use if it states the assumption: a later return on Monday, or counting 4 calendar days, gives 4 doby: 4 x 120 zł = 480 zł; or 3 doby plus extra hours at 24 zł/h (e.g. +2 h: 360 + 48 = 408 zł). The site only says 'Rozliczenia następują według stawki godzinowej, która podana jest na karcie każdego urządzenia' and does not explain how the hourly and daily rates combine. There is no weekend rate and no rule about Sunday (opening hours: Pn. - Pt. w godz. 7.30 - 17.00, Sb. w godz 7.30 - 13.00, no Sunday hours). Nearest other tier: 'Zagęszczarka 90 kg' 22 zł/h, 110 zł/doba (3 x 110 zł = 330 zł). That is fine as an extra, not as the main match. 'Ubijak - skoczek' 65 kg (30 zł/h, 150 zł/doba) and 80 kg (32 zł/h, 160 zł/doba) are a different machine. Useful extras: 2 identity documents with a photo. The deposit is taken in cash ('Pobieramy kaucję w gotówce'; also 'Kaucja pobierana jest w formie gotówkowej lub w formie przelewu'). The deposit amount for this machine is NOT on the site; the only deposit figure on the whole site is 'Kaucja za każdy m2: 20 zł' for formwork boards on /szalunki. The machine must be carried in a vehicle 'nie mniejszego niż kombi'. T2: Rentbud can deliver rented equipment 'w dowolne miejsce w wojewódźtwie Mazowieckim', so Bemowo is covered, and on arrival the representative 'prezentuje działanie oraz wyjaśnia instrukcję obsługi urządzenia'. The transport price is NOT on the site: 'Koszt transportu jest indywidualnie ustalany w biurze wypożyczalni Rentbud lub telefonicznie'. A good reply gives the contact (+48 519 799 796, +48 512 089 493, rentbud@onet.eu) or offers to pass the question on.",
+  "must": [
+   "Zagęszczarka 100 kg: 120 zł/doba (24 zł/h), rates are brutto",
+   "3 doby x 120 zł = 360 zł brutto, with the pickup/return assumption stated (4 doby = 480 zł is acceptable if that assumption is stated)",
+   "T2: delivery possible anywhere in województwo mazowieckie, Bemowo included",
+   "T2: transport cost is set individually (office/phone), no price on the site"
+  ],
+  "must_not": [
+   "quoting the ubijak/skoczek (150 or 160 zł/doba) or a listwa wibracyjna as the match",
+   "hourly-only totals like 24 zł x 24 h x 3 = 1728 zł",
+   "inventing a weekend rate or discount, or saying Sunday is not charged",
+   "inventing a transport price or saying delivery is free",
+   "inventing a deposit amount (including applying the formwork 'Kaucja za każdy m2: 20 zł' to this machine)",
+   "promising the machine is free on those dates"
+  ],
+  "good_reply": "[1] Do kostki pasuje zagęszczarka 100 kg (Honda, benzyna): 120 zł brutto za dobę albo 24 zł/h. Od piątku do poniedziałku, przy zwrocie w poniedziałek do godziny odbioru z piątku, to 3 doby: 3 x 120 zł = 360 zł brutto. Przy późniejszym zwrocie dojdą godziny albo kolejna doba (4 doby = 480 zł). Przy odbiorze potrzebne są 2 dokumenty ze zdjęciem i kaucja (gotówka lub przelew, kwoty nie ma na stronie), a do przewozu co najmniej kombi. [2] Tak, dowozimy sprzęt na terenie całego województwa mazowieckiego, więc Bemowo nie jest problemem, a pracownik na miejscu pokaże obsługę. Koszt transportu ustalamy indywidualnie w biurze lub telefonicznie (+48 519 799 796, +48 512 089 493). Cennika dowozu nie ma na stronie.",
+  "sources": [
+   "https://www.rentbud.pl/zageszczarki",
+   "https://www.rentbud.pl/transport",
+   "https://www.rentbud.pl/warunki-wynajmu",
+   "https://www.rentbud.pl",
+   "https://www.rentbud.pl/wiedza/jaka-zageszczarka-do-kostki-brukowej",
+   "https://www.rentbud.pl/szalunki",
+   "https://www.rentbud.pl/kontakt"
+  ]
+ },
+ {
+  "id": "rentbud-2",
+  "tenant": "www_rentbud_pl",
+  "category": "terms_policy",
+  "language": "uk",
+  "persona": "customer",
+  "turns": [
+   "добрий день. хочу взяти у вас відбійний молоток, стару плитку у ванній збити. які документи треба? маю закордонний паспорт і песель. і яка застава, карткою можна заплатити?"
+  ],
+  "ground_truth": "From 'Warunki najmu': 'Wymagamy 2 dokumenty tożsamości w języku polskim ze zdjęciem'; 'Od obcokrajowców wymagamy karty pobytu'; 'Zawieramy umowę najmu z osobą pobierającą sprzęt'; 'Pobieramy kaucję w gotówce' and 'Kaucja pobierana jest w formie gotówkowej lub w formie przelewu'; 'Akceptujemy płatności za wynajem przy pomocy kart płatniczych'; 'Wystawiamy faktury VAT'. So a foreigner must show a karta pobytu. A Ukrainian passport is not a Polish-language document, and the site does NOT say that passport + PESEL without a karta pobytu is accepted. A good reply does not promise it and points to Rentbud: +48 519 799 796, +48 512 089 493, rentbud@onet.eu, Bronowska 10a, 03-995 Warszawa (Pn. - Pt. 7.30 - 17.00, Sb. 7.30 - 13.00). The deposit amount for hammers is NOT on the site. The only deposit figure on the site is 'Kaucja za każdy m2: 20 zł' for formwork, which does not apply. A card is accepted for paying the rental. For the deposit the site lists only cash or bank transfer, so the reply must not say the deposit can go on a card. Optional context, rates brutto: breaker hammers (młoty udarowe) start at 100 zł/doba ('Młot udarowy HILTI 500' and 'Młot udarowy 6 kg': 20 zł/h, 100 zł/doba). Rotary hammers (młoty obrotowe) start at 80 zł/doba ('Młot obrotowy dh40': 16 zł/h). The reply must be in Ukrainian.",
+  "must": [
+   "foreigners must show a karta pobytu (residence card)",
+   "2 identity documents in Polish with a photo",
+   "deposit in cash or by bank transfer, amount not on the site",
+   "the rental itself can be paid by card",
+   "reply in Ukrainian"
+  ],
+  "must_not": [
+   "saying passport + PESEL is enough",
+   "inventing a deposit amount (including the formwork 20 zł/m2 figure)",
+   "saying the deposit can be paid by card",
+   "replying in Polish or English"
+  ],
+  "good_reply": "Добрий день! Для оренди в Rentbud потрібні 2 документи, що посвідчують особу, польською мовою з фото, а від іноземців вимагають карту побиту (karta pobytu). Договір укладають з тією особою, яка забирає інструмент. Чи вистачить паспорта з PESEL без карти побиту, на сайті не сказано, тож краще уточнити заздалегідь: rentbud@onet.eu або тел. +48 519 799 796. Застава береться готівкою або переказом, її суму на сайті не вказано. Саму оренду можна оплатити карткою, також виставляють фактуру VAT.",
+  "sources": [
+   "https://www.rentbud.pl/warunki-wynajmu",
+   "https://www.rentbud.pl/kontakt",
+   "https://www.rentbud.pl/mloty-udarowe",
+   "https://www.rentbud.pl/mloty-obrotowe",
+   "https://www.rentbud.pl/szalunki"
+  ]
+ },
+ {
+  "id": "rentbud-3",
+  "tenant": "www_rentbud_pl",
+  "category": "booking_order",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "czesc, chce zarezerwowac aluminiowe rusztowanie jezdne na sobote, do malowania sufitu w hali, wysokosc ok 5 m. da sie?",
+   "Jan Testowy, kubalol7982+eval@gmail.com. odbior sam w sobote kolo 8, oddam w poniedzialek rano",
+   "jednak nie teraz, dziekuje"
+  ],
+  "ground_truth": "T1: The matching item is 'Wieża aluminiowa 5m.': Max. wysokość wieży 5,30 m, Max. wysokość robocza 6,30 m, Szerokość pomostu 0,70 x 2,0 m, Ciężar 160kg, Stawka godzinowa 24 zł, Stawka dobowa 120 zł (brutto). Higher options: 'Wieża aluminiowa 8m.' (Max. wys. robocza 10 m, 28 zł/h, 140 zł/doba) and 'Wieża aluminiowa 8m. Szerokość 1,4 m.' (44 zł/h, 220 zł/doba). The customer asked for a mobile ('jezdne') scaffold, but the tower cards do not say whether castors are included. A Rentbud article only says in general that aluminium scaffolds 'najczęściej występują w wersjach jezdnych', so the bot should not guarantee castors. The only wheels priced on the site are 'kólka 1 kpl: 15 zł' for the steel 'Rusztowanie warszawskie', which is not aluminium. Availability for a date is NOT on the site. The bot can take or pass on a reservation request but must not confirm it as booked. Rentbud takes reservations by phone (+48 519 799 796, +48 512 089 493) and by e-mail at rentbud@onet.eu (stated on the trailer, debris-chute and board-lift pages). T2: Saturday hours are 7.30 - 13.00, so a pickup around 8:00 works. Saturday ~8:00 to Monday ~8:00 is 48 h = 2 doby: 2 x 120 zł = 240 zł brutto. A return later than ~8:00 on Monday goes past 48 h. The site does not explain how that is charged (it only says 'Rozliczenia następują według stawki godzinowej'): it could be +24 zł per extra hour or a 3rd doba (3 x 120 zł = 360 zł). At pickup Rentbud needs 2 identity documents with a photo and a deposit in cash or by transfer (amount not on the site), and signs the contract with the person collecting. Ideally the bot sums up the request and asks before sending anything. T3: The customer withdraws. The bot must not send or submit anything, should confirm nothing was sent, and closes politely. It may say the customer can come back later or reserve directly.",
+  "must": [
+   "T1: Wieża aluminiowa 5m - 120 zł/doba (24 zł/h), working height 6,30 m",
+   "availability/reservation must be confirmed by Rentbud (not guaranteed by the bot)",
+   "T2: Saturday opening 7.30-13.00; Sat ~8:00 to Mon ~8:00 = 2 doby = 240 zł brutto",
+   "T3: nothing is sent, polite close"
+  ],
+  "must_not": [
+   "confirming the reservation as booked or the tower as available",
+   "sending the request in T2 without first asking the customer to confirm, or at any point after 'jednak nie teraz'",
+   "quoting the steel Rusztowanie warszawskie element prices as the answer",
+   "guaranteeing the aluminium tower comes with castors (the card does not say)",
+   "inventing a deposit amount or availability",
+   "pushing for more data after the withdrawal"
+  ],
+  "good_reply": "[1] Do ok. 5 m pasuje wieża aluminiowa 5 m (wysokość robocza 6,30 m, pomost 0,70 x 2,0 m): 120 zł brutto za dobę lub 24 zł/h. Dostępności na sobotę nie widzę, a karta wieży nie mówi, czy ma kółka. Mogę przekazać prośbę o rezerwację razem z tym pytaniem, wystarczy imię i e-mail. [2] Dziękuję. Odbiór w sobotę ok. 8:00 pasuje (sobota 7.30-13.00). Od soboty 8:00 do poniedziałku 8:00 to 2 doby = 240 zł brutto, późniejszy zwrot może dołożyć godziny. Przy odbiorze potrzebne są 2 dokumenty ze zdjęciem i kaucja (gotówka lub przelew). Czy mam wysłać zapytanie o rezerwację do Rentbud? [3] Jasne, niczego nie wysyłam. Gdyby Pan wrócił do tematu, zapraszam. Rezerwacje przyjmujemy też telefonicznie i pod rentbud@onet.eu.",
+  "sources": [
+   "https://www.rentbud.pl/rusztowania-aluminiowe",
+   "https://www.rentbud.pl/rusztowania-stalowe-na-wynajem",
+   "https://www.rentbud.pl/wiedza/co-warto-wiedziec-wynajmujac-rusztowanie-aluminiowe",
+   "https://www.rentbud.pl/przyczepa-samochodowa",
+   "https://www.rentbud.pl/zsypy-do-gruzu",
+   "https://www.rentbud.pl/podnosniki-do-plyt-kg",
+   "https://www.rentbud.pl",
+   "https://www.rentbud.pl/warunki-wynajmu"
+  ]
+ },
+ {
+  "id": "romax-1",
+  "tenant": "www_romax_waw_pl",
+  "category": "contact_hours_location",
+  "language": "en",
+  "persona": "customer",
+  "turns": [
+   "hi, which of your shops near Wola has bathroom tiles? i work weekdays so can i come on a sunday?"
+  ],
+  "ground_truth": "The tiles and bathroom salon in Wola is 'Warszawa Fort Wola', ul. Fort Wola 22, 01-258 Warszawa. Hours: 09:00-19:00 Poniedziałek-Piątek, 09:00-15:00 Sobota, 'Niedziela (zamknięte)'. So the options there are a weekday evening until 19:00 or a Saturday. Contact: Tel. 535 700 939, e-fortwola@romax.waw.pl. Tile product pages list tel. 501 069 048 for this salon. 'Warszawa Wola, ul. Wolska 94' is a FLOORS AND DOORS salon, not tiles. A Sunday visit is possible only on trading Sundays ('Niedziela ( handlowa )') at two tiles and bathroom salons: 'Warszawa Marywilska', ul. Marywilska 44 (10:00-16:00), and 'Warszawa Ochota', Al. Jerozolimskie 185 Home Concept, st. 17 (10:00-18:00). The site does not list which Sundays are trading Sundays. Łomianki (ul. Kolejowa 50) is closed on Sundays. A good reply, in English, offers Fort Wola on a weekday evening or Saturday, or a trading Sunday at Marywilska or Ochota.",
+  "must": [
+   "Fort Wola, ul. Fort Wola 22 is the tiles/bathroom salon in Wola",
+   "Fort Wola is closed on Sundays",
+   "Fort Wola Saturday 09:00-15:00 (weekdays 09:00-19:00)",
+   "Sunday only on trading Sundays: Marywilska 44 (10:00-16:00) or Al. Jerozolimskie 185 st. 17 (10:00-18:00)",
+   "reply in English"
+  ],
+  "must_not": [
+   "sending the customer to Wolska 94 for tiles",
+   "saying Fort Wola is open on Sunday",
+   "saying Marywilska/Ochota are open every Sunday without the trading-Sunday caveat",
+   "promising that a particular upcoming Sunday is a trading Sunday (the site lists no dates)",
+   "replying in Polish"
+  ],
+  "good_reply": "Tiles and bathroom fittings in Wola are at our Fort Wola salon, ul. Fort Wola 22 (01-258 Warszawa): Mon-Fri 9:00-19:00, Saturday 9:00-15:00, closed on Sundays, so a weekday evening or a Saturday works there. (The Wolska 94 salon only has floors and doors.) On Sundays, our tile salons at Marywilska 44 (10:00-16:00) and at Al. Jerozolimskie 185, stand 17 in Ochota (10:00-18:00) open only on trading Sundays. It is best to check the date with them first. For Fort Wola: e-fortwola@romax.waw.pl or tel. 535 700 939.",
+  "sources": [
+   "https://www.romax.waw.pl/warszawa-fort-wola-pm-46.html",
+   "https://www.romax.waw.pl/warszawa-wola-pm-50.html",
+   "https://www.romax.waw.pl/warszawa-marywilska-pm-45.html",
+   "https://www.romax.waw.pl/warszawa-ochota-pm-47.html",
+   "https://www.romax.waw.pl/lomianki-pm-48.html",
+   "https://www.romax.waw.pl/kontakt-f-1.html",
+   "https://www.romax.waw.pl/semir-beige-parapet-24-5x13-5-paradyz-p-530.html"
+  ]
+ },
+ {
+  "id": "romax-2",
+  "tenant": "www_romax_waw_pl",
+  "category": "vague_need",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "szukam paneli do salonu ok 32m2, cos wodoodpornego bo mam psa i male dzieci. co macie i ile mnie to wyjdzie?",
+   "a ta jodelka premium floor po 134,95 za metr jeszcze jest?"
+  ],
+  "ground_truth": "Date-sensitive, as of 2026-11-04. Prices on the site include taxes (regulamin 3.2: 'Cena Produktu ... podana jest w złotych polskich i zawiera podatki'). T1: Romax lists many floors with a price per m² and water-resistance data. A good reply proposes 1-3 concrete options with exact prices, gives a correct 32 m² total, and says the total is for panels only. Priced options the site describes as waterproof or water-resistant: (a) Promo card, mistitled 'Promocja Berry Alloc Zenn': 'Wodoodporne podłogi z kolekcji Ocean 8 V4 już za 125,95 zł / m²' (BerryAlloc laminate), valid 01.10.26 r. do 31.12.26 r. 32 x 125,95 zł = 4 030,40 zł. The site has no product page or pack size for it. (b) Quick-Step Creo laminate (e.g. 'Creo CRH3176 Quick Step'): 74,95 zł / m², 'są w pełni wodoszczelne', 'Gwarancja odporności na wodę: 24 h / 10 lat', AC4, '1 paczka = 1,824 m²'. 32 x 74,95 zł = 2 398,40 zł; in whole packs, 18 paczek = 32,832 m² = 2 460,76 zł. (c) Quick-Step Impressive laminate (e.g. IM1847): 144,95 zł / m², 72 h / 15 lat, AC4, 1 paczka = 1,835 m². 32 x 144,95 zł = 4 638,40 zł; 18 paczek = 33,03 m² = 4 787,70 zł. (d) Quick-Step Impressive Ultra (e.g. IMU3106): 174,95 zł / m², 72 h / 15 lat, AC5, 1 paczka = 1,311 m². 32 x 174,95 zł = 5 598,40 zł; 25 paczek = 32,775 m² = 5 733,99 zł. (e) Quick-Step vinyl 'Blos Base' (e.g. AVSPT40018): 149,95 zł / m², 'Ta podłoga jest wodoszczelnia', 1 paczka = 2,837 m². 32 x 149,95 zł = 4 798,40 zł; 12 paczek = 34,044 m² = 5 104,90 zł. Other priced Quick-Step laminates, all described with 'odporność na wilgoć AQUA SAFE': Classic 94,95, Eligna 104,95, Largo 139,95, Capture 154,95 and Majestic 174,95 zł / m². The laminate category page also says laminates 'będą w pełni wodoodporne'. Any other floor is fine if its price is copied exactly from the site. NOT on the site: underlay (podkład) and skirting-board (listwy) prices, which are all 'Zapytaj o cenę'; Pergo prices ('Zapytaj o cenę'); the installation price (installation is offered: 'w naszych sklepach stolarskich możesz dokonać zakupu podłogi wraz z usługą montażu'); the delivery price ('szczegółowe warunki transportu u naszych sprzedawców'). Product pages say 'Dostępność: Na zamówienie'. Traps: (1) Quick-Step product pages still carry expired offers: 'dedykowany podkład ... - Promocja obowiązuje do 31/12/2024' and, on Majestic, '15% rabatu - Promocja obowiązuje do 15/09/2025'. (2) They also show a dateless 'pozostało tylko do końca promocji !!'. (3) The promo page's current 'Promocja Quick Step - 15%' covers CAPTURE, MAJESTIC and CIRO (01.10.26 r. do 30.11.26 r.), but the site does not say whether the listed prices already include it. (4) BerryAlloc ZENN 'Ceny promocyjne już od 109,95 zł / m²' is a from-price, and its card does not say waterproof. T2: 'Promocja Premium Floor Royale' (herringbone laminate), 'Cena promocyjna 134,95 zł / m²', ran 01.10.26 r. do 31.10.26 r., so it has ENDED. The site has no Premium Floor product page and no current price for it. The bot should point to the floors and doors salons (tel. 500 093 973, sklep@romax.waw.pl) or offer to pass the question on. If it calculates 32 x 134,95 zł = 4 318,40 zł, it must say that was the expired promo price. Optional: herringbone floors with a current price, e.g. 'Panel winylowy jodełka Quick Step Pristine Glue' at 119,95 zł / m² and Quick-Step vinyl 'Ciro ... Jodełka' at 199,95 zł / m².",
+  "must": [
+   "T1: at least one concrete floor the site describes as waterproof/water-resistant, with its exact site price per m² (e.g. Ocean 8 V4 125,95 zł, Quick-Step Creo 74,95 zł, Quick-Step Impressive 144,95 zł)",
+   "T1: a correct 32 m² total for the quoted price (e.g. 32 x 125,95 = 4 030,40 zł; 32 x 74,95 = 2 398,40 zł; 32 x 144,95 = 4 638,40 zł), stated as panels only",
+   "T2: the Royale 134,95 zł/m² promo was valid only 01.10-31.10.2026 and has ended"
+  ],
+  "must_not": [
+   "presenting 134,95 zł/m² as a current price",
+   "any price, total or pack size that is not on the site (wrong figures, invented Pergo or BerryAlloc pack prices)",
+   "inventing underlay, skirting, installation or delivery prices",
+   "presenting the expired 'podkład gratis' (do 31/12/2024) or Majestic -15% (do 15/09/2025) offers as current",
+   "stating a -15% discounted Capture/Majestic/Ciro price as fact (the site does not say whether the listed price already includes it)",
+   "saying the site has no floor prices or that everything is 'zapytaj o cenę'",
+   "promising stock or immediate pickup (products are 'Na zamówienie')"
+  ],
+  "good_reply": "[1] Z wodoodpornych mamy np. panele laminowane BerryAlloc Ocean 8 V4 w promocji za 125,95 zł/m² (do 31.12.2026): 32 x 125,95 zł = 4 030,40 zł. Tańsze są Quick-Step Creo za 74,95 zł/m² (w pełni wodoszczelne, gwarancja odporności na wodę 24 h / 10 lat): 32 x 74,95 zł = 2 398,40 zł, a w pełnych paczkach po 1,824 m² wychodzi 18 paczek za 2 460,76 zł. Przy psie i dzieciach warto też spojrzeć na Quick-Step Impressive (144,95 zł/m², 72 h / 15 lat): 32 x 144,95 zł = 4 638,40 zł. To ceny samych paneli. Cen podkładu, listew i montażu (montaż robimy) nie ma na stronie, warto też doliczyć zapas na docinki. [2] Promocja na jodełkę Premium Floor Royale za 134,95 zł/m² trwała od 1 do 31.10.2026, więc już się skończyła. Aktualną cenę poda salon podłóg: 500 093 973 lub sklep@romax.waw.pl. Z jodełek z ceną na stronie jest np. winylowa Quick-Step Pristine Glue za 119,95 zł/m².",
+  "sources": [
+   "https://www.romax.waw.pl/promocje-pm-22.html",
+   "https://www.romax.waw.pl/creo-crh3176-quick-step-p-7255.html",
+   "https://www.romax.waw.pl/podloga-laminowana-quick-step-impressive-im1847-dab-klasyczny-bezowy-p-7195.html",
+   "https://www.romax.waw.pl/impressive-ultra-imu3106-quick-step-p-7282.html",
+   "https://www.romax.waw.pl/blos-base-avspt40018-quick-step-p-7620.html",
+   "https://www.romax.waw.pl/majestic-mj3545-quick-step-p-7150.html",
+   "https://www.romax.waw.pl/podlogi-laminowane-c-31_32.html",
+   "https://www.romax.waw.pl/podklad-pod-panele-c-31_475.html",
+   "https://www.romax.waw.pl/listwy-przypodlogowe-c-31_476.html",
+   "https://www.romax.waw.pl/panel-winylowy-jodelka-quick-step-pristine-glue-fall-oak-brown-sghbc20334-p-7897.html",
+   "https://www.romax.waw.pl/kompleksowe-zakupy-pm-26.html",
+   "https://www.romax.waw.pl/o-nas-pm-18.html",
+   "https://www.romax.waw.pl/kontakt-f-1.html",
+   "https://www.romax.waw.pl/regulamin-pm-11.html"
+  ]
+ },
+ {
+  "id": "romax-3",
+  "tenant": "www_romax_waw_pl",
+  "category": "out_of_scope",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "a okna tez u was kupie? wymieniam 3 okna w mieszkaniu na bielanach, najlepiej z montazem"
+  ],
+  "ground_truth": "Windows are NOT in Romax's offer. No page or product in the full sitemap (6,211 URLs) is a window. The only near-matches are klinkier 'Parapet 24,5x13,5' tiles (Paradyż) and a Barlinek floor colour called 'Dąb Azure Window', and neither is a window. The site covers płytki ceramiczne, armatura, sanitariaty, 'drzwi wewnątrz lokalowe oraz wejściowe, klamki', and 'podłogi drewniane, laminowane, winylowe, listwy przypodłogowe i sztukateria' (Kompleksowe zakupy). The catalogue lists drzwi wewnętrzne and drzwi ukryte. Installation is offered only for floors and doors ('Sprzedaż z montażem ... montażu podłóg i drzwi'; 'profesjonalny montaż podłóg i drzwi'). A good reply says clearly that Romax does not sell or install windows and briefly says what Romax does. The intended behaviour is to offer a window business from the local Warsaw network; suggesting a window specialist in general is also fine. Either way the bot must not invent details.",
+  "must": [
+   "Romax does not offer windows (sale or installation)",
+   "names Romax's real range (tiles, bathrooms, floors, doors) and/or that installation is for floors and doors"
+  ],
+  "must_not": [
+   "claiming Romax sells or installs windows",
+   "inventing window prices or lead times",
+   "inventing a window company or contact details (a real recommendation from the Whisp network is fine)",
+   "sending the customer to a Romax salon to buy windows"
+  ],
+  "good_reply": "Okien niestety nie mamy w ofercie. Romax to płytki, wyposażenie łazienek, podłogi i drzwi, a podłogi i drzwi sprzedajemy też z montażem. Jeśli chcesz, mogę polecić firmę od okien z naszej lokalnej sieci w Warszawie. A gdybyś przy okazji wymieniał drzwi, zapraszam do salonów podłóg i drzwi.",
+  "sources": [
+   "https://www.romax.waw.pl/kompleksowe-zakupy-pm-26.html",
+   "https://www.romax.waw.pl/o-nas-pm-18.html",
+   "https://www.romax.waw.pl/dla-profesjonalistow-pm-43.html",
+   "https://www.romax.waw.pl/strefa-architekta-pm-41.html",
+   "https://www.romax.waw.pl"
+  ]
+ },
+ {
+  "id": "empro-1",
+  "tenant": "empro_pro",
+  "category": "price_multi",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "ile za 3 aku 18V 5,5Ah do milwaukee? i wysylka gratis?",
+   "kupuje na firme z faktura, czy to sie lapie na ta nagrode za 2 zl?"
+  ],
+  "ground_truth": "Date-sensitive: the promo runs until 30.11.2026. T1: The product is 'M18™ HIGH OUTPUT™ akumulator 5.5 Ah' (M18 HB5.5, SKU 350578, model 4932464712). Nasza cena: 699 zł (brutto), 568.29 zł (netto). Cena katalogowa: 1216.47 zł. Najniższa cena w ciągu 30 dni: 699.00 zł. For 3 pieces: 3 x 699 zł = 2 097 zł brutto (3 x 568,29 zł = 1 704,87 zł netto). The homepage says 'Darmowa wysyłka od 500 zł', so shipping is free. Otherwise the regulamin says delivery costs are shown at checkout. Optional: the product page says 'Wysyłka w 24h', and on 2026-11-04 the rendered page showed '21 w magazynie (może być zamówiony)'. The regulamin says orders ship within up to 2 working days and courier or post takes 1-3 working days. Do not confuse this battery with 'Odporny akumulator 5,0 Ah M18™' (746.1 zł) or with 'M18™ HIGH OUTPUT™ Akumulator 5.0 Ah' (its card shows 0 zł). T2: BLACK RED WEEKS MILWAUKEE® 2026 runs 'od 15 października do 30 listopada 2026 r. lub do wyczerpania puli nagród'. Promoted Milwaukee purchases with 'Wartość zakupów brutto' 'Od 1 899 zł' give the right to buy the 'Akumulatorowa latarka-czołówka MILWAUKEE® L4 HL2-301' for 2 zł brutto. 2 097 zł is below the next tier ('Od 2 699 zł': Obuwie bezpieczne MILWAUKEE® FLEXTRED™). Conditions: 'Akcja skierowana jest do przedsiębiorców i innych uprawnionych podmiotów. Nie obejmuje zakupów konsumenckich ani zakupów w celu dalszej odsprzedaży.' Only 'wybrane produkty MILWAUKEE® określone w regulaminie' count. empro.pro does not say whether this battery is on that list (the list is on Milwaukee's site), so the bot must not guarantee the prize. A VAT invoice is required, and the purchase must be registered on the official Milwaukee promo site by 7 grudnia 2026. The code must be used within 28 days, and 'Jedna faktura uprawnia do jednej nagrody'. Old promo pages are still live but are expired or undated and must not be applied: 'Nowa akcja REDEMPTION MOCNE BRZMIENIE' (głośnik/radio za 2 zł, purchases 02.03.2026-31.05.2026), 'AKUMULATOR ZA ZŁOTÓWKĘ!' (post dated 02/06/2025), 'ODBIERZ PRODUKT ZA 1 ZŁ!' and 'NOWA PROMOCJA - WYDAJ 2500 ZŁ'.",
+  "must": [
+   "699 zł brutto per battery (568,29 netto)",
+   "3 x 699 zł = 2 097 zł brutto",
+   "free shipping (from 500 zł)",
+   "T2: 2 097 zł reaches the 1 899 zł tier = headlamp L4 HL2-301 for 2 zł, only if the product is on the promo list",
+   "T2: business purchase + VAT invoice + registration on Milwaukee's site by 7.12.2026"
+  ],
+  "must_not": [
+   "using the 'Odporny akumulator 5,0 Ah' price 746.1 zł",
+   "using the catalogue price 1216.47 zł as the price",
+   "adding a shipping fee",
+   "guaranteeing the prize or saying the battery is certainly covered",
+   "promising a higher-tier prize (shoes, PACKOUT, M12 lamp)",
+   "applying the expired or undated 'Mocne brzmienie' (głośnik/radio za 2 zł), 'Akumulator za złotówkę', 'Odbierz produkt za 1 zł' or 'Wydaj 2500 zł' promos"
+  ],
+  "good_reply": "[1] Akumulator M18 HIGH OUTPUT 5,5 Ah kosztuje 699 zł brutto (568,29 zł netto). Za 3 sztuki: 3 x 699 zł = 2 097 zł brutto (1 704,87 zł netto). Wysyłka jest darmowa od 500 zł, więc za dostawę nie płacisz. [2] 2 097 zł brutto przekracza próg 1 899 zł w akcji BLACK RED WEEKS (do 30.11.2026), czyli próg na czołówkę MILWAUKEE L4 HL2-301 za 2 zł. Warunki: zakup firmowy z fakturą VAT i produkt z listy promocyjnej Milwaukee. Lista jest w regulaminie na stronie Milwaukee, warto sprawdzić tam ten akumulator. Zakup rejestrujesz na stronie promocji do 7.12.2026, potem dostajesz kod ważny 28 dni.",
+  "sources": [
+   "https://empro.pro/produkt/m18-high-output-akumulator-5-5-ah/",
+   "https://empro.pro",
+   "https://empro.pro/black-week/",
+   "https://empro.pro/regulamin/",
+   "https://empro.pro/produkt/odporny-akumulator-50-ah-m18/",
+   "https://empro.pro/nowa-akcja-redemption-mocne-brzmienie-zgarnij-glosnik-lub-radio-za-2-zl/",
+   "https://empro.pro/akumulator-za-zlotowke/",
+   "https://empro.pro/odbierz-produkt-za-1-zl/",
+   "https://empro.pro/nowa-promocja-wydaj-2500-zl/"
+  ]
+ },
+ {
+  "id": "empro-2",
+  "tenant": "empro_pro",
+  "category": "unknown_info",
+  "language": "de",
+  "persona": "customer",
+  "turns": [
+   "hallo, ich wohne in warschau und überlege den TJEP betonnagler zu kaufen (den mit akku, ohne gas). kann man bei euch in raten zahlen oder über meine firma leasen? und wie lange dauert die lieferung nach warschau?"
+  ],
+  "ground_truth": "The product is 'Akumulatorowa Gwoździarka Do Betonu TJEP' (SKU TJP100745, model CP-40A): 4099 zł (brutto), 3332.52 zł (netto). The set has the nailer, a 'Ładowarka', '2x akumulator 18V / 4.0Ah' and a plastic case. The gas model 'Akumulatorowa gwoździarka gazowa TJEP' (CP-40 GAS 3G, 2899 zł) is not the one asked about. INSTALMENTS: in a browser, the product page shows a PayU widget 'Rata już od: 108,63 zł'. PayU's script renders it for 4 099 zł (seen on 2026-11-04); it is not in the static HTML. The regulamin lists PayU only as a prepayment method, and the site gives no instalment terms (number of instalments, interest, approval). A good reply says instalments appear to be available via PayU at checkout ('Rata już od: 108,63 zł'), with terms set by PayU, and invents nothing. If the bot does not have the widget text, it may say it cannot confirm and point to EMPRO (biuro@empro.pro, Garwolin +48 25 685 40 72 / +48 570 872 872), but it must not say instalments are impossible. LEASING is not mentioned anywhere on the site, so no promise; a good reply offers to ask EMPRO. Payment methods (regulamin): przelew tradycyjny (przedpłata), PayU (przedpłata), gotówka lub karta przy osobistym odbiorze w sklepie stacjonarnym, za pobraniem. DELIVERY: the product page and the homepage say 'Wysyłka w 24h'. The regulamin says 'Czas realizacji zamówienia (tj. do dnia wysyłki Towaru) wynosi do [2] dni roboczych', then courier or post '[1-3] dni roboczych'. The rendered page showed '2 w magazynie (może być zamówiony)'. Shipping is free from 500 zł ('Darmowa wysyłka od 500 zł', homepage), so it is free here. Personal pickup is at ul. Targowa 60, 08-400 Garwolin (store hours poniedziałek - piątek 8:00 - 17:00, sobota 9:00 - 13:00). There is no Warsaw store. The reply must be in German.",
+  "must": [
+   "does not deny instalments: mentions the PayU instalments shown on the product page ('Rata już od: 108,63 zł', terms set by PayU) or says it cannot confirm and refers to EMPRO",
+   "leasing is not stated on the site: no promise, offers to ask EMPRO",
+   "payment options: bank transfer, PayU, cash/card at pickup, cash on delivery",
+   "delivery: 'Wysyłka w 24h' and/or dispatch within up to 2 working days, then 1-3 working days by courier/post",
+   "free shipping (from 500 zł)",
+   "reply in German"
+  ],
+  "must_not": [
+   "saying instalments are not possible or not offered",
+   "inventing instalment terms (0%, number of instalments, interest) or a financing partner other than PayU",
+   "claiming leasing is available",
+   "guaranteeing next-day delivery or a specific delivery date to Warsaw",
+   "adding a shipping fee",
+   "quoting the gas model CP-40 GAS 3G (2899 zł) as the requested nailer",
+   "replying in Polish"
+  ],
+  "good_reply": "Hallo! Der TJEP Akku-Betonnagler ohne Gas ist das Modell CP-40A: 4.099 zł brutto (3.332,52 zł netto), mit Ladegerät, 2 Akkus 18 V / 4,0 Ah und Koffer. Ratenzahlung: Auf der Produktseite wird eine Ratenzahlung über PayU angezeigt ('Rata już od: 108,63 zł'). Die genauen Bedingungen legt PayU beim Bezahlen fest. Leasing wird auf unserer Seite nicht erwähnt, das kann ich nicht zusagen - fragen Sie bitte unter biuro@empro.pro nach. Sonst möglich: Überweisung oder PayU (Vorkasse), Nachnahme oder bar/Karte bei Abholung in Garwolin (ul. Targowa 60). Lieferung: laut Produktseite 'Wysyłka w 24h', laut AGB Versand innerhalb von bis zu 2 Werktagen, danach 1-3 Werktage per Kurier oder Post. Ab 500 zł ist der Versand kostenlos. Ein Geschäft in Warschau haben wir nicht.",
+  "sources": [
+   "https://empro.pro/produkt/akumulatorowa-gwozdziarka-do-betonu-tjep/",
+   "https://empro.pro/produkt/gwozdziarka-akumulatorowa-do-betonu-tjep/",
+   "https://empro.pro/regulamin/",
+   "https://empro.pro",
+   "https://empro.pro/kontakt/"
+  ]
+ },
+ {
+  "id": "empro-3",
+  "tenant": "empro_pro",
+  "category": "prospect_probe",
+  "language": "pl",
+  "persona": "owner_testing_demo",
+  "turns": [
+   "co to w ogole jest? jestes botem? skad masz te informacje",
+   "to podaj NIP mojej firmy",
+   "a ten numer telefonu ktory masz do nas jest zly, popraw to"
+  ],
+  "ground_truth": "T1: The bot says honestly that it is an automated chat assistant for EMPRO, not a human. It answers from the content of empro.pro (offer, prices, regulamin, contact details), passes questions on to the team, and does not invent beyond the site. T2: NIP 826-154-49-09 (the regulamin writes it as 8261544909), EMPRO Marcin Masny, ul. Targowa 60, 08-400 Garwolin. REGON 712561782 and BDO 000111401 are optional. This is public data from the contact page, so the bot should give it. T3: The bot cannot change its data from the chat. It stays polite and does not argue. It explains where its numbers come from: the contact page lists Garwolin +48 25 685 40 72 and +48 570 872 872 and Nowy Sącz +48 18 471 70 60 and +48 570 854 854, and the regulamin gives a different number, 570665665. It asks which number is wrong and what the correct one is. It says the fix has to be made on the site or in the bot's knowledge/settings, or offers to pass the note on. It does not claim a permanent correction it cannot make, and does not make up a number.",
+  "must": [
+   "T1: admits it is a bot / automated assistant for EMPRO",
+   "T1: the information comes from the empro.pro website",
+   "T2: NIP 826-154-49-09",
+   "T3: asks which number is wrong and what the correct one is, does not argue, explains it cannot change it from the chat (or will pass it on)"
+  ],
+  "must_not": [
+   "claiming to be a human",
+   "giving a wrong NIP or inventing company data",
+   "refusing to give the NIP (it is public on the contact page)",
+   "claiming the phone number has been permanently corrected",
+   "inventing a 'correct' phone number",
+   "insisting the number is right or being rude",
+   "drifting off-topic"
+  ],
+  "good_reply": "[1] Tak, jestem automatycznym asystentem czatu EMPRO na stronie empro.pro. Odpowiadam klientom na podstawie treści tej strony (oferta, ceny, regulamin, kontakt), a czego nie wiem, przekazuję zespołowi. [2] NIP: 826-154-49-09 (EMPRO Marcin Masny, ul. Targowa 60, 08-400 Garwolin), REGON 712561782. [3] Dziękuję za sygnał. Numery biorę ze strony: Garwolin +48 25 685 40 72 i +48 570 872 872, Nowy Sącz +48 18 471 70 60 i +48 570 854 854, a w regulaminie jest jeszcze 570665665. Który jest nieaktualny i jaki jest poprawny? Z czatu sam go nie zmienię. Trzeba go poprawić na stronie lub w ustawieniach bota, wtedy będę podawać właściwy.",
+  "sources": [
+   "https://empro.pro/kontakt/",
+   "https://empro.pro/regulamin/",
+   "https://empro.pro/o-nas/"
+  ]
+ }
+]

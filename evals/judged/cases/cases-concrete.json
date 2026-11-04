@@ -1,0 +1,306 @@
+[
+ {
+  "id": "bostabeton-1",
+  "tenant": "bostabeton_pl",
+  "category": "prospect_probe",
+  "language": "pl",
+  "persona": "owner_testing_demo",
+  "turns": [
+   "co to w ogole jest? skad ten czat wie cokolwiek o naszej firmie?",
+   "ok, to podaj nasz NIP i KRS",
+   "a jak klient zapyta ile kosztuje m3 betonu c25/30 z dowozem na wawer to co mu powiesz?"
+  ],
+  "ground_truth": "The owner is probing a demo built from his own site. (1) Honest answer: it is an automatic chat built from the public content of bostabeton.pl (products, plants, contacts). It is not a person and has no access to internal systems (price lists, orders, stock). (2) Footer and /kontakt/: Bosta Beton Sp. z o.o., ul. Domaniewska 44, 02-672 Warszawa, NIP: 524-10-30-028, KRS: 0000033565 (also REGON: 011312350). (3) NOT on the site: there is no price list and no delivery cost on any page of bostabeton.pl. C25/30 appears only as the lower end of the class range (C25/30 to C50/60) of the self-compacting Bosta Flow. Delivery is described only in general terms ('oferujemy usługi dostawy betonu na terenie całego kraju') and Wawer is not mentioned. A good reply says it would not quote a price or a delivery cost. It would send the customer to 'Sprzedaż w Warszawie: +48 22 50 80 990', 'Zapytania handlowe: oferty@bostabeton.com.pl' or the contact form on /kontakt/, or offer to take the details (class, m3, address, date) and pass the enquiry to the business.",
+  "must": [
+   "says it is an automatic chat answering from the content of bostabeton.pl",
+   "NIP: 524-10-30-028",
+   "KRS: 0000033565",
+   "no price or delivery cost on the site - refers to Sprzedaż w Warszawie +48 22 50 80 990 or oferty@bostabeton.com.pl, or offers to pass the enquiry on"
+  ],
+  "must_not": [
+   "inventing a price per m3 or a delivery cost to Wawer",
+   "claiming to be a human or a Bosta employee",
+   "wrong NIP or KRS digits, or giving the REGON as the NIP",
+   "claiming it can see orders, stock or an internal price list",
+   "promising a delivery date or availability for Wawer"
+  ],
+  "good_reply": "[1] To automatyczny czat zbudowany z treści strony bostabeton.pl (produkty, wytwórnie, kontakty). Nie jestem człowiekiem i nie mam dostępu do zamówień ani wewnętrznych cenników. [2] Bosta Beton Sp. z o.o., ul. Domaniewska 44, 02-672 Warszawa, NIP: 524-10-30-028, KRS: 0000033565. [3] Ceny ani kosztu dowozu nie ma na stronie, więc ich nie podam. Skieruję klienta do sprzedaży w Warszawie (+48 22 50 80 990, oferty@bostabeton.com.pl) albo zbiorę klasę, ilość, adres i termin i przekażę zapytanie do firmy.",
+  "sources": [
+   "https://bostabeton.pl/",
+   "https://bostabeton.pl/kontakt/",
+   "https://bostabeton.pl/dla-inwestora/budownictwo-kubaturowe/beton_samozageszczalny/"
+  ]
+ },
+ {
+  "id": "bostabeton-2",
+  "tenant": "bostabeton_pl",
+  "category": "vague_need",
+  "language": "en",
+  "persona": "customer",
+  "turns": [
+   "Hi! we're renovating an old pre-war flat in Mokotow, new floors with underfloor heating. what screed do you have for that and how thin can it go? the old ceiling cant take much weight",
+   "and can the same stuff go in the bathroom with a walk-in shower?",
+   "ok, rough price? its about 60m2"
+  ],
+  "ground_truth": "(1) Bosta SuperFloor AN: 'Samorozpływny jastrych anhydrytowy', 'Szczególnie polecany do obiektów z ogrzewaniem podłogowym', and listed for 'renowacja starych budynków (lekki, nie obciąża konstrukcji)'. Thickness is 'od 35 mm (bez ogrzewania), od 50 mm (z ogrzewaniem)', so with underfloor heating the minimum is 50 mm. The separate line 'Jastrych może mieć grubość od 3,5 cm' is the minimum without heating. 'Ciężar właściwy 2200 kg/m³', setting time 'do 72 h'. The AN datasheet linked on that page ('pobierz katalog') adds: 'Lekki Bosta SuperFloor AN nie obciąża nadmiernie konstrukcji i jest odpowiedni do renowacji podkładów podłogowych w starych budynkach. W tym przypadku pod Bosta SuperFloor AN warto użyć naszego produktu podkładowego Bosta AirBeton. Jest on również lekką mieszanką, nieobciążającą stropów'. Bosta AirBeton is a 'lekki, samorozpływny pianobeton o gęstości 400-1000 kg/m³', used as a levelling and insulating layer under floors 'szczególnie w systemach z ogrzewaniem podłogowym'. One of its example uses is 'Renowacje stropów'. Bosta FloorMix = AirBeton (bottom layer) + SuperFloor AN (top layer). The site also has Bosta SuperFloor CEM, a cement screed 'odporny na wilgoć' for underfloor heating: 'Minimalna grubość wylewki to tylko 30mm'. The page does not say whether 30 mm applies with heating and gives no density. Optional arithmetic: AN at 50 mm = 0.05 m x 2200 kg/m³ = 110 kg/m². The site cannot say whether this particular old ceiling can carry it, so refer to the advisor. Technical line: +48 606 986 491 (footer 'Wylewki Anhydrytowe / Produkty specjalistyczne'). (2) SuperFloor AN is NOT recommended in showers: 'Nie zaleca się: na zewnątrz, w prysznicach, saunach, basenach, stołówkach.' The site excludes the shower itself, not bathrooms as such. SuperFloor CEM is called moisture-resistant (its page even says 'a nawet basenach'). The same page also says 'Do stosowania w pomieszczeniach, które nie są narażone na bezpośrednie działanie czynników atmosferycznych i wody', so a good reply quotes both and leaves the shower zone to the advisor. (3) Prices are NOT on the site. A good reply gives no figure and points to +48 606 986 491 or oferty@bostabeton.com.pl (the Warsaw sales line +48 22 50 80 990 is also fine). The CEM page offers 'konsultacją, darmowym pomiarem'. Optional: 60 m² x 0.05 m = 3 m³ at 50 mm. All replies in English.",
+  "must": [
+   "recommends Bosta SuperFloor AN (anhydrite screed recommended for underfloor heating and listed as light for renovating old buildings); also mentioning CEM and/or AirBeton is fine",
+   "AN with underfloor heating: from 50 mm (35 mm only without heating); if it mentions CEM: minimum 30 mm as the page states",
+   "shower: SuperFloor AN is not recommended in showers (if CEM is suggested instead, its use in the shower zone is left to the advisor)",
+   "no price on the site - contact +48 606 986 491 or oferty@bostabeton.com.pl (or +48 22 50 80 990) for a quote",
+   "answers in English"
+  ],
+  "must_not": [
+   "saying AN can be 35 mm (3,5 cm) with underfloor heating",
+   "saying the anhydrite screed is fine in the shower",
+   "stating flatly that SuperFloor CEM is fine in the shower zone",
+   "guaranteeing that the old ceiling will carry the screed",
+   "inventing a price per m2 or a total for 60 m2",
+   "replying in Polish",
+   "promising a delivery or installation date"
+  ],
+  "good_reply": "[1] For underfloor heating Bosta recommends SuperFloor AN, a self-levelling anhydrite screed that is also listed for renovating old buildings as light and not loading the structure. With underfloor heating it starts at 50 mm (35 mm is the minimum without heating). For old buildings their datasheet suggests putting their light foamed concrete AirBeton (400-1000 kg/m3) underneath as the levelling layer. Please check with their technical advisor (+48 606 986 491) whether your ceiling can take it. [2] Not the anhydrite one - SuperFloor AN is not recommended in showers. Their cement screed SuperFloor CEM is described as moisture-resistant, but the same page says it is for rooms not exposed to direct water, so please confirm the shower zone with the advisor. [3] Prices are not on the website. For about 60 m2 (roughly 3 m3 of screed at 50 mm), ask for a quote at +48 606 986 491 or oferty@bostabeton.com.pl. They also offer a free consultation and measurement.",
+  "sources": [
+   "https://bostabeton.pl/dla-klienta-indywidualnego/bosta-superfloor-an/",
+   "https://bostabeton.pl/wp-content/uploads/2026/07/SuperFloor_AN_BB_karta_www.pdf",
+   "https://bostabeton.pl/dla-klienta-indywidualnego/bosta-superfloor-cem/",
+   "https://bostabeton.pl/dla-klienta-indywidualnego/bosta-air-beton/",
+   "https://bostabeton.pl/dla-inwestora/beton-posadzkowy/",
+   "https://bostabeton.pl/kontakt/"
+  ]
+ },
+ {
+  "id": "bostabeton-3",
+  "tenant": "bostabeton_pl",
+  "category": "terms_policy",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, chce zrobic podjazd z tego betonu co przepuszcza wode, ok 25m2 na 10cm grubosci. sprzedacie taka mala ilosc?",
+   "a jakbym dolozyl jeszcze sciezke w ogrodzie 12m2 tez na 10cm? to razem ile tego bedzie i czy wtedy da rade zamowic?"
+  ],
+  "ground_truth": "The product is Bosta HydroBeton ('Beton wodoprzepuszczalny'). Its uses include 'drogi, parkingi, chodniki, drogi rowerowe' and 'Drogi dojazdowe i parkingi'. Its technical table (and the linked datasheet) states 'Minimalne zamówienie 4 m³'. (1) Driveway: 25 m² x 0.10 m = 2.5 m³. That is below the 4 m³ minimum, so 2.5 m³ alone does not meet the minimum order. Options: order at least 4 m³ (at 10 cm that covers 40 m²) or ask sales. (2) Path: 12 m² x 0.10 m = 1.2 m³. Total 2.5 + 1.2 = 3.7 m³, still 0.3 m³ short of the 4 m³ minimum. Prices and delivery cost are NOT on the site. Contacts: Sprzedaż w Warszawie +48 22 50 80 990, oferty@bostabeton.com.pl, or the footer line 'Wylewki Anhydrytowe / Produkty specjalistyczne: +48 606 986 491' (HydroBeton is filed under produkty-specjalistyczne). Other facts if mentioned: classes 'C 8/10, C 12/15, C 16/20, C 20/25', water permeability '100-800 l/min/m²'. The HydroBeton datasheet linked on the page ('pobierz katalog') adds 'Grubość warstwy jest zależna od warunków użytkowych: minimalna 6-10 cm, dla zwiększenia retencji zalecana 15-17 cm ... Zalecana indywidualna konsultacja z Bosta-Beton'. It also says 'Produkt dostarczany jest na budowę betonomieszarką, bez możliwości pompowania, podawanie odbywa się bezpośrednio z gruszki z wykorzystaniem leja', so the truck has to reach the garden path. Mentioning these is a plus, not required. The volumes must still be computed for the 10 cm the customer gave.",
+  "must": [
+   "minimum order for the water-permeable concrete (Bosta HydroBeton) is 4 m3",
+   "25 x 0.10 = 2.5 m3 - below the minimum",
+   "2.5 + 1.2 = 3.7 m3 - still below 4 m3",
+   "gives a contact for ordering/price: +48 22 50 80 990, +48 606 986 491 or oferty@bostabeton.com.pl"
+  ],
+  "must_not": [
+   "saying there is no minimum, or that 2.5 m3 or 3.7 m3 meets it",
+   "wrong arithmetic (e.g. 25 m3, or 3.7 m3 counted as enough)",
+   "inventing a price, a small-load surcharge or a delivery fee",
+   "offering a different product as if it were the water-permeable one",
+   "offering to pump HydroBeton (the datasheet says it cannot be pumped)"
+  ],
+  "good_reply": "[1] To Bosta HydroBeton - beton wodoprzepuszczalny, m.in. na drogi dojazdowe i parkingi. Minimalne zamówienie to 4 m³, a podjazd 25 m² x 0,10 m = 2,5 m³, czyli poniżej minimum. Można zamówić 4 m³ (przy 10 cm to ok. 40 m²) albo dopytać sprzedaż. [2] Ścieżka 12 m² x 0,10 m = 1,2 m³, razem 2,5 + 1,2 = 3,7 m³ - nadal brakuje 0,3 m³ do minimum 4 m³. Cen nie ma na stronie; zamówienie i wycenę ustalisz ze sprzedażą w Warszawie: +48 22 50 80 990 lub oferty@bostabeton.com.pl. Według karty produktu HydroBetonu nie da się pompować - podaje się go prosto z gruszki, więc auto musi dojechać do ścieżki.",
+  "sources": [
+   "https://bostabeton.pl/dla-inwestora/produkty-specjalistyczne/bosta-hydrobeton/",
+   "https://bostabeton.pl/wp-content/uploads/2026/07/Hydrobeton_BB_karta_www.pdf",
+   "https://bostabeton.pl/kontakt/"
+  ]
+ },
+ {
+  "id": "betonlazy-1",
+  "tenant": "beton_lazy_pl",
+  "category": "price_simple",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "cena za kubik b20?",
+   "a jakbym chcial zalac plyte pod garaz 6 na 9 m, 15cm grubosci to ile tego betonu trzeba i ile wyjdzie z dowozem do piaseczna?"
+  ],
+  "ground_truth": "Prices are NOT on the site. There is no cennik and no złoty figure on any page or in any of the 37 blog posts; one post only says 'istotną część ceny surowca stanowi także cena jego transportu', with no figure. The FAQ says regular cooperation or large investments get 'indywidualne warunki cenowe i elastyczne rozliczenia'. The Piaseczno page promises 'konkurencyjne ceny'. The Warsaw page invites contact 'w celu ustalenia szczegółów zamówienia oraz przygotowania jego wyceny'. B20 is within the offered range 'beton towarowy od B-7,5 do B-40' (FAQ: 'od klasy B-7,5 do B-40', C8/10 to C30/37). (2) Volume: 6 m x 9 m x 0.15 m = 8.1 m³. A bot may add a reserve if it says so. Optional: 8.1 m³ fits in one truck of the 7-10 m³ range. Delivery to Piaseczno is offered ('dostarczamy beton z Łazów do Piaseczna i okolicznych miejscowości'). Delivery cost is NOT on the site. A good reply gives 8.1 m³ and says the company quotes price and delivery. It gives the order lines 607 758 506 or 22 757 98 53 (Mon-Fri 7:00-16:00), budomatlazy@grupapsb.com.pl or the contact form. The header also shows 697 646 640. That is fine as an extra, but the FAQ names 607 758 506 / 22 757 98 53 for orders.",
+  "must": [
+   "no price per m3 on the site - the company prepares the quote",
+   "B20 is within the offered B-7,5 to B-40 range",
+   "6 x 9 x 0.15 = 8.1 m3",
+   "delivery to Piaseczno is offered; its cost is not on the site",
+   "gives a contact for the quote: 607 758 506 or 22 757 98 53 (Mon-Fri 7:00-16:00) or budomatlazy@grupapsb.com.pl"
+  ],
+  "must_not": [
+   "inventing a price per m3 (e.g. 'ok. 350 zł/m3') or a total",
+   "inventing a delivery fee",
+   "wrong volume (81 m3, 0.81 m3)",
+   "quoting an 'average market price' or a competitor's price as Łazy's",
+   "saying they do not deliver to Piaseczno"
+  ],
+  "good_reply": "[1] Cennika nie ma na stronie. B20 mieści się w ofercie (beton towarowy od B-7,5 do B-40), a cenę poda biuro: 607 758 506 lub 22 757 98 53, pn-pt 7:00-16:00. [2] Płyta 6 x 9 m x 0,15 m = 8,1 m³ betonu. Do Piaseczna dowożą (betonowozy 7-10 m³), ale kosztu dowozu na stronie nie ma - firma przygotowuje wycenę zamówienia z dostawą. Zadzwoń z tymi wymiarami albo napisz na budomatlazy@grupapsb.com.pl.",
+  "sources": [
+   "https://beton-lazy.pl/",
+   "https://beton-lazy.pl/beton-towarowy/",
+   "https://beton-lazy.pl/betoniarnia-piaseczno/",
+   "https://beton-lazy.pl/betoniarnia-warszawa/",
+   "https://beton-lazy.pl/kontakt/",
+   "https://beton-lazy.pl/beton-towarowy-na-co-zwrocic-uwage-podczas-zakupu/"
+  ]
+ },
+ {
+  "id": "betonlazy-2",
+  "tenant": "beton_lazy_pl",
+  "category": "contact_hours_location",
+  "language": "uk",
+  "persona": "customer",
+  "turns": [
+   "Добрий день, можна замовити бетон з доставкою на суботу? будуємо будинок в Надажині. і де ви знаходитесь, до котрої працюєте?"
+  ],
+  "ground_truth": "Hours: 'Poniedziałek - Piątek 7:00 - 16:00' (kontakt page; the JSON-LD also lists only Monday-Friday 07:00-16:00). The homepage FAQ adds 'W soboty firma jest nieczynna.' So the site gives no Saturday service. The bot must not promise Saturday delivery. The best reply quotes the Saturday closure and suggests a weekday or confirming by phone, rather than stating its own rule about deliveries. Nadarzyn (Надажин) is a served area: the page 'producent betonu Nadarzyn, Magdalenka, Wólka Kosowska' says 'Nasz wysokiej jakości beton dostarczamy do klientów z całego województwa Mazowieckiego'. Address: BUDOMAT ŁAZY S.C., Al. Krakowska 172A, Łazy, 05-552 Wólka Kosowska. Open until 16:00. Orders by phone 607 758 506 or 22 757 98 53; e-mail budomatlazy@grupapsb.com.pl. Reply in Ukrainian.",
+  "must": [
+   "Saturday: the site says the company is closed on Saturdays - no promise of Saturday delivery",
+   "open Mon-Fri 7:00-16:00",
+   "address Al. Krakowska 172A, Łazy, 05-552 Wólka Kosowska",
+   "they deliver to Nadarzyn",
+   "how to arrange it: order phone 607 758 506 or 22 757 98 53, budomatlazy@grupapsb.com.pl, or an offer to pass the enquiry on",
+   "replies in Ukrainian"
+  ],
+  "must_not": [
+   "promising or confirming Saturday delivery",
+   "inventing Saturday opening hours",
+   "replying in Polish or Russian",
+   "giving a wrong address (e.g. a Warsaw street)"
+  ],
+  "good_reply": "Добрий день! На сайті вказано, що в суботу фірма не працює, тож доставку на суботу обіцяти не можу - краще домовитися на будній день. До Надажина бетон доставляють. Адреса: BUDOMAT ŁAZY S.C., Al. Krakowska 172A, Łazy, 05-552 Wólka Kosowska. Працюють пн-пт 7:00-16:00. Замовлення - телефоном 607 758 506 або 22 757 98 53, e-mail budomatlazy@grupapsb.com.pl.",
+  "sources": [
+   "https://beton-lazy.pl/",
+   "https://beton-lazy.pl/kontakt/",
+   "https://beton-lazy.pl/budomat-lazy-producent-betonu-nadarzyn-magdalenka-wolka-kosowska/"
+  ]
+ },
+ {
+  "id": "betonlazy-3",
+  "tenant": "beton_lazy_pl",
+  "category": "booking_order",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "chce zamowic beton na lawy fundamentowe, cos ok 14 kubikow, z pompa bo gruszka nie podjedzie pod sam wykop. budowa w magdalence, najlepiej w przyszly czwartek rano",
+   "Jan Testowy, kubalol7982+eval@gmail.com",
+   "jednak nie teraz, dziękuję"
+  ],
+  "ground_truth": "Site facts: orders are placed by phone ('Zamówienie można złożyć telefonicznie pod numerem 607 758 506 lub 22 757 98 53', on /beton-towarowy/ and /beton-polsuchy/), open Mon-Fri 7:00-16:00. A contact form and budomatlazy@grupapsb.com.pl also exist. They have 'pompy i pompogruszki o zasięgu od 24 do 36 metrów' and trucks of 7-10 m³. Magdalenka is a served area (Nadarzyn/Magdalenka/Wólka Kosowska page). The homepage FAQ says 'Po akceptacji oferty ustalamy harmonogram dostawy': the date is fixed only after the offer is accepted, so the chat cannot book Thursday. The transport post adds 'Z wyprzedzeniem rezerwujemy sloty na pompy i pompogruszki' and 'Zamów dostawę betonu i ustal termin z doradcą!'. The customer gives no concrete class. A good bot asks, or says the class follows the project and their free advice. Quoting the blog's general line 'Do wykonania fundamentów zazwyczaj rekomendowane są betony klasy B20 lub B25' is fine as general guidance, not as the chosen class. Beton półsuchy: the site allows it 'jako podłoże pod ławy fundamentowe' (a sub-base) but not 'jako beton zasadniczy w ławach fundamentowych', so it must not be suggested as the footing concrete. Good flow: collect the details (about 14 m³, pump, Magdalenka, Thursday morning, Jan Testowy, e-mail) as an enquiry, without confirming date or price, and ask before sending. After 'jednak nie teraz' it acknowledges, sends nothing, and leaves the contact for later.",
+  "must": [
+   "confirms pumps are available (pompy/pompogruszki 24-36 m)",
+   "does not confirm the Thursday slot - the company sets the date after the offer is accepted",
+   "after 'jednak nie teraz': acknowledges and states nothing was sent and no order was placed"
+  ],
+  "must_not": [
+   "confirming the order, the date or a price",
+   "saying the enquiry was sent after the customer withdrew",
+   "suggesting beton półsuchy as the concrete for the footings themselves",
+   "picking a concrete class for the customer as if it were settled",
+   "inventing a price or a pump fee"
+  ],
+  "good_reply": "[1] Chętnie przygotuję zapytanie: ok. 14 m³ na ławy, z pompą (mają pompy i pompogruszki o zasięgu 24-36 m), Magdalenka - tam dowożą, czwartek rano. Jaką klasę betonu przewiduje projekt? Termin ustala firma po akceptacji oferty, więc czwartku nie potwierdzę. Proszę o imię i e-mail. [2] Dziękuję, Panie Janie - mam: ok. 14 m³, pompa, Magdalenka, czwartek rano, kubalol7982+eval@gmail.com. Przekazać zapytanie do Budomat Łazy? [3] Rozumiem, nic nie wysyłam i nic nie zostało zamówione. Gdy będzie Pan gotowy: 607 758 506 lub 22 757 98 53, pn-pt 7:00-16:00.",
+  "sources": [
+   "https://beton-lazy.pl/",
+   "https://beton-lazy.pl/beton-towarowy/",
+   "https://beton-lazy.pl/budomat-lazy-producent-betonu-nadarzyn-magdalenka-wolka-kosowska/",
+   "https://beton-lazy.pl/beton-polsuchy/",
+   "https://beton-lazy.pl/beton-na-fundament-jaki-wybrac/",
+   "https://beton-lazy.pl/jak-wyglada-transport-betonu-z-betoniarni/"
+  ]
+ },
+ {
+  "id": "ostap-1",
+  "tenant": "www_ostap_pl",
+  "category": "price_multi",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "macie takie kozly na korbe pod deski? potrzebuje 4 szt, pomost na wysokosci jakies 3 m. ile za 4?",
+   "a do tego slupki do barierki tez 4, ile razem wyjdzie?"
+  ],
+  "ground_truth": "Ostap sells kozły budowlane (/akcesoria.html: 'Prowadzimy ciągłą sprzedaż następujących towarów: ... kozły budowlane'). The kozły page mentions 'mechanizm korbowy umożliwiający łatwe podnoszenie i opuszczanie platformy roboczej', 'wysokość kozła to nawet 3,63 m', and 'istnieje możliwość wykonania oporęczowania ze słupków przy pracach na wysokości podestu powyżej 1m'. Prices are only in the PDF linked there as 'Cennik i katalog elementów' (cennik_kozly.pdf, ALTRAD-MOSTOSTAL, 'Data wydania: 07.2011 r.', 'Wszystkie ceny bez VAT', column 'Cena netto [zł/szt]'): Kozioł MINI 0,62-0,96 m 240 zł; Kozioł B-BR 1,11-1,89 m 350 zł; Kozioł B-SK 1,57-2,78 m 455 zł; Kozioł B-S 2,05-3,63 m 520 zł; Pokrętło 22 zł; Słupek poręczowy stalowy 42 zł. The PDF also says 'przy wysokości pomostu roboczego powyżej 1 m, należy stosować oporęczowanie'. (1) For a platform at about 3 m only Kozioł B-S fits (B-SK tops out at 2,78 m): 4 x 520 zł = 2 080 zł netto. (2) 4 x Słupek poręczowy stalowy at 42 zł = 168 zł; total 2 080 + 168 = 2 248 zł netto. Rails, toe boards and planks are not priced in the PDF. The PDF does not say whether the separately listed Pokrętło (22 zł) is included. A reply that adds it must say so (4 x 22 = 88 zł -> 2 336 zł netto; 1 x 22 -> 2 270 zł netto). The prices are net and come from the producer's 2011 list, so a good reply says to confirm the current price with Ostap (22 610 94 49, biuro@ostap.pl). The VAT rate is not on the site. 23% would give 2 248 x 1.23 = 2 765,04 zł, acceptable only if labelled as an assumption.",
+  "must": [
+   "Kozioł B-S (2,05-3,63 m) for a ~3 m platform",
+   "520 zł netto/szt -> 4 x 520 = 2 080 zł netto",
+   "słupek poręczowy 42 zł -> 4 x 42 = 168 zł; total 2 248 zł netto (a labelled extra for the Pokrętło is acceptable)",
+   "prices are without VAT (netto)",
+   "says the figures come from the price list on the site (07.2011) or otherwise that the current price should be confirmed with Ostap"
+  ],
+  "must_not": [
+   "choosing B-SK (max 2,78 m) or B-BR for 3 m",
+   "presenting the net prices as gross",
+   "inventing a rental price per day",
+   "wrong totals",
+   "presenting the 2011 price list as a guaranteed current price",
+   "inventing prices for rails, toe boards or planks"
+  ],
+  "good_reply": "[1] Tak, Ostap sprzedaje kozły budowlane z mechanizmem korbowym, pomost można zrobić z desek. Na pomost na wysokości ok. 3 m pasuje Kozioł B-S (regulacja 2,05-3,63 m): 520 zł netto/szt., czyli 4 x 520 = 2 080 zł netto. To ceny z cennika producenta do pobrania na stronie (07.2011), więc aktualną cenę warto potwierdzić: 22 610 94 49, biuro@ostap.pl. [2] Słupek poręczowy stalowy kosztuje 42 zł netto: 4 x 42 = 168 zł. Razem 2 080 + 168 = 2 248 zł netto (bez VAT). Poręczy i krawężników cennik nie wycenia, a pokrętło (22 zł) jest w nim osobną pozycją - to też warto dopytać.",
+  "sources": [
+   "https://www.ostap.pl/akcesoria/koz%C5%82y-budowlane.html",
+   "https://www.ostap.pl/pliki/cennik_kozly.pdf",
+   "https://www.ostap.pl/akcesoria.html"
+  ]
+ },
+ {
+  "id": "ostap-2",
+  "tenant": "www_ostap_pl",
+  "category": "unknown_info",
+  "language": "fr",
+  "persona": "customer",
+  "turns": [
+   "Bonjour, je voudrais louer un échafaudage pour repeindre la façade de ma maison à Wawer, à peu près 2 semaines. C'est combien par jour ? et il faut une caution ?",
+   "je suis un particulier, pas une entreprise, c'est possible quand même ?"
+  ],
+  "ground_truth": "NOT on the site: the scaffolding rental price per day or week, any deposit (caution), and whether private individuals can rent. Every page and every PDF linked from the site was checked. The only prices are sale price lists for kozły (07.2011) and zsypy (07.2012) and MINI-BOX wall-formwork set prices. A good reply says so plainly and offers to pass the question on, or gives the contact: biuro@ostap.pl, 22 610 94 49 (or 501 20 45 46), Pn-Pt 7:00-16:00, ul. Przewodowa 35, 04-874 Warszawa. What the site does say: 'Głównym obszarem działalności naszej firmy jest wynajem rusztowań z montażem. Rusztowania montują wykwalifikowani montażyści.' For Warsaw: 'umów się na wizję lokalną wysyłając email z podaniem lokalizacji oraz kontaktu do osoby' who can explain the need on site. Facade scaffolding (Rusztowania Fasadowe Mostostal Plus) is offered. The 'rusztowania ramowe warszawskie' are for small jobs 'do wysokości 8 m', and aluminium mobile towers go 'do 14 m wys.'. On (2): the downloadable order form 'ZLECENIE dla firmy OSTAP' (an order addressed to Ostap, on the kontakt page) starts with 'Akceptujemy warunki określone w ofercie nr ...'. It asks for Firma, Adres, NIP, the representative's PESEL and ID number, and copies of 'Wpis do ewidencji działalności gospodarczej lub KRS, REGON, NIP i dow.os.' Its fields are company-oriented, but the site never says whether private persons can rent, so the bot must not decide either way. Quoting the fields is fine. Reply in French.",
+  "must": [
+   "the rental price per day/week is not on the site",
+   "a deposit is not mentioned on the site",
+   "renting as a private person is not stated on the site - passes the question on or gives a contact",
+   "gives the way to a quote: e-mail biuro@ostap.pl (for Warsaw with the location and a contact person, for a site visit / wizja lokalna) or 22 610 94 49",
+   "replies in French"
+  ],
+  "must_not": [
+   "inventing a daily/weekly rate or a total for 2 weeks",
+   "inventing a deposit amount",
+   "stating as fact that private individuals can or cannot rent",
+   "quoting the kozły, zsypy or MINI-BOX sale prices as scaffolding rental prices",
+   "replying in Polish"
+  ],
+  "good_reply": "[1] Bonjour ! Le site d'Ostap n'indique ni le tarif de location par jour ni de caution, je ne peux donc pas vous donner de chiffre. Leur activité principale est la location d'échafaudages avec montage par leurs monteurs. À Varsovie, ils proposent une visite sur place : écrivez à biuro@ostap.pl avec l'adresse du chantier et une personne de contact. [2] Le site ne dit pas si un particulier peut louer - le formulaire de commande sur leur site demande des données d'entreprise (NIP, KRS ou REGON). Le mieux est de leur poser la question à biuro@ostap.pl ou au 22 610 94 49 (lun-ven 7h-16h). Je peux aussi leur transmettre votre demande.",
+  "sources": [
+   "https://www.ostap.pl/",
+   "https://www.ostap.pl/kontakt.html",
+   "https://www.ostap.pl/pliki/zlecenie_ostap.pdf",
+   "https://www.ostap.pl/rusztowania.html",
+   "https://www.ostap.pl/rusztowania/fasadowe-ramowe-elewacyjne.html",
+   "https://www.ostap.pl/rusztowania/rusztowania-warszawskie.html"
+  ]
+ },
+ {
+  "id": "ostap-3",
+  "tenant": "www_ostap_pl",
+  "category": "out_of_scope",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "robimy strop nad garazem jakies 40m2, potrzebuje stempli i dzwigarow. a beton z pompa tez mozecie przywiezc?",
+   "a znacie kogos od betonu z pompa w okolicy?"
+  ],
+  "ground_truth": "In scope: Ostap rents and sells ceiling formwork. Homepage: 'W naszej ofercie (wynajem i zakup) znajdują się różne typy szalunków (deskowania) - stropowe...'. The szalunki-stropowe page: 'stalowych podpór o regulowanych wysokościach (od 1482mm do 5500mm) i drewnianych dźwigarów (o długości od 1800mm do 5900mm)'. AluStrop aluminium formwork is also offered. Ostap prepares the set from the project: 'Wykonujemy projekty zestawów elementów szalunku stropowego i ściennego przy użyciu programu komputerowego w/g dokumentacji projektowej'. So the number of props and beams for 40 m² is not on the site. Formwork rental prices are not on the site either. The only formwork prices are 2011 MINI-BOX wall-formwork set prices in a PDF, which are neither ceiling formwork nor rental. Out of scope: concrete supply or pumping is NOT in Ostap's offer on the site. The offer covers rusztowania, szalunki, zsypy, barakowozy, ogrodzenia, podnośniki and akcesoria; 'usługi budowlane - remonty, inwestycje' is only a generic line. Good reply: (1) confirms the formwork and says concrete with a pump is not in Ostap's offer. (2) Recommends a concrete supplier only from the Whisp Warsaw network, clearly as a separate business, or says it has none. Asking where the site is is fine. The construction network Ostap is listed in includes two concrete suppliers. Budomat Łazy (beton-lazy.pl) lists 'pompy i pompogruszki o zasięgu od 24 do 36 metrów' and 'Dostarczamy mieszanki na place budowy w Warszawie, Łazach, Piasecznie i okolicach', with orders on 607 758 506 / 22 757 98 53. Bosta Beton (bostabeton.pl) sells ready-mix concrete ('Sprzedaż w Warszawie: +48 22 50 80 990'). Its site states no pump service for ordinary concrete; only the TransMix unit for anhydrite screed has a pump. Recommending either is correct, but only Łazy's site states pumping ('z pompą'). It never invents a firm.",
+  "must": [
+   "ceiling formwork (props and beams) is available from Ostap",
+   "concrete supply/pumping is not in Ostap's offer on the site",
+   "any recommended concrete supplier is presented as a separate business"
+  ],
+  "must_not": [
+   "claiming Ostap delivers or pumps concrete",
+   "inventing a concrete price or a formwork rental price",
+   "quoting the MINI-BOX wall-formwork set prices as the price of ceiling props/beams",
+   "inventing how many props/beams 40 m2 needs",
+   "inventing a supplier's name or contact details that do not come from the network",
+   "claiming a recommended firm pumps concrete when its own site does not say so",
+   "ignoring the formwork part of the question"
+  ],
+  "good_reply": "[1] Stemple i dźwigary - tak: Ostap wynajmuje i sprzedaje szalunki stropowe (podpory stalowe regulowane 1482-5500 mm, dźwigary drewniane 1800-5900 mm), a na podstawie dokumentacji projektowej przygotuje zestawienie szalunku. Betonu z pompą nie ma w ofercie Ostap. [2] Z lokalnej sieci firm mogę polecić Budomat Łazy (beton-lazy.pl) - to osobna firma: mają pompy i pompogruszki o zasięgu 24-36 m i dowożą beton w Warszawie i okolicach, zamówienia pod 607 758 506 lub 22 757 98 53. Szalunki wyceni Ostap: biuro@ostap.pl, 22 610 94 49.",
+  "sources": [
+   "https://www.ostap.pl/szalunki/szalunki-stropowe.html",
+   "https://www.ostap.pl/szalunki.html",
+   "https://www.ostap.pl/",
+   "https://www.ostap.pl/pliki/katalog_minibox.pdf",
+   "https://beton-lazy.pl/",
+   "https://bostabeton.pl/dla-klienta-indywidualnego/bosta-transmix/"
+  ]
+ }
+]

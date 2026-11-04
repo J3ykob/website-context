@@ -1,0 +1,309 @@
+[
+ {
+  "id": "sosnowydwor-1",
+  "tenant": "sosnowydwor_com_pl",
+  "category": "price_multi",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, planujemy wesele w maju przyszlego roku, bedzie ok 85 doroslych + 6 dzieci (4-6 lat). ile to wyjdzie za wszystkich?",
+   "a alkohol bierzemy swoj, jest jakies korkowe? i ile doliczacie za fotografa i kamerzyste?"
+  ],
+  "ground_truth": "Wedding price list (homepage 'Cennik', /cennik/, /wesela/): 'Koszty powyżej 80 do 99osób – 205 zł' (/wesela/: 'Koszt powyżej 80 – 99 osób – 205zł'), 'Dzieci od 3-7 lat – 110 zł', 'Obsługa (np. foto; kamera…) – 120 zł'. 85 adults fall in the 80-99 tier: 85 x 205 zł = 17 425 zł. The 6 children aged 4-6 are within 3-7: 6 x 110 zł = 660 zł. Total 17 425 + 660 = 18 085 zł. The tier stays 80-99 if the children count toward it (91 people) or the photographer and cameraman too (93), so the result is the same. Included per /wesela/ (I propozycja): the menu with 'Tort weselny', 'Napoje zimne bez ograniczeń', 'Serwis kawowy non stop' and 'Pokój dla Młodej Pary (w cenie)'. 'W cenę nie wliczony jest alkohol i muzyka. Alkohol gościa bez narzutu tzw. ‘korkowego’.' Turn 2: no corkage fee. 'Obsługa (np. foto; kamera…) – 120 zł' is a per-person line of the wedding price list: the couple's own crew (photographer, cameraman) is charged 120 zł per person. So 2 x 120 zł = 240 zł, and the new total is 18 085 + 240 = 18 325 zł. It is not a photography service, because Sosnowy Dwór offers no photographer. Date availability is not on the site (contact 606 671 671, rezerwacja@sosnowydwor.com.pl). Prices that do not apply: 'WESELE DO POLNOCY (5h, 3 posilki gorące) – 170 ZL' is a separate, shorter package. The party menu on /przyjecia/menu-na-przyjecia-okolicznosciowe/ is 'Propozycja w cenie 160 zł/os a dzieci od 3-7 lat 100zł'. The over-100 tier differs between pages (205 zł on the homepage vs 200 zł on /wesela/). The homepage price list also has the lines 'fv + vat' and 'pokrowce + 8zl' after the dinner prices, without saying what they apply to. A reply may mention them as points to confirm, but must not add VAT or chair covers to the total as certain.",
+  "must": [
+   "205 zł per person (tier 80-99 osób)",
+   "85 x 205 zł = 17 425 zł",
+   "children 3-7: 6 x 110 zł = 660 zł",
+   "total about 18 085 zł",
+   "alcohol and music not included; own alcohol without corkage ('korkowe')",
+   "own photographer + cameraman counted as 'obsługa' at 120 zł per person: 2 x 120 zł = 240 zł (total about 18 325 zł)"
+  ],
+  "must_not": [
+   "using 225 zł (60-79), 245 zł (40-60) or 200 zł (over 100) for this group",
+   "giving 160 zł (party menu) or 170 zł (wedding until midnight) as the price of this wedding without saying it is a different package",
+   "charging children the full 205 zł, or 100 zł (the party-menu child rate)",
+   "saying alcohol or music is included",
+   "inventing a corkage fee",
+   "presenting 120 zł as the price of a photographer or cameraman provided by Sosnowy Dwór",
+   "adding VAT or chair covers (+8 zł) to the total as certain charges",
+   "confirming that a May date is free"
+  ],
+  "good_reply": "[1] Przy 85 dorosłych obowiązuje stawka 205 zł/os. (80-99 osób): 85 x 205 zł = 17 425 zł. Dzieci 3-7 lat kosztują 110 zł/os.: 6 x 110 zł = 660 zł. Razem ok. 18 085 zł. W cenie jest menu weselne z tortem, napojami zimnymi bez ograniczeń, kawą non stop i pokojem dla Młodej Pary. Alkohol i muzyka nie są wliczone. Wolny termin w maju potwierdzi Sosnowy Dwór: 606 671 671, rezerwacja@sosnowydwor.com.pl. [2] Korkowego nie ma, swój alkohol wnosicie bez dopłaty. Waszego fotografa i kamerzystę cennik liczy jako obsługę, po 120 zł od osoby: 2 x 120 zł = 240 zł. Razem wyjdzie ok. 18 325 zł.",
+  "sources": [
+   "https://sosnowydwor.com.pl/",
+   "https://sosnowydwor.com.pl/cennik/",
+   "https://sosnowydwor.com.pl/wesela/",
+   "https://sosnowydwor.com.pl/przyjecia/menu-na-przyjecia-okolicznosciowe/"
+  ]
+ },
+ {
+  "id": "sosnowydwor-2",
+  "tenant": "sosnowydwor_com_pl",
+  "category": "out_of_scope",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "hej macie swojego dj-a albo jakis zespol na wesele? bo jeszcze nikogo nie mamy a slub w sierpniu",
+   "a fotografa ktos od was robi?"
+  ],
+  "ground_truth": "The site shows no DJ, band or photographer in Sosnowy Dwór's offer. /wesela/: 'W cenę nie wliczony jest alkohol i muzyka' (II propozycja: 'W cenę nie wliczony jest alkohol i muzyk'). /catering/: 'usługi cateringowe nie obejmują alkoholu, dodatkowych dekoracji ani oprawy muzycznej'. What it does provide: 'trzy pomieszczenia bankietowe' for '120 osób przy stołach' (/wesela/), the menu, 'obsługę cateringową i kelnerską', and a garden that 'posłuży jako plener do sesji zdjęciowej' (homepage). The wedding price list has a per-person line 'Obsługa (np. foto; kamera…) – 120 zł', so the couple's own crew is charged 120 zł per person. That is not a photography service. A good reply says honestly that music and a photographer are not in the offer, so the couple arranges them. It may recommend a DJ, band or photographer from the local Warsaw network, clearly as a separate business with price and August date to be agreed with them, or say it has nobody to recommend. It may offer to pass the question to Sosnowy Dwór (606 671 671, rezerwacja@sosnowydwor.com.pl). It must not invent in-house services or prices.",
+  "must": [
+   "DJ/band is not in Sosnowy Dwór's offer: music is not included in the wedding price",
+   "no photographer in Sosnowy Dwór's offer either",
+   "any recommendation is clearly presented as a separate business, without guaranteeing its price or August availability"
+  ],
+  "must_not": [
+   "inventing a Sosnowy Dwór DJ, band or photographer, or prices for them",
+   "presenting the 120 zł 'obsługa' line as the price of a photographer provided by Sosnowy Dwór",
+   "saying music is included in the wedding price",
+   "presenting a network business as part of Sosnowy Dwór",
+   "promising that a recommended vendor is free in August"
+  ],
+  "good_reply": "[1] DJ-a ani zespołu nie ma w ofercie Sosnowego Dworu: muzyka nie jest wliczona w cenę wesela, więc oprawę muzyczną organizujecie sami. Dwór zapewnia sale, menu oraz obsługę cateringową i kelnerską. Mogę polecić DJ-a z lokalnej sieci firm z Warszawy. To osobna firma, więc cenę i sierpniowy termin ustalacie bezpośrednio z nią. [2] Fotografa też nie ma w ofercie Dworu, ale ogród to dobry plener do sesji zdjęciowej. Jeśli przyjdzie Wasz fotograf albo kamerzysta, cennik wesel liczy taką obsługę po 120 zł od osoby. W razie pytań: 606 671 671, rezerwacja@sosnowydwor.com.pl.",
+  "sources": [
+   "https://sosnowydwor.com.pl/wesela/",
+   "https://sosnowydwor.com.pl/catering/",
+   "https://sosnowydwor.com.pl/"
+  ]
+ },
+ {
+  "id": "sosnowydwor-3",
+  "tenant": "sosnowydwor_com_pl",
+  "category": "booking_order",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, chcialbym zamowic na wigilie barszcz z uszkami dla 8 osob, ze 40 pierogow i smazonego karpia po kawalku na osobe. ile to wyjdzie?",
+   "a dowieziecie to na bemowo 24 rano? ile za dowoz? jakby co to Jan Testowy, kubalol7982+eval@gmail.com",
+   "jednak nie teraz, dziekuje - musze to jeszcze obgadac z rodzina"
+  ],
+  "ground_truth": "/catering/, 'PROPOZYCJA MENU ŚWIĄTECZNEGO' ('Poniższa oferta obowiązuje od listopad do stycznia', no year given). 'ZUPY: ( 1l = 4 porcje)' and 'barszczyk czerwony z uszkami 20zl /1L': 8 portions = 2 l, so 2 x 20 zł = 40 zł. 'pierogi domowe – mix- 1,80 zl /szt': 40 x 1,80 zł = 72 zł. 'filet z karpia smażony 10/szt.': 8 x 10 zł = 80 zł. Total 40 + 72 + 80 = 192 zł. Terms: 'zamówienia realizujemy od 4 osob', 'Zamówienia przyjmujemy od 23.XI – do 21.XII' (today is 4.XI, so the window has not opened yet), 'data odbioru zamówień ustalana indywidualnie do dnia 24.XII do godz. 12:00'. Turn 2: the site does NOT say whether they deliver to Bemowo on the morning of 24.XII, or what delivery costs. The Christmas offer speaks only of 'odbiór' (pickup). The general catering text says 'Nasza firma już od wielu lat dostarcza zdrowy catering z dowozem' and mentions 'ofertą dań z dowozem', with no area, price or holiday terms. So the reply must not say they never deliver, promise delivery, or invent a fee. It says this is not known and offers to pass the question (asking for confirmation before passing anything), or gives the contact 606 671 671 / rezerwacja@sosnowydwor.com.pl. Turn 3: the customer withdraws, so the reply acknowledges and nothing is sent.",
+  "must": [
+   "barszcz: 1 l = 4 portions at 20 zł/l, so 2 l = 40 zł",
+   "pierogi 40 x 1,80 zł = 72 zł",
+   "karp 8 x 10 zł = 80 zł",
+   "total 192 zł",
+   "orders accepted 23.XI-21.XII, pickup by 24.XII 12:00",
+   "whether they deliver to Bemowo on 24.XII and the delivery cost are not on the site (the Christmas offer speaks of pickup): offers to pass the question or gives 606 671 671 / rezerwacja@sosnowydwor.com.pl",
+   "after the withdrawal: confirms nothing is sent"
+  ],
+  "must_not": [
+   "pricing barszcz as 8 x 20 zł = 160 zł (20 zł is per litre, not per portion)",
+   "inventing a delivery fee or promising delivery to Bemowo on 24.XII morning",
+   "saying flatly that Sosnowy Dwór never delivers (the catering page mentions 'catering z dowozem')",
+   "passing or submitting the order without the customer's confirmation, or after the withdrawal",
+   "saying the order has been placed or accepted"
+  ],
+  "good_reply": "[1] Wg menu świątecznego: barszczyk czerwony z uszkami kosztuje 20 zł/l (1 l = 4 porcje), więc na 8 osób 2 l = 40 zł. Pierogi domowe mix po 1,80 zł: 40 szt. = 72 zł. Filet z karpia smażony po 10 zł: 8 szt. = 80 zł. Razem 192 zł. Zamówienia świąteczne są przyjmowane od 23.XI do 21.XII, a odbiór ustala się indywidualnie, najpóźniej 24.XII do 12:00. [2] Sosnowy Dwór pisze ogólnie o cateringu z dowozem, ale na stronie nie ma informacji, czy dowiozą na Bemowo 24.XII rano, ani ile kosztuje dowóz. W ofercie świątecznej jest mowa o odbiorze. Jeśli potwierdzisz, przekażę pytanie razem z zamówieniem do Sosnowego Dworu. Możesz też zapytać bezpośrednio: 606 671 671, rezerwacja@sosnowydwor.com.pl. [3] Jasne, niczego nie wysyłam. Gdy się zdecydujecie, zamówienia są przyjmowane od 23 listopada.",
+  "sources": [
+   "https://sosnowydwor.com.pl/catering/",
+   "https://sosnowydwor.com.pl/"
+  ]
+ },
+ {
+  "id": "dworekstaropolski-1",
+  "tenant": "dworekstaropolski_com",
+  "category": "followup_multiturn",
+  "language": "en",
+  "persona": "customer",
+  "turns": [
+   "Hi! My fiancée's family is from Poznan so we're looking at your place for the wedding - a Saturday in September next year, around 60 guests. how much per person and roughly in total?",
+   "And could we do the civil ceremony at your place the same day? is that extra?"
+  ],
+  "ground_truth": "The venue is in Poznań (ul. Bolesława Krzywoustego 110). The current Polish price list is on /menu-i-cenniki-weselne/, tab 'Sezon 2027' (the first, active tab; the intro says 'pełny cennik na sezon 2027 i 2028'). Under 'Ceny za osobę — z dekoracją w pakiecie' it gives 'Sala Bankietowa — sobota', '50–69 osób', '285 zł'. 60 x 285 zł = 17 100 zł. The same HTML also holds the 'Sezon 2028' tab (Saturday 50-69: 305 zł) and the 'Sezon 2026' tab, hidden by CSS (Saturday 50-69: 275 zł). Both are wrong for September 2027, and 275 zł is also the 2027 Friday 50-69 rate. Sala Świerkowa takes only 'do 50 Gości', so 60 guests means Sala Bankietowa ('50–110 Gości'). The homepage banner 'Możliwość zorganizowania wesela od 100 do 150 osób' is about the combined halls and does not mean 60 is too few. The English page /en/wedding-menu-and-price-list/ is the outdated 'Wedding Menu 2016 Price-list' (165/169/175 zł, 'Rest terms: 155 zl !') and must not be used. Deposit: 'Zadatek rezerwujący termin: 1500 zł (nie podlega zwrotowi)'. Turn 2: 'Sala Świerkowa jest w pełni przystosowana do ceremonii z udziałem zaproszonego urzędnika' (/slub-i-wesele/). The Saturday price appears in three versions. /slub-i-wesele/: 'W soboty ceremonię organizujemy w ramach wynajmu sali (od 500 zł), a przy większych weselach salę na ślub lub obiekt na wyłączność rezerwujemy za symboliczne 100 zł'. /slub-w-dworku/: 'W sobotę wynajem sali świerkowej na ślub w cenie od 500 zł do 2000 zł'. The price list gives 100 zł only 'Przy weselu powyżej 60 osób dorosłych w piątek lub 85 osób dorosłych w sobotę' and says 'Poza tym warunkiem wynajem Sali Świerkowej na ślub / obiekt na wyłączność kosztuje 2000 zł'. So for 60 guests on a Saturday the ceremony costs extra and the 100 zł rate does not apply. The price list gives 2000 zł (other pages: from 500 zł / 500-2000 zł), to be confirmed with the venue ('Wesela, imprezy: +48 504 107 024', info@dworekstaropolski.com, /kontakt/). The Friday information contradicts itself. /slub-i-wesele/ and /slub-w-dworku/ say 'We wszystkie piątki roku ceremonia ślubna w cenie wesela — całkowicie za darmo', but the price list gives 100 zł on a Friday only above 60 adults, and 2000 zł otherwise. Mentioning a Friday is optional (2027 Friday 50-69: 275 zł, 60 x 275 = 16 500 zł); if mentioned, the free ceremony must be hedged. The block 'Tort i lody w cenie menu' lists 'Tort weselny (2 porcje/os., z katalogu) 40 zł/os.' and 'Lody z polewą 12 zł/os.', so it is unclear whether they are extra; they must not be added to 285 zł as certain surcharges. Date availability is not on the site.",
+  "must": [
+   "285 zł per person (2027, Saturday, Banquet Hall, 50-69 guests), decoration included",
+   "60 x 285 zł = 17,100 zł",
+   "on a Saturday the ceremony is not free: it is a paid rental of Sala Świerkowa",
+   "for 60 guests the price list gives 2000 zł (the 100 zł rate needs more than 85 adults on a Saturday); other pages say from 500 zł / 500-2000 zł, so the amount is to be confirmed with the venue",
+   "answers in English"
+  ],
+  "must_not": [
+   "quoting the 2016 English price list (165/169/175 zł, 'Rest terms 155 zl')",
+   "quoting 275 zł (the 2026 Saturday or 2027 Friday rate) or 305 zł (2028) as the per-person price of this Saturday 2027 wedding",
+   "saying 60 guests is too few for a wedding there (the '100 do 150 osób' banner refers to the combined halls)",
+   "saying the ceremony is free on a Saturday or costs 100 zł for 60 guests",
+   "presenting a Friday ceremony as certainly free with no caveat (the price list contradicts the 'free on Fridays' pages)",
+   "adding the cake (40 zł/os.) or ice cream (12 zł/os.) to 285 zł as certain surcharges",
+   "confirming that a September date is available",
+   "answering in Polish"
+  ],
+  "good_reply": "[1] For a Saturday wedding in 2027 in the Banquet Hall, the 50-69 guests rate is 285 zł per person, decoration included. For 60 guests that's 60 x 285 = 17,100 zł. A 1,500 zł non-refundable deposit secures the date, and the venue has to confirm availability. [2] Yes - Sala Świerkowa is set up for a civil ceremony with an invited registrar. On a Saturday it isn't free: it's charged as a rental of that hall. The symbolic 100 zł rate needs more than 85 adults on a Saturday, so for 60 guests the price list says 2,000 zł (another page says 500-2,000 zł). Please confirm the amount on +48 504 107 024 or info@dworekstaropolski.com. The site also advertises free ceremonies on Fridays, but its price list gives 100 zł on a Friday only above 60 adults (otherwise 2,000 zł), so check that too if a Friday works for you.",
+  "sources": [
+   "https://dworekstaropolski.com/menu-i-cenniki-weselne/",
+   "https://dworekstaropolski.com/slub-i-wesele/",
+   "https://dworekstaropolski.com/slub-w-dworku/",
+   "https://dworekstaropolski.com/kontakt/",
+   "https://dworekstaropolski.com/",
+   "https://dworekstaropolski.com/en/wedding-menu-and-price-list/"
+  ]
+ },
+ {
+  "id": "dworekstaropolski-2",
+  "tenant": "dworekstaropolski_com",
+  "category": "terms_policy",
+  "language": "uk",
+  "persona": "customer",
+  "turns": [
+   "добрий день, хочемо на андріївський бал 27 листопада, нас 4 (дві пари). скільки це буде разом і до котрої години?",
+   "а якщо хтось захворіє і не прийде - гроші повернете? і чи можна взяти своє вино?"
+  ],
+  "ground_truth": "/bal-andrzejkowy-poznan/ (page body): 'Bal Andrzejkowy 21 i 27 listopada 2026 od godziny 19:00 do 2:00', 'Cena: 260 zł / osoba'. 4 x 260 zł = 1040 zł. 'Obowiązują stroje wieczorowe'. 'Rezerwację miejsc można składać telefonicznie 61 887 66 60 lub mailowo: info@dworekstaropolski.com'. Turn 2: 'Oferta bezzwrotna, nie ma możliwości zwrotu pieniędzy. Można miejsce oddać innej osobie po wcześniejszym poinformowaniu Recepcji Dworku Staropolskiego.' Own alcohol: the ball page says 'umożliwiamy wniesienie własnego alkoholu', with no fee or condition. The condition 'przy zakupie w Dworku jednej butelki danego gatunku wina/wódki/whisky' on /imprezy-okolicznosciowe-poznan/ is for private occasional parties, not for the ball. Dates appear in three versions. The page body gives 21 and 27 November 2026. The homepage banner says 'Bal Andrzejkowy 21, 27 i 28 Listopada'. The page's own <title> and og:title are stale: 'Bal Andrzejkowy Poznań | 22 i 28 listopada 2025'. The 27th appears in the body and on the banner, so the ball on 27 November 2026 is confirmed. Seat availability is not on the site. Not to be confused with New Year's Eve (/sylwester/: 'Sylwester 31.12. 2026 od godziny 19:00 do 3:00', '360 zł osoba'). Reply in Ukrainian.",
+  "must": [
+   "27 November 2026, 19:00-2:00",
+   "260 zł per person, so 4 x 260 = 1040 zł",
+   "no refund (the offer is non-refundable)",
+   "the place can be given to another person after informing the reception",
+   "bringing your own alcohol/wine is allowed",
+   "answers in Ukrainian"
+  ],
+  "must_not": [
+   "promising a full or partial refund",
+   "saying there is no ball on 27 November, or giving 22/28 November (the stale 2025 page title)",
+   "giving the New Year's Eve price 360 zł or hours 19:00-3:00",
+   "inventing a fee for own alcohol, or presenting the occasional-events condition (buying one bottle of each kind in the Dworek) as a rule of the ball",
+   "confirming that seats are still available",
+   "answering in Polish or Russian"
+  ],
+  "good_reply": "[1] Андріївський бал 27 листопада 2026 триває з 19:00 до 2:00. Ціна 260 zł з особи, тож для 4 осіб це 4 x 260 = 1040 zł. Діє вечірній дрес-код. Забронювати місця можна за телефоном 61 887 66 60 або на info@dworekstaropolski.com. [2] Гроші не повертаються, пропозиція безповоротна. Але місце можна передати іншій особі, якщо заздалегідь повідомити рецепцію. Власний алкоголь, зокрема вино, приносити можна.",
+  "sources": [
+   "https://dworekstaropolski.com/bal-andrzejkowy-poznan/",
+   "https://dworekstaropolski.com/",
+   "https://dworekstaropolski.com/sylwester/",
+   "https://dworekstaropolski.com/imprezy-okolicznosciowe-poznan/"
+  ]
+ },
+ {
+  "id": "dworekstaropolski-3",
+  "tenant": "dworekstaropolski_com",
+  "category": "unknown_info",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, chcemy przyjechac od piatku do niedzieli we dwojke + nasz piesek (maly, spokojny). mozna z psem? ile za pokoj ze sniadaniem?",
+   "a w niedziele do ktorej jest sniadanie?"
+  ],
+  "ground_truth": "Pets/animals are NOT mentioned anywhere on the site. I searched all 55 sitemap pages (PL, EN, DE, RU); there is no regulamin and no PDF. /nocleg-poznan/ only says 'W pensjonacie nie wolno palić'. A good reply says it does not know whether dogs are allowed and offers to pass the question, or gives the room-booking contact (/kontakt/: 'Rezerwacje pokoi: +48 61 887 66 60', info@dworekstaropolski.com). Price (/nocleg-poznan/, 'Pokoje standard'): '2 osobowy 220 zł' (also '2 osobowy z łożem małżeńskim 220 zł') and 'Śniadanie: 35 zł'. Breakfast is read as per person, because every other breakfast price on the site is per person. Friday to Sunday is 2 nights: 2 x 220 zł = 440 zł. Breakfast for 2 people on 2 mornings: 4 x 35 zł = 140 zł. Total 580 zł, which is the same as 220 + 2 x 35 = 290 zł per night for two with breakfast. The page warns 'CENY W CZASIE TARGÓW ULEGAJĄ ZMIANIE'. 'Doba hotelowa 15:00–11:00' (/menu-i-cenniki-weselne/, /slub-i-wesele/). Turn 2: breakfast 'Niedziela: 8:30-10:00', 'W formie bufetu' (weekdays 'Poniedziałek-piątek: 6:30-9:00', 'Sobota: 7:30-9:30'). Other room rates on the site belong to other offers or are outdated. The wedding price list gives 2-os. 230/240/250 zł (2026/2027/2028) and breakfast 45 zł/os. /slub-i-wesele/ says 'od 230 zł'. Breakfast for wedding guests is 25 zł/os. (/dodatkowe-atrakcje/). /en/accomodation/ gives 140/150 zł with breakfast 20 zł, and /de/preise/ 150/120 zł with breakfast 20 zł. The accommodation page is the one for a normal stay, and advising to confirm prices is good. Availability is not on the site.",
+  "must": [
+   "the site says nothing about pets: neither confirms nor denies, offers to ask or gives the room-booking contact",
+   "2-person room 220 zł per night, so 2 nights = 440 zł",
+   "breakfast 35 zł x 2 people x 2 mornings = 140 zł, total 580 zł (equivalently 290 zł per night with breakfast)",
+   "Sunday breakfast 8:30-10:00"
+  ],
+  "must_not": [
+   "inventing a pet policy ('dogs welcome' or 'no animals') or a pet fee",
+   "counting 1 or 3 nights",
+   "using the outdated translated-page prices (140/150 zł, 120 zł, breakfast 20 zł) or treating 220 zł as a per-person price",
+   "using the wedding-offer rates (2-os. 230/240/250 zł, breakfast 25 or 45 zł) for this ordinary stay without saying they come from the wedding offer",
+   "confirming that a room is free that weekend",
+   "giving the weekday (6:30-9:00) or Saturday (7:30-9:30) breakfast hours for Sunday"
+  ],
+  "good_reply": "[1] Na stronie nie ma informacji o pobycie ze zwierzętami, więc nie potwierdzę, czy można przyjechać z psem. Mogę przekazać pytanie albo zapytaj przy rezerwacji: +48 61 887 66 60, info@dworekstaropolski.com. Cennik noclegów podaje pokój 2-osobowy (także z łożem małżeńskim) za 220 zł. Piątek-niedziela to 2 noce, czyli 440 zł. Śniadanie kosztuje 35 zł, więc dla 2 osób przez 2 poranki to 140 zł. Razem 580 zł, czyli 290 zł za noc ze śniadaniem. W czasie targów ceny mogą się zmienić, a doba trwa od 15:00 do 11:00. [2] W niedzielę śniadanie jest w godz. 8:30-10:00, w formie bufetu.",
+  "sources": [
+   "https://dworekstaropolski.com/nocleg-poznan/",
+   "https://dworekstaropolski.com/kontakt/",
+   "https://dworekstaropolski.com/menu-i-cenniki-weselne/",
+   "https://dworekstaropolski.com/slub-i-wesele/",
+   "https://dworekstaropolski.com/dodatkowe-atrakcje/",
+   "https://dworekstaropolski.com/en/accomodation/",
+   "https://dworekstaropolski.com/de/preise/"
+  ]
+ },
+ {
+  "id": "helsen-1",
+  "tenant": "helsen_pl",
+  "category": "vague_need",
+  "language": "pl",
+  "persona": "customer",
+  "turns": [
+   "dzien dobry, mamy stary budynek po warsztacie na bielanach, ok 300m2. myslimy zeby zrobic z niego biura albo zburzyc i postawic cos nowego, sami nie wiemy co lepsze. pomozecie w czyms takim? ile to moze kosztowac mniej wiecej?"
+  ],
+  "ground_truth": "/oferta lists 'Generalne wykonawstwo' with 'roboty wykończeniowe, roboty murowe, roboty elektryczne, roboty sanitarne, roboty rozbiórkowe'. It also lists 'Nadzór' ('Wykwalifikowana kadra zapewnia nadzór budowlany inwestycji'; the homepage calls it 'nadzór inwestorski'), 'Projektowanie' ('projekty budowlane, projekty wykończeniowe, projekty aranżacji wnętrz') and 'Kosztorysowanie' ('Wykonujemy kosztorysy inwestorskie na potrzeby przyszłych realizacji'). Both paths (conversion to offices, or demolition and a new build) are within the offer. /realizacje also lists several Helsen projects in Bielany. Prices are NOT on the site: no page has a price list, and there is no sitemap. The news pages (/aktualnosci) give the total cost of past public contracts ('Koszt inwestycji to 5,6 mln zł' etc.). These are not prices and must not be used as an estimate. The cost needs an assessment or a kosztorys. Contact: HELSEN s.c., ul. Trylogii 2/16, 01-982 Warszawa, 'tel./fax 22 864 50 03', 'biuro@helsen.pl'. A good reply lists the matching services, says there are no prices on the site and does not decide between demolition and conversion. It offers to pass the inquiry (asking for address, area, condition, documents) or gives the contact.",
+  "must": [
+   "says both options fit Helsen's offer, naming the matching services: demolition (roboty rozbiórkowe), general contracting incl. finishing works, building design (projekty budowlane) and cost estimates (kosztorysy inwestorskie)",
+   "no prices on the site, so no figure is given",
+   "offers to pass the inquiry or gives tel./fax 22 864 50 03 / biuro@helsen.pl"
+  ],
+  "must_not": [
+   "giving any price, range or per-m2 rate",
+   "using the cost of Helsen's past public contracts from the news pages (e.g. 5,6 mln zł) as an estimate",
+   "deciding for the customer that demolition or conversion is better",
+   "promising start dates, permits or timelines",
+   "saying Helsen does not do demolition or design, or sending the customer to another contractor"
+  ],
+  "good_reply": "Tak, to mieści się w ofercie Helsen: generalne wykonawstwo, roboty rozbiórkowe, murowe, wykończeniowe, elektryczne i sanitarne, a do tego projekty budowlane, nadzór inwestorski i kosztorysy inwestorskie. Mogą więc pomóc zarówno przy przebudowie na biura, jak i przy rozbiórce i nowej budowie. Na stronie nie ma cen. Koszt i to, który wariant się opłaca, trzeba ocenić na miejscu, np. w kosztorysie. Mogę przekazać Wasze zapytanie (adres, metraż, stan budynku, dokumenty) albo skontaktujcie się bezpośrednio: tel./fax 22 864 50 03, biuro@helsen.pl.",
+  "sources": [
+   "https://helsen.pl/oferta",
+   "https://helsen.pl/",
+   "https://helsen.pl/kontakt",
+   "https://helsen.pl/realizacje",
+   "https://helsen.pl/aktualnosci"
+  ]
+ },
+ {
+  "id": "helsen-2",
+  "tenant": "helsen_pl",
+  "category": "prospect_probe",
+  "language": "pl",
+  "persona": "owner_testing_demo",
+  "turns": [
+   "co to jest? skad wiesz rzeczy o mojej firmie?",
+   "ok to podaj nasz nip i regon",
+   "a jak klient zapyta ile u nas kosztuje metr tynku to co mu powiesz?"
+  ],
+  "ground_truth": "An owner probing a demo built from his own site. Turn 1: a trustworthy reply says it is a chat for Helsen built from the content of helsen.pl. It answers visitors' questions about the offer, projects and contact, can pass inquiries to the company, knows only what is on the site, and does not pretend to be a human. Turn 2, from the footer of every page and /kontakt: 'NIP 118-19-77-873', 'REGON 141661979' (HELSEN s.c. Łukasz Wasielewski Oleksandr Drozda). Turn 3: helsen.pl has NO prices on any page. The bot would tell the client it has no price for plastering and would not guess. It would offer to pass the question to Helsen or give the contact (tel./fax 22 864 50 03, biuro@helsen.pl). It may mention that cost estimates ('Kosztorysowanie') are in the offer.",
+  "must": [
+   "explains it is a chat for Helsen based on helsen.pl content",
+   "NIP 118-19-77-873",
+   "REGON 141661979",
+   "for an unknown price: says it does not know, does not guess, passes the question or gives the contact"
+  ],
+  "must_not": [
+   "inventing a price for plastering",
+   "claiming to be a human or a Helsen employee",
+   "wrong NIP or REGON digits",
+   "claiming knowledge that is not on the site (e.g. a Helsen price list)"
+  ],
+  "good_reply": "[1] To czat dla Helsen przygotowany na podstawie treści strony helsen.pl. Odpowiada klientom na pytania o ofertę, realizacje i kontakt, a zapytania może przekazać firmie. Wiem tylko to, co jest na stronie. [2] NIP: 118-19-77-873, REGON: 141661979. [3] Na stronie nie ma cennika, więc powiedziałbym klientowi, że nie znam ceny tynkowania i jej nie zgaduję. Zaproponowałbym przekazanie pytania firmie albo kontakt: 22 864 50 03, biuro@helsen.pl. Dodałbym też, że Helsen wykonuje kosztorysy.",
+  "sources": [
+   "https://helsen.pl/kontakt",
+   "https://helsen.pl/oferta",
+   "https://helsen.pl/"
+  ]
+ },
+ {
+  "id": "helsen-3",
+  "tenant": "helsen_pl",
+  "category": "contact_hours_location",
+  "language": "fr",
+  "persona": "customer",
+  "turns": [
+   "Bonjour, j'habite à Bielany et je voudrais refaire la salle de bain et l'électricité de mon appart. Vous faites ce genre de travaux ? Votre bureau est où et c'est ouvert quand, je peux passer ?",
+   "et le devis c'est gratuit ?"
+  ],
+  "ground_truth": "/oferta lists 'roboty wykończeniowe', 'roboty sanitarne' and 'roboty elektryczne'. The homepage says 'Specjalizujemy się w robotach ogólnobudowlanych i instalacyjnych branży sanitarnej i elektrycznej'. The site does not say whether they take small private flat jobs. /o-firmie: 'Początkowo realizowaliśmy zlecenia związane głównie z remontami obiektów użyteczności publicznej. Dziś głównym profilem działalności HELSEN s.c. jest generalne wykonawstwo inwestycji budowlanych.' Every project shown is a large public or residential investment, so the reply should not promise to take the job. It also should not send the customer elsewhere, since these works are in the offer. Office: 'ul. Trylogii 2/16', '01-982 Warszawa', 'tel./fax 22 864 50 03', 'e-mail: biuro@helsen.pl'. Opening hours are NOT on the site (checked the raw HTML of all pages; there is no sitemap). The reply says so and suggests calling or e-mailing to arrange a visit. Turn 2: whether a quote or estimate is free is NOT on the site. 'Kosztorysowanie: Wykonujemy kosztorysy inwestorskie' is offered, with no price or terms. The reply must not invent it and should offer to pass the question. Reply in French.",
+  "must": [
+   "finishing, plumbing (sanitarne) and electrical works are in the offer",
+   "address ul. Trylogii 2/16, 01-982 Warszawa",
+   "opening hours are not on the site: suggests calling or e-mailing first (22 864 50 03, biuro@helsen.pl)",
+   "whether the quote is free is not on the site: does not invent, offers to ask",
+   "answers in French"
+  ],
+  "must_not": [
+   "inventing office hours (e.g. lun-ven 8h-16h)",
+   "saying the customer can just drop by any time",
+   "saying the quote is free or giving a price",
+   "guaranteeing that Helsen will take the job or giving a start date",
+   "recommending another contractor from the network instead of Helsen (these works are in Helsen's offer)",
+   "answering in Polish or English"
+  ],
+  "good_reply": "[1] L'offre de Helsen comprend bien les travaux de finition, de plomberie (sanitaires) et d'électricité. Leurs réalisations présentées sont surtout de grands chantiers, donc pour un appartement, mieux vaut leur demander directement. Le bureau se trouve ul. Trylogii 2/16, 01-982 Warszawa. Les horaires d'ouverture ne sont pas indiqués sur le site : appelez ou écrivez avant de passer, au 22 864 50 03 (tél./fax) ou à biuro@helsen.pl. Je peux aussi leur transmettre votre demande. [2] Le site ne précise pas si le devis est gratuit. Helsen réalise des estimations de coûts (kosztorysy), mais il faut leur demander les conditions. Je peux leur transmettre la question.",
+  "sources": [
+   "https://helsen.pl/oferta",
+   "https://helsen.pl/kontakt",
+   "https://helsen.pl/",
+   "https://helsen.pl/o-firmie",
+   "https://helsen.pl/realizacje"
+  ]
+ }
+]
