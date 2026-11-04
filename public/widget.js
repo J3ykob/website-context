@@ -2315,10 +2315,10 @@
           </svg>\
         </div>\
         <input class="wctx-chat-input" type="text" placeholder="' + wctxT("Tell me what you need…", "Napisz, czego potrzebujesz…") + '" autocomplete="off" spellcheck="false" autofocus />\
-        <button class="wctx-send-btn" type="button">Send</button>\
+        <button class="wctx-send-btn" type="button">' + wctxT("Send", "Wyślij") + '</button>\
       </div>\
       <div class="wctx-idle-footnote">\
-        <span><kbd>↵</kbd>Send</span>\
+        <span><kbd>↵</kbd>' + wctxT("Send", "Wyślij") + '</span>\
         <span>' + wctxT("Ask anything about this website", "Zapytaj o cokolwiek na tej stronie") + '</span>\
       </div>\
     </div>\
