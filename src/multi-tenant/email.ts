@@ -53,6 +53,32 @@ export async function sendWelcomeEmail(
   }
 }
 
+// The owner's "set a new password" e-mail (password-reset.ts; text: templates/emails/owner-password-reset.<lang>.txt).
+// Language: the login page's, else as the other owner e-mails. New template: until the owner approves it
+// (PASSWORD_RESET_EMAIL_APPROVED=1) it goes only to the Whisp owner's own address.
+export async function sendPasswordResetEmail(
+  email: string,
+  r: { domain: string; resetUrl: string; minutes: number; lang: string },
+): Promise<boolean> {
+  if (process.env.PASSWORD_RESET_EMAIL_APPROVED !== "1" && email.trim().toLowerCase() !== "kubalol7982@gmail.com") {
+    console.log(`[email] password reset to ${email} not sent - template awaiting approval`);
+    return false;
+  }
+  const { renderTemplate } = await import("./templates.js");
+  const lang = r.lang === "pl" || r.lang === "en" ? r.lang : ownerLang(r.domain);
+  const t = renderTemplate("owner-password-reset", { reset_url: r.resetUrl, domain: r.domain, minutes: String(r.minutes) }, lang);
+  if (!t) { console.error("[email] templates/emails/owner-password-reset.*.txt is missing"); return false; }
+  try {
+    const { error } = await resend.emails.send({ from: FROM, to: email, replyTo: "jakub@whisp.so", subject: t.subject, text: t.text });
+    if (error) { console.error(`[email] password reset to ${email} failed:`, error.message); return false; }
+    console.log(`[email] Password reset sent to ${email}`);
+    return true;
+  } catch (e: any) {
+    console.error(`[email] password reset to ${email} failed:`, e.message);
+    return false;
+  }
+}
+
 /**
  * Send "bot ready" email when scraping completes.
  * Includes demo link and embed code — only sent when demo is verified working.

@@ -106,9 +106,11 @@ export async function confirmCheckout(token: string, sessionId: string): Promise
   if (t) {
     const settings = { ...(t.settings || {}), stripeCustomer: String(s.customer || ""), stripeSubscription: String(s.subscription || "") };
     delete settings.network; // a member now: its requests come to it first, answered under its own settings
-    // The business owns its account from now on: the address it paid with (logins, setup, its emails).
+    // The business owns its account from now on: the address it paid with (logins, setup, its emails). An account
+    // that already has an owner (password set) keeps its login e-mail - a password reset link goes there. A new
+    // address ends the set-password link sent to the old one (updateTenant).
     const payer = String(s.customer_details?.email || "").trim();
-    updateTenant(t.id, { settings, ...(payer.includes("@") ? { email: payer } : {}) });
+    updateTenant(t.id, { settings, ...(payer.includes("@") && !t.ownerPasswordHash ? { email: payer } : {}) });
   }
   forgetSubscription(inv.tenant_id);
   await d1Query("UPDATE network_invites SET unlocked_at = COALESCE(unlocked_at, ?) WHERE token = ?", [new Date().toISOString(), token]);
@@ -116,10 +118,15 @@ export async function confirmCheckout(token: string, sessionId: string): Promise
   return true;
 }
 
-/** A dashboard session for a subscribed business (the whole Whisp panel: assistant, requests, analytics). */
-export async function dashboardSession(token: string): Promise<{ token: string; tenantId: string } | null> {
+/**
+ * A dashboard session for a subscribed business (the whole Whisp panel: assistant, requests, analytics). A business
+ * whose owner has set a password logs in with it ({ login: true } - the page opens the login): the lead link has no
+ * expiry and is often forwarded, and opened a new session right after a password reset had ended every other one.
+ */
+export async function dashboardSession(token: string): Promise<{ token: string; tenantId: string } | { login: true } | null> {
   const inv = await inviteByToken(token);
   if (!inv || !inv.unlocked_at || !(await subscribed(inv.tenant_id))) return null;
+  if (getTenant(inv.tenant_id)?.ownerPasswordHash) return { login: true };
   const { createSession } = await import("../multi-tenant/d1-auth.js");
   return { token: await createSession(inv.tenant_id), tenantId: inv.tenant_id };
 }

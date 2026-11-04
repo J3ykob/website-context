@@ -103,6 +103,24 @@ Spend caps (budget.ts) stay: $1 per conversation, $10 per business, $80 overall 
 OpenRouter $3.22 that day (heavy testing), $9.82 that week, $57 that month - $80/day is ~8x the busiest day, a stop
 against runaway loops only.
 
+### Password reset (src/multi-tenant/password-reset.ts, added 2026-11)
+
+| Limit | Value | Where | Why (trace) |
+|---|---|---|---|
+| Reset link lifetime (PASSWORD_RESET_TTL_MIN) | 60 min | password-reset.ts resetTtlMinutes | a link in an inbox is a key to the account; one asked for on the login page is used within minutes |
+| Reset link uses | once: the signature covers the account's current password hash, so any new password ends every link | password-reset.ts checkResetToken | single use without storing tokens |
+| Reset e-mails per address (PASSWORD_RESET_PER_DAY) | 3 per UTC day (quota.ts bump `pwreset:email:`); above it nothing is sent and the page answers the same | password-reset.ts requestPasswordReset | anyone can type an owner's address (the reason of MSG_PER_DAY_EMAIL): one inbox gets at most 3 a day; a link lost to spam can be asked for twice more. Unmeasured |
+| Reset requests per IP (PASSWORD_RESET_PER_DAY_IP) | 20 per UTC day, 429 above (quota.ts bump `pwreset:ip:`) | S /api/auth/forgot-password | one client cycling through many owners' addresses; an office of a few owners stays far below. Unmeasured |
+| New-password attempts | no throttle | S /api/auth/reset-password | a 256-bit signature cannot be guessed and bcrypt runs only after a valid one - a throttle would only be a way to lock owners out |
+| Password minimum length | 8 characters (setup and reset; pages and server) | S /api/auth/setup-password, /api/auth/reset-password, public/auth/setup.html | 6ff72bc 2026-05-05 (setup), unchanged; bcrypt reads only the first 72 bytes |
+| Login attempts per account | 10 / 15 min (unchanged), now keyed on the trimmed lower-case address (was lower-case only) | S /api/auth/login | the login now finds the account by the address in any case and with spaces around it (ownerByEmail, the account a reset sets); a key that kept the spaces gave " a@b.pl", "a@b.pl " ... 10 tries each |
+| Registry refresh vs. a write in flight | a record this instance wrote in the last 10 min (the fresh-record grace, GRACE_MS) and newer than its D1 row is kept over that row | d1-registry.ts hydrateRegistry | the 60 s refresh put the old value back when its SELECT ran before an UPDATE landed (reproduced in password-reset.test.ts): a reset password went back to the old one and the used link worked again. Side effect: a write that failed twice stays in this instance's cache up to 10 min (was 60 s) |
+| E-mail read by forgot-password | first 254 characters | S /api/auth/forgot-password | the longest valid address (RFC 5321); a longer value cannot match an account |
+| Set-password link and apiKey (claiming an account) | until the password is set or the account's e-mail changes: a new address ends both unless the same write issues new ones (admin handover) | d1-registry.ts updateTenant | /api/onboard-demo and a lead-page payment change an unclaimed account's address; the link sent to the old address then claimed the account under the new one - its login and reset address: a takeover through "Forgot password?" (security review 2026-11-04, reproduced in password-reset.test.ts). An address changed before this rule existed left its old link working |
+| Account an address opens (login, reset) | the newest with a password; one whose password was set with its apiKey (settings.claimedWithApiKey) only when no other account has the address | password-reset.ts ownerByEmail | the apiKey goes to whoever signs up, with any address typed: a stranger's newer account carrying an owner's address took the owner's login and reset (security review 2026-11-04). PUT /api/dashboard/widget-settings now takes only the widget's keys (startExpanded, forceTheme, brandName): it merged any key into settings, the flag included |
+| Dashboard session from a lead link | only for an account without a password; with one the lead page opens the login | lead.ts dashboardSession | the lead link never expires and is often forwarded: it opened a new 7-day session right after a password reset had ended every other one (security review 2026-11-04) |
+| Reset page when the other devices could not be signed out | says so (EN/PL) and goes on after 8 s instead of 1 s | public/auth/setup.html; password-reset.ts resetPassword (signedOut) | the session DELETE failing twice left every old session valid while the page promised the sign-out; 8 s to read two sentences |
+
 ## Still to measure or decide (CHECK / STALE not changed yet)
 
 - Qdrant service + disk in render.yaml - unused since 2026-06-05, still paid; removing it deletes the service (owner's call).

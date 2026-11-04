@@ -58,6 +58,10 @@ import {
   ScrapeWorker,
   TenantManager,
   sendWelcomeEmail,
+  ownerByEmail,
+  requestPasswordReset,
+  resetPassword,
+  resetTtlMinutes,
 } from "../src/multi-tenant/index.js";
 import {
   saveFlow,
@@ -89,7 +93,7 @@ import { clientIp } from "../src/security/client-ip.js";
 import { ecosystemOf } from "../src/ecosystem/ask.js";
 import { verifiedHistory, signAssistant } from "../src/security/history-sig.js";
 import { budgetBefore, budgetAfter, setBudgetAlert } from "../src/security/budget.js";
-import { logAbuse } from "../src/security/quota.js";
+import { logAbuse, bump } from "../src/security/quota.js";
 import { elevenChatCompletions, elevenRegisterTwiml } from "../src/voice/eleven-llm.js";
 import { registerAgentRoutes } from "../src/agent/routes.js";
 import { registerOfferRoutes } from "../src/offer/routes.js";
@@ -1062,7 +1066,9 @@ app.post("/api/onboard-demo", async (req, res) => {
     if (existing) {
       if (existing.status === "active") { res.json({ ready: true, tenantId: existing.id }); return; }
       if (["pending", "queued", "scraping"].includes(existing.status)) {
-        if (email && existing.email !== email) updateTenant(existing.id, { email });
+        // An owner's e-mail (password set) is the login and where a reset link goes: only the owner changes it.
+        // An unclaimed account's new address ends the set-password link sent to the old one (updateTenant).
+        if (email && existing.email !== email && !existing.ownerPasswordHash) updateTenant(existing.id, { email });
         // No VPS pipeline anymore: a claimed pending tenant must actually be
         // enqueued HERE or the claim hangs on "building" forever. "scraping" is
         // left alone — it's either genuinely in-flight or gets reset to pending
@@ -1071,9 +1077,9 @@ app.post("/api/onboard-demo", async (req, res) => {
         res.json({ building: true, tenantId: existing.id }); return;
       }
       // broken / error -> re-onboard
-      updateTenant(existing.id, { email, status: "pending" });
+      updateTenant(existing.id, { ...(existing.ownerPasswordHash ? {} : { email }), status: "pending" });
       worker.enqueue(existing.id, existing.siteUrl || origin, MAX_PAGES);
-      console.log(`[onboard-demo] re-queued ${existing.id} (${domain}) -> notify ${email}`);
+      console.log(`[onboard-demo] re-queued ${existing.id} (${domain}) -> notify ${existing.ownerPasswordHash ? existing.email : email}`);
       res.json({ building: true, tenantId: existing.id }); return;
     }
     const tenant = createTenant(email, origin);
@@ -1236,7 +1242,8 @@ function refreshIfStale(t: { id: string; lastScrapedAt?: string | null; siteUrl?
 
 // Admin: hand a demo (made by a seller through /claim, or by outreach) over to its owner - the owner said yes
 // on a call and gave their e-mail. Only while nobody has set a password (no takeover of a claimed account).
-// The owner gets the existing welcome / set-password e-mail with a new setup token.
+// The owner gets the existing welcome / set-password e-mail with a new setup token (the old link and the apiKey
+// end with the new address - updateTenant).
 app.post("/api/admin/handover", async (req, res) => {
   if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenantId = String(req.body?.tenantId || "");
@@ -1852,15 +1859,16 @@ app.post("/api/auth/login", async (req, res) => {
     res.status(400).json({ error: "email and password required" });
     return;
   }
-  // Throttle online password brute force (keyed per-account, not per-proxy-IP).
-  if (!checkAuthAttempt(`login:${String(email).toLowerCase()}`)) {
+  // Throttle online password brute force (keyed per-account, not per-proxy-IP). The key is the address as the
+  // lookup below reads it (trimmed, any case): with the spaces kept, " a@b.pl" and "a@b.pl " had 10 tries each.
+  if (!checkAuthAttempt(`login:${String(email).trim().toLowerCase()}`)) {
     res.status(429).json({ error: "Too many attempts. Try again later." });
     return;
   }
 
-  // Find tenant by email (check all tenants)
-  const tenants = listTenants();
-  const tenant = tenants.find((t) => t.email === email);
+  // The account a reset link sets too (src/multi-tenant/password-reset.ts): the newest business with this e-mail
+  // (any case) that has a password; an address without a password anywhere keeps the "not set" answer.
+  const tenant = ownerByEmail(email) || listTenants().find((t) => t.email === email);
   if (!tenant) {
     res.status(401).json({ error: "Invalid credentials" });
     return;
@@ -1953,15 +1961,52 @@ app.post("/api/auth/setup-password", async (req, res) => {
   }
 
   const hash = hashPassword(password);
-  // Clear setup token after use; the acceptance kept with the version (date) of the Terms accepted.
+  // Clear setup token after use; the acceptance kept with the version (date) of the Terms accepted. A password set
+  // with the apiKey proves no mailbox (the key goes to whoever signs up, with any address): such an account comes
+  // after the others when its address is looked up (ownerByEmail - login and reset).
   const accepted = req.body?.termsAccepted === true ? { termsAcceptedAt: new Date().toISOString(), termsVersion: process.env.TERMS_EFFECTIVE_DATE || "2026-10-31" } : {};
-  updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null, ...(Object.keys(accepted).length ? { settings: { ...(tenant.settings || {}), ...accepted } } : {}) });
+  const marks = { ...accepted, ...(setupToken ? {} : { claimedWithApiKey: true }) };
+  updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null, ...(Object.keys(marks).length ? { settings: { ...(tenant.settings || {}), ...marks } } : {}) });
   // The owner has claimed it: a crawl stopped at the onboarding cap now covers the whole site.
   const onboardCap = Number(process.env.ONBOARD_MAX_PAGES) || 150;
   if (tenant.siteUrl && (tenant.pagesCount || 0) >= onboardCap && tenant.status !== "scraping") worker.enqueue(tenant.id, tenant.siteUrl, Number(process.env.SCRAPE_MAX_PAGES) || 500);
 
   const sessionToken = await createSession(tenantId);
   res.json({ token: sessionToken, tenantId });
+});
+
+// "Forgot password?" (src/multi-tenant/password-reset.ts): one answer for every address, given before the account is
+// looked up - neither the answer nor its timing tells whether the address has an account. Limits: docs/limits.md.
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const email = String(req.body?.email || "").trim().slice(0, 254);
+  if (!email) { res.status(400).json({ error: "email required" }); return; }
+  const ip = clientIp(req);
+  if (!(await bump(`pwreset:ip:${ip}`, Number(process.env.PASSWORD_RESET_PER_DAY_IP) || 20))) {
+    logAbuse("password_reset_ip", `ip:${ip}`);
+    res.status(429).json({ error: "Too many requests. Try again later." });
+    return;
+  }
+  res.json({ ok: true, minutes: resetTtlMinutes() });
+  const lang = req.body?.lang === "pl" || req.body?.lang === "en" ? req.body.lang : "";
+  // Our own address (BASE_URL) in the link, never the request's Host header.
+  requestPasswordReset(email, lang, publicBase()).catch((e) => console.error(`[auth] password reset: ${e?.message || e}`));
+});
+
+// A new password from a reset link (works once, until it expires); every other session of the account ends.
+// No attempt throttle: the 256-bit signature cannot be guessed and bcrypt runs only after a valid one.
+app.post("/api/auth/reset-password", async (req, res) => {
+  const token = String(req.body?.token || ""), password = String(req.body?.password || "");
+  if (!token || !password) { res.status(400).json({ error: "token and password required" }); return; }
+  if (password.length < 8) { res.status(400).json({ error: "Password must be at least 8 characters" }); return; }
+  try {
+    const r = await resetPassword(token, password);
+    if (!r) { res.status(401).json({ error: "This link has expired or was already used. Ask for a new one on the login page." }); return; }
+    console.log(`[auth] ${r.tenantId}: password reset - other sessions ${r.signedOut ? "ended" : "NOT ended"}`);
+    res.json(r);
+  } catch (e: any) {
+    console.error(`[auth] reset-password: ${e?.message || e}`);
+    res.status(503).json({ error: "The new password could not be saved. Please try again." });
+  }
 });
 
 // --- Auth pages ---
@@ -2512,8 +2557,12 @@ app.put("/api/dashboard/widget-settings", authMiddleware, (req, res) => {
   const tenantId = (req as any).tenantId;
   const tenant = getTenant(tenantId);
   if (!tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
-  const current = tenant.settings || {};
-  const updated = { ...current, ...req.body };
+  // Only the widget's own keys (the ones the GET above and /api/widget-config read). It merged the whole body into
+  // settings, so an owner could also write the server's keys - e.g. claimedWithApiKey, which decides the account
+  // an address opens at login and reset (password-reset.ts ownerByEmail).
+  const updated = { ...(tenant.settings || {}) };
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  for (const k of ["startExpanded", "forceTheme", "brandName"]) if (k in body) updated[k] = body[k];
   updateTenant(tenantId, { settings: updated });
   res.json({ ok: true, settings: updated });
 });

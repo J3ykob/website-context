@@ -1379,9 +1379,15 @@
       opts.headers = Object.assign({}, opts.headers || {}, { "Authorization": "Bearer " + AUTH_TOKEN });
       var res = await fetch(url, opts);
       if (res.status === 401) {
-        localStorage.removeItem("wctx-dashboard-token");
-        localStorage.removeItem("wctx-tenant-id");
-        window.location.href = "/auth/login";
+        // Only this tab's own session is dropped. Another tab may have stored a newer one - a password reset ends
+        // the old sessions and logs the owner in again - and removing it sent every tab to the login page.
+        if (localStorage.getItem("wctx-dashboard-token") === AUTH_TOKEN) {
+          localStorage.removeItem("wctx-dashboard-token");
+          localStorage.removeItem("wctx-tenant-id");
+          window.location.href = "/auth/login";
+        } else {
+          window.location.reload();
+        }
         throw new Error("Unauthorized");
       }
       return res;

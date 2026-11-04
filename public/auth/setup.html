@@ -208,8 +208,8 @@
   <div class="auth-card">
     <a class="brand" href="/"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1 -.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg> Whisp</a>
     <button type="button" class="lang-toggle" id="lang-toggle" onclick="toggleLang()">PL</button>
-    <h1 data-i18n="setup.h1">Set your password</h1>
-    <p class="subtitle" data-i18n="setup.sub">Create a password to access your Whisp dashboard.</p>
+    <h1 id="title" data-i18n="setup.h1">Set your password</h1>
+    <p class="subtitle" id="subtitle" data-i18n="setup.sub">Create a password to access your Whisp dashboard.</p>
 
     <div class="error" id="error-msg"></div>
     <div class="success" id="success-msg"></div>
@@ -223,14 +223,14 @@
         <label for="confirm" data-i18n="setup.confirm">Confirm password</label>
         <input type="password" id="confirm" placeholder="Type it again" data-i18n-placeholder="setup.confirmPh" required minlength="8" autocomplete="new-password">
       </div>
-      <label class="terms">
+      <label class="terms" id="terms-row">
         <input type="checkbox" id="terms" required>
         <span data-i18n="setup.terms" data-i18n-html="1">On behalf of my business I accept the <a href="/regulamin" target="_blank">Terms</a> and the <a href="/umowa-powierzenia" target="_blank">data processing agreement</a>.</span>
       </label>
       <button type="submit" class="btn" id="submit-btn">Set password</button>
     </form>
 
-    <p class="footer-link"><span data-i18n="setup.haveAccount">Already have a password?</span> <a href="/auth/login" data-i18n="setup.login">Log in</a></p>
+    <p class="footer-link"><span id="footer-q" data-i18n="setup.haveAccount">Already have a password?</span> <a href="/auth/login" id="footer-a" data-i18n="setup.login">Log in</a></p>
   </div>
 
   <script>
@@ -247,7 +247,12 @@
         "setup.done": "Password set! Redirecting to dashboard...",
         "err.link": "Invalid setup link. Please use the link from your email.",
         "err.short": "Password must be at least 8 characters.", "err.mismatch": "Passwords do not match.",
-        "err.generic": "Something went wrong.", "err.network": "Network error. Please try again."
+        "err.generic": "Something went wrong.", "err.network": "Network error. Please try again.",
+        "reset.h1": "Set a new password", "reset.sub": "Choose a new password for your Whisp dashboard. You'll be signed out on your other devices.",
+        "reset.btn": "Save new password", "reset.busy": "Saving...", "reset.done": "Password changed - taking you to your dashboard...",
+        "reset.login": "Password changed - log in with your new password.",
+        "reset.title": "Set a new password - Whisp", "reset.back": "Back to log in",
+        "reset.notSignedOut": "We could not sign you out on your other devices. If someone else may know your old password, write to jakub@whisp.so."
       },
       pl: {
         // \u00a0 (&nbsp; in the HTML string) after one-letter words (w, z, i...) keeps them off the end of a line, as Polish typography requires;
@@ -268,7 +273,15 @@
         "api.404": "Nie znaleźliśmy konta dla tego linku.",
         "api.409": "Hasło jest już ustawione. Zaloguj się.",
         "api.429": "Za dużo prób. Spróbuj ponownie później.",
-        "api.other": "Coś poszło nie tak. Spróbuj ponownie."
+        "api.other": "Coś poszło nie tak. Spróbuj ponownie.",
+        "reset.h1": "Ustaw nowe hasło", "reset.sub": "Wybierz nowe hasło do panelu firmy w\u00a0Whisp. Na innych urządzeniach wylogujemy Cię.",
+        "reset.btn": "Zapisz nowe hasło", "reset.busy": "Zapisywanie...", "reset.done": "Hasło zmienione - przenosimy Cię do panelu...",
+        "reset.login": "Hasło zmienione - zaloguj się nowym hasłem.",
+        "reset.title": "Ustaw nowe hasło - Whisp", "reset.back": "Wróć do logowania",
+        "reset.notSignedOut": "Nie udało się wylogować Cię na innych urządzeniach. Jeśli ktoś inny może znać Twoje stare hasło, napisz do nas: jakub@whisp.so.",
+        // A reset link: the texts for its API answers.
+        "reset.api.401": "Ten link wygasł albo został już użyty. Poproś o\u00a0nowy na stronie logowania (Nie pamiętasz hasła?).",
+        "reset.api.503": "Nie udało się zapisać hasła. Spróbuj ponownie."
       }
     };
 
@@ -297,9 +310,11 @@
     // The API's messages are English: shown as they are in English; in Polish, the text for the HTTP status.
     function apiError(status, message, fallbackKey) {
       if (currentLang !== 'pl') return message || t(fallbackKey);
-      return i18n.pl['api.' + status] || i18n.pl['api.other'];
+      return (window.resetToken && i18n.pl['reset.api.' + status]) || i18n.pl['api.' + status] || i18n.pl['api.other'];
     }
 
+    // The tab's title follows the page's mode (a reset link switches it to its own).
+    var titleKey = 'page.title';
     function applyLang(lang) {
       currentLang = lang;
       document.querySelectorAll('[data-i18n]').forEach(function(el) {
@@ -312,7 +327,7 @@
         el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
       });
       for (var id in said) document.getElementById(id).textContent = said[id]();
-      document.title = t('page.title');
+      document.title = t(titleKey);
       document.documentElement.lang = lang;
       var toggle = document.getElementById('lang-toggle');
       toggle.textContent = lang === 'en' ? 'PL' : 'EN';
@@ -335,8 +350,24 @@
     var params = new URLSearchParams(window.location.search);
     var token = params.get("token");
     var tenantId = params.get("tenant");
+    // A reset link ("Forgot password?" on the login page): its token rides in the #fragment, never sent to a server.
+    var resetToken = new URLSearchParams(window.location.hash.slice(1)).get("reset") || params.get("reset");
+    var mode = resetToken ? "reset" : "setup";
+    if (resetToken) {
+      document.getElementById("title").setAttribute("data-i18n", "reset.h1");
+      document.getElementById("subtitle").setAttribute("data-i18n", "reset.sub");
+      titleKey = "reset.title";
+      // The owner has a password (forgot it): the footer leads back to the login, not "Already have a password?".
+      document.getElementById("footer-q").style.display = "none";
+      document.getElementById("footer-a").setAttribute("data-i18n", "reset.back");
+      // The Terms were accepted when the password was first set.
+      document.getElementById("terms-row").style.display = "none";
+      document.getElementById("terms").required = false;
+      say("submit-btn", "reset.btn");
+      applyLang(currentLang);
+    }
 
-    if (!token || !tenantId) {
+    if (!resetToken && (!token || !tenantId)) {
       say("error-msg", "err.link");
       document.getElementById("error-msg").classList.add("visible");
       document.getElementById("setup-form").style.display = "none";
@@ -367,13 +398,14 @@
       }
 
       btn.disabled = true;
-      say("submit-btn", "setup.busy");
+      say("submit-btn", mode + ".busy");
 
       try {
-        var res = await fetch("/api/auth/setup-password", {
+        var res = await fetch(resetToken ? "/api/auth/reset-password" : "/api/auth/setup-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: token, tenantId: tenantId, password: pw, termsAccepted: document.getElementById("terms").checked })
+          body: JSON.stringify(resetToken ? { token: resetToken, password: pw }
+            : { token: token, tenantId: tenantId, password: pw, termsAccepted: document.getElementById("terms").checked })
         });
 
         var data = await res.json();
@@ -382,23 +414,36 @@
           say("error-msg", function() { return apiError(res.status, data.error, "err.generic"); });
           errorEl.classList.add("visible");
           btn.disabled = false;
-          say("submit-btn", "setup.btn");
+          say("submit-btn", mode + ".btn");
           return;
         }
 
-        // Store token and redirect to dashboard
-        localStorage.setItem("wctx-dashboard-token", data.token);
-        localStorage.setItem("wctx-tenant-id", data.tenantId);
-        say("success-msg", "setup.done");
+        // Store token and redirect to dashboard. A reset that saved the password but got no session goes to the
+        // login page without the session this browser held: this account's ended with the reset (the dashboard
+        // would answer 401), and with another business's the login page forwarded to that business's dashboard.
+        if (data.token) {
+          localStorage.setItem("wctx-dashboard-token", data.token);
+          localStorage.setItem("wctx-tenant-id", data.tenantId);
+        } else {
+          localStorage.removeItem("wctx-dashboard-token");
+          localStorage.removeItem("wctx-tenant-id");
+        }
+        say("success-msg", data.token ? mode + ".done" : "reset.login");
         successEl.classList.add("visible");
+        // The other devices could not be signed out (the server failed to end their sessions): said, not promised,
+        // and the page stays long enough to read it.
+        if (data.signedOut === false) {
+          say("error-msg", "reset.notSignedOut");
+          errorEl.classList.add("visible");
+        }
         setTimeout(function() {
-          window.location.href = "/dashboard";
-        }, 1000);
+          window.location.href = data.token ? "/dashboard" : "/auth/login";
+        }, data.signedOut === false ? 8000 : 1000);
       } catch (err) {
         say("error-msg", "err.network");
         errorEl.classList.add("visible");
         btn.disabled = false;
-        say("submit-btn", "setup.btn");
+        say("submit-btn", mode + ".btn");
       }
     });
   </script>

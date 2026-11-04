@@ -199,6 +199,8 @@
   });
   $("panel").addEventListener("click", function () {
     fetch(api + "/dashboard", { method: "POST" }).then(function (r) { return r.json(); }).then(function (x) {
+      // A business whose owner has set a password enters with it (the lead link opens no session for it).
+      if (x.login) { location.href = "/auth/login"; return; }
       if (!x.token) return;
       try { localStorage.setItem("wctx-dashboard-token", x.token); localStorage.setItem("wctx-tenant-id", x.tenantId); } catch (e) {}
       location.href = "/dashboard";

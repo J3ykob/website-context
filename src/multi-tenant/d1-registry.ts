@@ -92,8 +92,15 @@ export async function hydrateRegistry(): Promise<number> {
   const rows = (await query("SELECT * FROM tenants")) as TenantRow[];
   const freshById = new Map<string, TenantRecord>();
   const freshByDomain = new Map<string, string>();
+  const now = Date.now();
+  const GRACE_MS = 10 * 60 * 1000;
   for (const row of rows) {
-    const rec = rowToRecord(row);
+    let rec = rowToRecord(row);
+    // A write made here after this snapshot was read (its UPDATE still in flight) is kept: the refresh used to
+    // undo it for up to 60 s - a reset password went back to the old one, and the used link worked again.
+    const mine = byId.get(rec.id);
+    const mineAt = mine ? Date.parse(mine.updatedAt) : NaN;
+    if (mine && mineAt > Date.parse(rec.updatedAt) && mineAt > now - GRACE_MS) rec = mine;
     freshById.set(rec.id, rec);
     freshByDomain.set(rec.domain, rec.id);
   }
@@ -101,8 +108,6 @@ export async function hydrateRegistry(): Promise<number> {
   // just-created tenant's write-through can still be in flight when the periodic
   // refresh fires, and a blind clear+reload would drop it — 404-ing the tenant
   // mid-onboarding (e.g. between /api/interview/start and the first /message).
-  const now = Date.now();
-  const GRACE_MS = 10 * 60 * 1000;
   for (const [id, rec] of byId) {
     if (!freshById.has(id) && Date.parse(rec.updatedAt) > now - GRACE_MS) {
       freshById.set(id, rec);
@@ -124,10 +129,14 @@ const refresh = setInterval(() => {
 
 // Write-through to D1: cache is already updated synchronously by the caller, so a
 // transient D1 failure never breaks the request — retry once, then log loudly.
-function persist(sql: string, params: any[], label: string): void {
-  query(sql, params).catch((e) => {
+// Resolves true once D1 has the write (a caller that must know - a password reset - awaits it).
+function persist(sql: string, params: any[], label: string): Promise<boolean> {
+  return query(sql, params).then(() => true, (e) => {
     console.error(`[d1-registry] ${label} write failed, retrying: ${(e as Error).message}`);
-    query(sql, params).catch((e2) => console.error(`[d1-registry] ${label} write FAILED after retry: ${(e2 as Error).message}`));
+    return query(sql, params).then(() => true, (e2) => {
+      console.error(`[d1-registry] ${label} write FAILED after retry: ${(e2 as Error).message}`);
+      return false;
+    });
   });
 }
 function upsert(rec: TenantRecord, label: string): void {
@@ -195,6 +204,9 @@ export function ensureTenant(id: string, email: string, domain: string, siteUrl:
   return rec;
 }
 
+// One mailbox, whatever the case and the spaces around it typed.
+const sameAddress = (a: unknown, b: unknown) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+
 const UPDATE_COL_MAP: Record<string, string> = {
   email: "email", siteUrl: "site_url", brandName: "brand_name", status: "status",
   lastScrapedAt: "last_scraped_at", pagesCount: "pages_count", chunksCount: "chunks_count",
@@ -206,9 +218,16 @@ export function updateTenant(id: string, updates: Partial<{
   email: string; siteUrl: string; brandName: string | null; status: TenantRecord["status"];
   lastScrapedAt: string | null; pagesCount: number; chunksCount: number;
   settings: any; ownerPasswordHash: string | null; apiKey: string | null; setupToken: string | null;
-}>): void {
+}>): Promise<boolean> {
   const rec = byId.get(id);
-  if (!rec) return;
+  if (!rec) return Promise.resolve(false);
+  // The set-password link and the apiKey claim the account for the address they were issued to (signup, admin
+  // handover). A new address (/api/onboard-demo, a lead-page payment) ends both unless this write issues new ones:
+  // the old address's link used to claim the account under the new one, which became its login and where a
+  // reset link goes - a takeover through "Forgot password?" (reproduced in password-reset.test.ts).
+  if (updates.email !== undefined && !sameAddress(updates.email, rec.email)) {
+    updates = { ...updates, setupToken: updates.setupToken ?? null, apiKey: updates.apiKey ?? null };
+  }
   Object.assign(rec, updates);
   rec.updatedAt = new Date().toISOString();
   // Persist ONLY the changed columns. The old full-record INSERT OR REPLACE let two
@@ -225,10 +244,10 @@ export function updateTenant(id: string, updates: Partial<{
     sets.push(`${col} = ?`);
     params.push(k === "settings" ? JSON.stringify(v || {}) : v);
   }
-  if (sets.length === 0) return;
+  if (sets.length === 0) return Promise.resolve(true);
   sets.push("updated_at = ?");
   params.push(rec.updatedAt, id);
-  persist(`UPDATE tenants SET ${sets.join(", ")} WHERE id = ?`, params, "updateTenant");
+  return persist(`UPDATE tenants SET ${sets.join(", ")} WHERE id = ?`, params, "updateTenant");
 }
 
 export function deleteTenant(id: string): void {
