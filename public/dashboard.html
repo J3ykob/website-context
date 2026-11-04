@@ -1069,6 +1069,7 @@
         "plan.freeTitle": "Your assistant is free",
         "plan.freeText": "Paste this code into your site (before &lt;/head&gt;) and the assistant answers your visitors from your own information - no payment needed.",
         "plan.copy": "Copy code",
+        "plan.copied": "Copied",
         "plan.panelTitle": "The panel",
         "plan.per": "/ month, VAT included",
         "plan.f1": "Every conversation, searchable",
@@ -1257,6 +1258,7 @@
         "plan.freeTitle": "Twój czat jest darmowy",
         "plan.freeText": "Wklej ten kod na swoją stronę (przed &lt;/head&gt;), a czat będzie odpowiadał Twoim klientom na podstawie Twoich informacji - bez żadnych opłat.",
         "plan.copy": "Kopiuj kod",
+        "plan.copied": "Skopiowano",
         "plan.panelTitle": "Panel firmy",
         "plan.per": "/ mies., z VAT",
         "plan.f1": "Wszystkie rozmowy, z wyszukiwaniem",
@@ -2109,7 +2111,7 @@
             '<h2>' + t('plan.freeTitle') + '</h2>' +
             '<p class="plan-muted">' + t('plan.freeText') + '</p>' +
             '<pre class="plan-code" id="plan-code"></pre>' +
-            '<button class="btn btn-outline" onclick="copyPlanCode()">' + t('plan.copy') + '</button>' +
+            '<button class="btn btn-outline" onclick="copyPlanCode(this)">' + t('plan.copy') + '</button>' +
           '</div>' +
           '<div class="plan-card">' +
             '<h2>' + t('plan.panelTitle') + '</h2>' +
@@ -2128,9 +2130,12 @@
       })();
     }
 
-    function copyPlanCode() {
-      var t = document.getElementById("plan-code").textContent;
-      if (navigator.clipboard) navigator.clipboard.writeText(t).catch(function() {});
+    // "Copied" on the button for 2 s; without clipboard access the code is selected for copying by hand (the button gave no sign).
+    function copyPlanCode(btn) {
+      var el = document.getElementById("plan-code"), code = el.textContent;
+      var done = function() { if (!btn) return; btn.textContent = t('plan.copied'); setTimeout(function() { btn.textContent = t('plan.copy'); }, 2000); };
+      var select = function() { var r = document.createRange(); r.selectNodeContents(el); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); };
+      if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, select); else select();
     }
 
     async function buyPlan() {
