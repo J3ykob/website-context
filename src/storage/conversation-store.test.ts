@@ -22,7 +22,7 @@ beforeEach(() => {
   mem = new Database(":memory:");
   mem.exec(`
     CREATE TABLE chat_messages (id TEXT PRIMARY KEY, tenant_id TEXT, session_id TEXT, role TEXT,
-      content TEXT, domain TEXT, created_at TEXT, flow_invoked TEXT);
+      content TEXT, domain TEXT, created_at TEXT, flow_invoked TEXT, intent_id TEXT);
     CREATE TABLE unknown_questions (id TEXT PRIMARY KEY, tenant_id TEXT, question TEXT, created_at TEXT);
   `);
   cs.__setQuery(makeQuery(mem));
