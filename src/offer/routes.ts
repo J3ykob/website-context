@@ -73,9 +73,9 @@ export function registerOfferRoutes(app: Express, deps: OfferRouteDeps): void {
     let size = 0, tooBig = false;
     req.on("data", (c: Buffer) => { size += c.length; if (size > 15 * 1024 * 1024) { tooBig = true; return; } parts.push(c); });
     req.on("end", async () => {
-      if (tooBig) { res.status(413).json({ error: "File too large (max 15MB)" }); return; }
+      if (tooBig) { res.status(413).json({ error: "File too large (max 15MB)", code: "file_too_large" }); return; }
       const buffer = Buffer.concat(parts);
-      if (!buffer.length) { res.status(400).json({ error: "Empty file" }); return; }
+      if (!buffer.length) { res.status(400).json({ error: "Empty file", code: "file_empty" }); return; }
       try {
         if (await isTemplate(buffer)) {
           // Our spreadsheet: read exactly, saved at once (the owner already reviewed it in Excel).
@@ -90,13 +90,13 @@ export function registerOfferRoutes(app: Express, deps: OfferRouteDeps): void {
         const blocks = isImageUpload(filename, req.headers["content-type"])
           ? imageTextToBlocks((await extractImage(buffer, filename, req.headers["content-type"])).text)
           : (await extractFile(buffer, filename, req.headers["content-type"])).blocks;
-        if (!blocks.length) { res.status(422).json({ error: "No readable text found in the file." }); return; }
+        if (!blocks.length) { res.status(422).json({ error: "No readable text found in the file.", code: "file_no_text" }); return; }
         const items = await extractFromBlocks(blocks.slice(0, 120), llm, "file");
         console.log(`[offer] ${tid(req)}: ${items.length} item(s) found in ${filename}`);
         res.json({ items });
       } catch (e: any) {
         console.warn(`[offer] ${tid(req)}: import failed: ${e?.message || e}`);
-        res.status(500).json({ error: "Could not read the file." });
+        res.status(500).json({ error: "Could not read the file.", code: "file_read" });
       }
     });
   });
@@ -112,14 +112,14 @@ export function registerOfferRoutes(app: Express, deps: OfferRouteDeps): void {
 
   app.post("/api/dashboard/offer/extract-site", deps.auth, async (req, res) => {
     const cat = await loadKnowledgeCatalog(tid(req));
-    if (!cat?.chunks.length) { res.status(404).json({ error: "No scraped website content yet." }); return; }
+    if (!cat?.chunks.length) { res.status(404).json({ error: "No scraped website content yet.", code: "offer_no_site" }); return; }
     try {
       const items = await extractFromBlocks(cat.chunks.slice(0, 400).map((c) => c.content), llm, "website");
       console.log(`[offer] ${tid(req)}: ${items.length} item(s) found on the website`);
       res.json({ items });
     } catch (e: any) {
       console.warn(`[offer] ${tid(req)}: site extract failed: ${e?.message || e}`);
-      res.status(500).json({ error: "Could not read the website content." });
+      res.status(500).json({ error: "Could not read the website content.", code: "site_read" });
     }
   });
 }

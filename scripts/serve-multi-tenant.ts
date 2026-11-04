@@ -2578,7 +2578,7 @@ app.post("/api/dashboard/knowledge-file", authMiddleware, async (req, res) => {
   const filename = String(req.query.filename || (req.headers["x-filename"] as string) || "upload").slice(0, 200);
   const MAX_UPLOAD = 15 * 1024 * 1024; // 15MB
   // Each upload costs reading (vision / embeddings): UPLOADS_PER_DAY per business (default 100).
-  if (!(await (await import("../src/security/quota.js")).bump(`upload:${(req as any).tenantId}`, Number(process.env.UPLOADS_PER_DAY) || 100))) { res.status(429).json({ error: "Too many uploads today - try again tomorrow." }); return; }
+  if (!(await (await import("../src/security/quota.js")).bump(`upload:${(req as any).tenantId}`, Number(process.env.UPLOADS_PER_DAY) || 100))) { res.status(429).json({ error: "Too many uploads today - try again tomorrow.", code: "uploads_quota" }); return; }
   const parts: Buffer[] = [];
   let size = 0, tooBig = false;
   req.on("data", (c: Buffer) => {
@@ -2587,9 +2587,9 @@ app.post("/api/dashboard/knowledge-file", authMiddleware, async (req, res) => {
     parts.push(c);
   });
   req.on("end", async () => {
-    if (tooBig) { res.status(413).json({ error: "File too large (max 15MB)" }); return; }
+    if (tooBig) { res.status(413).json({ error: "File too large (max 15MB)", code: "file_too_large" }); return; }
     const buffer = Buffer.concat(parts);
-    if (buffer.length === 0) { res.status(400).json({ error: "Empty file" }); return; }
+    if (buffer.length === 0) { res.status(400).json({ error: "Empty file", code: "file_empty" }); return; }
     try {
       let kind: string, blocks: string[], charCount: number;
       if (isImageUpload(filename, req.headers["content-type"])) {
@@ -2600,7 +2600,7 @@ app.post("/api/dashboard/knowledge-file", authMiddleware, async (req, res) => {
         ({ kind, blocks, charCount } = await extractFile(buffer, filename, req.headers["content-type"]));
       }
       if (blocks.length === 0) {
-        res.status(422).json({ error: "No readable text found (blurry photo, scanned-image PDF, or empty document)" });
+        res.status(422).json({ error: "No readable text found (blurry photo, scanned-image PDF, or empty document)", code: "file_no_text" });
         return;
       }
       const store = new CloudflareVectorizeStore({ tenantId });
@@ -2674,17 +2674,17 @@ app.post("/api/dashboard/scrape-url", authMiddleware, async (req, res) => {
   if (!url) { res.status(400).json({ error: "No URL provided" }); return; }
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   let host = "";
-  try { host = new URL(url).hostname.toLowerCase(); } catch { res.status(400).json({ error: "That doesn't look like a valid URL." }); return; }
+  try { host = new URL(url).hostname.toLowerCase(); } catch { res.status(400).json({ error: "That doesn't look like a valid URL.", code: "url_invalid" }); return; }
   if (BLOCKED_HOSTS.test(host)) {
-    res.status(422).json({ error: "This platform blocks scraping behind a login wall, so there's nothing to read. Copy the text and add it as a document or a manual entry instead." });
+    res.status(422).json({ error: "This platform blocks scraping behind a login wall, so there's nothing to read. Copy the text and add it as a document or a manual entry instead.", code: "url_login_wall" });
     return;
   }
   try {
     const fetchResult = await fetchPage(url, { timeout: 20000 });
-    if (fetchResult.statusCode >= 400) { res.status(422).json({ error: `The page returned ${fetchResult.statusCode} — it may be private or gone.` }); return; }
+    if (fetchResult.statusCode >= 400) { res.status(422).json({ error: `The page returned ${fetchResult.statusCode} — it may be private or gone.`, code: "url_status", status: fetchResult.statusCode }); return; }
     const page = extractPage(fetchResult);
     const chunks = pageToChunks(page.content);
-    if (chunks.length === 0) { res.status(422).json({ error: "No readable text found there (the page may be login-walled, image-only, or script-rendered)." }); return; }
+    if (chunks.length === 0) { res.status(422).json({ error: "No readable text found there (the page may be login-walled, image-only, or script-rendered).", code: "url_no_text" }); return; }
     const store = new CloudflareVectorizeStore({ tenantId });
     const baseTitle = (page.title || host).slice(0, 160);
     const provider = bgeProvider();
@@ -2706,7 +2706,7 @@ app.post("/api/dashboard/scrape-url", authMiddleware, async (req, res) => {
     res.status(201).json({ ok: true, url: fetchResult.finalUrl, title: baseTitle, added });
   } catch (e: any) {
     console.error(`[scrape-url] ${tenantId}: ${e?.message}`);
-    res.status(400).json({ error: "Could not fetch that URL — check the address and that the page is public." });
+    res.status(400).json({ error: "Could not fetch that URL — check the address and that the page is public.", code: "url_fetch" });
   }
 });
 

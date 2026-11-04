@@ -1015,7 +1015,8 @@ var i18n = {
 };
 
 var currentLang = (function() {
-  var saved = localStorage.getItem('whisp-lang');
+  var saved = null;
+  try { saved = localStorage.getItem('whisp-lang'); } catch (e) {}
   if (saved) return saved;
   var nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
   return nav.startsWith('pl') ? 'pl' : 'en';
@@ -1023,7 +1024,6 @@ var currentLang = (function() {
 
 function applyLang(lang) {
   currentLang = lang;
-  localStorage.setItem('whisp-lang', lang);
   var dict = i18n[lang] || i18n.en;
   document.querySelectorAll('[data-i18n]').forEach(function(el) {
     var key = el.getAttribute('data-i18n');
@@ -1037,8 +1037,12 @@ function applyLang(lang) {
   if (typeof restartDemo === 'function') restartDemo(dict['demo.convo']);
 }
 
+// Only a click on the switch is saved: saving on every visit carried a browser's English into the panel, where a
+// .pl business defaults to Polish (the same rule as the panel, login and /claim).
 function toggleLang() {
-  applyLang(currentLang === 'en' ? 'pl' : 'en');
+  var lang = currentLang === 'en' ? 'pl' : 'en';
+  try { localStorage.setItem('whisp-lang', lang); } catch (e) {}
+  applyLang(lang);
 }
 
 // Apply on load

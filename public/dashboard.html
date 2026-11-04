@@ -113,7 +113,9 @@
       0%,100% { opacity:1; box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
       50% { opacity:0.7; box-shadow: 0 0 0 4px rgba(16,185,129,0); }
     }
-    .topbar-right { display:flex; gap:8px; }
+    .topbar { gap:16px; }
+    .topbar-right { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .topbar-right .btn { white-space:nowrap; }
 
     /* ─── Buttons ─── */
     .btn {
@@ -144,6 +146,8 @@
     .btn-success:hover { background: rgba(16,185,129,0.2); }
     .btn-ghost { background:none; color:var(--text-3); }
     .btn-ghost:hover { color:var(--text); }
+    .btn.lang-toggle { color: var(--text-3); min-width: 44px; justify-content: center; }
+    .btn.lang-toggle:hover { color: var(--text); }
 
     /* ─── Stats ─── */
     .stats {
@@ -177,6 +181,7 @@
       color: var(--text);
       letter-spacing: -0.02em;
       line-height: 1;
+      margin-top: auto;
     }
 
     /* ─── Grid ─── */
@@ -693,7 +698,10 @@
       .stat { padding: 18px 16px; }
       .stat-value { font-size: 30px; }
       .topbar { flex-direction: column; align-items: flex-start; gap: 14px; }
-      .topbar-right { width: 100%; flex-wrap: wrap; }
+      .topbar-right { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+      .topbar { position: relative; }
+      .topbar-left { padding-right: 60px; }
+      .btn.lang-toggle { position: absolute; top: 24px; right: 0; }
       .btn { min-height: 44px; padding: 10px 16px; font-size: 13px; }
       .btn-sm { min-height: 40px; }
       .kb-head { flex-wrap: wrap; }
@@ -713,7 +721,7 @@
       <div class="topbar-left">
         <div class="logo-mark"></div>
         <div class="site-info">
-          <h1 id="site-name">Loading...</h1>
+          <h1 id="site-name" data-i18n="common.loading">Loading...</h1>
           <div class="site-url">
             <span class="status-dot"></span>
             <span id="site-url">&mdash;</span>
@@ -721,37 +729,38 @@
         </div>
       </div>
       <div class="topbar-right">
-        <a class="btn btn-outline" id="open-site-btn" href="#" target="_blank">Open site</a>
-        <button class="btn btn-outline" onclick="openAgentFlowModal()">Describe flow</button>
-        <button class="btn btn-dark" onclick="startRecording()">Record flow</button>
-        <button class="btn btn-outline" id="billing-btn" style="display:none" onclick="openBilling()">Billing</button>
-        <button class="btn btn-outline" onclick="logout()">Logout</button>
+        <a class="btn btn-outline" id="open-site-btn" href="#" target="_blank" data-i18n="top.openSite">Open site</a>
+        <button class="btn btn-outline" onclick="openAgentFlowModal()" data-i18n="top.describeFlow">Describe flow</button>
+        <button class="btn btn-dark" onclick="startRecording()" data-i18n="top.recordFlow">Record flow</button>
+        <button class="btn btn-outline" id="billing-btn" style="display:none" onclick="openBilling()" data-i18n="top.billing">Billing</button>
+        <button class="btn btn-outline" id="logout-btn" onclick="logout()" data-i18n="top.logout">Logout</button>
+        <button class="btn btn-outline lang-toggle" id="lang-toggle" onclick="toggleLang()" title="Przełącz na polski" data-i18n-title="lang.switchTitle">PL</button>
       </div>
     </div>
 
     <div class="stats">
       <div class="stat">
-        <span class="stat-label">Conversations today</span>
+        <span class="stat-label" data-i18n="stats.today">Conversations today</span>
         <span class="stat-value" id="stat-today">&mdash;</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Questions answered</span>
+        <span class="stat-label" data-i18n="stats.answered">Questions answered</span>
         <span class="stat-value" id="stat-answered">&mdash;</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Knowledge gaps</span>
+        <span class="stat-label" data-i18n="stats.gaps">Knowledge gaps</span>
         <span class="stat-value" id="stat-gaps">&mdash;</span>
       </div>
       <div class="stat">
-        <span class="stat-label">Flows executed</span>
+        <span class="stat-label" data-i18n="stats.flows">Flows executed</span>
         <span class="stat-value" id="stat-flows">&mdash;</span>
       </div>
     </div>
 
     <div class="intents-section" style="margin-bottom:32px">
       <div class="section-head">
-        <span class="section-title">What People Ask About<span class="badge badge-blue" id="intents-badge" style="display:none">0</span></span>
-        <button class="btn btn-sm btn-ghost" onclick="refreshIntents()" title="Recompute now">Refresh</button>
+        <span class="section-title"><span data-i18n="intents.title">What People Ask About</span><span class="badge badge-blue" id="intents-badge" style="display:none">0</span></span>
+        <button class="btn btn-sm btn-ghost" onclick="refreshIntents()" title="Recompute now" data-i18n-title="intents.refreshTitle" data-i18n="intents.refresh">Refresh</button>
       </div>
       <div class="card" id="intents-panel"><div class="loading"></div></div>
     </div>
@@ -759,130 +768,130 @@
     <div class="grid">
       <div>
         <div class="section-head">
-          <span class="section-title">Knowledge Gaps<span class="badge badge-amber" id="gaps-badge" style="display:none">0</span></span>
+          <span class="section-title"><span data-i18n="gaps.title">Knowledge Gaps</span><span class="badge badge-amber" id="gaps-badge" style="display:none">0</span></span>
         </div>
         <div class="card" id="gaps-panel"><div class="loading"></div></div>
       </div>
 
       <div>
         <div class="section-head">
-          <span class="section-title">Recent Activity</span>
+          <span class="section-title" data-i18n="activity.title">Recent Activity</span>
         </div>
         <div class="card" id="activity-panel"><div class="loading"></div></div>
 
         <div class="section-head" style="margin-top:32px">
-          <span class="section-title">Skills</span>
-          <button class="btn btn-sm btn-outline" onclick="startRecording()">Record new</button>
+          <span class="section-title" data-i18n="skills.title">Skills</span>
+          <button class="btn btn-sm btn-outline" onclick="startRecording()" data-i18n="skills.recordNew">Record new</button>
         </div>
         <div class="card" id="skills-panel"><div class="loading"></div></div>
 
         <div class="section-head" style="margin-top:32px">
-          <span class="section-title">Work for customers</span>
+          <span class="section-title" data-i18n="review.title">Work for customers</span>
         </div>
         <div class="card" id="review-panel">
-          <p style="margin:0 0 12px;color:#94a3b8;font-size:14px">When a customer asks for real work - a calculation, a comparison, a plan or a document - the assistant prepares it. Choose whether it reaches the customer right away or after you approve it.</p>
-          <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0;cursor:pointer"><input type="radio" name="agent-review" value="auto" onchange="saveAgentReview(this.value)"> <span><b>Send automatically</b><br><span style="color:#94a3b8;font-size:13px">After the automatic checks (numbers, language, completeness).</span></span></label>
-          <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0;cursor:pointer"><input type="radio" name="agent-review" value="approve" onchange="saveAgentReview(this.value)"> <span><b>I approve first</b><br><span style="color:#94a3b8;font-size:13px">You get an email with a link: send as is, edit, ask the assistant for changes, or reply in your own words.</span></span></label>
+          <p style="margin:0 0 12px;color:#94a3b8;font-size:14px" data-i18n="review.intro">When a customer asks for real work - a calculation, a comparison, a plan or a document - the assistant prepares it. Choose whether it reaches the customer right away or after you approve it.</p>
+          <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0;cursor:pointer"><input type="radio" name="agent-review" value="auto" onchange="saveAgentReview(this.value)"> <span><b data-i18n="review.auto">Send automatically</b><br><span style="color:#94a3b8;font-size:13px" data-i18n="review.autoHint">After the automatic checks (numbers, language, completeness).</span></span></label>
+          <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0;cursor:pointer"><input type="radio" name="agent-review" value="approve" onchange="saveAgentReview(this.value)"> <span><b data-i18n="review.approve">I approve first</b><br><span style="color:#94a3b8;font-size:13px" data-i18n="review.approveHint">You get an email with a link: send as is, edit, ask the assistant for changes, or reply in your own words.</span></span></label>
         </div>
       </div>
     </div>
 
     <div>
       <div class="section-head kb-head">
-        <span class="section-title">Knowledge Base<span class="badge badge-green" id="chunks-badge">0</span></span>
-        <input type="text" id="chunk-search" class="kb-search" placeholder="Search knowledge..." />
-        <button class="btn btn-sm btn-outline" id="add-chunk-btn">+ Add</button>
+        <span class="section-title"><span data-i18n="kb.title">Knowledge Base</span><span class="badge badge-green" id="chunks-badge">0</span></span>
+        <input type="text" id="chunk-search" class="kb-search" placeholder="Search knowledge..." data-i18n-ph="kb.searchPh" />
+        <button class="btn btn-sm btn-outline" id="add-chunk-btn" data-i18n="common.add">+ Add</button>
       </div>
       <div class="card" id="chunks-panel" style="max-height:600px;overflow-y:auto"><div class="loading"></div></div>
     </div>
 
     <div>
       <div class="section-head kb-head">
-        <span class="section-title">Products &amp; services<span class="badge badge-green" id="offer-badge">0</span></span>
-        <input type="text" id="offer-search" class="kb-search" placeholder="Search offer..." oninput="renderOffer()" />
-        <button class="btn btn-sm btn-outline" onclick="downloadOfferSheet()" id="offer-sheet-btn">Download spreadsheet</button>
-        <button class="btn btn-sm btn-outline" onclick="offerFromSite()" id="offer-site-btn">Find on my website</button>
-        <button class="btn btn-sm btn-outline" onclick="document.getElementById('offer-file').click()" id="offer-file-btn">Import price list</button>
+        <span class="section-title"><span data-i18n="offer.title">Products &amp; services</span><span class="badge badge-green" id="offer-badge">0</span></span>
+        <input type="text" id="offer-search" class="kb-search" placeholder="Search offer..." data-i18n-ph="offer.searchPh" oninput="renderOffer()" />
+        <button class="btn btn-sm btn-outline" onclick="downloadOfferSheet()" id="offer-sheet-btn" data-i18n="offer.sheet">Download spreadsheet</button>
+        <button class="btn btn-sm btn-outline" onclick="offerFromSite()" id="offer-site-btn" data-i18n="offer.fromSite">Find on my website</button>
+        <button class="btn btn-sm btn-outline" onclick="document.getElementById('offer-file').click()" id="offer-file-btn" data-i18n="offer.importList">Import price list</button>
         <input type="file" id="offer-file" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.jpg,.jpeg,.png,.webp,.heic,image/*" style="display:none" onchange="offerFromFile(this)" />
-        <button class="btn btn-sm btn-outline" onclick="openOfferItem()">+ Add</button>
+        <button class="btn btn-sm btn-outline" onclick="openOfferItem()" data-i18n="common.add">+ Add</button>
       </div>
       <div class="card" id="offer-panel" style="max-height:600px;overflow-y:auto"><div class="loading"></div></div>
     </div>
 
     <div class="modal-overlay" id="offer-item-modal">
       <div class="modal">
-        <div class="section-title" id="offer-item-title">Add product or service</div>
-        <div class="form-hint">The assistant answers "do you have it / how much / is it available" from this list and checks orders against it.</div>
+        <div class="section-title" id="offer-item-title" data-i18n="offer.addTitle">Add product or service</div>
+        <div class="form-hint" data-i18n="offer.itemHint">The assistant answers "do you have it / how much / is it available" from this list and checks orders against it.</div>
         <input type="hidden" id="oi-id" />
-        <input type="text" id="oi-name" placeholder="Name, e.g. Cement CEM II 32,5 R 25 kg" maxlength="200" />
-        <input type="text" id="oi-category" placeholder="Category, e.g. Cements" maxlength="100" />
-        <div style="display:flex;gap:8px"><input type="text" id="oi-price_value" placeholder="Price (number), e.g. 28.90" style="flex:1" /><input type="text" id="oi-price_max" placeholder="Up to (range)" style="flex:1" /></div>
+        <input type="text" id="oi-name" placeholder="Name, e.g. Cement CEM II 32,5 R 25 kg" data-i18n-ph="offer.namePh" maxlength="200" />
+        <input type="text" id="oi-category" placeholder="Category, e.g. Cements" data-i18n-ph="offer.categoryPh" maxlength="100" />
+        <div style="display:flex;gap:8px"><input type="text" id="oi-price_value" placeholder="Price (number), e.g. 28.90" data-i18n-ph="offer.pricePh" style="flex:1" /><input type="text" id="oi-price_max" placeholder="Up to (range)" data-i18n-ph="offer.priceMaxPh" style="flex:1" /></div>
         <div id="oi-fields"></div>
-        <textarea id="oi-description" rows="3" maxlength="1000" placeholder="Short description (optional)"></textarea>
+        <textarea id="oi-description" rows="3" maxlength="1000" placeholder="Short description (optional)" data-i18n-ph="offer.descriptionPh"></textarea>
         <div class="form-error" id="oi-error"></div>
         <div class="modal-actions">
-          <button class="btn btn-sm btn-outline" onclick="closeModal('offer-item-modal')">Cancel</button>
-          <button class="btn btn-sm btn-dark" onclick="saveOfferItem()">Save</button>
+          <button class="btn btn-sm btn-outline" onclick="closeModal('offer-item-modal')" data-i18n="common.cancel">Cancel</button>
+          <button class="btn btn-sm btn-dark" onclick="saveOfferItem()" data-i18n="common.save">Save</button>
         </div>
       </div>
     </div>
 
     <div class="modal-overlay" id="offer-review-modal">
       <div class="modal">
-        <div class="section-title">Review what was found</div>
+        <div class="section-title" data-i18n="offer.reviewTitle">Review what was found</div>
         <div class="form-hint" id="offer-review-hint"></div>
         <div class="review-list" id="offer-review-list"></div>
         <div class="form-error" id="offer-review-error"></div>
         <div class="modal-actions">
-          <button class="btn btn-sm btn-outline" onclick="closeModal('offer-review-modal')">Cancel</button>
-          <button class="btn btn-sm btn-dark" id="offer-review-save" onclick="saveOfferReview()">Add selected</button>
+          <button class="btn btn-sm btn-outline" onclick="closeModal('offer-review-modal')" data-i18n="common.cancel">Cancel</button>
+          <button class="btn btn-sm btn-dark" id="offer-review-save" onclick="saveOfferReview()" data-i18n="offer.reviewAdd">Add selected</button>
         </div>
       </div>
     </div>
 
     <div class="modal-overlay" id="add-chunk-modal">
       <div class="modal">
-        <div class="section-title">Add Knowledge</div>
-        <input type="text" id="new-chunk-title" placeholder="Title (optional)" />
-        <textarea id="new-chunk-content" placeholder="Write the knowledge content..." rows="5"></textarea>
+        <div class="section-title" data-i18n="kb.addTitle">Add Knowledge</div>
+        <input type="text" id="new-chunk-title" placeholder="Title (optional)" data-i18n-ph="kb.titlePh" />
+        <textarea id="new-chunk-content" placeholder="Write the knowledge content..." data-i18n-ph="kb.contentPh" rows="5"></textarea>
         <div style="border-top:1px solid var(--line);margin:14px 0 12px;padding-top:12px">
-          <div style="font-size:12px;color:var(--text-3);margin-bottom:8px">Or upload a document or a photo — PDF, Excel, CSV, Word, TXT, or a photo of a menu / price list (JPG, PNG)</div>
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:8px" data-i18n="kb.uploadHint">Or upload a document or a photo — PDF, Excel, CSV, Word, TXT, or a photo of a menu / price list (JPG, PNG)</div>
           <input type="file" id="kb-file-input" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.jpg,.jpeg,.png,.webp,.heic,image/*" style="display:none" />
-          <button class="btn btn-sm btn-outline" id="kb-file-btn" type="button" onclick="document.getElementById('kb-file-input').click()">Choose file…</button>
+          <button class="btn btn-sm btn-outline" id="kb-file-btn" type="button" onclick="document.getElementById('kb-file-input').click()" data-i18n="kb.chooseFile">Choose file…</button>
           <span id="kb-file-status" style="font-size:12px;color:var(--text-3);margin-left:10px"></span>
         </div>
         <div style="border-top:1px solid var(--line);margin:2px 0 12px;padding-top:12px">
-          <div style="font-size:12px;color:var(--text-3);margin-bottom:8px">Or import from a web page — a blog post, article, or any public URL</div>
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:8px" data-i18n="kb.urlHint">Or import from a web page — a blog post, article, or any public URL</div>
           <div style="display:flex;gap:8px">
-            <input type="text" id="kb-url-input" placeholder="https://example.com/blog/post" style="flex:1;margin:0" />
-            <button class="btn btn-sm btn-outline" type="button" id="kb-url-btn" onclick="importFromUrl()">Import</button>
+            <input type="text" id="kb-url-input" placeholder="https://example.com/blog/post" data-i18n-ph="kb.urlPh" style="flex:1;margin:0" />
+            <button class="btn btn-sm btn-outline" type="button" id="kb-url-btn" onclick="importFromUrl()" data-i18n="kb.import">Import</button>
           </div>
           <span id="kb-url-status" style="font-size:12px;color:var(--text-3);display:block;margin-top:8px"></span>
         </div>
         <div class="modal-actions">
-          <button class="btn btn-sm btn-outline" onclick="closeChunkModal()">Cancel</button>
-          <button class="btn btn-sm btn-dark" onclick="saveNewChunk()">Save</button>
+          <button class="btn btn-sm btn-outline" onclick="closeChunkModal()" data-i18n="common.cancel">Cancel</button>
+          <button class="btn btn-sm btn-dark" onclick="saveNewChunk()" data-i18n="common.save">Save</button>
         </div>
       </div>
     </div>
 
     <div class="modal-overlay" id="agent-flow-modal">
       <div class="modal">
-        <div class="section-title">Describe a flow</div>
+        <div class="section-title" data-i18n="flow.modalTitle">Describe a flow</div>
         <div class="mode-switch">
-          <label><input type="radio" name="agent-flow-mode" value="agent" checked onchange="setAgentFlowMode()" /><span><b>On my website</b> - the assistant goes through a page for the visitor (a booking, a contact form). Consents, payment and the final submit stay with the visitor.</span></label>
-          <label><input type="radio" name="agent-flow-mode" value="collect" onchange="setAgentFlowMode()" /><span><b>In the chat</b> - the assistant takes an order or inquiry itself, shows the customer a summary to confirm, and emails it to you.</span></label>
+          <label><input type="radio" name="agent-flow-mode" value="agent" checked onchange="setAgentFlowMode()" /><span data-i18n="flow.modeAgent" data-i18n-html="1"><b>On my website</b> - the assistant goes through a page for the visitor (a booking, a contact form). Consents, payment and the final submit stay with the visitor.</span></label>
+          <label><input type="radio" name="agent-flow-mode" value="collect" onchange="setAgentFlowMode()" /><span data-i18n="flow.modeCollect" data-i18n-html="1"><b>In the chat</b> - the assistant takes an order or inquiry itself, shows the customer a summary to confirm, and emails it to you.</span></label>
         </div>
-        <input type="text" id="agent-flow-name" placeholder="Name, e.g. Book an appointment" maxlength="120" />
-        <textarea id="agent-flow-goal" rows="5" maxlength="2000" placeholder="What should the assistant do? e.g. Book the visitor for an exam: pick the exam package that fits their job, the location and a date they want, then fill in their details."></textarea>
+        <input type="text" id="agent-flow-name" placeholder="Name, e.g. Book an appointment" data-i18n-ph="flow.namePh" maxlength="120" />
+        <textarea id="agent-flow-goal" rows="5" maxlength="2000" placeholder="What should the assistant do? e.g. Book the visitor for an exam: pick the exam package that fits their job, the location and a date they want, then fill in their details." data-i18n-ph="flow.goalAgentPh"></textarea>
         <div id="agent-flow-url-wrap">
-          <input type="text" id="agent-flow-url" placeholder="Start page, e.g. https://booking.yoursite.com" maxlength="500" style="width:100%" />
-          <div class="form-hint" style="margin-top:6px">The page where the process begins. It must be on your site, with the Whisp widget installed.</div>
+          <input type="text" id="agent-flow-url" placeholder="Start page, e.g. https://booking.yoursite.com" data-i18n-ph="flow.urlPh" maxlength="500" style="width:100%" />
+          <div class="form-hint" style="margin-top:6px" data-i18n="flow.urlHint">The page where the process begins. It must be on your site, with the Whisp widget installed.</div>
         </div>
         <div class="form-error" id="agent-flow-error"></div>
         <div class="modal-actions">
-          <button class="btn btn-sm btn-outline" onclick="closeAgentFlowModal()">Cancel</button>
-          <button class="btn btn-sm btn-dark" id="agent-flow-save" onclick="saveAgentFlow()">Create</button>
+          <button class="btn btn-sm btn-outline" onclick="closeAgentFlowModal()" data-i18n="common.cancel">Cancel</button>
+          <button class="btn btn-sm btn-dark" id="agent-flow-save" onclick="saveAgentFlow()" data-i18n="flow.create">Create</button>
         </div>
       </div>
     </div>
@@ -890,6 +899,426 @@
   </div>
 
   <script>
+    // ─── Language: English / Polish ────
+    // The same "whisp-lang" choice as the landing page. Static texts carry data-i18n
+    // (textContent, or innerHTML with data-i18n-html), data-i18n-ph (placeholder) and
+    // data-i18n-title (title); texts built in the script come from t(key, params).
+    var i18n = {
+      en: {
+        "page.title": "Command Center - Whisp",
+        "lang.switchTitle": "Przełącz na polski",
+        "common.loading": "Loading...",
+        "common.add": "+ Add",
+        "common.save": "Save",
+        "common.cancel": "Cancel",
+        "common.edit": "Edit",
+        "common.delete": "Delete",
+        "common.retry": "Retry",
+        "top.openSite": "Open site",
+        "top.describeFlow": "Describe flow",
+        "top.recordFlow": "Record flow",
+        "top.billing": "Billing",
+        "top.logout": "Logout",
+        "header.fallback": "Dashboard",
+        "header.yourBusiness": "Your business",
+        "stats.today": "Conversations today",
+        "stats.answered": "Questions answered",
+        "stats.gaps": "Knowledge gaps",
+        "stats.flows": "Flows executed",
+        "intents.title": "What People Ask About",
+        "intents.refresh": "Refresh",
+        "intents.refreshTitle": "Recompute now",
+        "intents.loadError": "Could not load insights right now.",
+        "intents.refreshError": "Could not refresh insights.",
+        "intents.empty": "Not enough questions yet - once visitors start chatting with your bot, the questions they ask most show up here.",
+        "intents.unanswered": function(p) { return p.n + " unanswered"; },
+        "intents.foot": function(p) { return p.n + " question" + (p.n !== 1 ? "s" : "") + " asked · " + p.d + " distinct intent" + (p.d !== 1 ? "s" : ""); },
+        "intents.legend": "unanswered = the bot had no answer",
+        "gaps.title": "Knowledge Gaps",
+        "gaps.loadError": "Could not load knowledge gaps.",
+        "gaps.empty": "No gaps - your assistant has answered everything it was asked so far.",
+        "gaps.addKnowledge": "Add knowledge",
+        "gaps.answer": "Answer this",
+        "gaps.answerPh": "Type the answer...",
+        "gaps.resolved": "Resolved",
+        "activity.title": "Recent Activity",
+        "activity.loadError": "Could not load recent activity.",
+        "activity.empty": "No conversations yet - messages from your site visitors will show up here.",
+        "activity.visitor": "Visitor:",
+        "activity.bot": "Bot:",
+        "skills.title": "Skills",
+        "skills.recordNew": "Record new",
+        "skills.loadError": "Could not load skills.",
+        "skills.empty": "No skills yet - describe what the assistant should do on your site, or record it once by doing it yourself.",
+        "skills.describeFirst": "Describe your first flow",
+        "skills.triggersPh": "Triggers (comma-separated)",
+        "skills.collects": "Collects: ",
+        "skills.tagCollect": "Chat form",
+        "skills.tagAgent": "Agent",
+        "skills.namePh": "Name",
+        "skills.goalPh": "What should the assistant do?",
+        "skills.urlPh": "Start page",
+        "review.title": "Work for customers",
+        "review.intro": "When a customer asks for real work - a calculation, a comparison, a plan or a document - the assistant prepares it. Choose whether it reaches the customer right away or after you approve it.",
+        "review.auto": "Send automatically",
+        "review.autoHint": "After the automatic checks (numbers, language, completeness).",
+        "review.approve": "I approve first",
+        "review.approveHint": "You get an email with a link: send as is, edit, ask the assistant for changes, or reply in your own words.",
+        "kb.title": "Knowledge Base",
+        "kb.searchPh": "Search knowledge...",
+        "kb.noMatch": function(p) { return 'No knowledge matches "' + p.q + '".'; },
+        "kb.clearSearch": "Clear search",
+        "kb.listError": function(p) { return p.n + " chunks are indexed, but the list could not be loaded right now. This is usually temporary."; },
+        "kb.empty": "No knowledge yet - add material your assistant can answer from.",
+        "kb.addCta": "+ Add knowledge",
+        "kb.noHeading": "(no heading)",
+        "kb.addedMaterials": "Added materials",
+        "kb.deleteConfirm": "Delete this chunk?",
+        "kb.loadError": "Could not load the knowledge base.",
+        "kb.addTitle": "Add Knowledge",
+        "kb.titlePh": "Title (optional)",
+        "kb.contentPh": "Write the knowledge content...",
+        "kb.uploadHint": "Or upload a document or a photo — PDF, Excel, CSV, Word, TXT, or a photo of a menu / price list (JPG, PNG)",
+        "kb.chooseFile": "Choose file…",
+        "kb.urlHint": "Or import from a web page — a blog post, article, or any public URL",
+        "kb.urlPh": "https://example.com/blog/post",
+        "kb.import": "Import",
+        "kb.reading": function(p) { return "Reading " + p.name + "…"; },
+        "kb.fileError": "Could not process file",
+        "kb.fileAdded": function(p) { return "Added " + p.n + " knowledge entries from " + p.name + ". They're indexed now and answerable within about a minute."; },
+        "kb.uploadFailed": "Upload failed - please try again.",
+        "kb.urlFirst": "Enter a URL first.",
+        "kb.fetching": "Fetching and reading the page…",
+        "kb.urlError": "Could not import that URL.",
+        "kb.urlAdded": function(p) { return "Added " + p.n + " item" + (p.n !== 1 ? "s" : "") + " from “" + p.title + "”."; },
+        "kb.importFailed": "Import failed - try again.",
+        "kb.saved": "Added to the knowledge base. New material is indexed now and becomes answerable within about a minute.",
+        "kb.saveError": "Could not save - please try again.",
+        "offer.title": "Products & services",
+        "offer.searchPh": "Search offer...",
+        "offer.sheet": "Download spreadsheet",
+        "offer.fromSite": "Find on my website",
+        "offer.importList": "Import price list",
+        "offer.loadError": "Could not load the offer.",
+        "offer.empty": "No products or services yet. Import a price list or catalog, find them on your website, or add them one by one - the assistant then answers about availability and prices from this list.",
+        "offer.colName": "Name",
+        "offer.colCategory": "Category",
+        "offer.colPrice": "Price",
+        "offer.colAvailability": "Availability",
+        "offer.priceParts": function(p) { return p.n + " price parts"; },
+        "offer.addTitle": "Add product or service",
+        "offer.editTitle": "Edit product or service",
+        "offer.itemHint": 'The assistant answers "do you have it / how much / is it available" from this list and checks orders against it.',
+        "offer.namePh": "Name, e.g. Cement CEM II 32,5 R 25 kg",
+        "offer.categoryPh": "Category, e.g. Cements",
+        "offer.pricePh": "Price (number), e.g. 28.90",
+        "offer.priceMaxPh": "Up to (range)",
+        "offer.descriptionPh": "Short description (optional)",
+        "offer.deleteConfirm": function(p) { return 'Delete "' + p.name + '"?'; },
+        "offer.nameRequired": "Give it a name.",
+        "offer.saveError": "Could not save.",
+        "offer.reviewTitle": "Review what was found",
+        "offer.reviewAdd": "Add selected",
+        "offer.reviewHint": function(p) { return p.hint + " Untick anything that is wrong, then add. Items with the same name as an existing one replace it."; },
+        "offer.reviewNone": "Nothing that looks like a product or service was found.",
+        "offer.onRequest": " · on request",
+        "offer.reading": "Reading…",
+        "offer.fileError": "Could not read the file.",
+        "offer.imported": function(p) { return "Imported " + p.n + " row(s) from your spreadsheet." + (p.problems ? "\n\nPlease fix:\n" + p.problems : ""); },
+        "offer.foundInFile": function(p) { return "Found " + p.n + " item(s) in " + p.file + "."; },
+        "offer.readingSite": "Reading your site…",
+        "offer.siteError": "Could not read the website content.",
+        "offer.foundOnSite": function(p) { return "Found " + p.n + " item(s) on your website."; },
+        "offer.preparing": "Preparing…",
+        "offer.sheetError": "Could not prepare the spreadsheet.",
+        "offer.adding": "Adding…",
+        "flow.modalTitle": "Describe a flow",
+        "flow.modeAgent": "<b>On my website</b> - the assistant goes through a page for the visitor (a booking, a contact form). Consents, payment and the final submit stay with the visitor.",
+        "flow.modeCollect": "<b>In the chat</b> - the assistant takes an order or inquiry itself, shows the customer a summary to confirm, and emails it to you.",
+        "flow.namePh": "Name, e.g. Book an appointment",
+        "flow.goalAgentPh": "What should the assistant do? e.g. Book the visitor for an exam: pick the exam package that fits their job, the location and a date they want, then fill in their details.",
+        "flow.goalCollectPh": "What should the assistant collect? e.g. Take a building-materials order: which products and how much, the delivery date and address, the customer's name and phone.",
+        "flow.urlPh": "Start page, e.g. https://booking.yoursite.com",
+        "flow.urlHint": "The page where the process begins. It must be on your site, with the Whisp widget installed.",
+        "flow.create": "Create",
+        "flow.saveError": "Could not save the flow.",
+        "plan.freeTitle": "Your assistant is free",
+        "plan.freeText": "Paste this code into your site (before &lt;/head&gt;) and the assistant answers your visitors from your own information - no payment needed.",
+        "plan.copy": "Copy code",
+        "plan.panelTitle": "The panel",
+        "plan.per": "/ month, VAT included",
+        "plan.f1": "Every conversation, searchable",
+        "plan.f2": "What people ask about, and what the assistant could not answer",
+        "plan.f3": "Fix answers: your knowledge, price list and files",
+        "plan.f4": "Requests from businesses in the Whisp network",
+        "plan.f5": "Calculations and quotes for your customers, with your approval",
+        "plan.unlock": "Unlock the panel",
+        "plan.noPayments": "Payments are not available right now - write to jakub@whisp.so.",
+        "plan.terms": 'Monthly, cancel any time. By paying you accept the <a href="/regulamin" target="_blank">terms</a> and the data processing agreement.',
+        "plan.opening": "Opening payment...",
+        "plan.payError": "Payment could not be opened - please try again in a moment.",
+        "date.justNow": "just now",
+        "date.minAgo": function(p) { return p.n + "m ago"; },
+        "date.hAgo": function(p) { return p.n + "h ago"; }
+      },
+      pl: {
+        "page.title": "Panel firmy - Whisp",
+        "lang.switchTitle": "Switch to English",
+        "common.loading": "Wczytywanie...",
+        "common.add": "+ Dodaj",
+        "common.save": "Zapisz",
+        "common.cancel": "Anuluj",
+        "common.edit": "Edytuj",
+        "common.delete": "Usuń",
+        "common.retry": "Spróbuj ponownie",
+        "top.openSite": "Otwórz stronę",
+        "top.describeFlow": "Opisz proces",
+        "top.recordFlow": "Nagraj proces",
+        "top.billing": "Płatności",
+        "top.logout": "Wyloguj",
+        "header.fallback": "Panel",
+        "header.yourBusiness": "Twoja firma",
+        "stats.today": "Rozmowy dzisiaj",
+        "stats.answered": "Pytania z odpowiedzią",
+        "stats.gaps": "Pytania bez odpowiedzi",
+        "stats.flows": "Wykonane procesy",
+        "intents.title": "O co pytają klienci",
+        "intents.refresh": "Odśwież",
+        "intents.refreshTitle": "Przelicz teraz",
+        "intents.loadError": "Nie udało się teraz wczytać pytań klientów.",
+        "intents.refreshError": "Nie udało się odświeżyć pytań klientów.",
+        "intents.empty": "Jest jeszcze za mało pytań - gdy klienci zaczną pisać na czacie, tutaj pojawią się te, które zadają najczęściej.",
+        "intents.unanswered": function(p) { return fmtNum(p.n) + " bez odpowiedzi"; },
+        "intents.foot": function(p) { return fmtNum(p.n) + " " + plural(p.n, "pytanie", "pytania", "pytań") + " · " + fmtNum(p.d) + " " + plural(p.d, "temat", "tematy", "tematów"); },
+        "intents.legend": "bez odpowiedzi = czat nie znał odpowiedzi",
+        "gaps.title": "Pytania bez odpowiedzi",
+        "gaps.loadError": "Nie udało się wczytać pytań bez odpowiedzi.",
+        "gaps.empty": "Nie ma pytań bez odpowiedzi - czat odpowiedział na wszystko, o co go do tej pory pytano.",
+        "gaps.addKnowledge": "Dodaj wiedzę",
+        "gaps.answer": "Odpowiedz",
+        "gaps.answerPh": "Wpisz odpowiedź...",
+        "gaps.resolved": "Uzupełnione",
+        "activity.title": "Ostatnie rozmowy",
+        "activity.loadError": "Nie udało się wczytać ostatnich rozmów.",
+        "activity.empty": "Nie ma jeszcze rozmów - tutaj pojawią się wiadomości od klientów z Twojej strony.",
+        "activity.visitor": "Klient:",
+        "activity.bot": "Czat:",
+        "skills.title": "Procesy",
+        "skills.recordNew": "Nagraj nowy",
+        "skills.loadError": "Nie udało się wczytać procesów.",
+        "skills.empty": "Nie ma jeszcze procesów - opisz, co czat ma robić na Twojej stronie, albo zrób to raz samodzielnie i nagraj.",
+        "skills.describeFirst": "Opisz pierwszy proces",
+        "skills.triggersPh": "Frazy uruchamiające (oddziel przecinkami)",
+        "skills.collects": "Zbiera: ",
+        "skills.tagCollect": "Na czacie",
+        "skills.tagAgent": "Na stronie",
+        "skills.namePh": "Nazwa",
+        "skills.goalPh": "Co ma zrobić czat?",
+        "skills.urlPh": "Strona startowa",
+        "review.title": "Wyceny i zestawienia dla klientów",
+        "review.intro": "Gdy klient prosi o coś więcej niż odpowiedź - wyliczenie, porównanie, plan albo dokument - czat to przygotowuje. Wybierz, czy ma to trafić do klienta od razu, czy dopiero po Twojej akceptacji.",
+        "review.auto": "Wysyłaj automatycznie",
+        "review.autoHint": "Po automatycznym sprawdzeniu (liczby, język, kompletność).",
+        "review.approve": "Najpierw akceptuję",
+        "review.approveHint": "Dostajesz e-mail z linkiem - możesz wysłać bez zmian, poprawić, poprosić czat o zmiany albo odpowiedzieć własnymi słowami.",
+        "kb.title": "Wiedza",
+        "kb.searchPh": "Szukaj w wiedzy...",
+        "kb.noMatch": function(p) { return "Nic w wiedzy nie pasuje do „" + p.q + "”."; },
+        "kb.clearSearch": "Wyczyść wyszukiwanie",
+        "kb.listError": function(p) { return "Zapisanych fragmentów wiedzy: " + fmtNum(p.n) + ", ale nie udało się teraz wczytać ich listy. Zwykle to chwilowe."; },
+        "kb.empty": "Nie ma jeszcze wiedzy - dodaj informacje, na podstawie których czat będzie odpowiadał.",
+        "kb.addCta": "+ Dodaj wiedzę",
+        "kb.noHeading": "(bez nagłówka)",
+        "kb.addedMaterials": "Dodane materiały",
+        "kb.deleteConfirm": "Usunąć ten fragment wiedzy?",
+        "kb.loadError": "Nie udało się wczytać wiedzy.",
+        "kb.addTitle": "Dodaj wiedzę",
+        "kb.titlePh": "Tytuł (opcjonalnie)",
+        "kb.contentPh": "Napisz, co czat ma wiedzieć...",
+        "kb.uploadHint": "Albo wgraj dokument lub zdjęcie - PDF, Excel, CSV, Word, TXT albo zdjęcie menu lub cennika (JPG, PNG)",
+        "kb.chooseFile": "Wybierz plik…",
+        "kb.urlHint": "Albo wczytaj stronę internetową - wpis na blogu, artykuł lub dowolny publiczny adres",
+        "kb.urlPh": "https://twojafirma.pl/blog/wpis",
+        "kb.import": "Wczytaj",
+        "kb.reading": function(p) { return "Czytam " + p.name + "…"; },
+        "kb.fileError": "Nie udało się przetworzyć pliku",
+        "kb.fileAdded": function(p) { return "Dodano " + fmtNum(p.n) + " " + plural(p.n, "fragment", "fragmenty", "fragmentów") + " z pliku " + p.name + ". Czat zacznie z nich korzystać w ciągu około minuty."; },
+        "kb.uploadFailed": "Nie udało się wgrać pliku - spróbuj ponownie.",
+        "kb.urlFirst": "Najpierw wpisz adres strony.",
+        "kb.fetching": "Pobieram i czytam stronę…",
+        "kb.urlError": "Nie udało się wczytać tej strony.",
+        "kb.urlAdded": function(p) { return "Dodano " + fmtNum(p.n) + " " + plural(p.n, "fragment", "fragmenty", "fragmentów") + " ze strony „" + p.title + "”."; },
+        "kb.importFailed": "Nie udało się wczytać - spróbuj ponownie.",
+        "kb.saved": "Dodano do wiedzy. Czat zacznie korzystać z nowych informacji w ciągu około minuty.",
+        "kb.saveError": "Nie udało się zapisać - spróbuj ponownie.",
+        "kb.type.content": "treść",
+        "kb.type.product": "produkt",
+        "kb.type.form-description": "formularz",
+        "kb.type.navigation": "nawigacja",
+        "kb.type.pricing": "cennik",
+        "kb.type.manual": "dodane",
+        "kb.type.edited": "poprawione",
+        "offer.title": "Produkty i usługi",
+        "offer.searchPh": "Szukaj w ofercie...",
+        "offer.sheet": "Pobierz arkusz",
+        "offer.fromSite": "Znajdź na mojej stronie",
+        "offer.importList": "Wczytaj cennik",
+        "offer.loadError": "Nie udało się wczytać oferty.",
+        "offer.empty": "Nie ma jeszcze produktów ani usług. Wczytaj cennik lub katalog, znajdź je na swojej stronie albo dodaj po kolei - czat będzie wtedy odpowiadał na pytania o dostępność i ceny na podstawie tej listy.",
+        "offer.colName": "Nazwa",
+        "offer.colCategory": "Kategoria",
+        "offer.colPrice": "Cena",
+        "offer.colAvailability": "Dostępność",
+        "offer.priceParts": function(p) { return fmtNum(p.n) + " " + plural(p.n, "składnik ceny", "składniki ceny", "składników ceny"); },
+        "offer.addTitle": "Dodaj produkt lub usługę",
+        "offer.editTitle": "Edytuj produkt lub usługę",
+        "offer.itemHint": "Czat odpowiada z tej listy na pytania „czy macie / ile kosztuje / czy jest dostępne” i według niej sprawdza zamówienia.",
+        "offer.namePh": "Nazwa, np. Cement CEM II 32,5 R 25 kg",
+        "offer.categoryPh": "Kategoria, np. Cementy",
+        "offer.pricePh": "Cena (liczba), np. 28,90",
+        "offer.priceMaxPh": "Cena do (przedział)",
+        "offer.descriptionPh": "Krótki opis (opcjonalnie)",
+        "offer.deleteConfirm": function(p) { return "Usunąć „" + p.name + "”?"; },
+        "offer.nameRequired": "Podaj nazwę.",
+        "offer.saveError": "Nie udało się zapisać.",
+        "offer.reviewTitle": "Sprawdź, co znaleziono",
+        "offer.reviewAdd": "Dodaj zaznaczone",
+        "offer.reviewHint": function(p) { return p.hint + " Odznacz to, co się nie zgadza, i dodaj. Jeśli pozycja o tej nazwie jest już na liście, zostanie zastąpiona."; },
+        "offer.reviewNone": "Nie znaleziono niczego, co wygląda na produkt lub usługę.",
+        "offer.onRequest": " · cena na zapytanie",
+        "offer.reading": "Czytam…",
+        "offer.fileError": "Nie udało się odczytać pliku.",
+        "offer.imported": function(p) { return "Wczytano " + fmtNum(p.n) + " " + plural(p.n, "wiersz", "wiersze", "wierszy") + " z arkusza." + (p.problems ? "\n\nDo poprawienia:\n" + p.problems : ""); },
+        "offer.foundInFile": function(p) { return "Znaleziono " + fmtNum(p.n) + " " + plural(p.n, "pozycję", "pozycje", "pozycji") + " w pliku " + p.file + "."; },
+        "offer.readingSite": "Czytam Twoją stronę…",
+        "offer.siteError": "Nie udało się odczytać treści strony.",
+        "offer.foundOnSite": function(p) { return "Znaleziono " + fmtNum(p.n) + " " + plural(p.n, "pozycję", "pozycje", "pozycji") + " na Twojej stronie."; },
+        "offer.preparing": "Przygotowuję…",
+        "offer.sheetError": "Nie udało się przygotować arkusza.",
+        "offer.adding": "Dodaję…",
+        "flow.modalTitle": "Opisz proces",
+        "flow.modeAgent": "<b>Na mojej stronie</b> - czat przechodzi za klienta przez stronę (rezerwacja, formularz kontaktowy). Zgody, płatność i ostateczne wysłanie zostają po stronie klienta.",
+        "flow.modeCollect": "<b>Na czacie</b> - czat sam przyjmuje zamówienie lub zapytanie, pokazuje klientowi podsumowanie do potwierdzenia i wysyła je do Ciebie e-mailem.",
+        "flow.namePh": "Nazwa, np. Umów wizytę",
+        "flow.goalAgentPh": "Co ma zrobić czat? Np. Zapisz klienta na badania: dobierz pakiet badań do jego pracy, wybierz placówkę i termin, który mu pasuje, a potem wpisz jego dane.",
+        "flow.goalCollectPh": "Co ma zebrać czat? Np. Przyjmij zamówienie na materiały budowlane: jakie produkty i ile, termin i adres dostawy, imię, nazwisko i telefon klienta.",
+        "flow.urlPh": "Strona startowa, np. https://rezerwacje.twojafirma.pl",
+        "flow.urlHint": "Podstrona, od której zaczyna się proces. Musi być na Twojej stronie i mieć zainstalowany czat Whisp.",
+        "flow.create": "Utwórz",
+        "flow.saveError": "Nie udało się zapisać procesu.",
+        // Server errors by their code (apiErr); English shows the server's own message.
+        "err.flow_name_short": "Nadaj procesowi krótką nazwę (np. „Umów wizytę”).",
+        "err.flow_goal_short": "Opisz w zdaniu lub dwóch, co ma zrobić czat.",
+        "err.flow_collect_short": "Opisz, co czat ma zebrać od klienta (np. produkt, ilość, termin i adres dostawy, kontakt).",
+        "err.flow_url_offsite": function(p) { return "Strona startowa musi być na Twojej stronie" + (p.siteUrl ? " (" + p.siteUrl + ")" : "") + " - tam czat przeprowadza proces."; },
+        "err.flow_limit": "Osiągnięto limit 50 procesów.",
+        "err.flow_collect_unclear": "Z tego opisu nie udało się ustalić, co zebrać od klienta - wypisz potrzebne dane (np. produkt, ilość, termin dostawy, telefon).",
+        "err.uploads_quota": "Na dziś wgrano już za dużo plików - spróbuj jutro.",
+        "err.file_too_large": "Plik jest za duży (maks. 15 MB).",
+        "err.file_empty": "Plik jest pusty.",
+        "err.file_no_text": "Nie znaleziono czytelnego tekstu (nieostre zdjęcie, zeskanowany PDF albo pusty dokument).",
+        "err.file_read": "Nie udało się odczytać pliku.",
+        "err.url_invalid": "To nie wygląda na poprawny adres strony.",
+        "err.url_login_wall": "Ta strona wymaga logowania (np. Facebook, Instagram), więc nie da się z niej nic odczytać. Skopiuj tekst i dodaj go jako wiedzę.",
+        "err.url_status": function(p) { return "Strona zwróciła błąd" + (p.status ? " " + p.status : "") + " - może być prywatna albo już nie istnieć."; },
+        "err.url_no_text": "Nie znaleziono tam tekstu do odczytania - strona może wymagać logowania albo mieć same zdjęcia. Możesz skopiować tekst i dodać go jako wiedzę.",
+        "err.url_fetch": "Nie udało się pobrać tej strony - sprawdź adres i czy strona jest publiczna.",
+        "err.offer_no_site": "Treść Twojej strony nie jest jeszcze wczytana.",
+        "err.site_read": "Nie udało się odczytać treści strony.",
+        "plan.freeTitle": "Twój czat jest darmowy",
+        "plan.freeText": "Wklej ten kod na swoją stronę (przed &lt;/head&gt;), a czat będzie odpowiadał Twoim klientom na podstawie Twoich informacji - bez żadnych opłat.",
+        "plan.copy": "Kopiuj kod",
+        "plan.panelTitle": "Panel firmy",
+        "plan.per": "/ mies., z VAT",
+        "plan.f1": "Wszystkie rozmowy, z wyszukiwaniem",
+        "plan.f2": "O co pytają klienci i na co czat nie znał odpowiedzi",
+        "plan.f3": "Poprawianie odpowiedzi: wiedza, cennik, pliki",
+        "plan.f4": "Zapytania od firm z sieci Whisp",
+        "plan.f5": "Wyceny i zestawienia dla klientów, z Twoją akceptacją",
+        "plan.unlock": "Odblokuj panel",
+        "plan.noPayments": "Płatności są teraz niedostępne - napisz na jakub@whisp.so.",
+        "plan.terms": 'Płatność miesięczna, anulujesz w każdej chwili. Płacąc, akceptujesz <a href="/regulamin" target="_blank">regulamin</a> i umowę powierzenia danych.',
+        "plan.opening": "Otwieram płatność...",
+        "plan.payError": "Nie udało się otworzyć płatności - spróbuj ponownie za chwilę.",
+        "date.justNow": "przed chwilą",
+        "date.minAgo": function(p) { return p.n + " min temu"; },
+        "date.hAgo": function(p) { return p.n + " godz. temu"; }
+      }
+    };
+
+    // A choice saved by the owner (here or on the landing page) always wins; otherwise
+    // the browser language, and a business on a .pl domain gets Polish (langFromSite).
+    var LANG_SAVED = (function() { try { var s = localStorage.getItem("whisp-lang"); return s === "pl" || s === "en" ? s : ""; } catch (e) { return ""; } })();
+    var currentLang = LANG_SAVED || ((navigator.language || navigator.userLanguage || "en").toLowerCase().indexOf("pl") === 0 ? "pl" : "en");
+
+    function t(key, p) {
+      var v = (i18n[currentLang] || i18n.en)[key];
+      if (v === undefined) v = i18n.en[key];
+      if (typeof v === "function") return v(p || {});
+      return v === undefined ? key : v;
+    }
+    // Polish plural forms: 1 pytanie, 2-4 pytania (but 12-14 pytań), 5+ pytań.
+    function plural(n, one, few, many) {
+      n = Math.abs(Number(n) || 0);
+      if (n === 1) return one;
+      var d = n % 10, h = n % 100;
+      return d >= 2 && d <= 4 && (h < 12 || h > 14) ? few : many;
+    }
+    function fmtNum(n) { return typeof n === "number" && currentLang === "pl" ? n.toLocaleString("pl-PL") : n; }
+    // A server error that carries a code is worded from the dictionary; without a code (or in
+    // English) the server's own message is shown, as before.
+    function apiErr(d, fallbackKey) {
+      var k = d && d.code ? "err." + d.code : "";
+      if (k && currentLang !== "en" && (i18n[currentLang] || {})[k] !== undefined) return t(k, d);
+      return (d && d.error) || t(fallbackKey);
+    }
+
+    function applyLang(lang) {
+      currentLang = lang;
+      var dict = i18n[lang] || i18n.en;
+      document.querySelectorAll("[data-i18n]").forEach(function(el) {
+        var v = dict[el.getAttribute("data-i18n")];
+        if (typeof v !== "string" || el.hasAttribute("data-busy")) return;
+        if (el.getAttribute("data-i18n-html")) el.innerHTML = v; else el.textContent = v;
+      });
+      document.querySelectorAll("[data-i18n-ph]").forEach(function(el) { var v = dict[el.getAttribute("data-i18n-ph")]; if (typeof v === "string") el.placeholder = v; });
+      document.querySelectorAll("[data-i18n-title]").forEach(function(el) { var v = dict[el.getAttribute("data-i18n-title")]; if (typeof v === "string") el.title = v; });
+      document.getElementById("lang-toggle").textContent = lang === "en" ? "PL" : "EN";
+      document.documentElement.lang = lang;
+      document.title = t("page.title");
+    }
+
+    // Panels the script draws register how to draw themselves again, so a language
+    // switch redraws them at once from what they already show (no new requests).
+    var REDRAW = {};
+    function redrawAll() { Object.keys(REDRAW).forEach(function(k) { try { REDRAW[k](); } catch (e) {} }); }
+    function panelMsg(id, build) { (REDRAW[id] = function() { document.getElementById(id).innerHTML = build(); })(); }
+    // An element showing a dictionary text keeps following the language; one showing data stops.
+    function setT(el, key) { el.setAttribute("data-i18n", key); el.textContent = t(key); }
+    function setData(el, text) { el.removeAttribute("data-i18n"); el.textContent = text; }
+    function setPh(el, key) { el.setAttribute("data-i18n-ph", key); el.placeholder = t(key); }
+
+    function setLang(lang) {
+      if (lang === currentLang) return;
+      applyLang(lang);
+      redrawAll();
+    }
+    function toggleLang() {
+      var lang = currentLang === "en" ? "pl" : "en";
+      LANG_SAVED = lang;
+      try { localStorage.setItem("whisp-lang", lang); } catch (e) {}
+      setLang(lang);
+    }
+    // No saved choice: the business's own domain decides - .pl gets the panel in Polish.
+    function langFromSite(domain, siteUrl) {
+      if (LANG_SAVED) return;
+      var host = String(domain || "");
+      if (!host && siteUrl) { try { host = new URL(siteUrl).hostname; } catch (e) {} }
+      if (/\.pl\.?$/i.test(host)) setLang("pl");
+    }
+
+    applyLang(currentLang);
+
     // ─── Auth Gate ────
     var AUTH_TOKEN = localStorage.getItem("wctx-dashboard-token");
 
@@ -966,11 +1395,12 @@
           try { siteHost = new URL(siteHref).hostname.replace(/^www\./, ""); } catch (e2) { siteHost = siteHref; }
         }
 
-        var displayName = data.brandName || siteHost || humanizeId(data.tenantId) || "Dashboard";
+        var displayName = data.brandName || siteHost || humanizeId(data.tenantId);
         var nameEl = document.getElementById("site-name");
-        nameEl.textContent = displayName;
+        if (displayName) setData(nameEl, displayName); else setT(nameEl, "header.fallback");
         nameEl.title = data.tenantId || "";
         document.getElementById("site-url").textContent = siteHost || data.tenantId || "";
+        langFromSite(data.domain, siteHref);
 
         var openBtn = document.getElementById("open-site-btn");
         if (siteHref) {
@@ -982,7 +1412,7 @@
           openBtn.style.display = "none";
         }
       } catch (e) {
-        document.getElementById("site-name").textContent = "Dashboard";
+        setT(document.getElementById("site-name"), "header.fallback");
       }
     }
 
@@ -990,10 +1420,12 @@
       try {
         var res = await authFetch(API + "/api/dashboard/stats");
         var data = await res.json();
-        document.getElementById("stat-today").textContent = data.totalToday;
-        document.getElementById("stat-answered").textContent = data.questionsAnswered;
-        document.getElementById("stat-gaps").textContent = data.gapsFound;
-        document.getElementById("stat-flows").textContent = data.flowsExecuted;
+        (REDRAW.stats = function() {
+          document.getElementById("stat-today").textContent = fmtNum(data.totalToday);
+          document.getElementById("stat-answered").textContent = fmtNum(data.questionsAnswered);
+          document.getElementById("stat-gaps").textContent = fmtNum(data.gapsFound);
+          document.getElementById("stat-flows").textContent = fmtNum(data.flowsExecuted);
+        })();
       } catch (e) {}
     }
 
@@ -1012,7 +1444,7 @@
 
         renderGaps(questions, resolvedSet);
       } catch (e) {
-        document.getElementById("gaps-panel").innerHTML = emptyState('alert', 'amber', 'Could not load knowledge gaps.', 'Retry', 'loadGaps()');
+        panelMsg("gaps-panel", function() { return emptyState('alert', 'amber', t('gaps.loadError'), t('common.retry'), 'loadGaps()'); });
       }
     }
 
@@ -1021,7 +1453,7 @@
         var res = await authFetch(API + "/api/dashboard/conversations?limit=20");
         renderActivity(await res.json());
       } catch (e) {
-        document.getElementById("activity-panel").innerHTML = emptyState('alert', 'amber', 'Could not load recent activity.', 'Retry', 'loadActivity()');
+        panelMsg("activity-panel", function() { return emptyState('alert', 'amber', t('activity.loadError'), t('common.retry'), 'loadActivity()'); });
       }
     }
 
@@ -1044,7 +1476,7 @@
         var res = await authFetch(API + "/api/dashboard/flows");
         renderSkills(await res.json());
       } catch (e) {
-        document.getElementById("skills-panel").innerHTML = emptyState('alert', 'amber', 'Could not load skills.', 'Retry', 'loadSkills()');
+        panelMsg("skills-panel", function() { return emptyState('alert', 'amber', t('skills.loadError'), t('common.retry'), 'loadSkills()'); });
       }
     }
 
@@ -1071,40 +1503,39 @@
         var res = await authFetch(API + "/api/dashboard/intents");
         renderIntents(await res.json());
       } catch (e) {
-        document.getElementById("intents-panel").innerHTML = emptyState('chat', '', 'Could not load insights right now.');
+        panelMsg("intents-panel", function() { return emptyState('chat', '', t('intents.loadError')); });
       }
     }
 
     function refreshIntents() {
-      var p = document.getElementById("intents-panel");
-      p.innerHTML = '<div class="loading"></div>';
+      panelMsg("intents-panel", function() { return '<div class="loading"></div>'; });
       authFetch(API + "/api/dashboard/intents?force=1").then(function(r){ return r.json(); }).then(renderIntents).catch(function(){
-        p.innerHTML = emptyState('chat', '', 'Could not refresh insights.');
+        panelMsg("intents-panel", function() { return emptyState('chat', '', t('intents.refreshError')); });
       });
     }
 
     function renderIntents(data) {
+      REDRAW["intents-panel"] = function() { renderIntents(data); };
       var panel = document.getElementById("intents-panel");
       var intents = (data && data.intents) || [];
       var badge = document.getElementById("intents-badge");
       if (!intents.length) {
         if (badge) badge.style.display = "none";
-        panel.innerHTML = emptyState('chat', '',
-          'Not enough questions yet - once visitors start chatting with your bot, the questions they ask most show up here.');
+        panel.innerHTML = emptyState('chat', '', t('intents.empty'));
         return;
       }
       if (badge) { badge.textContent = intents.length; badge.style.display = ""; }
-      var max = intents.reduce(function(m, t){ return Math.max(m, t.count || 0); }, 1);
-      var rows = intents.map(function(t) {
-        var pct = Math.max(6, Math.round((t.count || 0) / max * 100));
-        var examples = (t.examples || []).map(function(e){ return '<li>' + esc(e) + '</li>'; }).join("");
+      var max = intents.reduce(function(m, it){ return Math.max(m, it.count || 0); }, 1);
+      var rows = intents.map(function(it) {
+        var pct = Math.max(6, Math.round((it.count || 0) / max * 100));
+        var examples = (it.examples || []).map(function(e){ return '<li>' + esc(e) + '</li>'; }).join("");
         var expandable = examples ? ' onclick="this.classList.toggle(\'open\')"' : '';
         return '<div class="intent-row"' + expandable + '>' +
           '<div class="intent-head">' +
-            '<span class="intent-label">' + esc(t.question) + '</span>' +
+            '<span class="intent-label">' + esc(it.question) + '</span>' +
             '<span class="intent-meta">' +
-              (t.gapCount > 0 ? '<span class="intent-gap-badge">' + t.gapCount + ' unanswered</span>' : '') +
-              '<span class="intent-count">&times;' + (t.count || 0) + '</span>' +
+              (it.gapCount > 0 ? '<span class="intent-gap-badge">' + t('intents.unanswered', { n: it.gapCount }) + '</span>' : '') +
+              '<span class="intent-count">&times;' + (it.count || 0) + '</span>' +
             '</span>' +
           '</div>' +
           '<div class="intent-bar-track"><div class="intent-bar" style="width:' + pct + '%"><span class="seg ans" style="flex:1"></span></div></div>' +
@@ -1113,18 +1544,17 @@
       }).join("");
       var n = data.totalQuestions || 0, d = data.distinctIntents || intents.length;
       var foot = '<div class="intent-foot">' +
-        '<span>' + n + ' question' + (n !== 1 ? 's' : '') + ' asked · ' + d + ' distinct intent' + (d !== 1 ? 's' : '') + '</span>' +
-        '<span class="dotlegend"><span class="sw" style="background:var(--amber)"></span>unanswered = the bot had no answer</span>' +
+        '<span>' + t('intents.foot', { n: n, d: d }) + '</span>' +
+        '<span class="dotlegend"><span class="sw" style="background:var(--amber)"></span>' + t('intents.legend') + '</span>' +
       '</div>';
       panel.innerHTML = rows + foot;
     }
 
     function renderGaps(questions, resolvedSet) {
+      REDRAW["gaps-panel"] = function() { renderGaps(questions, resolvedSet); };
       var panel = document.getElementById("gaps-panel");
       if (!questions.length) {
-        panel.innerHTML = emptyState('check', 'green',
-          'No gaps - your assistant has answered everything it was asked so far.',
-          'Add knowledge', 'openChunkModal()');
+        panel.innerHTML = emptyState('check', 'green', t('gaps.empty'), t('gaps.addKnowledge'), 'openChunkModal()');
         return;
       }
 
@@ -1140,20 +1570,20 @@
         return '<div class="gap-item' + (resolved ? ' resolved' : '') + '">' +
           '<div class="gap-top"><span class="gap-question">' + esc(qText) + '</span><span class="gap-time">' + fmtDate(q.timestamp) + '</span></div>' +
           (!resolved ?
-            '<div class="gap-actions"><button class="btn btn-sm btn-success" onclick="openAnswerForm(' + idx + ')">Answer this</button></div>' +
+            '<div class="gap-actions"><button class="btn btn-sm btn-success" onclick="openAnswerForm(' + idx + ')">' + t('gaps.answer') + '</button></div>' +
             '<div class="gap-answer-form" id="answer-form-' + idx + '" data-question="' + escAttr(qText) + '">' +
-            '<textarea placeholder="Type the answer..." id="answer-text-' + idx + '"></textarea>' +
-            '<div class="form-actions"><button class="btn btn-sm btn-dark" onclick="submitAnswer(' + idx + ')">Save</button><button class="btn btn-sm btn-ghost" onclick="closeAnswerForm(' + idx + ')">Cancel</button></div></div>'
-          : '<div class="gap-actions"><span style="font-size:11px;color:var(--green);font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Resolved</span></div>'
+            '<textarea placeholder="' + escAttr(t('gaps.answerPh')) + '" id="answer-text-' + idx + '"></textarea>' +
+            '<div class="form-actions"><button class="btn btn-sm btn-dark" onclick="submitAnswer(' + idx + ')">' + t('common.save') + '</button><button class="btn btn-sm btn-ghost" onclick="closeAnswerForm(' + idx + ')">' + t('common.cancel') + '</button></div></div>'
+          : '<div class="gap-actions"><span style="font-size:11px;color:var(--green);font-weight:600;text-transform:uppercase;letter-spacing:0.06em">' + t('gaps.resolved') + '</span></div>'
           ) + '</div>';
       }).join("");
     }
 
     function renderActivity(conversations) {
+      REDRAW["activity-panel"] = function() { renderActivity(conversations); };
       var panel = document.getElementById("activity-panel");
       if (!conversations.length) {
-        panel.innerHTML = emptyState('chat', '',
-          'No conversations yet - messages from your site visitors will show up here.');
+        panel.innerHTML = emptyState('chat', '', t('activity.empty'));
         return;
       }
 
@@ -1166,16 +1596,15 @@
           '<div class="activity-content">' +
           '<div class="activity-question">' + esc((c.userMessage || "").slice(0,80)) + '</div>' +
           '<div class="activity-response">' + esc((c.botResponse || "").slice(0,100)) + '</div>' +
-          '<div class="activity-expanded"><strong>Visitor:</strong> ' + esc(c.userMessage || "") + '\n\n<strong>Bot:</strong> ' + esc(c.botResponse || "") + '</div></div></div>';
+          '<div class="activity-expanded"><strong>' + t('activity.visitor') + '</strong> ' + esc(c.userMessage || "") + '\n\n<strong>' + t('activity.bot') + '</strong> ' + esc(c.botResponse || "") + '</div></div></div>';
       }).join("") + '</div>';
     }
 
     function renderSkills(flows) {
+      REDRAW["skills-panel"] = function() { renderSkills(flows); };
       var panel = document.getElementById("skills-panel");
       if (!flows.length) {
-        panel.innerHTML = emptyState('zap', '',
-          'No skills yet - describe what the assistant should do on your site, or record it once by doing it yourself.',
-          'Describe your first flow', "openAgentFlowModal()", true);
+        panel.innerHTML = emptyState('zap', '', t('skills.empty'), t('skills.describeFirst'), "openAgentFlowModal()", true);
         return;
       }
 
@@ -1186,8 +1615,8 @@
           '<div class="skill-info"><span class="skill-name" onclick="toggleSkillEdit(\'' + f.id + '\')">' + esc(f.name) + '</span>' +
           '<span class="skill-triggers">' + esc(triggers) + '</span></div>' +
           '<label class="toggle"><input type="checkbox" ' + (f.status === "active" ? "checked" : "") + ' onchange="toggleFlowStatus(\'' + f.id + '\',this.checked)"><span class="toggle-slider"></span></label></div>' +
-          '<div class="skill-edit-form" id="skill-edit-' + f.id + '"><input type="text" value="' + escAttr((f.triggerPhrases||[]).join(", ")) + '" placeholder="Triggers (comma-separated)" id="skill-triggers-' + f.id + '" />' +
-          '<div style="display:flex;gap:6px"><button class="btn btn-sm btn-dark" onclick="saveSkillTriggers(\'' + f.id + '\')">Save</button><button class="btn btn-sm btn-ghost" onclick="toggleSkillEdit(\'' + f.id + '\')">Cancel</button></div></div></div>';
+          '<div class="skill-edit-form" id="skill-edit-' + f.id + '"><input type="text" value="' + escAttr((f.triggerPhrases||[]).join(", ")) + '" placeholder="' + escAttr(t('skills.triggersPh')) + '" id="skill-triggers-' + f.id + '" />' +
+          '<div style="display:flex;gap:6px"><button class="btn btn-sm btn-dark" onclick="saveSkillTriggers(\'' + f.id + '\')">' + t('common.save') + '</button><button class="btn btn-sm btn-ghost" onclick="toggleSkillEdit(\'' + f.id + '\')">' + t('common.cancel') + '</button></div></div></div>';
       }).join("");
     }
 
@@ -1195,17 +1624,17 @@
     var SITE_HREF = "";
     function agentSkillRow(f) {
       var collect = f.executionMode === "collect";
-      var sub = collect ? "Collects: " + (f.requiredInputs || []).map(function(i) { return i.label; }).join(", ") : (f.description || "");
+      var sub = collect ? t('skills.collects') + (f.requiredInputs || []).map(function(i) { return i.label; }).join(", ") : (f.description || "");
       return '<div><div class="skill-item">' +
-        '<div class="skill-info"><span class="skill-tag">' + (collect ? "Chat form" : "Agent") + '</span><span class="skill-name" onclick="toggleSkillEdit(\'' + f.id + '\')">' + esc(f.name) + '</span>' +
+        '<div class="skill-info"><span class="skill-tag">' + (collect ? t('skills.tagCollect') : t('skills.tagAgent')) + '</span><span class="skill-name" onclick="toggleSkillEdit(\'' + f.id + '\')">' + esc(f.name) + '</span>' +
         '<span class="skill-triggers">' + esc(sub) + '</span></div>' +
         '<label class="toggle"><input type="checkbox" ' + (f.status === "active" ? "checked" : "") + ' onchange="toggleFlowStatus(\'' + f.id + '\',this.checked)"><span class="toggle-slider"></span></label></div>' +
         '<div class="skill-edit-form" id="skill-edit-' + f.id + '">' +
-        '<input type="text" id="agent-edit-name-' + f.id + '" value="' + escAttr(f.name) + '" placeholder="Name" maxlength="120" />' +
-        '<textarea id="agent-edit-goal-' + f.id + '" maxlength="2000" placeholder="What should the assistant do?">' + esc(f.description || "") + '</textarea>' +
-        (collect ? '' : '<input type="text" id="agent-edit-url-' + f.id + '" value="' + escAttr(f.startUrl || "") + '" placeholder="Start page" maxlength="500" />') +
+        '<input type="text" id="agent-edit-name-' + f.id + '" value="' + escAttr(f.name) + '" placeholder="' + escAttr(t('skills.namePh')) + '" maxlength="120" />' +
+        '<textarea id="agent-edit-goal-' + f.id + '" maxlength="2000" placeholder="' + escAttr(t('skills.goalPh')) + '">' + esc(f.description || "") + '</textarea>' +
+        (collect ? '' : '<input type="text" id="agent-edit-url-' + f.id + '" value="' + escAttr(f.startUrl || "") + '" placeholder="' + escAttr(t('skills.urlPh')) + '" maxlength="500" />') +
         '<div class="form-error" id="agent-edit-error-' + f.id + '"></div>' +
-        '<div style="display:flex;gap:6px"><button class="btn btn-sm btn-dark" onclick="saveAgentEdit(\'' + f.id + '\')">Save</button><button class="btn btn-sm btn-ghost" onclick="toggleSkillEdit(\'' + f.id + '\')">Cancel</button></div></div></div>';
+        '<div style="display:flex;gap:6px"><button class="btn btn-sm btn-dark" onclick="saveAgentEdit(\'' + f.id + '\')">' + t('common.save') + '</button><button class="btn btn-sm btn-ghost" onclick="toggleSkillEdit(\'' + f.id + '\')">' + t('common.cancel') + '</button></div></div></div>';
     }
     function agentFlowMode() {
       var r = document.querySelector('input[name="agent-flow-mode"]:checked');
@@ -1214,9 +1643,7 @@
     function setAgentFlowMode() {
       var collect = agentFlowMode() === "collect";
       document.getElementById("agent-flow-url-wrap").style.display = collect ? "none" : "";
-      document.getElementById("agent-flow-goal").placeholder = collect
-        ? "What should the assistant collect? e.g. Take a building-materials order: which products and how much, the delivery date and address, the customer's name and phone."
-        : "What should the assistant do? e.g. Book the visitor for an exam: pick the exam package that fits their job, the location and a date they want, then fill in their details.";
+      setPh(document.getElementById("agent-flow-goal"), collect ? "flow.goalCollectPh" : "flow.goalAgentPh");
     }
     function openAgentFlowModal() {
       var u = document.getElementById("agent-flow-url");
@@ -1234,9 +1661,9 @@
       try {
         var r = await authFetch(url, { method: method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         var d = await r.json().catch(function() { return {}; });
-        if (!r.ok) { errEl.textContent = d.error || "Could not save the flow."; return false; }
+        if (!r.ok) { errEl.textContent = apiErr(d, 'flow.saveError'); return false; }
         return true;
-      } catch (e) { errEl.textContent = "Could not save the flow."; return false; }
+      } catch (e) { errEl.textContent = t('flow.saveError'); return false; }
     }
     async function saveAgentFlow() {
       var btn = document.getElementById("agent-flow-save");
@@ -1271,34 +1698,40 @@
         OFFER = d.items || []; OFFER_SCHEMA = d.schema || OFFER_SCHEMA;
         renderOffer();
       } catch (e) {
-        document.getElementById("offer-panel").innerHTML = emptyState('alert', 'amber', 'Could not load the offer.', 'Retry', 'loadOffer()');
+        panelMsg("offer-panel", function() { return emptyState('alert', 'amber', t('offer.loadError'), t('common.retry'), 'loadOffer()'); });
       }
     }
     function renderOffer() {
+      REDRAW["offer-panel"] = renderOffer;
       var panel = document.getElementById("offer-panel");
-      document.getElementById("offer-badge").textContent = OFFER.length;
+      document.getElementById("offer-badge").textContent = fmtNum(OFFER.length);
       if (!OFFER.length) {
-        panel.innerHTML = emptyState('zap', '', 'No products or services yet. Import a price list or catalog, find them on your website, or add them one by one - the assistant then answers about availability and prices from this list.', 'Import price list', "document.getElementById('offer-file').click()", true);
+        panel.innerHTML = emptyState('zap', '', t('offer.empty'), t('offer.importList'), "document.getElementById('offer-file').click()", true);
         return;
       }
       var q = (document.getElementById("offer-search").value || "").toLowerCase();
       var list = OFFER.filter(function(i) { return !q || (i.name + " " + i.category + " " + i.description).toLowerCase().indexOf(q) >= 0; });
-      panel.innerHTML = '<div class="offer-row head"><span>Name</span><span class="c-cat">Category</span><span>Price</span><span class="c-avail">Availability</span><span></span></div>' +
+      panel.innerHTML = '<div class="offer-row head"><span>' + t('offer.colName') + '</span><span class="c-cat">' + t('offer.colCategory') + '</span><span>' + t('offer.colPrice') + '</span><span class="c-avail">' + t('offer.colAvailability') + '</span><span></span></div>' +
         list.map(function(i) {
           var f = i.fields || {}, av = f.availability || "unknown";
-          var sub = [i.components && i.components.length ? i.components.length + " price parts" : "", fieldLabel("lead_time", f.lead_time)].filter(Boolean).join(" · ") || i.description || "";
+          var sub = [i.components && i.components.length ? t('offer.priceParts', { n: i.components.length }) : "", fieldLabel("lead_time", f.lead_time)].filter(Boolean).join(" · ") || i.description || "";
           return '<div class="offer-row"><div style="min-width:0"><div class="offer-name">' + esc(i.name) + '</div>' + (sub ? '<div class="offer-sub">' + esc(sub) + '</div>' : '') + '</div>' +
             '<span class="offer-sub c-cat">' + esc(i.category || "-") + '</span><span>' + esc(i.price_display || "-") + '</span>' +
             '<span class="offer-pill c-avail ' + (av === "in_stock" ? "available" : av === "unavailable" ? "unavailable" : "") + '">' + esc(fieldLabel("availability", av) || "-") + '</span>' +
-            '<span class="offer-actions"><button onclick="openOfferItem(\'' + i.id + '\')">Edit</button><button onclick="deleteOfferItem(\'' + i.id + '\')">Delete</button></span></div>';
+            '<span class="offer-actions"><button onclick="openOfferItem(\'' + i.id + '\')">' + t('common.edit') + '</button><button onclick="deleteOfferItem(\'' + i.id + '\')">' + t('common.delete') + '</button></span></div>';
         }).join("");
+    }
+    // A price in the edit box: "28,9" in Polish (the server reads a comma as the decimal point).
+    function priceInput(v) {
+      if (v === null || v === undefined) return "";
+      return currentLang === "pl" ? String(v).replace(".", ",") : v;
     }
     function openOfferItem(id) {
       var it = OFFER.find(function(x) { return x.id === id; }) || { id: "", name: "", category: "", description: "", fields: {}, price_value: null, price_max: null };
-      document.getElementById("offer-item-title").textContent = id ? "Edit product or service" : "Add product or service";
+      setT(document.getElementById("offer-item-title"), id ? "offer.editTitle" : "offer.addTitle");
       ["id", "name", "category", "description"].forEach(function(k) { document.getElementById("oi-" + k).value = it[k] || ""; });
-      document.getElementById("oi-price_value").value = it.price_value === null || it.price_value === undefined ? "" : it.price_value;
-      document.getElementById("oi-price_max").value = it.price_max === null || it.price_max === undefined ? "" : it.price_max;
+      document.getElementById("oi-price_value").value = priceInput(it.price_value);
+      document.getElementById("oi-price_max").value = priceInput(it.price_max);
       document.getElementById("oi-fields").innerHTML = OFFER_EDIT_FIELDS.filter(function(f) { return OFFER_SCHEMA[f]; }).map(function(f) {
         var cur = (it.fields || {})[f] || "unknown";
         return '<select id="oi-f-' + f + '" title="' + escAttr(OFFER_SCHEMA[f].label) + '">' + Object.keys(OFFER_SCHEMA[f].values).map(function(v) {
@@ -1315,63 +1748,64 @@
       OFFER_EDIT_FIELDS.forEach(function(f) { var el = document.getElementById("oi-f-" + f); if (el && el.value !== "unknown") body.fields[f] = el.value; });
       var prev = OFFER.find(function(x) { return x.id === body.id; });
       if (prev) body.components = prev.components;
-      if (!body.name.trim()) { document.getElementById("oi-error").textContent = "Give it a name."; return; }
+      if (!body.name.trim()) { document.getElementById("oi-error").textContent = t('offer.nameRequired'); return; }
       var r = await authFetch(API + "/api/dashboard/offer/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!r.ok) { document.getElementById("oi-error").textContent = ((await r.json().catch(function() { return {}; })).error) || "Could not save."; return; }
+      if (!r.ok) { document.getElementById("oi-error").textContent = apiErr(await r.json().catch(function() { return {}; }), 'offer.saveError'); return; }
       var d = await r.json(); OFFER = d.items || []; OFFER_SCHEMA = d.schema || OFFER_SCHEMA; renderOffer(); closeModal("offer-item-modal");
     }
     async function deleteOfferItem(id) {
       var it = OFFER.find(function(x) { return x.id === id; });
-      if (!it || !confirm('Delete "' + it.name + '"?')) return;
+      if (!it || !confirm(t('offer.deleteConfirm', { name: it.name }))) return;
       var r = await authFetch(API + "/api/dashboard/offer/items/" + encodeURIComponent(id), { method: "DELETE" });
       if (r.ok) { var d = await r.json(); OFFER = d.items || []; renderOffer(); }
     }
     function busy(btnId, on, label) {
       var b = document.getElementById(btnId); if (!b) return;
-      if (on) { b.dataset.label = b.textContent; b.textContent = label; b.disabled = true; } else { b.textContent = b.dataset.label || b.textContent; b.disabled = false; }
+      if (on) { b.dataset.label = b.textContent; b.dataset.busy = "1"; b.textContent = label; b.disabled = true; }
+      else { delete b.dataset.busy; var k = b.getAttribute("data-i18n"); b.textContent = k ? t(k) : (b.dataset.label || b.textContent); b.disabled = false; }
     }
     function openReview(items, hint) {
       OFFER_REVIEW = items || [];
       document.getElementById("offer-review-error").textContent = "";
       document.getElementById("offer-review-hint").textContent = OFFER_REVIEW.length
-        ? hint + " Untick anything that is wrong, then add. Items with the same name as an existing one replace it."
-        : "Nothing that looks like a product or service was found.";
+        ? t('offer.reviewHint', { hint: hint })
+        : t('offer.reviewNone');
       document.getElementById("offer-review-list").innerHTML = OFFER_REVIEW.map(function(i, k) {
         return '<label class="review-item"><input type="checkbox" checked data-k="' + k + '" /><span><b>' + esc(i.name) + '</b>' +
-          (i.price_value !== null && i.price_value !== undefined ? ' · ' + esc(String(i.price_value)) + ' ' + esc(i.currency || "") : (i.fields && i.fields.price_type === "on_request" ? ' · on request' : '')) + (i.category ? '<br><span class="offer-sub">' + esc(i.category) + '</span>' : '') + '</span></label>';
+          (i.price_value !== null && i.price_value !== undefined ? ' · ' + esc(String(fmtNum(i.price_value))) + ' ' + esc(i.currency || "") : (i.fields && i.fields.price_type === "on_request" ? t('offer.onRequest') : '')) + (i.category ? '<br><span class="offer-sub">' + esc(i.category) + '</span>' : '') + '</span></label>';
       }).join("");
       document.getElementById("offer-review-save").style.display = OFFER_REVIEW.length ? "" : "none";
       document.getElementById("offer-review-modal").classList.add("open");
     }
     async function offerFromFile(input) {
       var f = input.files && input.files[0]; if (!f) return;
-      busy("offer-file-btn", true, "Reading…");
+      busy("offer-file-btn", true, t('offer.reading'));
       try {
         var r = await authFetch(API + "/api/dashboard/offer/import-file?filename=" + encodeURIComponent(f.name), { method: "POST", headers: { "Content-Type": f.type || "application/octet-stream" }, body: f });
         var d = await r.json().catch(function() { return {}; });
-        if (!r.ok) { alert(d.error || "Could not read the file."); return; }
+        if (!r.ok) { alert(apiErr(d, 'offer.fileError')); return; }
         if (d.template) {
           OFFER = (d.offer && d.offer.items) || OFFER; renderOffer();
-          alert("Imported " + d.saved + " row(s) from your spreadsheet." + (d.problems && d.problems.length ? "\n\nPlease fix:\n" + d.problems.join("\n") : ""));
+          alert(t('offer.imported', { n: d.saved, problems: d.problems && d.problems.length ? d.problems.join("\n") : "" }));
           return;
         }
-        openReview(d.items, "Found " + (d.items || []).length + " item(s) in " + f.name + ".");
+        openReview(d.items, t('offer.foundInFile', { n: (d.items || []).length, file: f.name }));
       } finally { busy("offer-file-btn", false); input.value = ""; }
     }
     async function offerFromSite() {
-      busy("offer-site-btn", true, "Reading your site…");
+      busy("offer-site-btn", true, t('offer.readingSite'));
       try {
         var r = await authFetch(API + "/api/dashboard/offer/extract-site", { method: "POST" });
         var d = await r.json().catch(function() { return {}; });
-        if (!r.ok) { alert(d.error || "Could not read the website content."); return; }
-        openReview(d.items, "Found " + (d.items || []).length + " item(s) on your website.");
+        if (!r.ok) { alert(apiErr(d, 'offer.siteError')); return; }
+        openReview(d.items, t('offer.foundOnSite', { n: (d.items || []).length }));
       } finally { busy("offer-site-btn", false); }
     }
     async function downloadOfferSheet() {
-      busy("offer-sheet-btn", true, "Preparing…");
+      busy("offer-sheet-btn", true, t('offer.preparing'));
       try {
         var r = await authFetch(API + "/api/dashboard/offer/template");
-        if (!r.ok) { alert("Could not prepare the spreadsheet."); return; }
+        if (!r.ok) { alert(t('offer.sheetError')); return; }
         var blob = await r.blob(), a = document.createElement("a");
         var cd = r.headers.get("Content-Disposition") || "", name = cd.split('filename="')[1];
         a.href = URL.createObjectURL(blob); a.download = name ? name.split('"')[0] : "oferta.xlsx";
@@ -1381,10 +1815,10 @@
     async function saveOfferReview() {
       var picked = [].slice.call(document.querySelectorAll("#offer-review-list input:checked")).map(function(cb) { return OFFER_REVIEW[+cb.dataset.k]; });
       if (!picked.length) { closeModal("offer-review-modal"); return; }
-      busy("offer-review-save", true, "Adding…");
+      busy("offer-review-save", true, t('offer.adding'));
       try {
         var r = await authFetch(API + "/api/dashboard/offer/items/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: picked }) });
-        if (!r.ok) { document.getElementById("offer-review-error").textContent = "Could not save."; return; }
+        if (!r.ok) { document.getElementById("offer-review-error").textContent = t('offer.saveError'); return; }
         var d = await r.json(); OFFER = d.items || []; renderOffer(); closeModal("offer-review-modal");
       } finally { busy("offer-review-save", false); }
     }
@@ -1417,60 +1851,73 @@
         var params = chunksSearch ? "?search="+encodeURIComponent(chunksSearch) : "";
         var res = await authFetch(API+"/api/dashboard/chunks"+params);
         var data = await res.json();
-        document.getElementById("chunks-badge").textContent = data.total || 0;
+        renderChunks(data, chunksSearch);
+      } catch(e) {
+        panelMsg("chunks-panel", function() { return emptyState('alert', 'amber', t('kb.loadError'), t('common.retry'), 'loadChunks()'); });
+      }
+    }
+
+    // A chunk's type is a fixed value from the index; Polish shows a word for the known ones.
+    function chunkTypeLabel(type) {
+      var v = (i18n[currentLang] || {})["kb.type." + type];
+      return typeof v === "string" ? v : type;
+    }
+
+    function renderChunks(data, search) {
+        REDRAW["chunks-panel"] = function() { renderChunks(data, search); };
+        document.getElementById("chunks-badge").textContent = fmtNum(data.total || 0);
         var panel = document.getElementById("chunks-panel");
 
         if (!data.pages || !data.pages.length) {
-          if (chunksSearch) {
+          if (search) {
             panel.innerHTML = emptyState('search', '',
-              'No knowledge matches "' + esc(chunksSearch) + '".',
-              'Clear search', 'clearChunkSearch()');
+              t('kb.noMatch', { q: esc(search) }),
+              t('kb.clearSearch'), 'clearChunkSearch()');
           } else if (data.total > 0) {
             // The index reports chunks but the list query returned none - a
             // backend/data issue, not an empty knowledge base. Be honest.
             panel.innerHTML = emptyState('alert', 'amber',
-              data.total + ' chunks are indexed, but the list could not be loaded right now. This is usually temporary.',
-              'Retry', 'loadChunks()');
+              t('kb.listError', { n: data.total }),
+              t('common.retry'), 'loadChunks()');
           } else {
             panel.innerHTML = emptyState('book', '',
-              'No knowledge yet - add material your assistant can answer from.',
-              '+ Add knowledge', 'openChunkModal()', true);
+              t('kb.empty'),
+              t('kb.addCta'), 'openChunkModal()', true);
           }
           return;
         }
 
         panel.innerHTML = data.pages.map(function(page) {
           var chunksHtml = page.chunks.map(function(c) {
-            var heading = c.heading || c.headingPath?.[c.headingPath.length-1] || "(no heading)";
+            var heading = c.heading || c.headingPath?.[c.headingPath.length-1] || t('kb.noHeading');
             return '<div class="chunk-item">' +
               '<div class="chunk-heading">' +
                 '<span class="chunk-heading-text">' + esc(heading) + '</span>' +
-                '<span class="chunk-type">' + esc(c.type) + '</span>' +
+                '<span class="chunk-type">' + esc(chunkTypeLabel(c.type)) + '</span>' +
               '</div>' +
               '<div class="chunk-content" id="chunk-text-'+c.id+'" contenteditable="false">' + esc(c.content).replace(/\n/g,"<br>") + '</div>' +
               '<div class="chunk-actions">' +
-                '<button class="btn-tiny" onclick="editChunk(\''+c.id+'\')">Edit</button>' +
-                '<button class="btn-tiny btn-danger" onclick="deleteChunk(\''+c.id+'\')">Delete</button>' +
+                '<button class="btn-tiny" onclick="editChunk(\''+c.id+'\')">' + t('common.edit') + '</button>' +
+                '<button class="btn-tiny btn-danger" onclick="deleteChunk(\''+c.id+'\')">' + t('common.delete') + '</button>' +
               '</div>' +
             '</div>';
           }).join("");
 
           var pathDisplay = "";
           try { pathDisplay = new URL(page.url).pathname || "/"; } catch(e) { pathDisplay = page.url; }
+          // Owner-added material (manual:// - the server names that folder "Added materials").
+          var pageTitle = String(page.url || "").indexOf("manual") === 0 ? t('kb.addedMaterials') : page.title;
 
           return '<div class="page-folder" onclick="toggleFolder(event, this)">' +
             '<div class="page-header">' +
               '<span class="page-arrow">▸</span>' +
-              '<span class="page-title">' + esc(page.title) + '</span>' +
+              '<span class="page-title">' + esc(pageTitle) + '</span>' +
               '<span class="page-url">' + esc(pathDisplay) + '</span>' +
               '<span class="page-count">' + page.chunks.length + '</span>' +
             '</div>' +
             '<div class="page-chunks">' + chunksHtml + '</div>' +
           '</div>';
         }).join("");
-      } catch(e) {
-        document.getElementById("chunks-panel").innerHTML = emptyState('alert', 'amber', 'Could not load the knowledge base.', 'Retry', 'loadChunks()');
-      }
     }
 
     function toggleFolder(e, el) {
@@ -1487,11 +1934,11 @@
       var el = document.getElementById("chunk-text-"+id);
       if (el.contentEditable==="true") {
         authFetch(API+"/api/dashboard/chunks/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:el.innerText.trim()})}).then(function(){
-          el.contentEditable="false"; el.style.background=""; el.style.border=""; el.parentElement.querySelector(".btn-tiny").textContent="Edit";
+          el.contentEditable="false"; el.style.background=""; el.style.border=""; el.parentElement.querySelector(".btn-tiny").textContent=t('common.edit');
         });
-      } else { el.contentEditable="true"; el.focus(); el.style.background="rgba(245,158,11,0.06)"; el.style.border="1px solid rgba(245,158,11,0.2)"; el.parentElement.querySelector(".btn-tiny").textContent="Save"; }
+      } else { el.contentEditable="true"; el.focus(); el.style.background="rgba(245,158,11,0.06)"; el.style.border="1px solid rgba(245,158,11,0.2)"; el.parentElement.querySelector(".btn-tiny").textContent=t('common.save'); }
     }
-    function deleteChunk(id) { if (!confirm("Delete this chunk?")) return; authFetch(API+"/api/dashboard/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
+    function deleteChunk(id) { if (!confirm(t('kb.deleteConfirm'))) return; authFetch(API+"/api/dashboard/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
     function openChunkModal() { document.getElementById("add-chunk-modal").classList.add("open"); }
     document.getElementById("add-chunk-btn").addEventListener("click", openChunkModal);
     function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; var st=document.getElementById("kb-file-status"); if(st) st.textContent=""; var fi=document.getElementById("kb-file-input"); if(fi) fi.value=""; var ui=document.getElementById("kb-url-input"); if(ui) ui.value=""; var us=document.getElementById("kb-url-status"); if(us) us.textContent=""; }
@@ -1500,7 +1947,7 @@
       var f = this.files && this.files[0]; if (!f) return;
       var status = document.getElementById("kb-file-status");
       var btn = document.getElementById("kb-file-btn");
-      status.textContent = "Reading " + f.name + "…"; btn.disabled = true;
+      status.textContent = t('kb.reading', { name: f.name }); btn.disabled = true;
       fetch(API + "/api/dashboard/knowledge-file?filename=" + encodeURIComponent(f.name), {
         method: "POST",
         headers: { "Authorization": "Bearer " + AUTH_TOKEN, "Content-Type": "application/octet-stream" },
@@ -1508,42 +1955,42 @@
       }).then(function(r){ return r.json().then(function(d){ return {ok:r.ok, d:d}; }); })
       .then(function(res){
         btn.disabled = false;
-        if (!res.ok) { status.textContent = res.d.error || "Could not process file"; return; }
+        if (!res.ok) { status.textContent = apiErr(res.d, 'kb.fileError'); return; }
         status.textContent = "";
         closeChunkModal();
-        alert("Added " + res.d.added + " knowledge entries from " + f.name + ". They're indexed now and answerable within about a minute.");
+        alert(t('kb.fileAdded', { n: res.d.added, name: f.name }));
         setTimeout(loadChunks, 1500);
-      }).catch(function(){ btn.disabled = false; status.textContent = "Upload failed - please try again."; });
+      }).catch(function(){ btn.disabled = false; status.textContent = t('kb.uploadFailed'); });
     });
     function importFromUrl() {
       var url = (document.getElementById("kb-url-input").value || "").trim();
       var st = document.getElementById("kb-url-status");
       var btn = document.getElementById("kb-url-btn");
-      if (!url) { st.style.color = "var(--amber)"; st.textContent = "Enter a URL first."; return; }
-      st.style.color = "var(--text-3)"; st.textContent = "Fetching and reading the page…";
+      if (!url) { st.style.color = "var(--amber)"; st.textContent = t('kb.urlFirst'); return; }
+      st.style.color = "var(--text-3)"; st.textContent = t('kb.fetching');
       btn.disabled = true;
       authFetch(API + "/api/dashboard/scrape-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url }) })
         .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
         .then(function(res){
           btn.disabled = false;
-          if (!res.ok) { st.style.color = "var(--amber)"; st.textContent = (res.d && res.d.error) || "Could not import that URL."; return; }
+          if (!res.ok) { st.style.color = "var(--amber)"; st.textContent = apiErr(res.d, 'kb.urlError'); return; }
           st.style.color = "var(--green)";
-          st.textContent = "Added " + res.d.added + " item" + (res.d.added !== 1 ? "s" : "") + " from “" + (res.d.title || url) + "”.";
+          st.textContent = t('kb.urlAdded', { n: res.d.added, title: res.d.title || url });
           document.getElementById("kb-url-input").value = "";
           loadChunks();
         })
-        .catch(function(){ btn.disabled = false; st.style.color = "var(--amber)"; st.textContent = "Import failed - try again."; });
+        .catch(function(){ btn.disabled = false; st.style.color = "var(--amber)"; st.textContent = t('kb.importFailed'); });
     }
 
     function saveNewChunk() {
-      var t=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();
+      var title=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();
       if (!c) return;
-      authFetch(API+"/api/dashboard/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:t})}).then(function(r){
+      authFetch(API+"/api/dashboard/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:title})}).then(function(r){
         if (!r.ok) throw new Error("save failed");
         closeChunkModal();
-        alert("Added to the knowledge base. New material is indexed now and becomes answerable within about a minute.");
+        alert(t('kb.saved'));
         setTimeout(loadChunks, 1500);
-      }).catch(function(){ alert("Could not save - please try again."); });
+      }).catch(function(){ alert(t('kb.saveError')); });
     }
 
     function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
@@ -1551,10 +1998,10 @@
     function fmtDate(iso) {
       if (!iso) return "";
       var d = new Date(iso), n = Date.now(), diff = n - d;
-      if (diff < 60000) return "just now";
-      if (diff < 3600000) return Math.floor(diff/60000) + "m ago";
-      if (diff < 86400000) return Math.floor(diff/3600000) + "h ago";
-      return d.toLocaleDateString(undefined, {month:"short",day:"numeric"});
+      if (diff < 60000) return t('date.justNow');
+      if (diff < 3600000) return t('date.minAgo', { n: Math.floor(diff/60000) });
+      if (diff < 86400000) return t('date.hAgo', { n: Math.floor(diff/3600000) });
+      return d.toLocaleDateString(currentLang === "pl" ? "pl-PL" : undefined, {month:"short",day:"numeric"});
     }
 
     // ─── The plan: the widget is free, the panel is paid (src/billing/plan.ts) ────
@@ -1572,34 +2019,42 @@
 
     async function showPlan(b) {
       var code = "";
-      try { var e = await (await authFetch(API + "/api/dashboard/embed-code")).json(); code = e.embedCode || ""; SITE_HREF = e.siteUrl || ""; document.getElementById("site-name").textContent = e.brandName || e.domain || "Your business"; document.getElementById("site-url").textContent = e.domain || ""; } catch (x) {}
+      try {
+        var e = await (await authFetch(API + "/api/dashboard/embed-code")).json(); code = e.embedCode || ""; SITE_HREF = e.siteUrl || "";
+        var nameEl = document.getElementById("site-name");
+        if (e.brandName || e.domain) setData(nameEl, e.brandName || e.domain); else setT(nameEl, "header.yourBusiness");
+        document.getElementById("site-url").textContent = e.domain || "";
+        langFromSite(e.domain, e.siteUrl);
+      } catch (x) {}
       var shell = document.querySelector(".shell");
       Array.prototype.forEach.call(shell.children, function(el) { if (!el.classList.contains("topbar")) el.style.display = "none"; });
-      document.querySelectorAll(".topbar-right .btn").forEach(function(el) { if (!/Logout/.test(el.textContent)) el.style.display = "none"; });
+      document.querySelectorAll(".topbar-right .btn").forEach(function(el) { if (el.id !== "logout-btn" && el.id !== "lang-toggle") el.style.display = "none"; });
       var box = document.createElement("div");
       box.className = "plan-box";
-      box.innerHTML =
-        '<div class="plan-card">' +
-          '<h2>Your assistant is free</h2>' +
-          '<p class="plan-muted">Paste this code into your site (before &lt;/head&gt;) and the assistant answers your visitors from your own information - no payment needed.</p>' +
-          '<pre class="plan-code" id="plan-code"></pre>' +
-          '<button class="btn btn-outline" onclick="copyPlanCode()">Copy code</button>' +
-        '</div>' +
-        '<div class="plan-card">' +
-          '<h2>The panel</h2>' +
-          '<p class="plan-price">' + esc(String(b.pricePln || 149)) + ' zł <span>/ month, VAT included</span></p>' +
-          '<ul class="plan-list">' +
-            '<li>Every conversation, searchable</li>' +
-            '<li>What people ask about, and what the assistant could not answer</li>' +
-            '<li>Fix answers: your knowledge, price list and files</li>' +
-            '<li>Requests from businesses in the Whisp network</li>' +
-            '<li>Calculations and quotes for your customers, with your approval</li>' +
-          '</ul>' +
-          (b.payments ? '<button class="btn btn-dark plan-buy" id="plan-buy" onclick="buyPlan()">Unlock the panel</button>' : '<p class="plan-muted">Payments are not available right now - write to jakub@whisp.so.</p>') +
-          '<p class="plan-muted">Monthly, cancel any time. By paying you accept the <a href="/regulamin" target="_blank">terms</a> and the data processing agreement.</p>' +
-        '</div>';
       shell.appendChild(box);
-      document.getElementById("plan-code").textContent = code;
+      (REDRAW.plan = function() {
+        box.innerHTML =
+          '<div class="plan-card">' +
+            '<h2>' + t('plan.freeTitle') + '</h2>' +
+            '<p class="plan-muted">' + t('plan.freeText') + '</p>' +
+            '<pre class="plan-code" id="plan-code"></pre>' +
+            '<button class="btn btn-outline" onclick="copyPlanCode()">' + t('plan.copy') + '</button>' +
+          '</div>' +
+          '<div class="plan-card">' +
+            '<h2>' + t('plan.panelTitle') + '</h2>' +
+            '<p class="plan-price">' + esc(String(b.pricePln || 149)) + ' zł <span>' + t('plan.per') + '</span></p>' +
+            '<ul class="plan-list">' +
+              '<li>' + t('plan.f1') + '</li>' +
+              '<li>' + t('plan.f2') + '</li>' +
+              '<li>' + t('plan.f3') + '</li>' +
+              '<li>' + t('plan.f4') + '</li>' +
+              '<li>' + t('plan.f5') + '</li>' +
+            '</ul>' +
+            (b.payments ? '<button class="btn btn-dark plan-buy" id="plan-buy" onclick="buyPlan()">' + t('plan.unlock') + '</button>' : '<p class="plan-muted">' + t('plan.noPayments') + '</p>') +
+            '<p class="plan-muted">' + t('plan.terms') + '</p>' +
+          '</div>';
+        box.querySelector("#plan-code").textContent = code;
+      })();
     }
 
     function copyPlanCode() {
@@ -1609,13 +2064,13 @@
 
     async function buyPlan() {
       var btn = document.getElementById("plan-buy");
-      btn.disabled = true; btn.textContent = "Opening payment...";
+      btn.disabled = true; btn.textContent = t('plan.opening');
       try {
         var d = await (await authFetch(API + "/api/dashboard/billing/checkout", { method: "POST" })).json();
         if (d.url) { location.href = d.url; return; }
       } catch (e) {}
-      btn.disabled = false; btn.textContent = "Unlock the panel";
-      alert("Payment could not be opened - please try again in a moment.");
+      btn.disabled = false; btn.textContent = t('plan.unlock');
+      alert(t('plan.payError'));
     }
 
     async function openBilling() {

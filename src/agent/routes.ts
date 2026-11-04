@@ -61,15 +61,17 @@ export function onTenantSite(url: string, siteUrl: string): boolean {
 // Validates an owner-written flow; returns the error message or the clean fields.
 // mode "agent": the assistant works on a page of the site (start page required);
 // mode "collect": the assistant gathers an order / inquiry in the chat itself.
-function agentFields(b: any, siteUrl: string): { error: string } | { mode: "agent" | "collect"; name: string; goal: string; startUrl?: string } {
+function agentFields(b: any, siteUrl: string): { error: string; code: string; siteUrl?: string } | { mode: "agent" | "collect"; name: string; goal: string; startUrl?: string } {
   const mode = b?.mode === "collect" ? "collect" : "agent";
   const name = str(b?.name, 120).trim(), goal = str(b?.goal, 2000).trim();
-  if (name.length < 3) return { error: "Give the flow a short name (e.g. \"Book an appointment\")." };
-  if (goal.length < 20) return { error: mode === "collect" ? "Describe what the assistant should collect from the customer (e.g. product, quantity, delivery date and address, contact)." : "Describe what the assistant should do in a sentence or two." };
+  if (name.length < 3) return { error: "Give the flow a short name (e.g. \"Book an appointment\").", code: "flow_name_short" };
+  if (goal.length < 20) return mode === "collect"
+    ? { error: "Describe what the assistant should collect from the customer (e.g. product, quantity, delivery date and address, contact).", code: "flow_collect_short" }
+    : { error: "Describe what the assistant should do in a sentence or two.", code: "flow_goal_short" };
   if (mode === "collect") return { mode, name, goal };
   let startUrl = str(b?.startUrl, 500).trim();
   if (startUrl && !/^https?:\/\//i.test(startUrl)) startUrl = `https://${startUrl}`;
-  if (!onTenantSite(startUrl, siteUrl)) return { error: `The start page must be on your site (${siteUrl}) - the assistant runs the flow there.` };
+  if (!onTenantSite(startUrl, siteUrl)) return { error: `The start page must be on your site (${siteUrl}) - the assistant runs the flow there.`, code: "flow_url_offsite", siteUrl };
   return { mode, name, goal, startUrl };
 }
 
@@ -82,12 +84,12 @@ export function registerAgentRoutes(app: Express, deps?: AgentRouteDeps): void {
     app.post("/api/dashboard/flows/agent", deps.auth, async (req, res) => {
       const tenantId = (req as any).tenantId as string;
       const f = agentFields(req.body, getTenant(tenantId)?.siteUrl || "");
-      if ("error" in f) { res.status(400).json({ error: f.error }); return; }
-      if ((await getFlows(tenantId)).length >= 50) { res.status(400).json({ error: "Flow limit reached (50)." }); return; }
+      if ("error" in f) { res.status(400).json(f); return; }
+      if ((await getFlows(tenantId)).length >= 50) { res.status(400).json({ error: "Flow limit reached (50).", code: "flow_limit" }); return; }
       let requiredInputs: FlowDefinition["requiredInputs"] = [];
       if (f.mode === "collect") {
         try { requiredInputs = await collectFieldsFor(f.goal); }
-        catch (e: any) { res.status(400).json({ error: "Could not work out what to collect from that description - try listing the details (e.g. product, quantity, delivery date, phone)." }); return; }
+        catch (e: any) { res.status(400).json({ error: "Could not work out what to collect from that description - try listing the details (e.g. product, quantity, delivery date, phone).", code: "flow_collect_unclear" }); return; }
       }
       const now = new Date().toISOString();
       const flow: FlowDefinition = {
@@ -105,11 +107,11 @@ export function registerAgentRoutes(app: Express, deps?: AgentRouteDeps): void {
       const existing = await getFlow(tenantId, String(req.params.id));
       if (!existing || (existing.executionMode !== "agent" && existing.executionMode !== "collect")) { res.status(404).json({ error: "Not found" }); return; }
       const f = agentFields({ ...req.body, mode: existing.executionMode }, getTenant(tenantId)?.siteUrl || "");
-      if ("error" in f) { res.status(400).json({ error: f.error }); return; }
+      if ("error" in f) { res.status(400).json(f); return; }
       let requiredInputs = existing.requiredInputs;
       if (f.mode === "collect" && f.goal !== existing.description) {
         try { requiredInputs = await collectFieldsFor(f.goal); }
-        catch { res.status(400).json({ error: "Could not work out what to collect from that description." }); return; }
+        catch { res.status(400).json({ error: "Could not work out what to collect from that description.", code: "flow_collect_unclear" }); return; }
       }
       const flow = await saveFlow(tenantId, { ...existing, name: f.name, description: f.goal, requiredInputs, ...(f.startUrl ? { startUrl: f.startUrl } : {}), updatedAt: new Date().toISOString() });
       deps.onFlowsChanged(tenantId);
