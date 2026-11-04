@@ -57,7 +57,7 @@ export function recordTurn(projectId: string | null, turn: { user: string; assis
 const INSTRUCTION = `Klient w tej rozmowie (rozmowa.md; jego ostatnia wiadomość: request.txt) prosi o coś, co wymaga pracy na danych.
 Wykonaj to na podstawie danych projektu: oferty firm w cenniki/, informacje z witryny firmy w ${KNOWLEDGE_DIR}/, wcześniejsze pliki projektu.
 Odpowiedź dla klienta zapisz w odpowiedz.txt - w języku klienta, jako wiadomość w czacie (bez nagłówków e-maila i podpisu).
-Plik dla klienta tylko wtedy, gdy wynik jest czymś do zachowania (zestawienie wielu pozycji, porównanie, plan) - zapisz go w ${CUSTOMER_DIR}/ (CSV, MD lub TXT) i wspomnij o nim w odpowiedzi; krótka odpowiedź nie potrzebuje pliku.
+Plik dla klienta tylko wtedy, gdy wynik jest czymś do zachowania (zestawienie wielu pozycji, porównanie, plan) - zapisz go w ${CUSTOMER_DIR}/ (CSV, MD lub TXT) i wspomnij o nim w odpowiedzi samą nazwą pliku - czat pokazuje go klientowi jako link pod wiadomością, folderów klient nie widzi; krótka odpowiedź nie potrzebuje pliku.
 Pytania do firmy - tylko w ${BUSINESS_QUESTIONS}, nigdy w odpowiedzi dla klienta.
 Nie obiecuj klientowi niczego na później („uzupełnię, gdy…”, „firma się odezwie”) - napisz, czego brakuje i co klient może zrobić.`;
 

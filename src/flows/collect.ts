@@ -25,6 +25,9 @@ export interface CollectSession {
   // Offer check (fields of type "select"): what was already queried per field, so
   // a customer who insists on something we could not find is not asked again.
   offerChecked?: Record<string, string>;
+  // Required fields this order does not need, as the reading call judges from the customer's words (a self-pickup
+  // needs no delivery address; one way of reaching them is enough) - not asked for (2026-11-04 eval: rentbud, kozielewicz).
+  notNeeded?: string[];
   at: number;
 }
 
@@ -96,7 +99,7 @@ export function missingLabels(flow: FlowDefinition, s: CollectSession): string[]
 }
 
 const fieldsOf = (flow: FlowDefinition) => [...flow.requiredInputs, NOTES];
-const missingRequired = (flow: FlowDefinition, s: CollectSession) => flow.requiredInputs.filter((f) => f.required && !(s.values[f.name] || "").trim());
+const missingRequired = (flow: FlowDefinition, s: CollectSession) => flow.requiredInputs.filter((f) => f.required && !(s.values[f.name] || "").trim() && !s.notNeeded?.includes(f.name));
 
 // The summary shown for confirmation: labels in the customer's language (given
 // by the model), values exactly as recorded - the model never rewrites them.
@@ -297,16 +300,21 @@ ${prior || "(none)"}
 
 The customer's new message: """${message.slice(0, 1000)}"""
 
-Output {"language": "...", "switched": false, "intent": "...", "values": {...}, "question": "..."}:
+The business's description of this form: """${flow.description.slice(0, 600)}"""
+Required fields: ${flow.requiredInputs.filter((f) => f.required).map((f) => f.name).join(", ") || "none"}
+
+Output {"language": "...", "switched": false, "intent": "...", "values": {...}, "question": "...", "not_needed": [...]}:
 - "language": the language the customer writes their sentences in, named in English (e.g. "Polish", "English", "Ukrainian"). Ignore names of places, streets, people and products (a Polish street name in an English sentence is still English).${s.language ? `
 - "switched": true only if in this message the customer clearly writes whole sentences in a language other than ${s.language}, the language of the conversation so far; otherwise false.` : ""}
 - "intent": "confirm" (they confirm the summary / say it is correct), "cancel" (they want to stop the whole order or inquiry), "change" (they correct something already given), or "answer" (anything else: giving details, asking something).
 - "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. Other remarks for the team go into "notes". Dates and relative days ("jutro", "next Friday", "w sobotę") as a concrete calendar date with its weekday, in the customer's language (e.g. "piątek, 17.10.2026"), counted from today. Empty object if the message gives no values.
-- "question": a question this new message asks the business (a price, availability, a term, whether something is possible), in the customer's words; "" if it asks none (details and remarks are not questions).`,
+- "question": a question this new message asks the business (a price, availability, a term, whether something is possible), in the customer's words; "" if it asks none (details and remarks are not questions).
+- "not_needed": keys of required fields this order does not need, judging by everything the customer has said: a field that does not apply to it (a delivery address when they collect it themselves), or a second way of reaching them when they already gave one (a phone number when they gave an e-mail, or the reverse) unless the business's description asks for both; [] otherwise.`,
     500,
   ));
   if (!read) throw new Error("collect: unparseable model reply");
   const intent = quick || (["confirm", "cancel", "change", "answer"].includes(read.intent) ? read.intent : "answer");
+  if (!quick && Array.isArray(read.not_needed)) s.notNeeded = read.not_needed.filter((k: unknown) => typeof k === "string" && flow.requiredInputs.some((f) => f.name === k));
   // The conversation's language is set by the first message and changes only
   // when the customer clearly switches (a Polish address in an English message
   // is not a switch).
@@ -381,7 +389,9 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}, 
   // translated into the customer's language.
   const shown = fields.filter((f) => (s.values[f.name] || "").trim());
   const replySystem = `You are the chat assistant of ${brand || "this business"}. Write the assistant's next chat message: short, friendly, no lists. Write it in ${language}; the field names in the task may be in another language - translate them into ${language}. Nothing is sent to the team until the customer confirms the summary - never say that anything was sent, passed on or booked${outcome === "send" ? " (except now: it is being passed on)" : ""}. If a field does not fit what the customer wants (e.g. a delivery address for a renovation job), ask for its sensible equivalent (e.g. the address of the job). Output only JSON.`;
+  // The details so far, so the reply addresses the customer as they wrote (their name - "Pan/Pani gotowy/a" was written to "Jan").
   const replyUser = `Customer's latest message: """${message.slice(0, 600)}"""
+Details the customer has given so far (to address them correctly - don't list them): ${JSON.stringify(s.values).slice(0, 800)}
 
 Your task: ${task}
 

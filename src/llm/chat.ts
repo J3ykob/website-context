@@ -716,6 +716,9 @@ export class WebsiteChat {
 
     const rt = await this.routeTurn(sanitizedMessages, question);
     markTurn(`routed ${rt?.intent || "-"}`);
+    // The owner or staff testing their chat (kept for the conversation once Jev is sure): answered as their chat, not as a customer.
+    if (rt && rt.owner >= (Number(process.env.JEV_OWNER_MIN) || 0.6)) st.owner = true;
+    if (rt) noteTurn("owner", { score: rt.owner, owner: !!st.owner });
     // An attempt on the assistant itself (any language, Jev): answered as a blocked message - no facts, no tools.
     if (rt && rt.injection >= (Number(process.env.JEV_INJECTION_MIN) || 0.8)) {
       noteTurn("injection", rt.injection);
@@ -853,6 +856,12 @@ export class WebsiteChat {
     let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[]; partners: { tenantId: string; label: string }[] } | null = null;
     let searching: { matches: Promise<EcosystemMatch[]>; need: string } | null = null;
     let productLinks: string[] = [];
+    const owner = !!st.owner;
+    // Our own phone numbers / e-mails, and whether an earlier reply of this conversation already gave one.
+    const prof = this.context.businessProfile;
+    const ownContacts = [prof?.primaryPhone?.value, prof?.primaryEmail?.value, ...(prof?.alternatePhones || [])].filter(Boolean).map((c) => String(c).includes("@") ? String(c).toLowerCase() : String(c).replace(/\D/g, "").slice(-9)).filter((c) => c.length >= 6);
+    const hasContact = (t: string) => { const digits = t.replace(/\D/g, ""), low = t.toLowerCase(); return ownContacts.some((c) => (c.includes("@") ? low : digits).includes(c)); };
+    const contactGiven = messages.slice(0, -1).some((m) => m.role === "assistant" && hasContact(m.content));
     if (opts.networkNeed && this.askEcosystem) {
       const found = await Promise.race([this.askEcosystem([{ role: "user", content: opts.networkNeed }]).catch(() => [] as EcosystemMatch[]), new Promise<EcosystemMatch[]>((r) => setTimeout(() => r([]), 15000))]);
       if (found.length) network = await this.networkBlock(found, opts.networkNeed);
@@ -1002,7 +1011,7 @@ export class WebsiteChat {
       // for recommendations elsewhere (router intent): the network too, next to what we have (W3: the venue's
       // 120 zł "photographer service" fee was judged ours and the photographers found were dropped).
       const alsoNetwork = answered && !outOfScope && rt?.intent === "elsewhere";
-      if ((!answered || outOfScope || alsoNetwork) && net) {
+      if ((!answered || outOfScope || alsoNetwork) && net && !owner) {
         // Matches already there: one reply. Still searching and the widget can show it: say so now, show the
         // search, continue the message when the matches come (the owner's wish 2026-10-27, like Gemini's search).
         const quick = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), this.statusOf.has(sessionKey) ? 400 : 10000))]); // no live status (API / tests): wait for the network search (3-8 s since it splits the need into parts)
@@ -1015,26 +1024,27 @@ export class WebsiteChat {
         }
       }
       if (!answered && !network && !searching) {
-        behaviour.push(BEHAVIOUR.noInfo);
+        behaviour.push(owner || contactGiven ? BEHAVIOUR.noInfoBare : BEHAVIOUR.noInfo);
         // Offered at most once per question: again only for a new question two or more turns later, never after a decline.
-        const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
+        const offerOk = rt && !owner && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
       if (answered && !network && !searching) behaviour.unshift(BEHAVIOUR.answer);
       if (answered && partial && !network && !searching) {
-        behaviour.push(BEHAVIOUR.partial);
+        behaviour.push(owner || contactGiven ? BEHAVIOUR.partialBare : BEHAVIOUR.partial);
         // Our information on it is vague and the network has businesses for it: offer to check them (the
         // customer decides - network last, our own answer first). Not for what we clearly do ourselves (Jev "ours"
         // >= 0.8): a missing detail of our own product (Beton-Lazy's price per m3, Ostap's daily scaffolding rate,
         // the florist's ribbon) offered the customer our competitors - 7 times in the 2026-11-04 eval, "ours" 0.85-0.97.
         const netHas = net && !st.handoffDeclined && oursScore < 0.8 ? ((await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), 1500))]))?.length ?? 0) : 0;
-        const offerOk = rt && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
+        const offerOk = rt && !owner && this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
         noteTurn("partialOffer", { netHas, offerOk: !!offerOk });
         if (netHas && offerOk) { behaviour.push(BEHAVIOUR.offerNetwork); opts.handoffKind = "network"; }
         else if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
     }
     behaviour.push(...(opts.extra || []));
+    if (owner) behaviour.unshift(BEHAVIOUR.owner);
 
     const brand = this.brandName || this.context.businessProfile?.businessName?.value || this.getAllowedDomain() || "our business";
     const pages = this.context.siteMap.slice(0, 20).map((p) => `- ${p.title} (${p.url})`).join("\n");
@@ -1045,8 +1055,16 @@ export class WebsiteChat {
     const notes = [...this.contextNotes].reverse().map((n) => `Q: ${n.question}\nA: ${n.answer}`).filter((t) => (notesLen += t.length + 2) <= 12000).join("\n\n");
     // What the chat is (a fact, for "what is this? how do you know this?" - owners testing their demo were told to write to their own e-mail).
     // The panel only when the owner really added answers there: on a demo "the firm gave me more information" was false (blind pairs, iteration 3).
+    // For the owner: what this chat is, from data (pages read, the date, the price list, the panel's answers, where inquiries go).
+    const priced = this.offerItems.filter((i) => i.price_value != null).length;
+    const readOn = (() => { const d = Date.parse(this.context.lastUpdated || ""); return Number.isFinite(d) ? new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", day: "numeric", month: "long", year: "numeric" }).format(new Date(d)) : ""; })();
+    const about = owner ? [
+      `- This is the Whisp chat on the website of ${brand}${this.getAllowedDomain() ? ` (${this.getAllowedDomain()})` : ""}. It answers from ${this.context.pages?.length || this.context.siteMap?.length || 0} pages of that website${readOn ? `, read on ${readOn}` : ""}${this.offerItems.length ? `, with ${this.offerItems.length} offer items read from them (${priced} with a price)` : ", which show no price list"}${this.contextNotes.length ? `, and ${this.contextNotes.length} answers the owner added in the Whisp panel` : ""}.`,
+      "- It cannot change its information itself: the owner corrects it or adds answers in the Whisp panel; changes on the website reach the chat when the website is read again.",
+      "- When a customer wants it, the chat takes their question or order with their contact details and, once they confirm, sends it to the business by e-mail and to the inquiries in the Whisp panel.",
+    ].join("\n") : "";
     let system = `You are the website chat assistant of ${brand}. You speak for the business as "we". You answer from ${brand}'s own website and price list${this.contextNotes.length ? " and what the business added in its Whisp panel" : ""}.${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
-${renderOfficialInfo(this.context.businessProfile)}${notes ? `\n## Answers from the owner\n${notes}\n` : ""}
+${renderOfficialInfo(this.context.businessProfile)}${notes ? `\n## Answers from the owner\n${notes}\n` : ""}${about ? `\n## About this chat\n${about}\n` : ""}
 ${packText ? `\n## Our information for this conversation (use only this for facts about us)\n${packText}\n` : opts.noFacts ? "" : "\n## Our information for this conversation\n(nothing in our information answers this message)\n"}
 ${network ? `\n## Businesses from our network (their own information)\n${network.text}\n` : ""}
 ${pages ? `\n## Pages of our website\n${pages}\n` : ""}
@@ -1121,23 +1139,20 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       // demo) is not blocked as unsupported - it was, in 3 of 14 fact-check blocks of the 2026-11-04 eval.
       { content: `This is the chat on the website of ${brand}${this.getAllowedDomain() ? ` (${this.getAllowedDomain()})` : ""}: it answers customers' questions for the business from the business's own website and price list and what the business added.` },
       // Offering to check the network is something this chat really does (on a yes it searches) - not a claim about the business.
-      ...(opts.handoffKind === "network" ? [{ content: "This chat can check businesses from our local Whisp network for the customer's question, if the customer wants that." }] : [])];
+      ...(opts.handoffKind === "network" ? [{ content: "This chat can check businesses from our local Whisp network for the customer's question, if the customer wants that." }] : []),
+      ...(about ? [{ content: about }] : [])];
     const factsText = `${renderOfficialInfo(this.context.businessProfile)}\n${passages.join("\n")}`;
     const hasPhone = /(?:\+?\d[\d\s().-]{7,}\d)/.test(factsText.replace(/\d{2}-\d{3}/g, "")), hasEmail = /[\w.+-]+@[\w-]+\.[\w.]+/.test(factsText);
     const allowedLinks = new Set([...(network?.links || []), ...this.context.siteMap.map((p) => p.url), ...used.map((p) => p.url), ...productLinks].filter(Boolean));
     const siteHost = (() => { try { return new URL(this.context.siteMap[0]?.url || `https://${this.getAllowedDomain()}`).hostname.replace(/^www\./, ""); } catch { return ""; } })();
     const customerText = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
     const wantOffer = !!opts.handoffKind || !!opts.keepOffer;
-    // Our own phone numbers / e-mails: a reply without an answer should give one (unless the last reply already did).
-    const prof = this.context.businessProfile;
-    const ownContacts = [prof?.primaryPhone?.value, prof?.primaryEmail?.value, ...(prof?.alternatePhones || [])].filter(Boolean).map((c) => String(c).includes("@") ? String(c).toLowerCase() : String(c).replace(/\D/g, "").slice(-9)).filter((c) => c.length >= 6);
-    const hasContact = (t: string) => { const digits = t.replace(/\D/g, ""), low = t.toLowerCase(); return ownContacts.some((c) => (c.includes("@") ? low : digits).includes(c)); };
+    // A reply without an answer should give our phone or e-mail (unless an earlier reply already did, or the owner is writing).
     // Any phone number or e-mail the reply gives that our information shows (a branch's line counts too).
     const factsDigits = factsText.replace(/\D/g, ""), factsLow = factsText.toLowerCase();
     const givesKnownContact = (t: string) => [...t.matchAll(/(?:\+?\d[\d\s().-]{7,}\d)/g)].some((m) => { const d = m[0].replace(/\D/g, "").slice(-9); return d.length >= 9 && factsDigits.includes(d); })
       || [...t.matchAll(/[\w.+-]+@[\w-]+\.[\w.]+/g)].some((m) => factsLow.includes(m[0].toLowerCase().replace(/[.,;:]+$/, "")));
-    const prevAssistant = messages.slice(0, -1).findLast((m) => m.role === "assistant")?.content || "";
-    const needContact = ownContacts.length > 0 && !network && behaviour.some((b) => b === BEHAVIOUR.noInfo || b === BEHAVIOUR.partial || b === BEHAVIOUR.quote) && !hasContact(prevAssistant);
+    const needContact = ownContacts.length > 0 && !network && !owner && behaviour.some((b) => b === BEHAVIOUR.noInfo || b === BEHAVIOUR.partial || b === BEHAVIOUR.quote) && !contactGiven;
     const finish = (final: string, offers: number): ChatResponse => {
       const cleaned = this.guardReplyLinks(final.replace(/\[\[[^\]]*\]\]/g, "").trim());
       // State for the next turn.
