@@ -993,7 +993,12 @@
   });
 
   // Rotating placeholder
-  var placeholders = [
+  var placeholders = UI_PL ? [
+    "Napisz, czego potrzebujesz…",
+    "Czego szukasz?",
+    "Zapytaj o cokolwiek na tej stronie…",
+    "W czym mogę pomóc?",
+  ] : [
     "Tell me what you need…",
     "What are you looking for?",
     "Ask me anything about this site…",
@@ -2300,7 +2305,7 @@
     </div>\
   </div>\
   <div class="wctx-main wctx-state-idle">\
-    <div class="wctx-idle-prompt">What can I help you with?</div>\
+    <div class="wctx-idle-prompt">' + wctxT("What can I help you with?", "W czym mogę pomóc?") + '</div>\
     <div class="wctx-messages"></div>\
     <div class="wctx-input-zone">\
       <div class="wctx-input-frame">\

@@ -742,6 +742,8 @@ app.get("/demo/:tenantId", async (req, res) => {
   const host = req.get("host") || "website-context-dwoj.onrender.com";
   const baseUrl = process.env.BASE_URL || "https://" + host;
   const brand = tenant.brandName || tenant.domain;
+  // The demo in the business's language: Polish for a .pl site or a Polish visitor (the widget follows the page's lang).
+  const demoPl = /\.pl$/i.test(String(tenant.domain || "")) || /^pl\b/i.test(String(req.headers["accept-language"] || ""));
 
   // A/B experiment: widget start state
   const visitorIp = clientIp(req);
@@ -756,11 +758,11 @@ app.get("/demo/:tenantId", async (req, res) => {
   if (req.query.expanded === "1") startExpanded = true;
 
   res.send('<!DOCTYPE html>\
-<html lang="en">\
+<html lang="' + (demoPl ? "pl" : "en") + '">\
 <head>\
 <meta charset="UTF-8">\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">\
-<title>' + brand + ' - AI assistant by Whisp</title>\
+<title>' + brand + (demoPl ? ' - czat na stronie (Whisp)' : ' - AI assistant by Whisp') + '</title>\
 <link rel="icon" type="image/svg+xml" href="/logo.svg">\
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">\
 <style>\
@@ -876,10 +878,10 @@ body {\
   <div class="demo-brand">\
     <svg class="demo-mark" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1-.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg>\
     <span class="demo-name">Whisp</span>\
-    <span class="demo-badge">Live demo</span>\
+    <span class="demo-badge">' + (demoPl ? 'Pokaz na żywo' : 'Live demo') + '</span>\
   </div>\
   <span class="demo-domain">' + tenant.domain + '</span>\
-  <a class="demo-cta" href="/">Get this for your site</a>\
+  <a class="demo-cta" href="/">' + (demoPl ? 'Chcę to na swojej stronie' : 'Get this for your site') + '</a>\
 </header>\
 <main class="demo-body">\
   <div class="demo-bg" id="demo-bg"></div>\
@@ -895,19 +897,19 @@ body {\
 })();\
 </script>\
   <div class="demo-info" id="demo-info">\
-    <span class="tag">Try it out</span>\
-    <h3>Ask it anything</h3>\
-    <p>This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.</p>\
+    <span class="tag">' + (demoPl ? 'Wypróbuj' : 'Try it out') + '</span>\
+    <h3>' + (demoPl ? 'Zapytaj o cokolwiek' : 'Ask it anything') + '</h3>\
+    <p>' + (demoPl ? 'Czat zna stronę <strong>' + brand + '</strong> - ofertę, ceny, kontakt. Napisz pytanie poniżej.' : 'This AI knows everything about <strong>' + brand + '</strong>. Just start typing below to ask any question.') + '</p>\
     <div class="arrow">↓</div>\
     <button class="demo-dismiss" onclick="document.getElementById(\'demo-info\').style.display=\'none\'">Dismiss</button>\
   </div>\
 </main>\
 <div class="scroll-modal" id="scroll-modal">\
   <div class="scroll-modal-box">\
-    <h3>This is a preview</h3>\
-    <p>You are viewing a screenshot of <strong>' + brand + '</strong> with an AI chat widget. To get this widget on your actual website, sign up below - it takes one line of code.</p>\
-    <a class="scroll-modal-cta" href="/">Get Whisp for your website</a>\
-    <button class="scroll-modal-close" onclick="document.getElementById(\'scroll-modal\').classList.remove(\'show\')">Close and keep chatting</button>\
+    <h3>' + (demoPl ? 'To jest podgląd' : 'This is a preview') + '</h3>\
+    <p>' + (demoPl ? 'To zrzut strony <strong>' + brand + '</strong> z czatem Whisp. Na prawdziwej stronie wstawia się go jedną linijką kodu albo wtyczką WordPress.' : 'You are viewing a screenshot of <strong>' + brand + '</strong> with an AI chat widget. To get this widget on your actual website, sign up below - it takes one line of code.') + '</p>\
+    <a class="scroll-modal-cta" href="/">' + (demoPl ? 'Whisp na Twojej stronie' : 'Get Whisp for your website') + '</a>\
+    <button class="scroll-modal-close" onclick="document.getElementById(\'scroll-modal\').classList.remove(\'show\')">' + (demoPl ? 'Zamknij i pisz dalej' : 'Close and keep chatting') + '</button>\
   </div>\
 </div>\
 <script>\
