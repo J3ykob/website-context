@@ -39,12 +39,20 @@ async function llmJson(system: string, user: string, maxTokens = 1200): Promise<
 // "of" (2026-11-04): a part that only goes with another part's product is the same business's when the product is
 // (src/network/coverage.ts) - Łazy's delivery and pump for its own concrete, a florist's sash and delivery for its wreath.
 // Agent rule 9 said it only as prompt text, and the chat had no way to know it.
+// What the customer says a thing is for stays in its part, and what they only mention is no part (2026-11-04 smoke of the
+// coverage): "panele słoneczne - chodzi mi o prąd" lost the "prąd" that tells photovoltaics from Insanit's solar thermal
+// (insanit-1); "wchodzimy na salę o 17" became a wedding hall to find for a DJ's customer (djmw-2) in 3 of 3 splits with
+// "only what they ask for, not what they only mention", 0 of 3 with "what they want to get - buy, rent or have done";
+// "robicie też dj-a?" (asking whether the business does it) is a request too - one wording returned no parts for it.
 const SPLIT = `Rozpisujesz prośbę klienta na części, o które sieć firm ma złożyć oferty. Zwróć JSON {"parts": ["..."], "of": [...]}:
-jedna część = jeden produkt lub usługa, z ilościami, wymiarami i czasem z prośby (przelicz oczywiste:
-wymiary -> powierzchnia lub objętość, dni tygodnia -> liczba dób). Części piszesz zawsze po polsku, także gdy klient
-pisze w innym języku: produkty i usługi nazywasz tak, jak nazywają je polskie firmy w swoich ofertach. Bez danych
-osobowych klienta (imię, nazwisko, telefon, e-mail, dokładny adres - zostaw najwyżej miejscowość lub dzielnicę).
-Tylko to, o co klient prosi. Gdy wiadomość nie prosi o żaden produkt ani usługę: {"parts": [], "of": []}.
+jedna część = jeden produkt lub usługa, z ilościami, wymiarami, czasem i tym, co klient mówi o jego rodzaju lub
+przeznaczeniu (przelicz oczywiste: wymiary -> powierzchnia lub objętość, dni tygodnia -> liczba dób). Części piszesz
+zawsze po polsku, także gdy klient pisze w innym języku: produkty i usługi nazywasz tak, jak nazywają je polskie firmy
+w swoich ofertach. Bez danych osobowych klienta (imię, nazwisko, telefon, e-mail, dokładny adres - zostaw najwyżej
+miejscowość lub dzielnicę).
+Tylko to, co klient chce dostać - kupić, wynająć albo zlecić (także gdy pyta, czy firma to ma lub robi); nie to, co już
+ma albo tylko wspomina (np. salę, w której będzie impreza, dom, w którym trwa remont).
+Gdy wiadomość nie prosi o żaden produkt ani usługę: {"parts": [], "of": []}.
 "of" - dla każdej części numer (od 0) części, z której produktem ta część tylko idzie (jego dowóz, montaż, instalacja,
 transport, pompowanie, akcesorium), inaczej null.`;
 

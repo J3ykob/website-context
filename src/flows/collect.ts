@@ -182,20 +182,31 @@ Output {"name": "..."}: the name of the ONE specific product or service from the
 
 /**
  * Whether what the customer asks for is part of this business's own offer, judging only by its own
- * information: "not_offered" / "several" when clear, "ok" otherwise, null when it could not be judged.
- * strict: "ok" only when it clearly is offered ("unclear" otherwise).
+ * information: Jev's distribution over offered / several / not_offered / unknown, null when it could not be asked.
  * Whether it is offered is a classification: Jev (stable across runs; the answer model flip-flopped).
  */
-export async function offeredHere(request: string, passages: string[], strict = false): Promise<"ok" | "several" | "not_offered" | "unclear" | null> {
-  if (!passages.length) return strict ? "unclear" : "ok";
+export async function offeredOdds(request: string, passages: string[]): Promise<Record<string, number> | null> {
   const a = await jevAsk({ business_information: passages, customer_request: request }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` part of the business's offer?", criteria: {
-    offered: "Yes: the excerpts show the business offers exactly this, or clearly this.",
+    // A fee, a rule or a mention connected with it is not the offer: a venue's "Obsługa (np. foto, kamera) 120 zł" (a charge per
+    // vendor) was read as its own photographer - by the old "ours" question in chain test W3, and by this one in the
+    // 2026-11-04 coverage smoke ("usługa fotografa": offered 0.80).
+    offered: "Yes: the excerpts show the business offers exactly this, or clearly this - not only a fee, a rule or a mention connected with it.",
     several: "The excerpts show several different offers that could be what the customer means, and it is unclear which one.",
     not_offered: "No: the excerpts show what the business offers in this area, and what was asked is not among it (a different kind of product or service).",
     unknown: "The excerpts do not say whether the business offers this.",
   } } }, 6000);
   if (!a) return null;
-  const probs = ((a.status as any)?.probabilities || {}) as Record<string, number>;
+  return ((a.status as any)?.probabilities || {}) as Record<string, number>;
+}
+
+/**
+ * The same as a verdict: "not_offered" / "several" when clear, "ok" otherwise, null when it could not be judged.
+ * strict: "ok" only when it clearly is offered ("unclear" otherwise).
+ */
+export async function offeredHere(request: string, passages: string[], strict = false): Promise<"ok" | "several" | "not_offered" | "unclear" | null> {
+  if (!passages.length) return strict ? "unclear" : "ok";
+  const probs = await offeredOdds(request, passages);
+  if (!probs) return null;
   // strict: "ok" only when the business clearly offers it (for starting an order form at all).
   if (strict) return (probs.offered ?? 0) >= 0.5 ? "ok" : (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : "unclear";
   return (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : (probs.several ?? 0) >= 0.5 ? "several" : "ok";
