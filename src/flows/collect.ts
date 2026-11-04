@@ -41,13 +41,12 @@ export interface Inquiry {
   at: string;
 }
 
+// No hand-over to the network from inside the form (removed 2026-11-04): whether an order is ours to take is decided
+// once, before a form opens (src/network/coverage.ts in chat.ts); inside it the offer check only notes or suggests.
 export type CollectResult =
   | { reply: string }
   | { reply: string; cancelled: true }
-  | { reply: string; inquiry: Inquiry }
-  // First message, and what the customer wants is not in this business's offer: someone else should
-  // answer it (the network), not this order form.
-  | { reply: string; handover: string[] };
+  | { reply: string; inquiry: Inquiry };
 
 // Free-form questions the customer asks along the way are kept here for the team.
 const NOTES: FlowInput = { name: "notes", label: "Uwagi / pytania klienta", type: "text", required: false, description: "Anything else the customer wants the team to know or answer." };
@@ -183,20 +182,39 @@ Output {"name": "..."}: the name of the ONE specific product or service from the
 
 /**
  * Whether what the customer asks for is part of this business's own offer, judging only by its own
- * information: "not_offered" / "several" when clear, "ok" otherwise, null when it could not be judged.
- * strict: "ok" only when it clearly is offered ("unclear" otherwise).
+ * information: Jev's distribution over offered / several / not_offered / unknown, null when it could not be asked.
  * Whether it is offered is a classification: Jev (stable across runs; the answer model flip-flopped).
+ * message: the customer's own words, when `request` is one part of them (src/network/coverage.ts).
+ * The kind, not the amount (2026-11-04): Bosta's six passages were all about its HydroBeton, yet "permeable concrete for
+ * a driveway, 25 m², 2.5 m³" came out not_offered 0.44-0.53 (the small amount; the customer's "taką małą ilość" pushed it
+ * to 0.58); asked about the kind with the customer's words, offered 0.95-1.00 - while photovoltaics at a solar-thermal
+ * installer went from not_offered 0.60 to 0.77-0.90, and a venue's photographer, a formwork firm's concrete, a bathroom
+ * salon's windows and a photographer's DJ stayed below offered 0.25 (probe, 13 parts).
  */
-export async function offeredHere(request: string, passages: string[], strict = false): Promise<"ok" | "several" | "not_offered" | "unclear" | null> {
-  if (!passages.length) return strict ? "unclear" : "ok";
-  const a = await jevAsk({ business_information: passages, customer_request: request }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` part of the business's offer?", criteria: {
-    offered: "Yes: the excerpts show the business offers exactly this, or clearly this.",
+export async function offeredOdds(request: string, passages: string[], message?: string): Promise<Record<string, number> | null> {
+  const asked = message ? `${request}\n(słowa klienta: "${message.slice(0, 1500)}")` : request;
+  const a = await jevAsk({ business_information: passages, customer_request: asked }, { status: { type: "choice", instructions: "Judging only by `business_information` (excerpts from this business's own website), is what the customer asks for in `customer_request` - that kind of product or service, whatever the quantity, date or place - part of the business's offer?", criteria: {
+    // A fee, a rule or a mention connected with it is not the offer: a venue's "Obsługa (np. foto, kamera) 120 zł" (a charge per
+    // vendor) was read as its own photographer - by the old "ours" question in chain test W3, and by this one in the
+    // 2026-11-04 coverage smoke ("usługa fotografa": offered 0.80).
+    offered: "Yes: the excerpts show the business offers exactly this, or clearly this - not only a fee, a rule or a mention connected with it.",
     several: "The excerpts show several different offers that could be what the customer means, and it is unclear which one.",
     not_offered: "No: the excerpts show what the business offers in this area, and what was asked is not among it (a different kind of product or service).",
     unknown: "The excerpts do not say whether the business offers this.",
   } } }, 6000);
-  if (!a) return null;
-  const probs = ((a.status as any)?.probabilities || {}) as Record<string, number>;
+  // An answer without its distribution was not judged (the coverage read {} as "nothing shows it is offered").
+  const p = (a?.status as any)?.probabilities;
+  return p && typeof p === "object" && Object.keys(p).length ? (p as Record<string, number>) : null;
+}
+
+/**
+ * The same as a verdict: "not_offered" / "several" when clear, "ok" otherwise, null when it could not be judged.
+ * strict: "ok" only when it clearly is offered ("unclear" otherwise).
+ */
+export async function offeredHere(request: string, passages: string[], strict = false): Promise<"ok" | "several" | "not_offered" | "unclear" | null> {
+  if (!passages.length) return strict ? "unclear" : "ok";
+  const probs = await offeredOdds(request, passages);
+  if (!probs) return null;
   // strict: "ok" only when the business clearly offers it (for starting an order form at all).
   if (strict) return (probs.offered ?? 0) >= 0.5 ? "ok" : (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : "unclear";
   return (probs.not_offered ?? 0) >= 0.6 ? "not_offered" : (probs.several ?? 0) >= 0.5 ? "several" : "ok";
@@ -278,7 +296,7 @@ export async function quickAnswer(s: CollectSession, message: string, prior: str
   return c.choice === "confirm" || c.choice === "cancel" || c.choice === "pause" ? c.choice : null;
 }
 
-export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, handOver = false, questionAnswered = false): Promise<CollectResult> {
+export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, questionAnswered = false): Promise<CollectResult> {
   s.at = Date.now();
   const fields = fieldsOf(flow);
   const prior = s.transcript.slice(-12).join("\n");
@@ -349,8 +367,6 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}, 
         if (exact) { s.values[f.name] = exact; s.offerChecked[f.name] = exact; }
         continue;
       }
-      // The opening message asks for something this business does not have: hand it over.
-      if (handOver && s.transcript.length <= 1 && (verdict.status === "not_seen" || verdict.status === "not_offered")) return { reply: "", handover: verdict.missing.length ? verdict.missing : [v] };
       if (verdict.status === "not_seen") {
         offerNote = `Say briefly that you can't see ${verdict.missing.length ? verdict.missing.join(", ") : v} in the offer, so the team will confirm whether they can provide it.`;
         continue;

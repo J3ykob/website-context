@@ -196,12 +196,11 @@ export class TenantManager {
       hasOwnerAccount: () => hasOwnerAccount(tenantId),
       offerItems: (await loadOffer(tenantId).catch(() => null))?.items || [],
       catalogue: getTenant(tenantId)?.settings?.catalogue || null,
-      networkOffers: () => networkOffers(tenantId),
-      // The best-ranked businesses of this tenant's ecosystem answer what its own site can't.
+      // The best-ranked businesses of this tenant's ecosystem answer what its own site can't (only the parts it does not have).
       askEcosystem: ecosystemOf(getTenant(tenantId))
-        ? (messages, onStart) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
+        ? (messages, onStart, parts, keep) => askEcosystem(tenantId, ecosystemOf(getTenant(tenantId)), messages, {
             embed: (texts) => this.bgeProvider.embed(texts),
-          }, onStart)
+          }, onStart, parts, keep)
         : undefined,
       // A question the assistant can't answer goes to the owner through this form - only
       // where someone owns the business on Whisp (an owner account, or an ecosystem member):
@@ -335,22 +334,4 @@ async function recordInquiry(tenantId: string, inquiry: Inquiry): Promise<boolea
     } catch (e: any) { console.warn(`[inquiry] project event failed: ${e?.message || e}`); }
   }
   return stored || emailed;
-}
-
-/**
- * The businesses of this tenant's network that have a structured offer: the
- * tenant itself plus the members of its ecosystem (settings.ecosystem).
- */
-async function networkOffers(tenantId: string): Promise<{ tenantId: string; label: string; items: import("../offer/store.js").OfferItem[] }[]> {
-  const self = getTenant(tenantId);
-  const eco = typeof self?.settings?.ecosystem === "string" ? self.settings.ecosystem.trim() : "";
-  const { listTenants } = await import("./tenant-registry.js");
-  const members = eco ? listTenants().filter((t) => t.id !== tenantId && t.settings?.ecosystem === eco && t.status === "active").slice(0, 40) : [];
-  const all = [self, ...members].filter(Boolean) as NonNullable<typeof self>[];
-  const out = await Promise.all(all.map(async (t) => ({
-    tenantId: t.id,
-    label: t.settings?.siteCard?.brand || t.brandName || t.domain,
-    items: (await loadOffer(t.id).catch(() => null))?.items || [],
-  })));
-  return out.filter((b) => b.items.length);
 }

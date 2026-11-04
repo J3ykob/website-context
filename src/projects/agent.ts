@@ -113,15 +113,14 @@ Zasady:
    o tym nie ma (np. klient chce koszt z dowozem, a cennik nie podaje ceny dowozu). Nie pytaj o sprawy, których klient
    nie poruszył (dostępność terminów, dowóz, kaucja itp.) ani o rzeczy, które wynikają z danych. Wynik przygotuj
    na najrozsądniejszym założeniu (zapisanym w zalozenia.md); firma odpowie, zanim klient go dostanie.
-9. Inne firmy z sieci (cenniki/firmy.md, jeśli jest): tylko dla części, o które prosi zlecający (nie dodawaj
-   rzeczy, o które nie prosił): gdy taka część należy do innej firmy z tej listy, a jej
-   cennik nie podaje potrzebnej ceny lub informacji (albo firma nie ma cennika), zapytaj ją: zapisz
-   zapytania_do_firm.json - lista [{"firma": "<identyfikator z firmy.md>", "pytanie": "konkretne pytanie z ilościami
-   i warunkami"}]. Pytaj firmę, której dopasowane pozycje są dokładnie tą częścią - nie firmy z samymi ogólnymi
-   usługami (np. "usługi budowlane"), gdy jest firma z konkretną pozycją. W pytaniach nie podawaj danych osobowych klienta. Wynik przygotuj tak, jakby ta część była do
-   wyceny; gdy firmy odpowiedzą, dostaniesz zadanie dokończenia. Nie pytaj firmy prowadzącej projekt; gdy
-   w jej danych brakuje ceny produktu lub usługi, który inna firma z listy też oferuje (ten sam produkt lub usługa) -
-   zapytaj tamtą. Usługa dodatkowa do rzeczy firmy prowadzącej (np. dowóz jej sprzętu) to sprawa tej firmy, nie innych.
+9. Inne firmy z sieci (cenniki/firmy.md, jeśli jest) są tylko dla części prośby, których firma prowadząca nie ma
+   w ofercie (cenniki/oferty_sieci.md mówi, która część czyja); części firmy prowadzącej - tylko z jej danych, bez
+   ceny = do wyceny (zasady 1 i 8). Gdy część innej firmy z tej listy nie ma w jej cenniku potrzebnej ceny lub
+   informacji (albo firma nie ma cennika), zapytaj ją: zapisz zapytania_do_firm.json - lista [{"firma": "<identyfikator
+   z firmy.md>", "pytanie": "konkretne pytanie z ilościami i warunkami"}]. Pytaj firmę, której dopasowane pozycje są
+   dokładnie tą częścią - nie firmy z samymi ogólnymi usługami (np. "usługi budowlane"), gdy jest firma z konkretną
+   pozycją. W pytaniach nie podawaj danych osobowych klienta. Wynik przygotuj tak, jakby ta część była do
+   wyceny; gdy firmy odpowiedzą, dostaniesz zadanie dokończenia.
    W tekście dla klienta nie pisz o zapytaniach do innych firm ani o tym, co zrobisz później - o tym informuje
    klienta system; opisz tylko to, co jest teraz (części bez ceny: "do wyceny").
 10. Gdy wyceniasz, zapisz też wybor.json - dla każdej części prośby pozycje, które brałeś pod uwagę, i wybraną:
@@ -134,8 +133,8 @@ Zasady:
 // cenniki/README.md: how the offer files are laid out (general, for any business type).
 const PRICE_README = `# Oferty firm
 
-Zapytanie trafiło do firm z sieci; każda sprawdziła je na swojej ofercie. W firmy.md są tylko firmy, które mają coś
-do tego zapytania. Dla każdej z nich:
+firma.md - firma prowadząca projekt. firmy.md (jeśli jest) - inne firmy z sieci, tylko dla części prośby, których
+firma prowadząca nie oferuje; każda sprawdziła swoją część na swojej ofercie. Dla każdej firmy:
 - cennik_<firma>.csv - pozycje oferty, które firma dopasowała do zapytania: id, nazwa, rodzaj (Produkt, Usługa, Wynajem...), kategoria, cena (opis ceny),
   cena_od, cena_do, waluta, jednostka, dostepnosc, czas_realizacji, opis. Pusta cena = brak ceny w ofercie (do ustalenia z firmą).
 - oferta_<firma>.csv (tylko firma prowadząca projekt) - cała jej oferta, w tym samym formacie, gdy dopasowanych pozycji
@@ -151,9 +150,9 @@ do tego zapytania. Dla każdej z nich:
   ilosc_od_klienta: czego ilość podaje klient (np. metraż) - jeśli jej nie podał, to jest założenie albo "do ustalenia".
 - wycena_<firma>.md (zamiast jej cennika, jeśli jest) - to zapytanie wycenione programem cenowym firmy (zbudowanym
   raz z jej cennika): kwoty dla ilości klienta, wariant najtańszy w sumie, alternatywy poza sumą, czego brakuje.
-Firma bez pliku cennika zgłosiła, że to oferuje (na podstawie opisu) - o ceny trzeba ją zapytać.
-oferty_sieci.md (jeśli jest) - oferty firm z sieci dla każdej części prośby, najlepsze najpierw: punkt wyjścia do wyboru
-firm; ceny sprawdź w cennikach i przelicz sam.
+Inna firma bez pliku cennika zgłosiła, że to oferuje (na podstawie opisu) - o ceny trzeba ją zapytać.
+oferty_sieci.md (jeśli jest) - dla każdej części prośby: czy to część firmy prowadzącej (jej pozycje), czy innych firm
+z sieci (ich oferty, najlepsze najpierw - punkt wyjścia do wyboru firmy); ceny sprawdź w cennikach i przelicz sam.
 `;
 
 const unitLabel = (u?: string) => (u && u !== "unknown" ? FIELDS.unit.values[u]?.label || u : "");
@@ -175,14 +174,16 @@ function componentsCsv(items: OfferItem[]): string | null {
 
 /**
  * The offers of the businesses that answered the need (public data): the items each matched, and for the
- * business running the project its whole offer too. Businesses that have nothing for it stay out.
+ * business running the project its whole offer too - it in firma.md, the others in firmy.md (only for the
+ * parts it does not offer). Businesses that have nothing for it stay out.
  */
-async function priceLists(project: Project, adverts: Advert[], mustAsk: string[] | null, need = ""): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
+async function priceLists(project: Project, adverts: Advert[], mustAsk: string[] | null, need = "", partsOf = new Map<string, string[]>()): Promise<{ files: Record<string, string>; allow: string[]; catalog: string[]; slugs: Record<string, string> }> {
   const files: Record<string, string> = {};
   const slugs: Record<string, string> = {};
   const { networkMembers } = await import("./network.js");
   const about = new Map((await networkMembers(project.initiatorTenantId).catch(() => [])).map((m) => [m.tenantId, m.about]));
   const directory: string[] = [];
+  let hostBlock = "";
   const allow: string[] = [];
   const catalog = new Set<string>();
   const used = new Set<string>();
@@ -196,7 +197,10 @@ async function priceLists(project: Project, adverts: Advert[], mustAsk: string[]
     return pb?.parts.length ? Promise.race([m.quoteText(pb, text).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 20000))]) : null;
   };
   const ids = [own, ...adverts.map((a) => a.tenantId).filter((id) => id !== own)];
-  const quotes = await Promise.all(ids.map((id) => (quoting && need ? quoteOf(id, need) : null)));
+  // Another firm's program prices only the parts it was picked for (partsOf): given the whole request it read the
+  // business's own products too, and their prices came into wycena_<firm>.md for the agent to compare.
+  const quoteNeed = (id: string) => (id === own ? need : (partsOf.get(id) || []).join("\n"));
+  const quotes = await Promise.all(ids.map((id) => (quoting && quoteNeed(id) ? quoteOf(id, quoteNeed(id)) : null)));
   if (quoting) console.log(`[pricing] ${project.id}: quoting models priced ${ids.filter((_, k) => quotes[k]).join(", ") || "none"} of ${ids.length}`);
   for (const [n, tenantId] of ids.entries()) {
     const ad = byTenant.get(tenantId);
@@ -224,8 +228,11 @@ async function priceLists(project: Project, adverts: Advert[], mustAsk: string[]
       if (unpriced.length) lines.push(unpriced.length === matched.length ? "W dopasowanych pozycjach nie ma cen - o ceny trzeba zapytać firmę." : `Bez ceny: ${unpriced.slice(0, 8).map((i) => i.name).join("; ")} - o ich ceny trzeba zapytać firmę.`);
     }
     if (whole.length && !quote) lines.push(`Cała oferta: oferta_${slug}.csv (${whole.length})`);
-    if (!matched.length && !whole.length && !quote) lines.push("Brak cennika w danych - o ceny trzeba zapytać firmę.");
-    directory.push(lines.join("\n"));
+    if (!matched.length && !whole.length && !quote && tenantId !== own) lines.push("Brak cennika w danych - o ceny trzeba zapytać firmę.");
+    // The business running the project in a file of its own: listed among "the network's businesses" it was asked
+    // like a competitor for its own unpriced products (djmw-2, betonlazy-1 - 2026-11-04 eval).
+    if (tenantId === own) hostBlock = lines.join("\n");
+    else directory.push(lines.join("\n"));
     if (quote) files[`wycena_${slug}.md`] = `# Wycena: ${label}\n\nPoliczone programem cenowym firmy (zbudowanym z jej cennika) dla tego zapytania. Kwoty bierz stąd; "needs" = brakuje danych od klienta.\n\n${quote}\n`;
     else {
       if (matched.length) files[`cennik_${slug}.csv`] = itemsCsv(matched);
@@ -235,7 +242,8 @@ async function priceLists(project: Project, adverts: Advert[], mustAsk: string[]
     }
     for (const i of [...matched, ...whole]) for (const w of i.name.split(" ")) if (w.length > 2) catalog.add(w);
   }
-  if (directory.length > 1) files["firmy.md"] = `# Firmy z sieci, które mają coś do tego zapytania\n\n${directory.join("\n\n")}\n`;
+  if (hostBlock) files["firma.md"] = `# Firma prowadząca projekt\n\n${hostBlock}\n`;
+  if (directory.length) files["firmy.md"] = `# Inne firmy z sieci - tylko dla części, których firma prowadząca nie oferuje\n\n${directory.join("\n\n")}\n`;
   return { files, allow: allow.filter(Boolean), catalog: [...catalog].slice(0, 3000), slugs };
 }
 
@@ -253,14 +261,23 @@ function fileSlug(s: string): string {
   return out.slice(0, 40);
 }
 
-/** cenniki/oferty_sieci.md: the offers the network gave per part, best first (picked by Jev). */
-function networkOffersText(parts: string[], offers: NetworkOffer[], own: string, businessLabel: (id: string) => string, isListed: (id: string) => boolean): string {
-  const out = ["# Oferty firm z sieci (wybrane najlepsze dla każdej części; ceny przelicz sam - nie przepisuj wyników)", ""];
+/**
+ * cenniki/oferty_sieci.md, per part of the request: whose it is. A part of the business running the project lists its
+ * own items (no price = to be quoted); a part it does not offer, the network's offers best first (picked by Jev).
+ */
+function networkOffersText(parts: string[], offers: NetworkOffer[], ownParts: boolean[], host: string, businessLabel: (id: string) => string, isListed: (id: string) => boolean): string {
+  const out = ["# Oferty dla części prośby (ceny przelicz sam - nie przepisuj wyników)", ""];
   parts.forEach((p, k) => {
-    out.push(`## Część ${k + 1}: ${p}`);
-    const mine = offers.filter((o) => o.part === k);
-    if (!mine.length) out.push("Żadna firma z sieci nie złożyła oferty.");
-    mine.forEach((o, n) => out.push(`${n + 1}. ${businessLabel(o.tenantId)}${o.tenantId === own ? " (firma prowadząca)" : ""}${isListed(o.tenantId) ? " (z publicznych danych firmy, niepotwierdzone)" : ""} - ${o.precise ? "cena z cennika" : "cena do ustalenia"}: ${o.text}${o.items.length ? ` [pozycje: ${o.items.map((i) => i.name).join("; ")}]` : ""}`));
+    if (ownParts[k]) {
+      out.push(`## Część ${k + 1}: ${p} - część firmy prowadzącej (${businessLabel(host)})`);
+      const items = offers.filter((o) => o.part === k && o.tenantId === host).flatMap((o) => o.items);
+      out.push(items.length ? `Jej pozycje: ${items.map((i) => `${i.name} (${priceText(i) || (i.components.some((c) => c.price_value !== null) ? "patrz skladniki" : "brak ceny = do wyceny")})`).join("; ")}` : "Jej oferta według jej strony (wiedza/), bez pozycji w cenniku - brak ceny = do wyceny.");
+    } else {
+      out.push(`## Część ${k + 1}: ${p} - firma prowadząca jej nie oferuje; oferty firm z sieci, najlepsze najpierw`);
+      const theirs = offers.filter((o) => o.part === k && o.tenantId !== host);
+      if (!theirs.length) out.push("Żadna firma z sieci nie złożyła oferty.");
+      theirs.forEach((o, n) => out.push(`${n + 1}. ${businessLabel(o.tenantId)}${isListed(o.tenantId) ? " (z publicznych danych firmy, niepotwierdzone)" : ""} - ${o.precise ? "cena z cennika" : "cena do ustalenia"}: ${o.text}${o.items.length ? ` [pozycje: ${o.items.map((i) => i.name).join("; ")}]` : ""}`));
+    }
     out.push("");
   });
   return out.join("\n");
@@ -273,10 +290,11 @@ async function needOf(projectId: string): Promise<string> {
 }
 
 /**
- * Puts the businesses' data in the repository (public, sent unmasked). The need goes out to the network
- * (advertise): businesses that have something for it come in with the items they matched; the business
- * running the project also with its whole offer. A business answering a request is alone with its own
- * offer. Reused while the need is the same (planner and run share it, up to 10 minutes).
+ * Puts the businesses' data in the repository (public, sent unmasked). The parts of the need the business
+ * running the project does not have go out to the network (broadcast): businesses that have something for
+ * them come in with the items they matched; the business running the project with its confirmed items for
+ * its own parts and its whole offer. A business answering a request is alone with its own offer. Reused
+ * while the need is the same (planner and run share it, up to 10 minutes).
  */
 export async function prepareInputs(projectId: string): Promise<{ allow: string[]; catalog: string[] }> {
   const project = await getProject(projectId);
@@ -298,41 +316,49 @@ export async function prepareInputs(projectId: string): Promise<{ allow: string[
   let mustAsk: string[] | null = [];
   let networkOffers: NetworkOffer[] = [];
   let parts: string[] = [];
+  let ownParts: boolean[] = [];
   if (project.type === BUSINESS_REQUEST) adverts = need ? await advertise(need, tenantIds) : [];
   // Quantities only (how much material for these sizes): nothing to price, so nobody to ask - the
   // network is not involved (it once had the agent ask a contractor to quote a wall for a board count).
   else if (need && !project.memory.pureCalc) {
-    const prevB = project.memory.broadcast as { need: string; parts: string[]; picked: { tenantId: string; part: number; precise: boolean; text: string; items: string[] }[] } | undefined;
-    if (prevB?.need === needHash) {
+    const prevB = project.memory.broadcast as { need: string; parts: string[]; own?: boolean[]; picked: { tenantId: string; part: number; precise: boolean; text: string; items: string[] }[] } | undefined;
+    // Reused only when it knows which parts are the business's own (since 2026-11-04): an older one is made again, so
+    // competitors picked for the business's own parts never come back.
+    if (prevB?.need === needHash && Array.isArray(prevB.own)) {
       const offersOf = new Map(await Promise.all([...new Set(prevB.picked.map((o) => o.tenantId))].map(async (id) => [id, (await loadOffer(id).catch(() => null))?.items || []] as const)));
       networkOffers = prevB.picked.map((o) => ({ ...o, items: (offersOf.get(o.tenantId) || []).filter((i) => o.items.includes(i.id)) }));
-      parts = prevB.parts;
+      parts = prevB.parts; ownParts = prevB.own;
     } else {
+      // The chat's coverage of the request when it started this run (agentTurn keeps its items as ids), else decided on the need.
       const { broadcastNeed } = await import("./broadcast.js");
-      const b = await broadcastNeed(need, tenantIds, project.initiatorTenantId);
-      networkOffers = b.picked; parts = b.parts;
-      await setMemory(projectId, { broadcast: { need: needHash, parts: b.parts, picked: b.picked.map((o) => ({ ...o, items: o.items.map((i) => i.id) })) } });
-      await addEvent(projectId, { kind: "network_offers", actor: "system", data: { ms: b.ms, parts: b.parts, answered: b.answered, declined: b.declined, picked: b.picked.map((o) => ({ tenantId: o.tenantId, part: o.part, precise: o.precise, text: o.text.slice(0, 300) })) } }).catch(() => {});
+      const b = await broadcastNeed(need, tenantIds, project.initiatorTenantId, project.memory.coverage as import("./broadcast.js").GivenCoverage | null | undefined);
+      networkOffers = b.picked; parts = b.parts; ownParts = b.own;
+      await setMemory(projectId, { broadcast: { need: needHash, parts: b.parts, own: b.own, picked: b.picked.map((o) => ({ ...o, items: o.items.map((i) => i.id) })) } });
+      await addEvent(projectId, { kind: "network_offers", actor: "system", data: { ms: b.ms, parts: b.parts, own: b.own, answered: b.answered, declined: b.declined, picked: b.picked.map((o) => ({ tenantId: o.tenantId, part: o.part, precise: o.precise, text: o.text.slice(0, 300) })) } }).catch(() => {});
     }
     // The businesses whose offers were picked come in with the items behind them; the business running
     // the project with its whole offer. A picked offer without a price: that business must be asked.
     const byTenant = new Map<string, OfferItem[]>();
     for (const o of networkOffers) byTenant.set(o.tenantId, [...new Map([...(byTenant.get(o.tenantId) || []), ...o.items].map((i) => [i.id, i])).values()]);
     adverts = [...byTenant].map(([tenantId, items]) => ({ tenantId, items, byDescription: !items.length }));
-    // Per part, the best offer without a price is asked for one - when the part has no priced offer, or
-    // when that offer was picked first (Jev found it better than the priced ones).
+    // Per part we don't have, the best offer without a price is asked for one - when the part has no priced offer,
+    // or when that offer was picked first (Jev found it better than the priced ones). Our own parts: nobody is asked.
     const ask: string[] = [];
     for (let k = 0; k < parts.length; k++) {
+      if (ownParts[k]) continue;
       const mine = networkOffers.filter((o) => o.part === k);
       const vague = mine.find((o) => !o.precise && o.tenantId !== project.initiatorTenantId);
       if (vague && (!mine.some((o) => o.precise) || mine[0] === vague)) ask.push(vague.tenantId);
     }
     mustAsk = project.memory.networkAsked ? [] : [...new Set(ask)].slice(0, MUST_ASK_MAX);
   }
-  const offers = await priceLists(project, adverts, mustAsk, need);
+  // The parts each other firm was picked for (only parts the business running the project does not have).
+  const partsOf = new Map<string, string[]>();
+  for (const o of networkOffers) if (o.tenantId !== project.initiatorTenantId && !ownParts[o.part] && parts[o.part]) partsOf.set(o.tenantId, [...new Set([...(partsOf.get(o.tenantId) || []), parts[o.part]])]);
+  const offers = await priceLists(project, adverts, mustAsk, need, partsOf);
   if (networkOffers.length) {
     const net = await import("./network.js");
-    offers.files["oferty_sieci.md"] = networkOffersText(parts, networkOffers, project.initiatorTenantId, net.businessLabel, net.isListed);
+    offers.files["oferty_sieci.md"] = networkOffersText(parts, networkOffers, ownParts, project.initiatorTenantId, net.businessLabel, net.isListed);
   }
   const out: Record<string, string> = {};
   for (const [name, body] of Object.entries(offers.files)) out[`${PRICE_DIR}/${name}`] = body;
@@ -909,7 +935,10 @@ export async function checkChoices(projectId: string, raw: string): Promise<stri
   if (!Array.isArray(choices)) return ["wybor.json must be a list"];
   const proj = await getProject(projectId);
   if (!proj) return [];
-  const tenants = new Set<string>([proj.initiatorTenantId, ...(await listParticipants(projectId).catch(() => [])).map((p) => p.tenantId)]);
+  // The businesses whose price lists the project was given: the broadcast's picks (the ones asked are among them - they
+  // are no longer participants of the customer's project, src/projects/network.ts askOne) and its participants.
+  const picked = ((proj.memory.broadcast as { picked?: { tenantId?: string }[] } | undefined)?.picked || []).map((o) => String(o?.tenantId || "")).filter(Boolean);
+  const tenants = new Set<string>([proj.initiatorTenantId, ...picked, ...(await listParticipants(projectId).catch(() => [])).map((p) => p.tenantId)]);
   const items = new Map<string, OfferItem>();
   for (const t of tenants) for (const i of (await loadOffer(t).catch(() => null))?.items || []) items.set(i.id.slice(0, 8), i);
   return choiceProblems(choices, items);

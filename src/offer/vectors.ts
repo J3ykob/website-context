@@ -26,10 +26,21 @@ async function embed(texts: string[]): Promise<Float32Array[]> {
   return (await new BGEEmbeddingProvider({ model: MODEL, batchSize: 96 }).embed(texts)).map(unit);
 }
 
-async function itemVectors(tenantId: string, items: OfferItem[]): Promise<Float32Array[]> {
+// The vectors of an offer being read or embedded right now: the parts of one request ask for them at the same moment
+// (romax-3's two parts embedded its 1,239 items twice in parallel - 19.6-23.2 s, 2026-11-04 smoke).
+const inFlight = new Map<string, Promise<Float32Array[]>>();
+
+function itemVectors(tenantId: string, items: OfferItem[]): Promise<Float32Array[]> {
   const key = offerKey(items);
   const hit = memory.get(tenantId);
-  if (hit?.key === key) return hit.vecs;
+  if (hit?.key === key) return Promise.resolve(hit.vecs);
+  const k = `${tenantId}\n${key}`;
+  let p = inFlight.get(k);
+  if (!p) { p = loadVectors(tenantId, items, key).finally(() => inFlight.delete(k)); inFlight.set(k, p); }
+  return p;
+}
+
+async function loadVectors(tenantId: string, items: OfferItem[], key: string): Promise<Float32Array[]> {
   const { downloadFromR2, uploadToR2 } = await import("../storage/r2.js");
   const path = `offer-vectors/${tenantId}.json`;
   try {

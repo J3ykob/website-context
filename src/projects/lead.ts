@@ -66,10 +66,16 @@ export async function leadView(token: string): Promise<LeadView | null> {
   if (unlocked && !inv.unlocked_at) await d1Query("UPDATE network_invites SET unlocked_at = ? WHERE token = ? AND unlocked_at IS NULL", [new Date().toISOString(), token]);
   const expires = Date.parse(inv.created_at) + EXCLUSIVE_MS();
   const status: LeadView["status"] = inv.replied_at ? "replied" : unlocked ? "unlocked" : inv.passed_at || Date.now() > expires ? "passed" : "open";
-  // Before paying it sees what was asked of it (to give a price for free); the customer's own request and
-  // the answer prepared from its price list unlock with the subscription (the owner's decision 2026-10-26).
+  // Before paying it sees what was asked of it (to give a price for free); the customer's request and the answer
+  // prepared from its price list unlock with the subscription (the owner's decision 2026-10-26). The request only as the
+  // parts this business was picked for (the network's split, without personal data), never the rest: the whole
+  // request.txt showed a competitor the business's own products (2026-11-04, owner). A broadcast made before 2026-11-04
+  // (no own[]) cannot tell them apart: then only what was asked of it.
   const parentId = String(sub.memory.parentId || "");
-  const full = parentId ? ((await readFile(parentId, "request.txt").catch(() => null)) || "").trim() : "";
+  const parent = parentId ? await getProject(parentId).catch(() => null) : null;
+  const b = parent?.memory.broadcast as { parts?: string[]; own?: boolean[]; picked?: { tenantId: string; part: number }[] } | undefined;
+  const mine = b && Array.isArray(b.own) ? (b.parts || []).filter((_, k) => !b.own![k] && (b.picked || []).some((o) => o.tenantId === inv.tenant_id && o.part === k)) : [];
+  const full = mine.map((p) => String(p)).join("\n").trim();
   return {
     status, unlocked, business: businessLabel(inv.tenant_id), from: businessLabel(String(sub.memory.fromTenant || "")), brand: "Whisp",
     teaser: question, hiddenChars: Math.max(120, full.length),
@@ -181,10 +187,10 @@ export async function passExpiredLeads(): Promise<number> {
     const parentId = sub?.memory.parentId as string | undefined;
     const parent = parentId ? await getProject(parentId) : null;
     if (!sub || !parent) continue;
-    // The next pick for the same part, not asked yet.
-    const b = parent.memory.broadcast as { picked: { tenantId: string; part: number }[] } | undefined;
+    // The next pick for the same part, not asked yet - only for a part the business running the project does not have.
+    const b = parent.memory.broadcast as { own?: boolean[]; picked: { tenantId: string; part: number }[] } | undefined;
     const asked = new Set(((parent.memory.subRequests as any[]) || []).map((x) => x.tenantId));
-    const parts = new Set((b?.picked || []).filter((o) => o.tenantId === inv.tenant_id).map((o) => o.part));
+    const parts = new Set((b?.picked || []).filter((o) => o.tenantId === inv.tenant_id && !b?.own?.[o.part]).map((o) => o.part));
     const next = (b?.picked || []).find((o) => parts.has(o.part) && !asked.has(o.tenantId) && o.tenantId !== parent.initiatorTenantId);
     await addEvent(parent.id, { kind: "lead_passed", actor: "system", data: { from: inv.tenant_id, to: next?.tenantId || null } });
     if (!next) continue;

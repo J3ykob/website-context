@@ -36,10 +36,33 @@ const PER_PART = () => Number(process.env.NETWORK_SHORTLIST_PART) || 6;
 const MIN_OFFERS = 0.5;
 
 /**
- * The businesses for a need. `include`: a business that always competes (the one running a project);
- * `exclude`: never (the one whose chat asks). `parts`: already split. Never throws.
+ * Which of these items IS the product or service the part asks for - the same thing, so its price prices
+ * that part - not a component of it, a related or partial job, a substitute of another kind, or an
+ * accessory, add-on or delivery that goes with it or that it goes with (Jev, one call, >= 0.5). null when
+ * Jev could not be asked. The network's priced offers (step 4b below) and the business's own items
+ * (src/network/coverage.ts) are judged by the same question. The add-on clause (2026-11-04, owner): a
+ * florist's sash was confirmed as one of its wreaths (600 zł) in 4 of 7 smoke runs and a delivery of
+ * permeable concrete as the concrete itself, so a part was "priced" by another product's price; with it the
+ * sash had 0 of 12 wreaths confirmed, its delivery still 1-2 of 11 (Ukrainian and English copies).
  */
-export async function findBusinesses(need: string, ecosystem: string, opts: { include?: string; exclude?: string; parts?: string[]; perPart?: number } = {}): Promise<FindResult> {
+export async function sameThing(part: string, items: OfferItem[]): Promise<boolean[] | null> {
+  if (!items.length) return [];
+  const { jevAsk } = await import("../llm/jev.js");
+  const { renderItem } = await import("../offer/store.js");
+  const a = await jevAsk({ part_asked: part, items: items.map((it) => renderItem(it).slice(0, 300)) },
+    Object.fromEntries(items.map((_, j) => [`i${j}`, { type: "noul" as const, instructions: `Is \`items[${j}]\` the product or service that \`part_asked\` asks for (the same thing, so its price prices that part) - not a component of it, a related or partial job, a substitute of another kind, or an accessory, add-on or delivery that goes with it or that it goes with?` }])), 8000).catch(() => null);
+  // An item Jev left without an answer was not judged: the whole answer counts as unavailable (a missing key read as
+  // "not the thing" made the business's own part not its own).
+  const odds = items.map((_, j) => (a as any)?.[`i${j}`]?.noul as number | undefined);
+  if (odds.some((p) => typeof p !== "number")) return null;
+  return odds.map((p) => p! >= 0.5);
+}
+
+/**
+ * The businesses for a need. `exclude`: never (the one whose chat asks, or whose project it is - its own
+ * parts are decided by src/network/coverage.ts and never searched here). `parts`: already split. Never throws.
+ */
+export async function findBusinesses(need: string, ecosystem: string, opts: { exclude?: string; parts?: string[]; perPart?: number } = {}): Promise<FindResult> {
   const t0 = Date.now();
   const empty = (parts: string[] = []): FindResult => ({ parts, hits: [], asked: 0, ms: Date.now() - t0 });
   if (!ecosystem || !need.trim()) return empty();
@@ -47,7 +70,8 @@ export async function findBusinesses(need: string, ecosystem: string, opts: { in
   const members = listTenants().filter((t: any) => t.status === "active" && t.settings?.ecosystem === ecosystem && t.id !== opts.exclude);
   if (!members.length) return empty();
   const { splitNeed } = await import("../projects/broadcast.js");
-  const parts = opts.parts ?? (await splitNeed(need).catch(() => [] as string[]));
+  // Not given: split as the asking business's customer wrote it (its description frames the reading).
+  const parts = opts.parts ?? (await splitNeed(need, opts.exclude).catch(() => [] as string[]));
   if (!parts.length) return empty(parts);
 
   const { BGEEmbeddingProvider } = await import("../embeddings/bge-provider.js");
@@ -66,8 +90,7 @@ export async function findBusinesses(need: string, ecosystem: string, opts: { in
     // 2. shortlist (the index; all members when it has nothing for this network)
     const short = await searchNetwork(ecosystem, part, { vector: vecs[k], limit: opts.perPart || PER_PART(), exclude: opts.exclude ? [opts.exclude] : [] }).catch(() => null);
     const scoreOf = new Map((short || []).map((s) => [s.tenant, s.score]));
-    let ids = short ? short.map((s) => s.tenant).filter((id) => memberIds.has(id)) : [...memberIds];
-    if (opts.include && memberIds.has(opts.include) && !ids.includes(opts.include)) ids = [opts.include, ...ids];
+    const ids = short ? short.map((s) => s.tenant).filter((id) => memberIds.has(id)) : [...memberIds];
     ids.forEach((id) => asked.add(id));
     // 3. evidence per candidate: matched items (with prices) and its own closest excerpts
     const ev = await Promise.all(ids.map(async (id) => {
@@ -92,12 +115,10 @@ export async function findBusinesses(need: string, ecosystem: string, opts: { in
     // a related job or a substitute?". Bathroom renovation priced from a screed and a paint job was quoted
     // as a partial bathroom price (chain test C17); the per-business model answer used to make this call.
     const priced = ev.flatMap((e, i) => (scores[i] >= minOffers ? e.items.filter((it) => it.price_value !== null).slice(0, 3).map((it) => ({ e, it })) : []));
-    const { jevAsk } = await import("../llm/jev.js");
-    const same = priced.length ? await jevAsk({ part_asked: part, items: priced.map((x) => renderItem(x.it).slice(0, 300)) },
-      Object.fromEntries(priced.map((_, j) => [`i${j}`, { type: "noul" as const, instructions: `Is \`items[${j}]\` the product or service that \`part_asked\` asks for (the same thing, so its price prices that part) - not a component of it, a related or partial job, or a substitute of another kind?` }])), 8000).catch(() => null) : null;
+    const same = priced.length ? await sameThing(part, priced.map((x) => x.it)) : null;
     // Only priced items judged to be the thing asked keep a place (unjudged ones beyond the first 3 slipped
     // through and the agent quoted silicone and skirting as a bathroom price - C17).
-    const isIt = new Set(priced.filter((_, j) => (((same as any)?.[`i${j}`]?.noul as number) ?? 0) >= 0.5).map((x) => x.it));
+    const isIt = new Set(priced.filter((_, j) => same?.[j]).map((x) => x.it));
     for (const e of ev) { e.items = e.items.filter((it) => it.price_value === null || isIt.has(it)); e.precise = e.items.slice(0, 2).some((it) => it.price_value !== null); }
     // 5. qualified, ranked
     return ev.map((e, i): BusinessHit => ({

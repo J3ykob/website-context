@@ -3,7 +3,8 @@ import type { ChatMessage } from "../src/llm/chat.js";
 import type { TenantManager } from "../src/multi-tenant/tenant-manager.js";
 
 // Live: a business that has not joined the network (OSTAP, treated as listed for this process only).
-// A Rentbud customer asks for something partly OSTAP's: the agent asks OSTAP, OSTAP's part is answered
+// A Rentbud customer asks for something partly OSTAP's - edge protection barriers, which Rentbud does not
+// have (its own parts never go to the network: src/network/coverage.ts): the agent asks OSTAP, OSTAP's part is answered
 // from its public data at once (no owner to wait for) and marked as not confirmed; the customer gets the
 // result; then OSTAP is invited (the invite with its full text is recorded; no email is sent without the
 // email key) and, acting as OSTAP on its link, confirms with a correction - which lands in Rentbud's project.
@@ -41,7 +42,7 @@ afterAll(async () => {
 live("a business that has not joined the network", () => {
   it("is answered from its public data, the customer does not wait, then it is invited and confirms", async () => {
     const chat = await tm.getChatForTenant(TENANT);
-    const w = await chat.chat([{ role: "user", content: "Dzień dobry, potrzebuję rusztowania fasadowego na dom (ok. 120 m2) na 2 tygodnie z montażem, i do tego zagęszczarki 130 kg na 2 doby. Ile to wszystko kosztuje?" } as ChatMessage], session);
+    const w = await chat.chat([{ role: "user", content: "Dzień dobry, potrzebuję systemowych barierek ochronnych na krawędź stropu (siatkowe, EN 13374, ok. 40 m) na 2 tygodnie z montażem, i do tego zagęszczarki 130 kg na 2 doby. Ile to wszystko kosztuje?" } as ChatMessage], session);
     expect(w.project?.agent?.status).toBe("running");
     const pid = w.project!.id;
     let d: any;
@@ -60,25 +61,34 @@ live("a business that has not joined the network", () => {
     console.log(`[final] ${d.status}\n${d.message}\n[subs] ${JSON.stringify(subs)}`);
     expect(d.status).toBe("done");
     expect(ostap?.status).toBe("answered");
+    // The compactor is Rentbud's own: picked for Rentbud alone; OSTAP was picked for a part Rentbud does not have.
+    const b = p.memory.broadcast as { parts: string[]; own: boolean[]; picked: { tenantId: string; part: number }[] };
+    console.log(`[broadcast] ${JSON.stringify(b.parts.map((x, k) => `${b.own[k] ? "own" : "other"}: ${x}`))}`);
+    expect(b.own.some(Boolean)).toBe(true);
+    expect(b.picked.every((o) => !b.own[o.part] || o.tenantId === TENANT)).toBe(true);
+    expect(b.picked.some((o) => !b.own[o.part] && o.tenantId === OSTAP)).toBe(true);
     // OSTAP's part came from its public data, said so in the answer it gave back.
     const back = (await M.repo.listFiles(pid)).filter((f: any) => f.path.startsWith("odpowiedzi_firm/"));
     const answer = await M.repo.readFile(pid, back[0].path);
     expect(answer).toContain("nie dołączyła do sieci");
-    // The invite: recorded with its full text and the link; the link opens in "listed" mode.
+    // The invite: recorded with its full text and the link - the lead page (src/projects/lead.ts), whose token is the review's.
     for (let k = 0; k < 20; k++) { if ((await M.store.projectDetail(ostap.id))?.events.some((e: any) => e.kind === "business_invited")) break; await new Promise((ok) => setTimeout(ok, 3000)); }
     const inv = (await M.store.projectDetail(ostap.id))!.events.find((e: any) => e.kind === "business_invited");
     console.log(`[invite] ${JSON.stringify(inv?.data)}`);
     expect(inv?.data.text).toContain("Rentbud");
-    expect(inv?.data.text).toContain("/review/");
-    const token = String(inv!.data.link).split("/review/")[1];
+    expect(inv?.data.text).toContain("/lead/");
+    const token = String(inv!.data.link).split("/lead/")[1];
+    // OSTAP is not a participant of Rentbud's customer project, so its panel cannot open it (src/projects/routes.ts member).
+    expect((await M.store.projectDetail(pid))!.participants.some((x: any) => x.tenantId === OSTAP)).toBe(false);
+    expect((await M.store.projectsForTenant(OSTAP)).some((x: any) => x.id === pid)).toBe(false);
     const rv = await M.review.reviewByToken(token);
     expect(rv?.status).toBe("pending");
     // Acting as OSTAP: confirm with a correction (what POST /api/review does for a business request).
-    const correction = "Rusztowanie fasadowe: 10 zł za m2 za tydzień, montaż i demontaż 14 zł za m2.";
+    const correction = "Barierki siatkowe Steel Mesh Barrier: 7 zł za metr za tydzień, montaż i demontaż 9 zł za metr.";
     await M.review.decide(token, "approved", { final: correction });
     const { settle } = await import("../src/projects/network.js");
     await settle(ostap.id, correction, "answered");
     const after = await M.store.projectDetail(pid);
-    expect(after.events.some((e: any) => e.kind === "business_confirmed" && String(e.data.answer).includes("10 zł"))).toBe(true);
+    expect(after.events.some((e: any) => e.kind === "business_confirmed" && String(e.data.answer).includes("7 zł"))).toBe(true);
   }, 60 * 60_000);
 });

@@ -177,7 +177,8 @@ export function renderPacks(packs: Pack[], budget = 40000, hits?: string[]): { t
 }
 
 /** The conversation's state as facts for the model (what was already offered, declined, started). */
-export interface PackState { handoffOfferedAt?: number; handoffDeclined?: boolean; referred?: string[]; calcStarted?: boolean; turns: number; lang?: string; lastPacks?: string[]; owner?: boolean; contactGiven?: boolean }
+// requests: the request (the coverage text, chat.ts coverageNeed) of the latest two customer messages, by message.
+export interface PackState { handoffOfferedAt?: number; handoffDeclined?: boolean; referred?: string[]; calcStarted?: boolean; turns: number; lang?: string; lastPacks?: string[]; owner?: boolean; contactGiven?: boolean; requests?: Record<string, string> }
 export function renderState(s: PackState | undefined): string {
   if (!s) return "";
   const lines: string[] = [];
@@ -193,7 +194,6 @@ export const BEHAVIOUR = {
   answer: "Answer the customer's latest message from the information above. If it is a follow-up, answer it in the context of the conversation. If they ask for advice (what to choose, how to do it), give concrete practical advice - product types, classes, standard rules of thumb and quantities - clearly as general professional advice, alongside what our information says.",
   noInfo: "Our information does not answer this. Say so plainly and briefly in your own words (missing information is not a 'no' - never say we don't offer or do it). If the customer asks for advice, give concrete general professional advice (types, classes, rules of thumb), clearly as general advice. Give the contact our information shows for this topic (phone, e-mail, form or platform); if it shows no phone number or e-mail, do not suggest calling or e-mailing.",
   handoff: "Then offer, once and in your own words, to pass this question on to our team so they can reply, and ask whether the customer wants that.",
-  quote: "The customer wants a price or total we cannot calculate: we have no prices for these items here. Say so in your own words, and offer, once, to pass a quote request to our team, asking whether the customer wants that.",
   explainHandoff: "The customer asked what passing the question on means. Explain in your own words: we note their question with the contact details they give and pass it straight to our team, who can reply by phone or email. Then ask whether they want that.",
   network: "Our own information does not cover this, but businesses from our local network do (their information is below). In ONE coherent reply: say briefly, as our information supports it, that this isn't something we handle or that we have no information on it here, then recommend these businesses as businesses from our network (not partners we work with, and without praising or vouching for them), saying what each offers using only their information - prices and totals as given - with their phone and e-mail, and add each one's link exactly as given (markdown) so the customer can continue with them. Do not also offer to pass the question to our team.",
   networkAlso: "The customer asks for recommendations. Give briefly what our own information says that bears on it (exactly as it states it, without presenting it as more than it says), then recommend these businesses from our local network (not partners we work with, and without praising or vouching for them), saying what each offers using only their information - prices and totals as given, with their phone and e-mail, and each one's link exactly as given (markdown). Do not also offer to pass the question to our team.",
@@ -214,8 +214,27 @@ export const BEHAVIOUR = {
   networkCheckAlso: "The customer asks for recommendations. Give briefly what our own information says that bears on it (exactly as it states it, without presenting it as more than it says), then say in one short sentence that you are also checking businesses from our local Whisp network right now. Nothing more: no business names yet, no questions.",
   networkCheck: "Our information doesn't cover this, or shows it isn't something we do. Say that briefly, as our information supports it (missing information is not a 'no'), then say in one short sentence that you are checking businesses from our local Whisp network right now. Nothing more: no business names yet, no questions.",
   networkFound: "You have just checked our local Whisp network: recommend these businesses (their information is below) as businesses from our network (not partners we work with, without praising them), saying what each offers using only their information - prices and totals as given - with their phone and e-mail, and each one's link exactly as given (markdown) so the customer can continue with them. Do not offer to pass the question to our team.",
-  offerNetwork: "Then offer, once and in your own words, to check businesses from our local Whisp network for the detail our information does not give, and ask whether the customer wants that.",
+  // The parts our information does not show we offer (src/network/coverage.ts): "the detail our information does not give"
+  // pointed the offer at our own products - Łazy's price per m3, Ostap's daily rate, the florist's ribbon (2026-11-04 eval).
+  offerNetwork: (parts: string[]) => `Then offer, once and in your own words, to check businesses from our local Whisp network for ${parts.join("; ")} - which our information does not show we offer - and ask whether the customer wants that.`,
   networkAccepted: "The customer agreed that we check our local Whisp network for their question. Recommend these businesses (their information is below) as businesses from our network (not partners we work with, without praising or vouching for them), saying what each offers using only their information - prices and totals as given - with their phone and e-mail, and each one's link exactly as given (markdown). Do not offer to pass the question to our team.",
   networkNone: "You have just checked our local Whisp network and found no business for this. Say so briefly, and give our phone or e-mail so the customer can ask us directly.",
   smalltalk: "This is a greeting, thanks or small talk: reply naturally and briefly and offer help with our business. No offers to pass anything on.",
 };
+
+/**
+ * A behaviour's name for the eval traces, also for the ones a function makes (offerNetwork(parts), whichAction(names)):
+ * those match by their fixed text before the first argument - the trace showed offerNetwork as its first 40 characters,
+ * which are the hand-off's too.
+ */
+export function behaviourName(b: string): string {
+  for (const [name, v] of Object.entries(BEHAVIOUR)) {
+    if (v === b) return name;
+    if (typeof v !== "function") continue;
+    const marked = (v as (x: string[]) => string)(["\u0000"]), empty = (v as (x: string[]) => string)([]);
+    let n = 0;
+    while (n < marked.length && marked[n] === empty[n] && marked[n] !== "\u0000") n++;
+    if (n >= 20 && b.startsWith(marked.slice(0, n))) return name;
+  }
+  return b.slice(0, 40);
+}

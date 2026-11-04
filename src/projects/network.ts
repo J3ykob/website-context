@@ -49,6 +49,16 @@ export function businessLabel(tenantId: string): string {
   return t?.settings?.siteCard?.brand || t?.brandName || t?.domain || tenantId;
 }
 
+/**
+ * The business's one-line description - its site card's "place · kind" label and tagline ("Warszawa · DJ, wodzirej i
+ * konferansjer - DJ, wodzirej i konferansjer na wesela..."): whom a customer writes to, for reading what they ask for
+ * (the split, src/network/coverage.ts). "" when it has no site card.
+ */
+export function businessLine(tenantId: string): string {
+  const card = getTenant(tenantId)?.settings?.siteCard || {};
+  return [card.eyebrow, card.tagline].filter((x: unknown): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim()).join(" - ").slice(0, 300);
+}
+
 /** The network the business belongs to (itself included), with what each member does. */
 export async function networkMembers(tenantId: string): Promise<NetworkMember[]> {
   const self = getTenant(tenantId);
@@ -125,26 +135,52 @@ export async function askBusinesses(parentId: string, slugs: Record<string, stri
   let raw: RawRequest[] = [];
   try { raw = JSON.parse((await readFile(parentId, REQUESTS_FILE)) || "[]"); } catch { raw = []; }
   if (!Array.isArray(raw)) raw = [];
+  // Only businesses the broadcast picked for a part the business running the project does not have (structure: the
+  // agent can name any firm in its files, and a project broadcast before 2026-11-04 picked competitors for its own parts).
+  const b = parent.memory.broadcast as { parts?: string[]; own?: boolean[]; picked?: { tenantId: string; part: number }[] } | undefined;
+  const picked = new Set((b?.picked || []).filter((o) => !b?.own?.[o.part]).map((o) => o.tenantId));
+  // What the business running the project has itself: a request that also asks about one of these is not sent (a firm
+  // picked for the pump asked "a pump and 8 m3 of B20" would quote the business's own concrete).
+  const ownParts = (b?.parts || []).filter((_, k) => b?.own?.[k]).map((p) => String(p).slice(0, 300));
   const byTenant = new Map<string, string[]>();
+  let notPicked = 0;
   for (const r of raw.slice(0, MAX_REQUESTS * 3)) {
     const tenantId = slugs[String(r?.firma || "").trim()];
     const q = String(r?.pytanie || "").trim();
     if (!tenantId || tenantId === parent.initiatorTenantId || q.length < 5) continue;
+    if (!picked.has(tenantId)) { notPicked++; continue; }
     byTenant.set(tenantId, [...(byTenant.get(tenantId) || []), q.slice(0, 2000)]);
   }
+  if (notPicked) await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped: notPicked, notPicked: true } });
   // Only parts the customer asked for (the agent tends to add extras: materials nobody mentioned, etc.).
   if (byTenant.size) {
     const { jevAsk } = await import("../llm/jev.js");
     const conversation = ((await readFile(parentId, "rozmowa.md").catch(() => null)) || (await readFile(parentId, "request.txt").catch(() => null)) || "").slice(-3000);
     const entries = [...byTenant.entries()].flatMap(([t, qs]) => qs.map((q) => ({ t, q })));
     const qs: Record<string, { type: "noul"; instructions: string }> = {};
-    entries.forEach((e, k) => { qs[`r${k}`] = { type: "noul", instructions: `A request to another business: "${e.q.slice(0, 600)}". Did the customer, in \`conversation\`, ask for the specific product, service or part this request is about? Only if the customer brought it up - an addition the customer never mentioned does not count.` }; });
-    const a = await jevAsk({ conversation }, qs, 10_000);
+    entries.forEach((e, k) => {
+      qs[`r${k}`] = { type: "noul", instructions: `A request to another business: "${e.q.slice(0, 600)}". Did the customer, in \`conversation\`, ask for the specific product, service or part this request is about? Only if the customer brought it up - an addition the customer never mentioned does not count.` };
+      if (ownParts.length) qs[`o${k}`] = { type: "noul", instructions: `A request to another business: "${e.q.slice(0, 600)}". Does it ask that business about any of \`own_parts\` (what the business sending it offers itself) - its price, supply or availability?` };
+    });
+    const a = await jevAsk({ conversation, ...(ownParts.length ? { own_parts: ownParts } : {}) }, qs, 10_000);
+    // Fail closed: whether a request also asks about the business's own parts could not be checked - none goes out (those
+    // parts stay to be quoted; a later round asks again). Without own parts, as before: sent unchecked.
+    if (!a && ownParts.length) {
+      await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped: entries.length, unchecked: true } });
+      return false;
+    }
     if (a) {
       byTenant.clear();
-      entries.forEach((e, k) => { if ((((a as any)[`r${k}`]?.noul as number) ?? 1) >= 0.5) byTenant.set(e.t, [...(byTenant.get(e.t) || []), e.q]); });
+      let ownAsked = 0;
+      entries.forEach((e, k) => {
+        if ((((a as any)[`r${k}`]?.noul as number) ?? 1) < 0.5) return;
+        // The own-parts answer missing (Jev left the key out): not checked = not sent, as when the call fails.
+        const o = (a as any)[`o${k}`]?.noul as number | undefined;
+        if (ownParts.length && (typeof o !== "number" || o >= 0.5)) { ownAsked++; return; }
+        byTenant.set(e.t, [...(byTenant.get(e.t) || []), e.q]);
+      });
       const dropped = entries.length - [...byTenant.values()].flat().length;
-      if (dropped) await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped } });
+      if (dropped) await addEvent(parentId, { kind: "business_requests_dropped", actor: "system", data: { dropped, ...(ownAsked ? { ownParts: ownAsked } : {}) } });
     }
   }
   if (!byTenant.size) return false;
@@ -165,7 +201,9 @@ export async function askOne(parentId: string, tenantId: string, question: strin
   const listed = isListed(tenantId);
   const sub = await createProject(BUSINESS_REQUEST, { customerSession: `project:${parentId}`, initiatorTenantId: tenantId, title: `Zapytanie od ${from}`.slice(0, 120), memory: { parentId, fromTenant: parent.initiatorTenantId, ...(listed ? { listed: true } : {}) }, ttlHours: 30 * 24 });
   await addParticipant(sub.id, parent.initiatorTenantId, "initiator").catch(() => {});
-  await addParticipant(parentId, tenantId, "quoting").catch(() => {});
+  // The asked business is not made a participant of the customer's project: a participant read that project whole
+  // through the dashboard (the host's own parts and prices, the conversation, the customer's contact) and could run
+  // its agent (review 2026-11-04; done since 7bcebd1). Its own request project links back (memory.parentId).
   const request = `Firma ${from} (z tej samej sieci firm) przygotowuje dla swojego klienta wycenę / projekt i pyta Twoją firmę:\n\n${question}\n`;
   await writeFile(sub.id, "request.txt", request, "txt", `business:${parent.initiatorTenantId}`);
   await writeFile(sub.id, "rozmowa.md", `# Zapytanie od ${from}\n\n**${from}:** ${question}\n`, "md", "system");

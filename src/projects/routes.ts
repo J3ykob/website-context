@@ -32,6 +32,9 @@ import { logMessage } from "../storage/conversation-store.js";
 
 export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler }): void {
   const tid = (req: any) => req.tenantId as string;
+  // Only the businesses running a project open it: its initiator, and a business that sent it a request (made an
+  // initiator of that business_request). Another role never does: every business asked for one part was a "quoting"
+  // participant of the customer's whole project until 2026-11-04 (src/projects/network.ts askOne) - those rows stay.
   const member = async (id: string, tenantId: string) => {
     const d = await projectDetail(id);
     return d && seesInPanel(d.project, d.participants, tenantId) ? d : null;
