@@ -296,11 +296,12 @@ ${prior || "(none)"}
 
 The customer's new message: """${message.slice(0, 1000)}"""
 
-Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
+Output {"language": "...", "switched": false, "intent": "...", "values": {...}, "question": "..."}:
 - "language": the language the customer writes their sentences in, named in English (e.g. "Polish", "English", "Ukrainian"). Ignore names of places, streets, people and products (a Polish street name in an English sentence is still English).${s.language ? `
 - "switched": true only if in this message the customer clearly writes whole sentences in a language other than ${s.language}, the language of the conversation so far; otherwise false.` : ""}
 - "intent": "confirm" (they confirm the summary / say it is correct), "cancel" (they want to stop the whole order or inquiry), "change" (they correct something already given), or "answer" (anything else: giving details, asking something).
-- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. A question the customer asks (price, availability...) goes into "notes". Dates and relative days ("jutro", "next Friday", "w sobotę") as a concrete calendar date with its weekday, in the customer's language (e.g. "piątek, 17.10.2026"), counted from today. Empty object if the message gives no values.`,
+- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. Other remarks for the team go into "notes". Dates and relative days ("jutro", "next Friday", "w sobotę") as a concrete calendar date with its weekday, in the customer's language (e.g. "piątek, 17.10.2026"), counted from today. Empty object if the message gives no values.
+- "question": a question this new message asks the business (a price, availability, a term, whether something is possible), in the customer's words; "" if it asks none (details and remarks are not questions).`,
     500,
   ));
   if (!read) throw new Error("collect: unparseable model reply");
@@ -368,7 +369,8 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}}:
   else if (!missing.length) { outcome = "summary"; task = "In ONE sentence, ask them to check the summary and confirm it or correct anything. Do not list the details yourself."; }
   else { outcome = "ask"; task = `Ask, briefly, for exactly these details and nothing else: ${missing.slice(0, 2).map((f) => `${f.label}${f.description ? ` (${f.description})` : ""}`).join("; ")}.`; }
   if (offerNote && outcome !== "cancel" && outcome !== "send") task = `${offerNote} Then: ${task}`;
-  const asked = (read.values?.notes || "").trim();
+  const asked = typeof read.question === "string" ? read.question.trim() : "";
+  if (asked) s.values.notes = s.values.notes ? `${s.values.notes}; ${asked}` : asked; // the team still sees it
   // The chat answers a question asked along the way itself (chat.ts, before this reply); otherwise the team does, with the order.
   if (asked && outcome !== "cancel") task += questionAnswered
     ? " Their question has just been answered above this message: do not answer or mention it again - just continue with the details."

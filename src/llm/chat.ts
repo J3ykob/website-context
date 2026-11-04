@@ -779,12 +779,23 @@ export class WebsiteChat {
       // No prices of ours for it: with a network the businesses are asked for their estimates (the agent's
       // network requests - the owner's wish 2026-10-26: reach out to the companies); without one, a quote offer.
       // (Until 2026-10-29 it was always the quote offer, so mixed orders never reached the network.)
+      // The business's quoting model starts first (its two model calls took 3.2 s after a 4.2 s price check - Zajacfoto's
+      // first word at 10.5 s): a quote that prices the whole request decides alone, without waiting for the checks below.
+      const quoting = process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing");
+      const routeQuoteP = quoting ? this.quoteResultWithModel(sanitizedMessages.slice(-8).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 700)}`).join("\n")).catch(() => null) : Promise.resolve(null);
       // Our passages for the "simple calculation?" check below are read at the same time (they were read after it, +0.5-1 s).
       const oursP = this.knowledgePassages(question, 8).catch(() => [] as string[]);
       // Our price list's items for this request - the same match the reply makes (same query and options: the
       // matcher's cache answers it there). The "every item ours?" check saw only 8 loose passages: Ostap's trestles +
       // posts (2080 + 4 x 42 zl, simple 0.92) were judged "not all ours" (0.17) and sent to a 47 s calculation.
       const itemsP: Promise<ItemMatch | null> = !this.catalogue && this.offerItems.length ? matchItems(this.turnQuery(sanitizedMessages, question, rt).query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: rt.price >= 0.5, alternatives: rt.specific >= 0.5 }).catch(() => null) : Promise.resolve(null);
+      // The business's own quoting model priced every part of the request (its program computes the amounts): answered
+      // here, like the simple calculation. Zajacfoto's "6 h package + 4 extra hours + a session" (5500 + 1500 zl, computed)
+      // went to a 75 s calculation held for approval because the guessed gates fell to simple 0.26 / ours 0.12 (2026-11-04).
+      const routeQuote = await routeQuoteP;
+      markTurn("quotedForRoute");
+      noteTurn("quoteCovered", !!routeQuote?.covered);
+      if (routeQuote?.covered) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
       const pricedItems = ((await itemsP)?.items || []).filter((i) => i.price_value != null);
       const hasPrices = pure || pricedItems.length > 0 || (await this.hasPricesFor(question));
       markTurn("hasPrices");
@@ -794,16 +805,6 @@ export class WebsiteChat {
           if (r) { st.calcStarted = true; onToken(r.message); return r; }
         }
         return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.quote], rt, handoffKind: "quote" });
-      }
-      // The business's own quoting model priced every part of the request (its program computes the amounts): answered
-      // here, like the simple calculation. Zajacfoto's "6 h package + 4 extra hours + a session" (5500 + 1500 zl, computed)
-      // went to a 75 s calculation held for approval because the guessed gates fell to simple 0.26 / ours 0.12 (2026-11-04).
-      if (process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing")) {
-        const convoText = sanitizedMessages.slice(-8).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 700)}`).join("\n");
-        const quote = await this.quoteResultWithModel(convoText).catch(() => null);
-        markTurn("quotedForRoute");
-        noteTurn("quoteCovered", !!quote?.covered);
-        if (quote?.covered) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc] });
       }
       // Listed unit prices times the customer's quantities: answered here (the owner's decision 2026-10-26);
       // anything more (measuring, unlisted work, discounts, many items) goes to the calculation and its approval.
