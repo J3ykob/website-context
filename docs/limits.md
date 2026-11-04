@@ -73,6 +73,7 @@ The tables below show each limit as audited; these rows were then changed:
 | Simple calculation (chat.ts simple) | "no ... options to compare" | up to three listed options or packages, each for the same quantities, count as simple | "a wedding for 100 on a Saturday" (3 packages x guests) went to a 1.5-min project calculation |
 | Router: price changes (router.ts) | - | "whether something changes a price" is ask, not calculate | "the hall is 90 km away - does it change the price?" went to the project agent (ask 0.73 -> 0.97) |
 | Contact page text for the official info (store.ts) | main-content markdown, 2500 chars | the page's whole visible text (side boxes in; nav, header/footer, forms out), 2500 chars | liliowa.pl's address and hours sat in a side box - "we don't list our hours" |
+| /claim waiting for the demo (claim/index.html) | 60 x 5 s = 5 min, then an error | 180 x 5 s = 15 min, a "keep this tab open" note after 90 s; at the end the demo link is shown | fresh demos took 3:51, 6:56 and 9:44 (2 of 3 over the old 5 min) |
 
 ### Network capability index (src/network/capability-index.ts, added 2026-10-29)
 

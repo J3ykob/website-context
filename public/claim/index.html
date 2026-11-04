@@ -205,11 +205,23 @@ footer {
 footer a { color: #475569; text-decoration: none; }
 footer a:hover { color: #3b82f6; }
 
+.lang-toggle {
+  position: absolute; top: 20px; right: 24px; z-index: 2;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  color: #64748b; background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06); border-radius: 8px;
+  padding: 4px 10px; cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.lang-toggle:hover { color: #f1f5f9; border-color: rgba(255,255,255,0.1); }
+.lang-toggle:focus-visible { outline: 2px solid rgba(59,130,246,0.6); outline-offset: 2px; }
+
 @media(max-width:600px) {
   .url-form { flex-direction: column; }
   .url-btn { padding: 16px; }
   .claim-result .stats { flex-direction: column; gap: 12px; }
   .example-chip { padding: 12px 16px; }
+  .lang-toggle { top: 12px; right: 12px; }
 }
 </style>
 </head>
@@ -217,38 +229,40 @@ footer a:hover { color: #3b82f6; }
 
 <div class="claim-page">
   <div class="glow"></div>
+  <button type="button" class="lang-toggle" id="lang-toggle" onclick="toggleLang()">PL</button>
   <div class="claim-content">
-    <div class="claim-badge">Takes 60 seconds</div>
-    <h1>Your website already<br>has a <em>chatbot</em></h1>
-    <p class="subtitle">Paste any URL. We'll read your site and show you a working AI chatbot in seconds. No signup needed.</p>
+    <div class="claim-badge" data-i18n="claim.badge">Takes a few minutes</div>
+    <h1 data-i18n="claim.h1" data-i18n-html="1">Your website already<br>has a <em>chatbot</em></h1>
+    <p class="subtitle" data-i18n="claim.sub">Paste any URL. We'll read your site and show you a working AI chatbot in a few minutes. No signup needed.</p>
 
-    <form class="url-form" id="claim-form" onsubmit="return handleClaim(event)">
-      <input class="url-input" id="url-input" type="url" placeholder="https://your-website.com" required autofocus />
+    <form class="url-form" id="claim-form" novalidate onsubmit="return handleClaim(event)">
+      <input class="url-input" id="url-input" type="url" placeholder="https://your-website.com" data-i18n-placeholder="claim.urlPh" required autofocus />
       <button class="url-btn" id="claim-btn" type="submit">See your chatbot</button>
     </form>
-    <p class="claim-note">Free forever. No credit card. Works with any website.</p>
+    <p class="claim-note" data-i18n="claim.note">Free forever. No credit card. Works with any website.</p>
 
     <div class="claim-error" id="claim-error"></div>
 
     <div class="claim-progress" id="progress">
-      <div class="progress-step" id="step-read"><span class="dot"></span> Reading your website...</div>
-      <div class="progress-step" id="step-learn"><span class="dot"></span> Learning your content...</div>
-      <div class="progress-step" id="step-build"><span class="dot"></span> Building your chatbot...</div>
+      <div class="progress-step" id="step-read"><span class="dot"></span> <span data-i18n="claim.stepRead">Reading your website...</span></div>
+      <div class="progress-step" id="step-learn"><span class="dot"></span> <span data-i18n="claim.stepLearn">Learning your content...</span></div>
+      <div class="progress-step" id="step-build"><span class="dot"></span> <span data-i18n="claim.stepBuild">Building your chatbot...</span></div>
+      <p class="claim-note" id="claim-wait" style="display:none" data-i18n="claim.wait">Larger sites take a few minutes - keep this tab open.</p>
     </div>
 
     <div class="claim-result" id="result">
-      <h3>Your chatbot is ready!</h3>
+      <h3 data-i18n="claim.ready">Your chatbot is ready!</h3>
       <p id="result-domain"></p>
       <div class="stats">
-        <div class="stat"><div class="stat-num" id="stat-pages">0</div><div class="stat-label">Pages read</div></div>
-        <div class="stat"><div class="stat-num" id="stat-chunks">0</div><div class="stat-label">Knowledge items</div></div>
+        <div class="stat"><div class="stat-num" id="stat-pages">0</div><div class="stat-label" data-i18n="claim.pages">Pages read</div></div>
+        <div class="stat"><div class="stat-num" id="stat-chunks">0</div><div class="stat-label" data-i18n="claim.chunks">Knowledge items</div></div>
       </div>
-      <a class="demo-btn" id="demo-link" href="#" target="_blank">Try your chatbot</a>
-      <a class="demo-btn secondary" id="site-link" href="#" target="_blank">Conversational page</a>
+      <a class="demo-btn" id="demo-link" href="#" target="_blank" data-i18n="claim.demo">Try your chatbot</a>
+      <a class="demo-btn secondary" id="site-link" href="#" target="_blank" data-i18n="claim.site">Conversational page</a>
     </div>
 
     <div class="examples">
-      <div class="examples-label">Try these examples</div>
+      <div class="examples-label" data-i18n="claim.examples">Try these examples</div>
       <div class="examples-grid">
         <div class="example-chip" onclick="tryExample('hubfootwear.com')">hubfootwear.com</div>
         <div class="example-chip" onclick="tryExample('restauracjasloik.pl')">restauracjasloik.pl</div>
@@ -260,11 +274,120 @@ footer a:hover { color: #3b82f6; }
 </div>
 
 <footer>
-  <a href="/">Whisp</a> · <a href="mailto:jakub@whisp.so">Contact</a>
+  <a href="/">Whisp</a> · <a href="mailto:jakub@whisp.so" data-i18n="claim.contact">Contact</a>
 </footer>
 
 <script>
+// --- i18n: the homepage's engine (public/landing/index.html), same 'whisp-lang' key so the choice carries across pages ---
+var i18n = {
+  en: {
+    "page.title": "Whisp - Your website already has a chatbot",
+    "page.desc": "Paste your URL and see your AI chatbot working in a few minutes. No signup, no setup.",
+    "claim.badge": "Takes a few minutes",
+    "claim.h1": 'Your website already<br>has a <em>chatbot</em>',
+    "claim.sub": "Paste any URL. We'll read your site and show you a working AI chatbot in a few minutes. No signup needed.",
+    "claim.urlPh": "https://your-website.com", "claim.btn": "See your chatbot", "claim.busy": "Working...",
+    "claim.note": "Free forever. No credit card. Works with any website.",
+    "claim.stepRead": "Reading your website...", "claim.stepLearn": "Learning your content...", "claim.stepBuild": "Building your chatbot...",
+    "claim.ready": "Your chatbot is ready!", "claim.for": "AI chatbot for {domain}",
+    "claim.pages": "Pages read", "claim.chunks": "Knowledge items",
+    "claim.demo": "Try your chatbot", "claim.site": "Conversational page",
+    "claim.examples": "Try these examples", "claim.contact": "Contact",
+    "err.blocked": "We couldn't read this website. It may be blocking automated access.",
+    "err.slow": "This is taking longer than usual. Your demo will be here once it is ready: {link}",
+    "claim.wait": "Larger sites take a few minutes - keep this tab open.",
+    "err.generic": "Something went wrong. Please try again."
+  },
+  pl: {
+    "page.title": "Whisp - Twoja strona ma już swój czat",
+    "page.desc": "Wklej adres swojej strony i w kilka minut zobacz działający czat. Bez rejestracji, bez konfiguracji.",
+    // \u00a0 (non-breaking space) after one-letter words (w, z, i...) keeps them off the end of a line, as Polish typography requires.
+    "claim.badge": "Trwa kilka minut",
+    "claim.h1": 'Twoja strona<br>ma już swój <em>czat</em>',
+    "claim.sub": "Wklej adres dowolnej strony. Przeczytamy ją i\u00a0w kilka minut pokażemy Ci działający czat. Bez rejestracji.",
+    "claim.urlPh": "https://twoja-firma.pl", "claim.btn": "Zobacz swój czat", "claim.busy": "Chwileczkę...",
+    "claim.note": "Czat za darmo, na zawsze. Bez karty kredytowej. Działa z\u00a0każdą stroną.",
+    "claim.stepRead": "Czytamy Twoją stronę...", "claim.stepLearn": "Poznajemy treść strony...", "claim.stepBuild": "Przygotowujemy Twój czat...",
+    "claim.ready": "Twój czat jest gotowy", "claim.for": "Czat dla strony {domain}",
+    "claim.pages": "Przeczytane podstrony", "claim.chunks": "Fragmenty wiedzy",
+    "claim.demo": "Wypróbuj swój czat", "claim.site": "Wizytówka z\u00a0czatem",
+    "claim.examples": "Wypróbuj na przykładach", "claim.contact": "Kontakt",
+    "err.blocked": "Nie udało nam się przeczytać tej strony. Możliwe, że blokuje automatyczny dostęp.",
+    "err.slow": "To trwa dłużej niż zwykle. Demo będzie pod tym adresem, gdy tylko będzie gotowe: {link}",
+    "claim.wait": "Większe strony czytamy kilka minut - zostaw tę kartę otwartą.",
+    "err.generic": "Coś poszło nie tak. Spróbuj ponownie.",
+    // The API answers in English - in Polish the text for its HTTP status.
+    "api.400": "Nieprawidłowy adres strony. Sprawdź go i\u00a0spróbuj ponownie.",
+    "api.429": "Za dużo prób. Spróbuj ponownie później.",
+    "api.other": "Coś poszło nie tak. Spróbuj ponownie."
+  }
+};
+
+var currentLang = (function() {
+  var saved = null;
+  try { saved = localStorage.getItem('whisp-lang'); } catch (e) {}
+  if (saved === 'en' || saved === 'pl') return saved;
+  var nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+  return nav.indexOf('pl') === 0 ? 'pl' : 'en';
+})();
+
+function t(key) {
+  var dict = i18n[currentLang] || i18n.en;
+  return dict[key] !== undefined ? dict[key] : i18n.en[key];
+}
+
+// Text set from code (messages, button states, counts) is kept as a function of the language, so a switch re-renders it.
+var said = {};
+function say(id, text) {
+  said[id] = typeof text === 'function' ? text : function() { return t(text); };
+  document.getElementById(id).textContent = said[id]();
+}
+
+// The API's messages are English: shown as they are in English; in Polish, the text for the HTTP status.
+function apiError(status, message, fallbackKey) {
+  if (currentLang !== 'pl') return message || t(fallbackKey);
+  return i18n.pl['api.' + status] || i18n.pl['api.other'];
+}
+
+// Counts the Polish way in Polish (12 345); English shows them as the API sends them.
+function num(n) {
+  return currentLang === 'pl' && typeof n === 'number' ? n.toLocaleString('pl-PL') : n;
+}
+
+function applyLang(lang) {
+  currentLang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var val = t(el.getAttribute('data-i18n'));
+    if (val === undefined) return;
+    if (el.getAttribute('data-i18n-html')) el.innerHTML = val;
+    else el.textContent = val;
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) {
+    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+  });
+  for (var id in said) document.getElementById(id).textContent = said[id]();
+  document.title = t('page.title');
+  var desc = document.querySelector('meta[name="description"]');
+  if (desc) desc.setAttribute('content', t('page.desc'));
+  document.documentElement.lang = lang;
+  var toggle = document.getElementById('lang-toggle');
+  toggle.textContent = lang === 'en' ? 'PL' : 'EN';
+  toggle.title = lang === 'en' ? 'Polski' : 'English';
+}
+
+// Only a click on the switch is saved; a default from the browser is worked out again on every visit.
+function toggleLang() {
+  var lang = currentLang === 'en' ? 'pl' : 'en';
+  try { localStorage.setItem('whisp-lang', lang); } catch (e) {}
+  applyLang(lang);
+}
+
+applyLang(currentLang);
+</script>
+
+<script>
 var API = window.location.origin;
+say("claim-btn", "claim.btn");
 
 function tryExample(domain) {
   document.getElementById("url-input").value = "https://" + domain;
@@ -294,7 +417,7 @@ function handleClaim(e) {
   try { domain = new URL(url).hostname; } catch(e) { return false; }
 
   btn.disabled = true;
-  btn.textContent = "Working...";
+  say("claim-btn", "claim.busy");
   errorEl.className = "claim-error";
   result.className = "claim-result";
   progress.className = "claim-progress active";
@@ -319,15 +442,18 @@ function handleClaim(e) {
       }
 
       // Register
+      var regStatus;
       return fetch(API + "/api/tenants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: "claim@whisp.so", siteUrl: url }),
       })
-      .then(function(r) { return r.json(); })
+      .then(function(r) { regStatus = r.status; return r.json(); })
       .then(function(reg) {
         if (reg.error && reg.error.indexOf("already exists") === -1) {
-          throw new Error(reg.error);
+          var failed = new Error(reg.error);
+          failed.status = regStatus; // the Polish message is picked by it
+          throw failed;
         }
 
         setStep("step-read", "done");
@@ -335,9 +461,11 @@ function handleClaim(e) {
 
         // Poll for completion
         var attempts = 0;
-        var maxAttempts = 60; // 5 minutes
+        // 15 minutes (docs/limits.md): fresh demos took 3:51, 6:56 and 9:44 (2026-11-04) - 2 of 3 over the old 5.
+        var maxAttempts = 180;
         var poll = setInterval(function() {
           attempts++;
+          if (attempts === 18) document.getElementById("claim-wait").style.display = "block";
           fetch(API + "/api/tenants/" + tenantId + "/status")
             .then(function(r) { return r.json(); })
             .then(function(s) {
@@ -351,42 +479,45 @@ function handleClaim(e) {
                 setStep("step-build", "active");
               } else if (s.status === "error") {
                 clearInterval(poll);
-                showError("We couldn't read this website. It may be blocking automated access.");
+                showError("err.blocked");
               } else if (attempts >= maxAttempts) {
                 clearInterval(poll);
-                showError("This is taking longer than usual. Try again in a few minutes.");
+                showError(function() { return t("err.slow").replace("{link}", API + "/demo/" + tenantId); });
               }
             });
         }, 5000);
       });
     })
     .catch(function(err) {
-      showError(err.message || "Something went wrong. Please try again.");
+      showError(function() { return apiError(err.status, err.message, "err.generic"); });
     });
 
   return false;
 }
 
 function showResult(domain, tenantId, pages, chunks) {
+  document.getElementById("claim-wait").style.display = "none";
   var btn = document.getElementById("claim-btn");
   btn.disabled = false;
-  btn.textContent = "See your chatbot";
+  say("claim-btn", "claim.btn");
 
-  document.getElementById("result-domain").textContent = "AI chatbot for " + domain;
-  document.getElementById("stat-pages").textContent = pages;
-  document.getElementById("stat-chunks").textContent = chunks;
+  say("result-domain", function() { return t("claim.for").replace("{domain}", function() { return domain; }); });
+  say("stat-pages", function() { return num(pages); });
+  say("stat-chunks", function() { return num(chunks); });
   document.getElementById("demo-link").href = "/demo/" + tenantId;
   document.getElementById("site-link").href = "/site/" + tenantId;
   document.getElementById("result").className = "claim-result active";
 }
 
+// msg: a dictionary key, or a function giving the text in the current language.
 function showError(msg) {
+  document.getElementById("claim-wait").style.display = "none";
   var btn = document.getElementById("claim-btn");
   btn.disabled = false;
-  btn.textContent = "See your chatbot";
+  say("claim-btn", "claim.btn");
 
   var el = document.getElementById("claim-error");
-  el.textContent = msg;
+  say("claim-error", msg);
   el.className = "claim-error active";
   document.getElementById("progress").className = "claim-progress";
 }
