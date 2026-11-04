@@ -13,4 +13,5 @@ export {
   generateApiKey,
   createSession,
   validateSession,
+  revokeSessions,
 } from "./d1-auth.js";

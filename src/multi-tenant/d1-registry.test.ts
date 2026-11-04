@@ -83,6 +83,33 @@ describe("d1-registry CRUD + cache", () => {
     expect(JSON.parse(row.settings_json).theme).toBe("dark");
   });
 
+  it("updateTenant: a new e-mail ends the set-password link and the apiKey, unless the same write issues new ones", async () => {
+    registry.createTenant("Owner@Acme.pl", "https://acme.pl");
+    registry.updateTenant("acme_pl", { apiKey: "k1", setupToken: "link-1" });
+    registry.updateTenant("acme_pl", { email: " owner@acme.pl" }); // the same mailbox, typed differently
+    expect(registry.getTenant("acme_pl")).toMatchObject({ apiKey: "k1", setupToken: "link-1" });
+    registry.updateTenant("acme_pl", { email: "new@acme.pl", setupToken: "link-2" }); // admin handover
+    expect(registry.getTenant("acme_pl")).toMatchObject({ email: "new@acme.pl", apiKey: null, setupToken: "link-2" });
+    registry.updateTenant("acme_pl", { email: "someone@else.pl" }); // /api/onboard-demo, a lead-page payment
+    expect(registry.getTenant("acme_pl")).toMatchObject({ email: "someone@else.pl", apiKey: null, setupToken: null });
+    await flush();
+    expect(mem.prepare("SELECT email, api_key, setup_token FROM tenants WHERE id=?").get("acme_pl"))
+      .toEqual({ email: "someone@else.pl", api_key: null, setup_token: null });
+  });
+
+  it("updateTenant: an account with a password keeps its e-mail, whatever a write asks (the rest of the write goes on)", async () => {
+    registry.createTenant("owner@acme.pl", "https://acme.pl");
+    registry.updateTenant("acme_pl", { ownerPasswordHash: "hash-1" });
+    registry.updateTenant("acme_pl", { email: "stranger@evil.example", status: "pending" }); // the old /api/onboard-demo write
+    expect(registry.getTenant("acme_pl")).toMatchObject({ email: "owner@acme.pl", status: "pending" });
+    registry.updateTenant("acme_pl", { email: "payer@else.pl" }); // a lead-page payment, nothing else in the write
+    expect(registry.getTenant("acme_pl")!.email).toBe("owner@acme.pl");
+    registry.updateTenant("acme_pl", { email: " Owner@Acme.pl" }); // the same mailbox, typed differently
+    expect(registry.getTenant("acme_pl")!.email).toBe(" Owner@Acme.pl");
+    await flush();
+    expect(mem.prepare("SELECT email, status FROM tenants WHERE id=?").get("acme_pl")).toEqual({ email: " Owner@Acme.pl", status: "pending" });
+  });
+
   it("updateTenant: no-op on unknown id", () => {
     expect(() => registry.updateTenant("nope_com", { status: "active" })).not.toThrow();
     expect(registry.getTenant("nope_com")).toBeNull();

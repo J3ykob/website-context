@@ -21,8 +21,12 @@ export {
   verifyPassword,
   createSession,
   validateSession,
+  revokeSessions,
   generateApiKey,
 } from "./auth.js";
+export {
+  ownerByEmail, requestPasswordReset, resetPassword, resetTtlMinutes, resetsOn, checkResetToken, setupLinkMark, confirmAddress,
+} from "./password-reset.js";
 export { scrapeTenant } from "./scrape-pipeline.js";
 export type { ScrapePipelineResult } from "./scrape-pipeline.js";
 export { ScrapeWorker } from "./background-worker.js";

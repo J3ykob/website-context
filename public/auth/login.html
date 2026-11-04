@@ -151,6 +151,18 @@
       display: none;
     }
     .error.visible { display: block; }
+    .success {
+      background: rgba(16,185,129,0.1);
+      border: 1px solid rgba(16,185,129,0.25);
+      color: var(--green);
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 12px 16px;
+      border-radius: 10px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .success.visible { display: block; }
     .footer-link {
       display: block;
       text-align: center;
@@ -204,10 +216,11 @@
   <div class="auth-card">
     <a class="brand" href="/"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1 -.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg> Whisp</a>
     <button type="button" class="lang-toggle" id="lang-toggle" onclick="toggleLang()">PL</button>
-    <h1 data-i18n="login.h1">Log in</h1>
-    <p class="subtitle" data-i18n="login.sub">Access your Whisp dashboard.</p>
+    <h1 id="title" data-i18n="login.h1">Log in</h1>
+    <p class="subtitle" id="subtitle" data-i18n="login.sub">Access your Whisp dashboard.</p>
 
     <div class="error" id="error-msg"></div>
+    <div class="success" id="forgot-msg"></div>
 
     <form id="login-form">
       <div class="form-group">
@@ -217,9 +230,18 @@
       <div class="form-group">
         <label for="password" data-i18n="login.password">Password</label>
         <input type="password" id="password" placeholder="Your password" data-i18n-placeholder="login.passwordPh" required autocomplete="current-password">
-        <a href="#" class="forgot" data-i18n="login.forgot">Forgot password?</a>
+        <a href="#" class="forgot" id="forgot-link" data-i18n="login.forgot">Forgot password?</a>
       </div>
       <button type="submit" class="btn" id="submit-btn">Log in</button>
+    </form>
+
+    <form id="forgot-form" style="display:none">
+      <div class="form-group">
+        <label for="forgot-email" data-i18n="login.email">Email</label>
+        <input type="email" id="forgot-email" placeholder="you@example.com" data-i18n-placeholder="login.emailPh" required autocomplete="email">
+        <a href="#" class="forgot" id="back-link" data-i18n="forgot.back">Back to log in</a>
+      </div>
+      <button type="submit" class="btn" id="forgot-btn">Send link</button>
     </form>
 
     <p class="footer-link"><span data-i18n="login.noAccount">Don't have an account?</span> <a href="/" data-i18n="login.signup">Sign up</a></p>
@@ -235,7 +257,15 @@
         "login.password": "Password", "login.passwordPh": "Your password", "login.forgot": "Forgot password?",
         "login.btn": "Log in", "login.busy": "Logging in...",
         "login.noAccount": "Don't have an account?", "login.signup": "Sign up",
-        "err.fill": "Please fill in all fields.", "err.invalid": "Invalid credentials.", "err.network": "Network error. Please try again."
+        "err.fill": "Please fill in all fields.", "err.invalid": "Invalid credentials.", "err.network": "Network error. Please try again.",
+        // The API's 401 is both a wrong password and no password yet (its own words are for developers).
+        "api.401": "Wrong e-mail or password. No password yet? Set it with the link in your e-mail from Whisp, or write to us (jakub@whisp.so).",
+        "forgot.h1": "Forgot your password?", "forgot.sub": "Enter the e-mail of your Whisp account and we'll send you a link to set a new password.",
+        "forgot.btn": "Send link", "forgot.busy": "Sending...", "forgot.back": "Back to log in",
+        "forgot.sent": "If this is the address of a Whisp account that has a password, we've sent it a link to set a new one. The link works for {minutes} minutes. Nothing arrived? Check your spam folder or write to jakub@whisp.so. Never set a password? Write to us too and we'll send you a link.",
+        "forgot.off": "We can't send password links by e-mail yet. Write to jakub@whisp.so and we'll get you back into your dashboard.",
+        "forgot.429": "Too many requests. Please try again later.", "forgot.fail": "Something went wrong. Please try again.",
+        "forgot.title": "Reset password - Whisp"
       },
       pl: {
         // \u00a0 (non-breaking space) after one-letter words (w, z, i...) keeps them off the end of a line, as Polish typography requires;
@@ -251,7 +281,13 @@
         "api.400": "Wpisz e\u2011mail i\u00a0hasło.",
         "api.401": "Nieprawidłowy e\u2011mail lub hasło. Nie masz jeszcze hasła? Ustaw je przez link z\u00a0e\u2011maila od Whisp albo napisz do nas (jakub@whisp.so).",
         "api.429": "Za dużo prób logowania. Spróbuj ponownie później.",
-        "api.other": "Coś poszło nie tak. Spróbuj ponownie."
+        "api.other": "Coś poszło nie tak. Spróbuj ponownie.",
+        "forgot.h1": "Nie pamiętasz hasła?", "forgot.sub": "Podaj e\u2011mail swojego konta w\u00a0Whisp - wyślemy na niego link do ustawienia nowego hasła.",
+        "forgot.btn": "Wyślij link", "forgot.busy": "Wysyłanie...", "forgot.back": "Wróć do logowania",
+        "forgot.sent": "Jeśli to adres konta w\u00a0Whisp, które ma już hasło, wysłaliśmy na niego link do ustawienia nowego. Link działa przez {minutes}\u00a0minut. Nic nie przyszło? Sprawdź folder spam albo napisz do nas (jakub@whisp.so). Nie masz jeszcze hasła? Też napisz - wyślemy link do jego ustawienia.",
+        "forgot.off": "Linków do zmiany hasła nie wysyłamy jeszcze e\u2011mailem. Napisz do nas (jakub@whisp.so) - pomożemy Ci wrócić do panelu.",
+        "forgot.429": "Za dużo prób. Spróbuj ponownie później.", "forgot.fail": "Coś poszło nie tak. Spróbuj ponownie.",
+        "forgot.title": "Nowe hasło - Whisp"
       }
     };
 
@@ -275,12 +311,15 @@
       document.getElementById(id).textContent = said[id]();
     }
 
-    // The API's messages are English: shown as they are in English; in Polish, the text for the HTTP status.
+    // The API's messages are English: in English shown as they are, unless the page has its own text for the HTTP
+    // status (401); in Polish, the text for the status.
     function apiError(status, message, fallbackKey) {
-      if (currentLang !== 'pl') return message || t(fallbackKey);
+      if (currentLang !== 'pl') return i18n.en['api.' + status] || message || t(fallbackKey);
       return i18n.pl['api.' + status] || i18n.pl['api.other'];
     }
 
+    // The tab's title follows the card ("Forgot password?" switches it to its own).
+    var titleKey = 'page.title';
     function applyLang(lang) {
       currentLang = lang;
       document.querySelectorAll('[data-i18n]').forEach(function(el) {
@@ -293,7 +332,7 @@
         el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
       });
       for (var id in said) document.getElementById(id).textContent = said[id]();
-      document.title = t('page.title');
+      document.title = t(titleKey);
       document.documentElement.lang = lang;
       var toggle = document.getElementById('lang-toggle');
       toggle.textContent = lang === 'en' ? 'PL' : 'EN';
@@ -312,6 +351,55 @@
 
   <script>
     say("submit-btn", "login.btn");
+    say("forgot-btn", "forgot.btn");
+
+    // "Forgot password?": the same card asks for the e-mail instead of the password.
+    function showForgot(on) {
+      document.getElementById("login-form").style.display = on ? "none" : "";
+      document.getElementById("forgot-form").style.display = on ? "" : "none";
+      document.getElementById("title").setAttribute("data-i18n", on ? "forgot.h1" : "login.h1");
+      document.getElementById("subtitle").setAttribute("data-i18n", on ? "forgot.sub" : "login.sub");
+      titleKey = on ? "forgot.title" : "page.title";
+      document.getElementById("error-msg").classList.remove("visible");
+      document.getElementById("forgot-msg").classList.remove("visible");
+      if (on) document.getElementById("forgot-email").value = document.getElementById("email").value.trim();
+      applyLang(currentLang);
+    }
+    document.getElementById("forgot-link").addEventListener("click", function(e) { e.preventDefault(); showForgot(true); });
+    document.getElementById("back-link").addEventListener("click", function(e) { e.preventDefault(); showForgot(false); });
+
+    document.getElementById("forgot-form").addEventListener("submit", async function(e) {
+      e.preventDefault();
+      var errorEl = document.getElementById("error-msg"), okEl = document.getElementById("forgot-msg"), btn = document.getElementById("forgot-btn");
+      errorEl.classList.remove("visible");
+      okEl.classList.remove("visible");
+      btn.disabled = true;
+      say("forgot-btn", "forgot.busy");
+      try {
+        var res = await fetch("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: document.getElementById("forgot-email").value.trim(), lang: currentLang })
+        });
+        var data = await res.json().catch(function() { return {}; });
+        if (res.ok) {
+          // The same answer for every address: the page never says whether it has an account. While no reset e-mail
+          // can reach anyone (sending: false), it says so and names the support address instead of a link.
+          var minutes = data.minutes || 60;
+          if (data.sending === false) say("forgot-msg", "forgot.off");
+          else say("forgot-msg", function() { return t("forgot.sent").replace("{minutes}", minutes); });
+          okEl.classList.add("visible");
+        } else {
+          say("error-msg", res.status === 429 ? "forgot.429" : "forgot.fail");
+          errorEl.classList.add("visible");
+        }
+      } catch (err) {
+        say("error-msg", "err.network");
+        errorEl.classList.add("visible");
+      }
+      btn.disabled = false;
+      say("forgot-btn", "forgot.btn");
+    });
 
     // If already logged in, redirect
     if (localStorage.getItem("wctx-dashboard-token")) {

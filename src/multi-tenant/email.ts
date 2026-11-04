@@ -22,7 +22,7 @@ async function withinEmailCap(email: string): Promise<boolean> {
 
 // The owner's e-mails (templates/emails/owner-welcome.*, bot-ready.*): Polish for a .pl business once the Polish
 // texts are approved (OWNER_EMAILS_PL_APPROVED=1), English until then.
-function ownerLang(domain: string): "pl" | "en" {
+export function ownerLang(domain: string): "pl" | "en" {
   return process.env.OWNER_EMAILS_PL_APPROVED === "1" && /\.pl$/i.test(domain.trim()) ? "pl" : "en";
 }
 
@@ -50,6 +50,32 @@ export async function sendWelcomeEmail(
     console.log(`[email] Welcome email sent to ${email}`);
   } catch (error: any) {
     console.error(`[email] Failed to send welcome email to ${email}:`, error.message);
+  }
+}
+
+// The owner's "set a new password" e-mail (password-reset.ts; text: templates/emails/owner-password-reset.<lang>.txt).
+// Language: the login page's, else as the other owner e-mails. New template: until the owner approves it
+// (PASSWORD_RESET_EMAIL_APPROVED=1) it goes only to the Whisp owner's own address.
+export async function sendPasswordResetEmail(
+  email: string,
+  r: { domain: string; resetUrl: string; minutes: number; lang: string },
+): Promise<boolean> {
+  if (process.env.PASSWORD_RESET_EMAIL_APPROVED !== "1" && email.trim().toLowerCase() !== "kubalol7982@gmail.com") {
+    console.log(`[email] password reset to ${email} not sent - template awaiting approval`);
+    return false;
+  }
+  const { renderTemplate } = await import("./templates.js");
+  const lang = r.lang === "pl" || r.lang === "en" ? r.lang : ownerLang(r.domain);
+  const t = renderTemplate("owner-password-reset", { reset_url: r.resetUrl, domain: r.domain, minutes: String(r.minutes) }, lang);
+  if (!t) { console.error("[email] templates/emails/owner-password-reset.*.txt is missing"); return false; }
+  try {
+    const { error } = await resend.emails.send({ from: FROM, to: email, replyTo: "jakub@whisp.so", subject: t.subject, text: t.text });
+    if (error) { console.error(`[email] password reset to ${email} failed:`, error.message); return false; }
+    console.log(`[email] Password reset sent to ${email}`);
+    return true;
+  } catch (e: any) {
+    console.error(`[email] password reset to ${email} failed:`, e.message);
+    return false;
   }
 }
 

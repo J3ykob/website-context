@@ -58,3 +58,8 @@ export async function validateSession(token: string): Promise<string | null> {
   }
   return row.tenant_id;
 }
+
+/** Ends every session of a business - the owner's, a lead-page one, an admin's support session (password reset). */
+export async function revokeSessions(tenantId: string): Promise<void> {
+  await query("DELETE FROM sessions WHERE tenant_id = ?", [tenantId]);
+}
