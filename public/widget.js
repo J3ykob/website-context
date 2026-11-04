@@ -1,9 +1,16 @@
-(function() {
+// Started once the page has a body: pasted in <head> (as the panel's install code says), an async script can run before
+// the body exists, and every document.body.appendChild below threw - no chat, nothing visible (found 2026-11-04).
+// This script's own tag is taken now: document.currentScript is gone by DOMContentLoaded.
+(function (start) {
+  var tag = document.currentScript;
+  if (document.body) start(tag);
+  else document.addEventListener("DOMContentLoaded", function () { start(tag); });
+})(function(loadedFrom) {
   var config = window.__wctx || {};
   // The dashboard's install code sets data-tenant-id / data-api-url on this script's tag (the WordPress
   // plugin and the demo page set window.__wctx); without either, the API is where this file came from -
   // never the customer's own site (it answered "Something went wrong" on every pasted install).
-  var ownTag = document.currentScript || document.querySelector('script[src*="/widget.js"][data-tenant-id]');
+  var ownTag = loadedFrom || document.querySelector('script[src*="/widget.js"][data-tenant-id]');
   var tagAttr = function (n) { return (ownTag && ownTag.getAttribute(n)) || ""; };
   var tagOrigin = ""; try { tagOrigin = ownTag && ownTag.src ? new URL(ownTag.src).origin : ""; } catch (e) {}
   var API_HOST = config.apiHost || tagAttr("data-api-url") || tagOrigin || window.location.origin;
@@ -2346,4 +2353,4 @@
 </div>' : '') + '\
 ';
   }
-})();
+});
