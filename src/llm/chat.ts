@@ -735,17 +735,20 @@ export class WebsiteChat {
           // the form only collected and told the customer the team would answer with the order (2026-11-04 eval: 3 of
           // 4 such openings left the site's hours, travel terms or the machine's height unanswered). Now the question is
           // answered first by the checked reply, which then asks for the details the form still needs.
-          const qP = jevAsk({ message: question }, { q: { type: "noul", instructions: "Besides wanting to order or book, does `message` also ask the business something - a price, availability, a term, a place, opening hours, whether something is possible or how something works?" } }, 3000).catch(() => null);
-          r = await this.startCollect(picked[0], sessionKey, question);
-          const asks = ((await qP)?.q as JevNoulAnswer | undefined)?.noul ?? 0;
-          const s = this.collectSessions.get(sessionKey);
+          const q = await jevAsk({ message: question }, { q: { type: "noul", instructions: "Besides wanting to order or book, does `message` also ask the business something - a price, availability, a term, a place, opening hours, whether something is possible or how something works?" } }, 3000).catch(() => null);
+          const asks = (q?.q as JevNoulAnswer | undefined)?.noul ?? 0;
           noteTurn("orderAlsoAsks", asks);
-          if (asks >= 0.7 && s && r.collect?.stage === "collecting") {
-            const answer = await this.packsReply(sanitizedMessages, sessionKey, () => {}, { rt, extra: [BEHAVIOUR.orderQuestion(missingLabels(picked[0], s).slice(0, 2))] });
-            if (answer.message.trim()) {
-              if (s.transcript.length && s.transcript[s.transcript.length - 1].startsWith("Assistant:")) s.transcript[s.transcript.length - 1] = `Assistant: ${answer.message}`;
-              r = { ...answer, collect: r.collect };
-            }
+          if (asks < 0.7) r = await this.startCollect(picked[0], sessionKey, question);
+          else {
+            // The form opens (and reads the message) in the background while the answer streams: run one after the
+            // other they took 14.7 s before the first word. The reply asks for the form's details itself.
+            const collectP = this.startCollect(picked[0], sessionKey, question);
+            const fields = picked[0].requiredInputs.filter((f) => f.required).map((f) => f.label).slice(0, 3);
+            const answer = await this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, extra: [BEHAVIOUR.orderQuestion(fields)] });
+            const started = await collectP.catch(() => null);
+            const s = this.collectSessions.get(sessionKey);
+            if (s?.transcript.length && s.transcript[s.transcript.length - 1].startsWith("Assistant:")) s.transcript[s.transcript.length - 1] = `Assistant: ${answer.message}`;
+            return { ...answer, ...(started?.collect ? { collect: started.collect } : {}) };
           }
         }
         else { const started = this.beginFlowSession(sessionKey, picked[0]); r = { message: started.message, sources: [], flowSession: { active: true, status: "choosing", flowId: picked[0].id, complete: false } }; }
