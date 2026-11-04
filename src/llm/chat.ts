@@ -730,7 +730,24 @@ export class WebsiteChat {
       if (picked.length === 1 && !elsewhere) {
         let r: ChatResponse;
         if (picked[0].executionMode === "agent") r = await this.startAgentFlow(picked[0], question);
-        else if (picked[0].executionMode === "collect") r = await this.startCollect(picked[0], sessionKey, question);
+        else if (picked[0].executionMode === "collect") {
+          // An order that also asks us something ("chcę zamówić beton na sobotę - gdzie jesteście, do której pracujecie?"):
+          // the form only collected and told the customer the team would answer with the order (2026-11-04 eval: 3 of
+          // 4 such openings left the site's hours, travel terms or the machine's height unanswered). Now the question is
+          // answered first by the checked reply, which then asks for the details the form still needs.
+          const qP = jevAsk({ message: question }, { q: { type: "noul", instructions: "Besides wanting to order or book, does `message` also ask the business something - a price, availability, a term, a place, opening hours, whether something is possible or how something works?" } }, 3000).catch(() => null);
+          r = await this.startCollect(picked[0], sessionKey, question);
+          const asks = ((await qP)?.q as JevNoulAnswer | undefined)?.noul ?? 0;
+          const s = this.collectSessions.get(sessionKey);
+          noteTurn("orderAlsoAsks", asks);
+          if (asks >= 0.7 && s && r.collect?.stage === "collecting") {
+            const answer = await this.packsReply(sanitizedMessages, sessionKey, () => {}, { rt, extra: [BEHAVIOUR.orderQuestion(missingLabels(picked[0], s).slice(0, 2))] });
+            if (answer.message.trim()) {
+              if (s.transcript.length && s.transcript[s.transcript.length - 1].startsWith("Assistant:")) s.transcript[s.transcript.length - 1] = `Assistant: ${answer.message}`;
+              r = { ...answer, collect: r.collect };
+            }
+          }
+        }
         else { const started = this.beginFlowSession(sessionKey, picked[0]); r = { message: started.message, sources: [], flowSession: { active: true, status: "choosing", flowId: picked[0].id, complete: false } }; }
         onToken(r.message);
         return r;
@@ -749,7 +766,12 @@ export class WebsiteChat {
       // (Until 2026-10-29 it was always the quote offer, so mixed orders never reached the network.)
       // Our passages for the "simple calculation?" check below are read at the same time (they were read after it, +0.5-1 s).
       const oursP = this.knowledgePassages(question, 8).catch(() => [] as string[]);
-      const hasPrices = pure || (await this.hasPricesFor(question));
+      // Our price list's items for this request - the same match the reply makes (same query and options: the
+      // matcher's cache answers it there). The "every item ours?" check saw only 8 loose passages: Ostap's trestles +
+      // posts (2080 + 4 x 42 zl, simple 0.92) were judged "not all ours" (0.17) and sent to a 47 s calculation.
+      const itemsP: Promise<ItemMatch | null> = !this.catalogue && this.offerItems.length ? matchItems(this.turnQuery(sanitizedMessages, question, rt).query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: rt.price >= 0.5, alternatives: rt.specific >= 0.5 }).catch(() => null) : Promise.resolve(null);
+      const pricedItems = ((await itemsP)?.items || []).filter((i) => i.price_value != null);
+      const hasPrices = pure || pricedItems.length > 0 || (await this.hasPricesFor(question));
       markTurn("hasPrices");
       if (!hasPrices) {
         if (await this.hasNetwork().catch(() => false)) {
@@ -764,7 +786,7 @@ export class WebsiteChat {
         const convoText = sanitizedMessages.slice(-6).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 500)}`).join("\n");
         // Simple AND every item priced by us: a mixed order (concrete from another business + our rental)
         // passed the first question alone and never reached the network (chain test 2026-10-29).
-        const ours = (await oursP).join("\n\n").slice(0, 20000);
+        const ours = [...pricedItems.map((p) => `- ${renderItem(p)}`), ...(await oursP)].join("\n\n").slice(0, 20000);
         const s = await jevAsk({ conversation: convoText, our_information: ours }, {
           // Up to three listed options (a hall's packages per person x the guests) are the owner's "at most three unit
           // prices" too: "options to compare" sent "a wedding for 100 on a Saturday" to a 1.5-minute calculation (2026-11-04).
@@ -815,11 +837,7 @@ export class WebsiteChat {
     // Preset behaviour (small talk, quote, explaining the offer, which action) needs no knowledge selection.
     if (opts.packs === undefined && !opts.noFacts && !opts.behaviour?.length) {
       if (this.packIndex === undefined) this.packIndex = buildPackIndex(this.knowledgeCatalog, new Set(this.context.siteMap.filter((p) => p.type === "article").map((p) => p.url)));
-      const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
-      // A follow-up or a short message keeps its subject: the previous question and what our last reply was about.
-      const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
-      const followup = (rt && rt.followup >= 0.5) || question.length < 40;
-      const query = followup && prevUser ? `${prevUser}\n${prevReply.slice(0, 200)}\n${question}` : question;
+      const { query, followup } = this.turnQuery(messages, question, rt);
       // A real need we can't meet may go to the network: started now, used below if our packs don't answer.
       // Over a spend cap or from a site the business does not own: no network search (src/security/budget.ts).
       const net = rt && !behaviour.length && !turnCheap() ? await this.networkStart(question, messages, rt) : null;
@@ -992,7 +1010,8 @@ export class WebsiteChat {
     // dropped older answers the fact check still trusted (docs/limits.md).
     let notesLen = 0;
     const notes = [...this.contextNotes].reverse().map((n) => `Q: ${n.question}\nA: ${n.answer}`).filter((t) => (notesLen += t.length + 2) <= 12000).join("\n\n");
-    let system = `You are the website chat assistant of ${brand}. You speak for the business as "we".${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
+    // What the chat is (a fact, for "what is this? how do you know this?" - owners testing their demo were told to write to their own e-mail).
+    let system = `You are the website chat assistant of ${brand}. You speak for the business as "we". You answer from ${brand}'s own website and price list and what the business adds in its Whisp panel.${this.systemPromptExtra ? ` ${this.systemPromptExtra}` : ""}
 ${renderOfficialInfo(this.context.businessProfile)}${notes ? `\n## Answers from the owner\n${notes}\n` : ""}
 ${packText ? `\n## Our information for this conversation (use only this for facts about us)\n${packText}\n` : opts.noFacts ? "" : "\n## Our information for this conversation\n(nothing in our information answers this message)\n"}
 ${network ? `\n## Businesses from our network (their own information)\n${network.text}\n` : ""}
@@ -1167,6 +1186,14 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       verdict = await check(final);
     }
     return finish(final, verdict.offers);
+  }
+
+  /** The turn's search query: a follow-up or a short message keeps its subject - the previous question and what our last reply was about. */
+  private turnQuery(messages: ChatMessage[], question: string, rt: TurnRoute | null): { query: string; followup: boolean } {
+    const prevUser = messages.filter((m) => m.role === "user").slice(-2, -1)[0]?.content || "";
+    const prevReply = messages.slice(0, -1).filter((m) => m.role === "assistant").slice(-1)[0]?.content || "";
+    const followup = (rt && rt.followup >= 0.5) || question.length < 40;
+    return { query: followup && prevUser ? `${prevUser}\n${prevReply.slice(0, 200)}\n${question}` : question, followup };
   }
 
   /** Knowledge audit (src/knowledge/audit.ts): the standard questions through this assistant, as test turns. */

@@ -131,12 +131,34 @@ export class OpenRouterProvider {
 
   // Streaming variant — calls onToken(delta) as tokens arrive, returns the full text.
   // Lets the chat surface a response token-by-token (first token ~1s vs ~3.5s full).
+  // No first token within OPENROUTER_FIRST_TOKEN_MS (6 s): the request is dropped and sent once more, away from
+  // the provider that served it - a fallback provider took 17.6 s to the first word (2026-11-04 eval) while the
+  // usual one starts in 0.5-1.8 s. Only before anything was shown, so nothing is repeated.
   async chatStream(messages: OpenRouterMessage[], onToken: (delta: string) => void, maxTokens?: number): Promise<{ content: string }> {
+    const deadline = Number(process.env.OPENROUTER_FIRST_TOKEN_MS) || 6000;
+    try {
+      return await this.chatStreamOnce(messages, onToken, maxTokens, deadline);
+    } catch (e) {
+      if (!(e as { firstTokenTimeout?: boolean })?.firstTokenTimeout) throw e;
+      console.warn(`[openrouter] no first token in ${deadline} ms - asking again elsewhere`);
+      return this.chatStreamOnce(messages, onToken, maxTokens, 0);
+    }
+  }
+
+  private async chatStreamOnce(messages: OpenRouterMessage[], onToken: (delta: string) => void, maxTokens: number | undefined, firstTokenMs: number): Promise<{ content: string }> {
     const t0 = Date.now();
     let first = 0;
     let servedBy = "?";
-    const response = await withProviderRetry((provider) => fetch("https://openrouter.ai/api/v1/chat/completions", {
-      signal: AbortSignal.timeout(Number(process.env.OPENROUTER_STREAM_TIMEOUT_MS) || 120000),
+    const late = new AbortController();
+    const timer = firstTokenMs ? setTimeout(() => late.abort(), firstTokenMs) : undefined;
+    const timedOut = () => {
+      if (servedBy !== "?") avoided.set(servedBy, Date.now() + SLOW_MS);
+      return Object.assign(new Error("first token timeout"), { firstTokenTimeout: true });
+    };
+    let response: Response;
+    try {
+      response = await withProviderRetry((provider) => fetch("https://openrouter.ai/api/v1/chat/completions", {
+      signal: AbortSignal.any([AbortSignal.timeout(Number(process.env.OPENROUTER_STREAM_TIMEOUT_MS) || 120000), late.signal]),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -155,8 +177,14 @@ export class OpenRouterProvider {
         ...REASONING,
       }),
     }), testModel() || this.model);
+    } catch (e) {
+      clearTimeout(timer);
+      if (late.signal.aborted) throw timedOut();
+      throw e;
+    }
 
     if (!response.ok || !response.body) {
+      clearTimeout(timer);
       const errorText = await response.text().catch(() => "");
       throw new Error("OpenRouter request failed (" + response.status + "): " + errorText);
     }
@@ -167,7 +195,9 @@ export class OpenRouterProvider {
     let content = "";
     let usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number } | null = null;
     while (true) {
-      const { done, value } = await reader.read();
+      let chunk: { done: boolean; value?: Uint8Array };
+      try { chunk = await reader.read(); } catch (e) { clearTimeout(timer); if (late.signal.aborted && !first) throw timedOut(); throw e; }
+      const { done, value } = chunk;
       // The last line may come without a newline (Anthropic models' streams): read it too, or the reply's end is lost.
       buffer += done ? decoder.decode() + "\n" : decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -182,11 +212,12 @@ export class OpenRouterProvider {
           const delta = json.choices?.[0]?.delta?.content;
           if (json.provider) servedBy = json.provider;
           if (json.usage) usage = json.usage;
-          if (delta) { if (!first) first = Date.now() - t0; content += delta; onToken(delta); }
+          if (delta) { if (!first) { first = Date.now() - t0; clearTimeout(timer); } content += delta; onToken(delta); }
         } catch { /* partial JSON across chunks — ignored, completes next read */ }
       }
       if (done) break;
     }
+    clearTimeout(timer);
     countLlm(usage?.prompt_tokens || 0, usage?.completion_tokens || 0, t0, `stream ${servedBy} first=${(first / 1000).toFixed(1)}s chars=${content.length}`, Number(usage?.cost) || 0);
     if (first) noteSpeed(servedBy, Date.now() - t0, 0, first);
     return { content };
