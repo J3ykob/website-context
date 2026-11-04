@@ -109,7 +109,7 @@
   function show(id, on) { $(id).classList.toggle("hidden", !on); }
   function fail(text) { $("error").textContent = text; show("error", true); }
 
-  var STATUS = { approved: "Wysłano klientowi.", declined: "Klient dostał Twoją wiadomość.", changes_requested: "Asystent wprowadza zmiany - nowa wersja przyjdzie do akceptacji." };
+  var STATUS = { approved: "Wysłano klientowi.", declined: "Klient dostał Twoją wiadomość.", changes_requested: "Asystent wprowadza zmiany - nowa wersja przyjdzie do akceptacji.", released: "Zamknięto bez decyzji - wynik nie czekał na akceptację." };
 
   fetch(api).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); }).then(function (x) {
     if (!x.ok) { $("sub").textContent = ""; fail(x.d.error || "Nie udało się wczytać."); return; }

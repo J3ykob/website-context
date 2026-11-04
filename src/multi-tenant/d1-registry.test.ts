@@ -145,6 +145,64 @@ describe("d1-registry CRUD + cache", () => {
   });
 });
 
+// A result waits for an owner only when the business has one (2026-11-04 eval: calculations on demos nobody
+// had claimed were held for approval and never arrived; the review e-mail goes to the demo's address).
+describe("owner account: a demo nobody has claimed vs. a business with an owner", () => {
+  afterEach(() => {
+    delete process.env.AGENT_REVIEW_FORCE;
+    delete process.env.AGENT_OWNER_FORCE;
+  });
+
+  it("hasOwnerAccount: a set password or a stored subscription, nothing else", () => {
+    registry.createTenant("claim@whisp.so", "https://demo.pl");
+    expect(registry.hasOwnerAccount("demo_pl")).toBe(false);
+    expect(registry.hasOwnerAccount("unknown_pl")).toBe(false);
+    registry.updateTenant("demo_pl", { settings: { agentReview: "approve", stripeCustomer: "cus_1" } });
+    expect(registry.hasOwnerAccount("demo_pl")).toBe(false); // a setting or a Stripe customer is not an owner
+    registry.updateTenant("demo_pl", { ownerPasswordHash: auth.hashPassword("s3cret-pass") });
+    expect(registry.hasOwnerAccount("demo_pl")).toBe(true);
+    // A subscriber without a password (the lead-page checkout stores only the subscription).
+    registry.createTenant("payer@firma.pl", "https://firma.pl");
+    registry.updateTenant("firma_pl", { settings: { stripeCustomer: "cus_2", stripeSubscription: "sub_2" } });
+    expect(registry.hasOwnerAccount("firma_pl")).toBe(true);
+  });
+
+  it("reviewMode: a stored approve waits for the claim; owners keep their choice", async () => {
+    const { reviewMode, hasReviewer } = await import("../projects/review.js");
+    registry.createTenant("claim@whisp.so", "https://demo.pl");
+    registry.updateTenant("demo_pl", { settings: { agentReview: "approve" } });
+    expect(hasReviewer("demo_pl")).toBe(false);
+    expect(reviewMode("demo_pl")).toBe("auto");
+    registry.updateTenant("demo_pl", { ownerPasswordHash: auth.hashPassword("s3cret-pass") });
+    expect(hasReviewer("demo_pl")).toBe(true);
+    expect(reviewMode("demo_pl")).toBe("approve");
+
+    registry.createTenant("payer@firma.pl", "https://firma.pl");
+    registry.updateTenant("firma_pl", { settings: { agentReview: "approve", stripeSubscription: "sub_2" } });
+    expect(reviewMode("firma_pl")).toBe("approve");
+    registry.updateTenant("firma_pl", { settings: { stripeSubscription: "sub_2" } });
+    expect(reviewMode("firma_pl")).toBe("auto"); // owned, its own choice: auto
+  });
+
+  it("live-test knobs: AGENT_REVIEW_FORCE = approve, AGENT_OWNER_FORCE = an owner under its own setting", async () => {
+    const { reviewMode, hasReviewer } = await import("../projects/review.js");
+    registry.createTenant("claim@whisp.so", "https://demo.pl");
+    registry.createTenant("claim@whisp.so", "https://other.pl");
+    process.env.AGENT_REVIEW_FORCE = "other_pl,demo_pl";
+    expect(hasReviewer("demo_pl")).toBe(true);
+    expect(reviewMode("demo_pl")).toBe("approve");
+    delete process.env.AGENT_REVIEW_FORCE;
+
+    process.env.AGENT_OWNER_FORCE = "demo_pl";
+    expect(hasReviewer("demo_pl")).toBe(true);
+    expect(reviewMode("demo_pl")).toBe("auto"); // nothing stored
+    registry.updateTenant("demo_pl", { settings: { agentReview: "approve" } });
+    expect(reviewMode("demo_pl")).toBe("approve");
+    expect(hasReviewer("other_pl")).toBe(false); // only the listed ids
+    expect(hasReviewer("")).toBe(false); // "".split(",") is [""]
+  });
+});
+
 describe("d1-auth sessions", () => {
   it("createSession -> validateSession returns tenantId", async () => {
     const token = await auth.createSession("acme_co_uk");

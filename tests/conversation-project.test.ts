@@ -185,6 +185,9 @@ live("questions for the business go to the owner, never to the customer", () => 
     const review = await import("../src/projects/review.js");
     const conv = await import("../src/projects/conversation.js");
     delete process.env.AGENT_REVIEW_FORCE; // the business sends automatically
+    // ...and has an owner, for this process only: a business without one holds nothing (review.ts
+    // hasReviewer), and Rentbud has no owner account.
+    process.env.AGENT_OWNER_FORCE = TENANT;
     const session = `test-conv-${run}-questions`;
     sessions.push(session);
     const w = await turn(session, [], "Robię podjazd z kostki, ok. 60 m2, podbudowę będę zagęszczał przez 2 dni. Dobierz mi odpowiednią zagęszczarkę i policz cały koszt razem z dowozem i odbiorem na Ursynów.");
@@ -225,5 +228,6 @@ live("questions for the business go to the owner, never to the customer", () => 
     const done = await poll("done");
     expect(done.message).toBe(rv2.draft.trim());
     expect(delivered[delivered.length - 1]).toBe(rv2.draft.trim());
+    delete process.env.AGENT_OWNER_FORCE;
   }, 40 * 60 * 1000);
 });

@@ -16,6 +16,7 @@ import { createHandoffs } from "../ecosystem/handoff.js";
 import { ensureCollectFlow, ensureQuestionFlow } from "../flows/collect-store.js";
 import { getFlows } from "../flows/flow-store.js";
 import { getTenant } from "./tenant-registry.js";
+import { hasOwnerAccount } from "./d1-registry.js";
 
 /**
  * A locally cached tenant file that is older than the tenant's last scrape is stale: another instance
@@ -191,7 +192,8 @@ export class TenantManager {
       systemPromptExtra,
       brandName: getTenant(tenantId)?.brandName || new URL(meta.siteUrl).hostname.replace(/^www\./, ""),
       onInquiry: (inquiry) => recordInquiry(tenantId, inquiry),
-      hasOwnerAccount: () => !!getTenant(tenantId)?.ownerPasswordHash,
+      // The one definition of a demo nobody has claimed (d1-registry.ts), shared with the review rule.
+      hasOwnerAccount: () => hasOwnerAccount(tenantId),
       offerItems: (await loadOffer(tenantId).catch(() => null))?.items || [],
       catalogue: getTenant(tenantId)?.settings?.catalogue || null,
       networkOffers: () => networkOffers(tenantId),

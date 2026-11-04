@@ -21,10 +21,12 @@ beforeAll(async () => {
   await reg.hydrateRegistry();
   tm = new tmm.TenantManager();
   process.env.NETWORK_MEMBER_FORCE = DACH; // this process only, never the business's settings
+  process.env.AGENT_OWNER_FORCE = DACH; // a member with an owner: only one that has an owner is asked for the price
 }, 60_000);
 
 afterAll(async () => {
   delete process.env.NETWORK_MEMBER_FORCE;
+  delete process.env.AGENT_OWNER_FORCE;
   if (process.env.KEEP_PROJECTS || !M) return;
   const { deleteFromR2 } = await import("../src/storage/r2.js");
   const ids = (await M.d1Query("SELECT id FROM projects WHERE customer_session = ?", [session])).map((r: any) => r.id);

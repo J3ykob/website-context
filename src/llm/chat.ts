@@ -67,7 +67,7 @@ export interface ChatConfig {
   // The businesses of our network (this one included) that have a structured
   // offer - for "what would this list / job cost?" projects (compare_offers@1).
   networkOffers?: () => Promise<Business[]>;
-  /** Whether the business's owner has a Whisp account (a set password); without one the chat is a demo. */
+  /** Whether the business's owner has a Whisp account (a set password or a stored subscription, d1-registry.ts hasOwnerAccount); without one the chat is a demo. */
   hasOwnerAccount?: () => boolean;
   // Ecosystem broadcast (src/ecosystem/ask.ts): when our own content has nothing
   // on the question, the other businesses of our ecosystem each decide from their
