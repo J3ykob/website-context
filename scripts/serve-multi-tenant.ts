@@ -1234,6 +1234,25 @@ function refreshIfStale(t: { id: string; lastScrapedAt?: string | null; siteUrl?
   worker.enqueue(t.id, t.siteUrl || `https://${t.domain}`, 150);
 }
 
+// Admin: hand a demo (made by a seller through /claim, or by outreach) over to its owner - the owner said yes
+// on a call and gave their e-mail. Only while nobody has set a password (no takeover of a claimed account).
+// The owner gets the existing welcome / set-password e-mail with a new setup token.
+app.post("/api/admin/handover", async (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  const tenantId = String(req.body?.tenantId || "");
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const t = getTenant(tenantId);
+  if (!t) { res.status(404).json({ error: "Tenant not found" }); return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) { res.status(400).json({ error: "valid email required" }); return; }
+  if ((t as any).ownerPasswordHash) { res.status(409).json({ error: "The account already has an owner (password set)" }); return; }
+  const setupToken = randomBytes(32).toString("hex");
+  updateTenant(t.id, { email, setupToken });
+  const baseUrl = process.env.BASE_URL || "https://whisp.so";
+  await sendWelcomeEmail(email, t.id, setupToken, baseUrl);
+  console.log(`[handover] ${t.id} -> ${email}`);
+  res.json({ ok: true, tenantId: t.id, email });
+});
+
 // Admin: empty the scrape queue (a bulk re-scrape stopped without a deploy). Running scrapes finish.
 app.post("/api/admin/scrape-queue/clear", (req, res) => {
   if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
