@@ -84,6 +84,10 @@ services:
         sync: false
       - key: CUSTOMER_OFFER_EMAIL_APPROVED
         value: "1"
+      # Owner e-mails in Polish for .pl businesses (templates/emails/owner-welcome.pl.txt, bot-ready.pl.txt) - drafted
+      # 2026-11-04, NOT approved yet: "0" sends the English versions (as before).
+      - key: OWNER_EMAILS_PL_APPROVED
+        value: "0"
       # Owner asked for the price its assistant left out of a network request - approved 2026-10-29 (templates/emails/owner-quote.txt).
       - key: OWNER_QUOTE_EMAIL_APPROVED
         value: "1"

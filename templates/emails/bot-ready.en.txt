@@ -1,0 +1,21 @@
+# "Your chat is ready" after the first scrape (sendBotReadyEmail) - to the e-mail given on /claim.
+# {{domain}} the website · {{demo_url}} the demo page · {{embed_code}} the install snippet · {{dashboard_url}} the login page
+Subject: Your AI chatbot for {{domain}} is live
+
+Your AI chatbot for {{domain}} is ready.
+
+Try it here: {{demo_url}}
+
+Ask it anything about the business - services, hours, pricing, contact info.
+
+To add it to your site, paste this one line before the closing </body> tag:
+
+{{embed_code}}
+
+You can manage the bot, view conversations and customize replies here:
+{{dashboard_url}}
+
+Reply to this email if you need a hand.
+
+Jakub
+whisp.so

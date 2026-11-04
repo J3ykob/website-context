@@ -20,6 +20,12 @@ async function withinEmailCap(email: string): Promise<boolean> {
   return ok;
 }
 
+// The owner's e-mails (templates/emails/owner-welcome.*, bot-ready.*): Polish for a .pl business once the Polish
+// texts are approved (OWNER_EMAILS_PL_APPROVED=1), English until then.
+function ownerLang(domain: string): "pl" | "en" {
+  return process.env.OWNER_EMAILS_PL_APPROVED === "1" && /\.pl$/i.test(domain.trim()) ? "pl" : "en";
+}
+
 export async function sendWelcomeEmail(
   email: string,
   tenantId: string,
@@ -29,21 +35,17 @@ export async function sendWelcomeEmail(
   const setupUrl = `${baseUrl}/auth/setup?token=${encodeURIComponent(setupToken)}&tenant=${encodeURIComponent(tenantId)}`;
 
   try {
+    const { renderTemplate } = await import("./templates.js");
+    const { getTenant } = await import("./d1-registry.js");
+    const domain = getTenant(tenantId)?.domain || "";
+    const t = renderTemplate("owner-welcome", { setup_url: setupUrl, domain }, ownerLang(domain));
+    if (!t) throw new Error("templates/emails/owner-welcome.*.txt is missing");
     await resend.emails.send({
       from: FROM,
       to: email,
-      subject: "Set your password - Whisp",
+      subject: t.subject,
       replyTo: "jakub@whisp.so",
-      text: `Welcome to Whisp.
-
-Your AI chat widget is being set up. Set your dashboard password to manage your bot, view conversations and customize responses:
-
-${setupUrl}
-
-If you didn't sign up for Whisp, you can ignore this email.
-
-Jakub
-whisp.so`,
+      text: t.text,
     });
     console.log(`[email] Welcome email sent to ${email}`);
   } catch (error: any) {
@@ -62,34 +64,20 @@ export async function sendBotReadyEmail(
   baseUrl: string
 ): Promise<void> {
   const demoUrl = `${baseUrl}/demo/${tenantId}`;
-  const siteUrl = `${baseUrl}/site/${tenantId}`;
   const dashboardUrl = `${baseUrl}/auth/login`;
 
   const embedCode = `<script>\nwindow.__wctx={tenantId:"${tenantId}",apiHost:"${baseUrl}"};\nvar s=document.createElement("script");s.src="${baseUrl}/widget.js";s.async=true;document.head.appendChild(s);\n</script>`;
 
   try {
+    const { renderTemplate } = await import("./templates.js");
+    const t = renderTemplate("bot-ready", { domain, demo_url: demoUrl, embed_code: embedCode, dashboard_url: dashboardUrl }, ownerLang(domain));
+    if (!t) throw new Error("templates/emails/bot-ready.*.txt is missing");
     await resend.emails.send({
       from: FROM,
       to: email,
       replyTo: "jakub@whisp.so",
-      subject: `Your AI chatbot for ${domain} is live`,
-      text: `Your AI chatbot for ${domain} is ready.
-
-Try it here: ${demoUrl}
-
-Ask it anything about the business - services, hours, pricing, contact info.
-
-To add it to your site, paste this one line before the closing </body> tag:
-
-${embedCode}
-
-You can manage the bot, view conversations and customize replies here:
-${dashboardUrl}
-
-Reply to this email if you need a hand.
-
-Jakub
-whisp.so`,
+      subject: t.subject,
+      text: t.text,
     });
     console.log(`[email] Bot-ready email sent to ${email} (demo: ${demoUrl})`);
   } catch (error: any) {

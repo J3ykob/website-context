@@ -1,0 +1,21 @@
+# "Your chat is ready", Polish (for .pl businesses). NOT APPROVED YET: sent only with OWNER_EMAILS_PL_APPROVED=1
+# (render.yaml) - until then the English version goes out.
+# {{domain}} the website · {{demo_url}} the demo page · {{embed_code}} the install snippet · {{dashboard_url}} the login page
+Temat: Czat dla {{domain}} jest gotowy
+
+Czat dla strony {{domain}} jest gotowy.
+
+Wypróbuj go tutaj: {{demo_url}}
+
+Zapytaj go o to, o co pytają Twoi klienci - ceny, godziny otwarcia, kontakt.
+
+Żeby wstawić czat na swoją stronę, wklej ten kod przed znacznikiem </body>:
+
+{{embed_code}}
+
+Konto i ustawienia: {{dashboard_url}}
+
+Jeśli potrzebujesz pomocy, po prostu odpowiedz na tę wiadomość.
+
+Jakub
+whisp.so

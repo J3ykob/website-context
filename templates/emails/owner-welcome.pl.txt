@@ -1,0 +1,15 @@
+# The owner's "set your password" e-mail, Polish (for .pl businesses). NOT APPROVED YET: sent only with
+# OWNER_EMAILS_PL_APPROVED=1 (render.yaml) - until then the English version goes out.
+# {{setup_url}} the set-password link · {{domain}} the business's website
+Temat: Ustaw hasło do konta Whisp - {{domain}}
+
+Dzień dobry,
+
+ustaw hasło do swojego konta Whisp dla strony {{domain}}. Znajdziesz tam kod czatu do wstawienia na stronę:
+
+{{setup_url}}
+
+Jeśli ta wiadomość nie jest do Ciebie, po prostu ją zignoruj.
+
+Jakub
+whisp.so

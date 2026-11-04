@@ -1,0 +1,14 @@
+# The owner's "set your password" e-mail (sendWelcomeEmail: sign-up and admin handover).
+# {{setup_url}} the set-password link · {{domain}} the business's website
+Subject: Set your password - Whisp
+
+Welcome to Whisp.
+
+Your AI chat widget is being set up. Set your dashboard password to manage your bot, view conversations and customize responses:
+
+{{setup_url}}
+
+If you didn't sign up for Whisp, you can ignore this email.
+
+Jakub
+whisp.so
