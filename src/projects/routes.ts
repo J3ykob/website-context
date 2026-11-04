@@ -1,5 +1,6 @@
 /**
- * Dashboard API for projects (only those the logged-in business takes part in):
+ * Dashboard API for projects (only the logged-in business's own projects and the requests it sent to
+ * other businesses - store.ts seesInPanel):
  *   GET /api/dashboard/projects                    newest first, with its role
  *   GET /api/dashboard/projects/:id                detail: participants, events, consents,
  *                                                  files, requirements (+ verification)
@@ -19,7 +20,7 @@
  *   POST /api/review/:token               {action: approve | decline | changes, message?, note?}
  */
 import type { Express, RequestHandler } from "express";
-import { projectsForTenant, projectDetail } from "./store.js";
+import { projectsForTenant, projectDetail, seesInPanel } from "./store.js";
 import { listFiles, listRequirements, readFile, readFileBuffer, writeFile } from "./repo.js";
 import { agentEnabled, agentStatus } from "./agent.js";
 import { agentDelivery, reworkWithGuidance, businessQuestions, deliverNow, setCustomerContact, projectByLink, NOTIFY, CUSTOMER_DIR } from "./conversation.js";
@@ -33,7 +34,7 @@ export function registerProjectRoutes(app: Express, deps: { auth: RequestHandler
   const tid = (req: any) => req.tenantId as string;
   const member = async (id: string, tenantId: string) => {
     const d = await projectDetail(id);
-    return d && (d.project.initiatorTenantId === tenantId || d.participants.some((p) => p.tenantId === tenantId)) ? d : null;
+    return d && seesInPanel(d.project, d.participants, tenantId) ? d : null;
   };
 
   app.get("/api/dashboard/projects", deps.auth, async (req, res) => {

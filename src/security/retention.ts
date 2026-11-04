@@ -2,16 +2,22 @@
  * Retention promised in the privacy policy (public/polityka-prywatnosci.html), run daily:
  * - chat messages older than CHAT_RETENTION_DAYS (365);
  * - projects (requests, their files, events, reviews, links) once expired AND without activity for
- *   30 days - a request still being worked on is never removed. At most 50 projects per run.
+ *   30 days - a request still being worked on is never removed. At most 50 projects per run;
+ * - expired panel sessions (7 days, d1-auth.ts): before 2026-11-04 a row was removed only when its token
+ *   was presented again, so a session nobody used again kept its token and business id for good.
  */
 import { d1Query } from "../storage/conversation-store.js";
 
+/** Days a chat message (and a model decision) is kept. The privacy policy shows this same number (src/legal/pages.ts). */
+export const chatRetentionDays = (e: Record<string, string | undefined> = process.env): number => Number(e.CHAT_RETENTION_DAYS) || 365;
+
 export async function runRetention(): Promise<{ messages: number; projects: number }> {
-  const days = Number(process.env.CHAT_RETENTION_DAYS) || 365;
+  const days = chatRetentionDays();
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
   const m = await d1Query("DELETE FROM chat_messages WHERE created_at < ? RETURNING id", [cutoff]).catch(() => [] as any[]);
   await d1Query("DELETE FROM decisions WHERE at < ?", [cutoff]).catch(() => {}); // decision log: same as chats
   const now = new Date().toISOString(), idle = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  await d1Query("DELETE FROM sessions WHERE expires_at < ?", [now]).catch(() => {});
   const due = (await d1Query("SELECT id FROM projects WHERE expires_at IS NOT NULL AND expires_at < ? AND updated_at < ? LIMIT 50", [now, idle]).catch(() => [] as any[])).map((r: any) => String(r.id));
   const { listFiles } = await import("../projects/repo.js");
   const { deleteFromR2 } = await import("../storage/r2.js");
