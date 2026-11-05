@@ -128,14 +128,22 @@ export const COULD_NOT: Record<string, string> = {
  * the visitor gets the "working on it" reply at once). A start that fails becomes a failed run, which
  * the widget then reports.
  */
-export async function beginConversationAgent(projectId: string, transcript: { role: string; content: string }[], knowledge: string[]): Promise<"started" | "busy"> {
+// A run started in the background registers within this long (masking + a sandbox's cold start); until then it is starting.
+const START_MS = 4 * 60_000;
+
+/**
+ * `at`: the run's marker (agentPending) - the knowledge reply the chat keeps for this calculation carries it
+ * (chat.ts releaseReply), so it is never released for a later run (a network continuation, the owner's rework).
+ */
+export async function beginConversationAgent(projectId: string, transcript: { role: string; content: string }[], knowledge: string[]): Promise<{ status: "started"; at: number } | { status: "busy" }> {
   const p = await getProject(projectId);
   const cur = p?.memory.agentRun as AgentRunState | undefined;
   const pendingAt = Number(p?.memory.agentPending) || 0;
   if ((cur && (cur.status === "running" || cur.status === "collecting") && Date.now() - Date.parse(cur.startedAt) < 20 * 60_000)
-    || (pendingAt && Date.now() - pendingAt < 4 * 60_000 && (!cur || Date.parse(cur.startedAt) < pendingAt - 1000))) return "busy";
+    || (pendingAt && Date.now() - pendingAt < START_MS && (!cur || Date.parse(cur.startedAt) < pendingAt - 1000))) return { status: "busy" };
   const at = Date.now();
-  await setMemory(projectId, { agentPending: at });
+  // The knowledge reply of the last calculation goes: this one's is written by the chat in the background (releaseText).
+  await setMemory(projectId, { agentPending: at, releaseText: null });
   void startConversationAgent(projectId, transcript, knowledge).then(async (r) => {
     if ("error" in r) {
       console.warn(`[conversation] ${projectId}: agent did not start: ${r.error}`);
@@ -145,7 +153,7 @@ export async function beginConversationAgent(projectId: string, transcript: { ro
     console.warn(`[conversation] ${projectId}: agent start error: ${(e as Error).message}`);
     await setMemory(projectId, { agentRun: { runId: `failed-${at}`, status: "failed", error: String((e as Error).message), startedAt: new Date(at).toISOString(), attempt: 1, model: "", instruction: "" } }).catch(() => {});
   });
-  return "started";
+  return { status: "started", at };
 }
 
 /**
@@ -280,7 +288,39 @@ export async function deliverNow(projectId: string): Promise<void> {
   });
 }
 
-export interface AgentDelivery { status: "none" | "running" | "review" | "done" | "failed"; message?: string; files?: string[]; projectId: string }
+// released: the knowledge reply went out while the calculation was late (the widget shows it once and keeps waiting).
+export interface AgentDelivery { status: "none" | "running" | "review" | "released" | "done" | "failed"; message?: string; files?: string[]; projectId: string; released?: boolean }
+
+/**
+ * How long a calculation may run before the knowledge reply kept when it started (src/llm/chat.ts releaseReply) goes out
+ * instead of more silence: the customer was told "usually up to 2-3 minutes" (WORKING), and romax-3's run gave nothing
+ * for 4 minutes (iteration-5 judges). The run goes on; its result follows in the chat and on the status page.
+ */
+const AGENT_RELEASE_MS = () => Number(process.env.AGENT_RELEASE_MS) || 180_000;
+/**
+ * The knowledge reply kept for a calculation (chat.ts releaseReply) - only for the run it was written for: its marker
+ * (`run`) is the conversation's latest agentPending (a network continuation and the owner's rework set a new one), and the
+ * run in progress is that start's - registered within START_MS of it, or its retry - not one started later from the panel.
+ * Kept for the conversation, an old reply that never went out (its own run finished in time) was released by a later run
+ * that ran long, hours later, in the middle of the network flow or of the owner's review (review 2026-11-05).
+ */
+function keptReply(memory: Record<string, unknown> | undefined, run?: AgentRunState): { at: number; text: string } | null {
+  const r = memory?.releaseText as { at?: unknown; run?: unknown; text?: unknown } | null | undefined;
+  if (!r || typeof r.text !== "string" || !r.text.trim() || typeof r.at !== "number" || typeof r.run !== "number") return null;
+  if (r.run !== Number(memory?.agentPending)) return null;
+  if (run && !run.runId.startsWith("failed-") && !(run.attempt > 1) && Date.parse(run.startedAt) > r.run + START_MS) return null;
+  return { at: r.at, text: r.text.trim() };
+}
+/** A calculation still not ready AGENT_RELEASE_MS after it started (`since`): its kept knowledge reply, delivered once. */
+async function releaseLate(projectId: string, since: number, memory: Record<string, unknown>, onDeliver: (message: string) => Promise<void>, run?: AgentRunState): Promise<AgentDelivery | null> {
+  const kept = keptReply(memory, run);
+  if (!kept || !(since > 0) || Date.now() - since < AGENT_RELEASE_MS()) return null;
+  if (String(memory.released || "") !== String(kept.at) && (await claimMemory(projectId, "released", String(kept.at)))) {
+    await onDeliver(kept.text).catch(() => {});
+    await addEvent(projectId, { kind: "released", actor: "chat", data: { at: kept.at } }).catch(() => {});
+  }
+  return { status: "released", message: kept.text, projectId };
+}
 
 /**
  * For the visitor's widget: the agent's result once ready - the text for the customer and the files
@@ -384,11 +424,11 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   const run = before.memory.agentRun as AgentRunState | undefined;
   // Started in the background and not registered yet: still starting (a few minutes at most).
   if (pendingAt && (!run || Date.parse(run.startedAt) < pendingAt - 1000)) {
-    if (Date.now() - pendingAt < 4 * 60_000) return { status: "running", projectId };
+    if (Date.now() - pendingAt < START_MS) return (await releaseLate(projectId, pendingAt, before.memory, onDeliver)) || { status: "running", projectId };
   }
   const s = run && run.runId.startsWith("failed-") ? run : await agentStatus(projectId);
   if (!s) return { status: "none", projectId };
-  if (s.status === "running" || s.status === "collecting") return { status: "running", projectId };
+  if (s.status === "running" || s.status === "collecting") return (await releaseLate(projectId, Math.min(pendingAt || Infinity, Date.parse(s.startedAt)), before.memory, onDeliver, s)) || { status: "running", projectId };
   // Waiting for other businesses (or about to ask them): not ready for the customer yet.
   const net = await import("./network.js");
   const now = await getProject(projectId);
@@ -443,20 +483,31 @@ export async function agentDelivery(projectId: string, onDeliver: (message: stri
   // replaces this run), nor a reply flagged as speaking to the business - where nobody reviews, that check
   // counts as failed (agent.ts collect); runs flagged on a demo before 2026-11-04 still carry the flag.
   else if (rv?.status === "changes_requested" || s.needsOwner) message = "";
+  // A run that failed (its time limit, lost, an error) with nothing to send and nobody's decision on it: the knowledge
+  // reply kept when it started instead of "could not prepare" - or nothing more, when it went out already while the run
+  // was late (releaseLate).
+  const kept = s.status === "failed" && !rv ? keptReply(p?.memory, s) : null;
+  const wasReleased = !!kept && String(p?.memory.released || "") === String(kept.at);
   if (!message) {
     // "Could not prepare" carries no files nobody approved: a run that failed its checks is no longer held
     // on a demo, and its blocked cost sheet would go out as chat links and e-mail attachments under the
     // notice (2026-11-04 review).
     if (rv?.status !== "approved") files = [];
-    const l = await replyLanguage(projectId);
-    message = await wordNotice(projectId, s.runId, "couldnot", l, COULD_NOT[l] || COULD_NOT.en, "We could not prepare the result this time. Suggest asking again or contacting the business directly. Promise nothing.");
+    if (kept) message = wasReleased ? "" : kept.text;
+    else {
+      const l = await replyLanguage(projectId);
+      message = await wordNotice(projectId, s.runId, "couldnot", l, COULD_NOT[l] || COULD_NOT.en, "We could not prepare the result this time. Suggest asking again or contacting the business directly. Promise nothing.");
+    }
   }
   if (!delivered && (await claimMemory(projectId, "delivered", s.runId))) {
     await setMemory(projectId, { ownerLoop: false });
-    await onDeliver(message).catch(() => {});
-    if (onFinal) await onFinal(message, files, "final").catch(() => {});
+    if (message) {
+      await onDeliver(message).catch(() => {});
+      if (onFinal) await onFinal(message, files, "final").catch(() => {});
+    }
     await addEvent(projectId, { kind: "delivered", actor: "chat", data: { runId: s.runId, status: s.status, files } }).catch(() => {});
   }
+  if (kept && (!message || message === kept.text)) return { status: "failed", message: kept.text, files: [], projectId, ...(wasReleased ? { released: true } : {}) };
   // Done when the customer gets real content: the agent's reply, or the owner's approved / own text.
   const ownerText = message !== draft && message !== (COULD_NOT[await replyLanguage(projectId)] || COULD_NOT.en);
   return { status: (s.status === "done" && !!draft) || ownerText ? "done" : "failed", message, files, projectId };

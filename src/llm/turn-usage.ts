@@ -26,6 +26,11 @@ export function markTurn(label: string): void {
   const u = turnUsage.getStore();
   if (u) u.steps.push(`mark @${sec(Date.now() - u.at)}s ${label}`);
 }
+/** A step that took time (`started`: Date.now() when it began) - e.g. the request's split - in the turn's timeline. */
+export function stepTurn(label: string, started: number, detail = ""): void {
+  const u = turnUsage.getStore();
+  if (u) u.steps.push(`${label} @${sec(started - u.at)}s ${sec(Date.now() - started)}s${detail ? ` ${detail}` : ""}`);
+}
 /** Admin trace detail for this turn (what was selected, why a reply was blocked) - for evals. */
 export function noteTurn(key: string, value: unknown): void {
   const u = turnUsage.getStore();

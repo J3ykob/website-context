@@ -296,7 +296,14 @@ export async function quickAnswer(s: CollectSession, message: string, prior: str
   return c.choice === "confirm" || c.choice === "cancel" || c.choice === "pause" ? c.choice : null;
 }
 
-export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, questionAnswered = false): Promise<CollectResult> {
+/**
+ * price: the order's price, computed by the chat from the conversation (its quoting model or its items' recipes, chat.ts
+ * orderPrice) - asked next to the reading call of a message that is not only a confirmation or a cancellation, and given
+ * when the summary is shown; `check` says what is wrong with the amounts a reply states (null = right).
+ */
+export type OrderPrice = () => Promise<{ text: string; check: (reply: string) => Promise<string | null> } | null>;
+
+export async function collectTurn(flow: FlowDefinition, s: CollectSession, message: string, brand: string, llm: Llm, knowledge?: (q: string) => string[] | Promise<string[]>, questionAnswered = false, price?: OrderPrice): Promise<CollectResult> {
   s.at = Date.now();
   const fields = fieldsOf(flow);
   const prior = s.transcript.slice(-12).join("\n");
@@ -305,6 +312,9 @@ export async function collectTurn(flow: FlowDefinition, s: CollectSession, messa
   // "Yes, send it" / "cancel" / "wait": settled by one Jev question (no reading call needed then);
   // the reply is always the model's. Anything else (details, corrections, "yes but…") is read below.
   const quick = await quickAnswer(s, message, prior);
+  // The order's price next to the reading call (this message may complete the order; its read takes 2-4 s): used only if
+  // the summary is shown now - a confirmation or a cancellation asks for none.
+  const pricing = !quick && price ? price().catch(() => null) : null;
   const read = quick ? ({ intent: quick, values: {} } as any) : parseJsonObject(await llm(
     `You read one customer message in an order / inquiry chat for the business ${brand || "(this business)"} and output only JSON.`,
     `Fields (key | label | hint):
@@ -325,7 +335,7 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}, 
 - "language": the language the customer writes their sentences in, named in English (e.g. "Polish", "English", "Ukrainian"). Ignore names of places, streets, people and products (a Polish street name in an English sentence is still English).${s.language ? `
 - "switched": true only if in this message the customer clearly writes whole sentences in a language other than ${s.language}, the language of the conversation so far; otherwise false.` : ""}
 - "intent": "confirm" (they confirm the summary / say it is correct), "cancel" (they want to stop the whole order or inquiry), "change" (they correct something already given), or "answer" (anything else: giving details, asking something).
-- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. Other remarks for the team go into "notes". Dates and relative days ("jutro", "next Friday", "w sobotę") as a concrete calendar date with its weekday, in the customer's language (e.g. "piątek, 17.10.2026"), counted from today. Empty object if the message gives no values.
+- "values": ONLY the fields this new message gives or corrects, as {key: value}. The business's own name, brand or town (${brand || "this business"}) says who receives the order - it is never a value of the customer's (in "I want to order from ${brand || "X"}" it is not a place or a name). Take values only from the customer's words; never invent or complete them. A value goes only into a field that asks for that kind of detail: never an e-mail address into a phone field or a phone number into an e-mail field - a detail with no field of its kind goes into "notes". Keep their wording for products and quantities; give place names in their dictionary (nominative) form, not the case ending used in the sentence (e.g. "do Ząbek" -> "Ząbki"), and keep street and number. Other details and remarks for the team go into "notes". Dates and relative days ("jutro", "next Friday", "w sobotę") as a concrete calendar date with its weekday, in the customer's language (e.g. "piątek, 17.10.2026"), counted from today. Empty object if the message gives no values.
 - "question": a question this new message asks the business (a price, availability, a term, whether something is possible), in the customer's words; "" if it asks none (details and remarks are not questions).
 - "not_needed": keys of required fields this order does not need, judging by everything the customer has said: a field that does not apply to it (a delivery address when they collect it themselves), or a second way of reaching them when they already gave one (a phone number when they gave an e-mail, or the reverse) unless the business's description asks for both; [] otherwise.`,
     500,
@@ -393,6 +403,9 @@ Output {"language": "...", "switched": false, "intent": "...", "values": {...}, 
   else if (offerAsk) { outcome = "ask"; task = offerAsk; }
   else if (!missing.length) { outcome = "summary"; task = "In ONE sentence, ask them to check the summary and confirm it or correct anything. Do not list the details yourself."; }
   else { outcome = "ask"; task = `Ask, briefly, for exactly these details and nothing else: ${missing.slice(0, 2).map((f) => `${f.label}${f.description ? ` (${f.description})` : ""}`).join("; ")}.`; }
+  // The summary gives the order's price as computed (structure -> text by the model; the amounts are checked below).
+  const priced = outcome === "summary" && pricing ? await pricing : null;
+  if (priced) task = `First, in one or two sentences, give the price computed for this order from our price list, with its amounts exactly as below and what each assumes (e.g. the return time; both readings when two are given). Then: ${task}\nComputed for this order:\n${priced.text.slice(0, 2500)}`;
   if (offerNote && outcome !== "cancel" && outcome !== "send") task = `${offerNote} Then: ${task}`;
   const asked = typeof read.question === "string" ? read.question.trim() : "";
   if (asked) s.values.notes = s.values.notes ? `${s.values.notes}; ${asked}` : asked; // the team still sees it
@@ -412,10 +425,12 @@ Details the customer has given so far (to address them correctly - don't list th
 Your task: ${task}
 
 Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${shown.map((f) => `"${f.name}": "<'${f.label}' translated into ${language}>"`).join(", ")}}` : ""}}.${outcome === "summary" ? ` "labels" holds each field name translated into ${language} (the summary is shown to the customer).` : ""}`;
-  let out = parseJsonObject(await llm(replySystem, replyUser, 300));
+  // A summary with the order's price and the field names is longer: at 300 tokens its JSON was cut (offline replay 2026-11-05).
+  const replyMax = priced ? 800 : 300;
+  let out = parseJsonObject(await llm(replySystem, replyUser, replyMax));
   const stray = strayScripts(message, String(out?.message || ""));
   if (stray.length) {
-    const again = parseJsonObject(await llm(`${replySystem} Use only the normal alphabet of ${language}; never mix in ${stray.join(" or ")} letters.`, replyUser, 300));
+    const again = parseJsonObject(await llm(`${replySystem} Use only the normal alphabet of ${language}; never mix in ${stray.join(" or ")} letters.`, replyUser, replyMax));
     if (again?.message && strayScripts(message, String(again.message)).length === 0) out = again;
   }
   // The model sometimes slips into the language of the field names or of a place
@@ -424,7 +439,7 @@ Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${s
     const inLang = async (t: string) => (await jevAsk({ text: t }, { ok: { type: "noul", instructions: `Is \`text\` written in ${s.language}?` } }, 3000))?.ok as { noul?: number } | undefined;
     const v = await inLang(String(out.message));
     if (v && (v.noul ?? 1) < 0.5) {
-      const again = parseJsonObject(await llm(`${replySystem} Your previous draft was not in ${s.language}. Write the message ONLY in ${s.language}.`, replyUser, 300));
+      const again = parseJsonObject(await llm(`${replySystem} Your previous draft was not in ${s.language}. Write the message ONLY in ${s.language}.`, replyUser, replyMax));
       if (again?.message) out = again;
     }
   }
@@ -432,13 +447,22 @@ Output {"message": "the message text"${outcome === "summary" ? `, "labels": {${s
   // summary nothing is sent, and the form produces no prices or results - a reply claiming either is
   // written again ("przekazaliśmy Twoje zapytanie", "wycena pojawi się za kilka minut" were sent).
   if (outcome !== "send" && out?.message) {
-    const c = await jevAsk({ reply: String(out.message) }, { claims: { type: "noul", instructions: "Does `reply` say that the order or request was already sent, passed on, booked or confirmed, or promise a price, quote or result (e.g. 'in a few minutes')?" } }, 3000).catch(() => null);
+    // With the order's computed price the summary states it: only a price or result promised for later is a claim then.
+    const c = await jevAsk({ reply: String(out.message) }, { claims: { type: "noul", instructions: priced
+      ? "Does `reply` say that the order or request was already sent, passed on, booked or confirmed, or promise a quote or result for later (e.g. 'in a few minutes')? Stating a price now is not a promise."
+      : "Does `reply` say that the order or request was already sent, passed on, booked or confirmed, or promise a price, quote or result (e.g. 'in a few minutes')?" } }, 3000).catch(() => null);
     if (((c?.claims as { noul?: number } | undefined)?.noul ?? 0) >= 0.6) {
-      const again = parseJsonObject(await llm(`${replySystem} Your previous draft said something was already sent or promised a price or result - nothing is sent before the customer confirms, and this form gives no prices or results. Write it again without that.`, replyUser, 300));
+      const again = parseJsonObject(await llm(`${replySystem} Your previous draft said something was already sent or promised ${priced ? "a quote or result for later" : "a price or result"} - nothing is sent before the customer confirms, and this form gives no ${priced ? "results" : "prices or results"}. Write it again without that.`, replyUser, replyMax));
+      if (again?.message) out = again;
+    }
+    // The amounts it states are the computed ones, for what they are computed for (one rewrite).
+    const wrong = priced && out?.message ? await priced.check(String(out.message)).catch(() => null) : null;
+    if (wrong) {
+      const again = parseJsonObject(await llm(`${replySystem} Your previous draft ${wrong} - give the computed amounts exactly as in the task, each for what it is computed for.`, replyUser, replyMax));
       if (again?.message) out = again;
     }
   }
-  let reply = String(out?.message || "").trim().slice(0, 600);
+  let reply = String(out?.message || "").trim().slice(0, priced ? 900 : 600);
   if (!reply) throw new Error("collect: empty reply");
   if (outcome === "cancel") return { reply, cancelled: true };
   if (outcome === "send") {

@@ -53,7 +53,9 @@ async function loadVectors(tenantId: string, items: OfferItem[], key: string): P
   } catch {}
   const vecs = await embed(items.map(itemText));
   memory.set(tenantId, { key, vecs });
-  await uploadToR2(path, JSON.stringify({ key, vecs: vecs.map((v) => Buffer.from(v.buffer).toString("base64")) }), "application/json").catch(() => {});
+  // Stored in the background: a turn waits for nobody's write (a 1,239-item offer is megabytes of vectors); this
+  // process has them in memory meanwhile.
+  void uploadToR2(path, JSON.stringify({ key, vecs: vecs.map((v) => Buffer.from(v.buffer).toString("base64")) }), "application/json").catch(() => {});
   return vecs;
 }
 

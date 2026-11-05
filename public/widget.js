@@ -1193,8 +1193,15 @@
             setTimeout(tick, 60000);
             return;
           }
+          // A calculation running long: the business's answer from its own information meanwhile (shown once); the
+          // result follows when it is ready.
+          if (d.status === "released") {
+            if (!w.released && d.message) { w.released = true; saveWatch(w); addAssistant(d.message); }
+            setTimeout(tick, 15000);
+            return;
+          }
           stopWatching();
-          if (d.status === "none" || !d.message) return;
+          if (d.status === "none" || !d.message || (d.released && w.released)) return;
           var text = d.message;
           if (d.files && d.files.length) text += "\n\n" + d.files.map(function(f) { return "[" + f.name + "](" + API_HOST + f.url + ")"; }).join("\n");
           addAssistant(text);
