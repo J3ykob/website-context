@@ -80,23 +80,28 @@ async function splitOnce(need: string, about: string): Promise<string[]> {
   // fixed provider and seed (measured 2026-10-30: 2 different splits in 4 calls), so the same request is split once and
   // the split reused - every later step sees the same parts.
   const { createHash } = await import("crypto");
+  const { stepTurn } = await import("../llm/turn-usage.js");
+  const t0 = Date.now();
   // v5: the business's description, no "of" (2026-11-04); v4: "what the customer wants to get"; v3: "of"; v2: Polish.
   const key = `decisions/split/${createHash("sha1").update(`v5\n${about}\n${normNeed(need)}`).digest("hex")}.json`;
   const hit = splitMemo.get(key);
-  if (hit) return hit;
+  if (hit) { stepTurn("split", t0, "memo"); return hit; }
   const { downloadFromR2, uploadToR2 } = await import("../storage/r2.js");
   const stored = await downloadFromR2(key).then((b) => (b ? JSON.parse(b.toString("utf-8")) : null)).catch(() => null);
-  if (Array.isArray(stored?.parts) && stored.parts.length) { splitMemo.set(key, stored.parts); return stored.parts; }
+  if (Array.isArray(stored?.parts) && stored.parts.length) { splitMemo.set(key, stored.parts); stepTurn("split", t0, "stored"); return stored.parts; }
   const j = await llmJson(SPLIT, about ? `Klient pisze do firmy: ${about}\n\n${need.slice(0, 3000)}` : need.slice(0, 3000), 800);
-  if (!j) throw new Error("the split model could not be asked");
+  if (!j) { stepTurn("split", t0, "failed"); throw new Error("the split model could not be asked"); }
   const parts = (Array.isArray(j?.parts) ? j.parts : []).filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 2).map((p: string) => p.trim().slice(0, 300)).slice(0, MAX_PARTS);
+  stepTurn("split", t0, `model ${parts.length} part(s)`);
   (await import("../llm/decision-log.js")).logDecision("split", MODEL(), { need: need.slice(0, 3000), about }, parts);
   // "Asks for nothing" is not kept as the decision: one draw left a real request without parts (above), and kept it
   // would decide that request for good.
   if (!parts.length) return parts;
   if (splitMemo.size > 5000) splitMemo.clear();
   splitMemo.set(key, parts);
-  await uploadToR2(key, JSON.stringify({ parts }), "application/json").catch(() => {});
+  // Stored in the background: the turn that asked waits for nobody's write (problem 7 of the iteration-5 judges - this
+  // write was in front of every new request's first word); the memo above serves this process meanwhile.
+  void uploadToR2(key, JSON.stringify({ parts }), "application/json").catch(() => {});
   return parts;
 }
 const splitMemo = new Map<string, string[]>();

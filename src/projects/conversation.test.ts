@@ -402,3 +402,38 @@ describe("a member business whose answer leaves part unpriced", () => {
     }
   });
 });
+
+describe("a calculation that runs too long: the knowledge reply kept when it started (chat.ts releaseReply)", () => {
+  const KEPT = "Z naszego cennika: zagęszczarka 100 kg - 120 zł za dobę, 24 zł za godzinę.";
+  const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+  it("goes out once after AGENT_RELEASE_MS while the run goes on; the result follows as usual", async () => {
+    registry.createTenant("demo@late.pl", "https://late.pl");
+    const pid = await conversation("late_pl", { releaseText: { at: Date.now() - 1000, text: KEPT } });
+    await setMemory(pid, { agentRun: run({ runId: `run-${pid}`, status: "running", startedAt: minutesAgo(1) }) });
+    expect(await poll(pid)).toMatchObject({ status: "running", chat: [] });
+    await setMemory(pid, { agentRun: run({ runId: `run-${pid}`, status: "running", startedAt: minutesAgo(4) }) });
+    expect(await poll(pid)).toMatchObject({ status: "released", message: KEPT, chat: [KEPT] });
+    expect(await poll(pid)).toMatchObject({ status: "released", message: KEPT, chat: [] }); // once into the conversation
+    await writeFile(pid, "odpowiedz.txt", DRAFT, "txt", "agent");
+    await setMemory(pid, { agentRun: run({ runId: `run-${pid}`, status: "done", files: ["odpowiedz.txt"] }) });
+    expect(await poll(pid)).toMatchObject({ status: "done", message: DRAFT, chat: [DRAFT] });
+  });
+
+  it("nothing kept: the wait goes on as before", async () => {
+    registry.createTenant("demo@nokept.pl", "https://nokept.pl");
+    const pid = await conversation("nokept_pl");
+    await setMemory(pid, { agentRun: run({ runId: `run-${pid}`, status: "running", startedAt: minutesAgo(10) }) });
+    expect(await poll(pid)).toMatchObject({ status: "running", chat: [] });
+  });
+
+  it("a run that fails: the kept reply instead of could not prepare - and nothing more when it went out already", async () => {
+    registry.createTenant("demo@lost.pl", "https://lost.pl");
+    const a = await conversation("lost_pl", { releaseText: { at: Date.now(), text: KEPT } });
+    await setMemory(a, { agentRun: run({ runId: `run-${a}`, status: "failed" }) });
+    expect(await poll(a)).toMatchObject({ status: "failed", message: KEPT, files: [], chat: [KEPT] });
+    const b = await conversation("lost_pl", { releaseText: { at: 123, text: KEPT }, released: "123" });
+    await setMemory(b, { agentRun: run({ runId: `run-${b}`, status: "failed" }) });
+    expect(await poll(b)).toMatchObject({ status: "failed", message: KEPT, chat: [] });
+    expect(await agentDelivery(b, async () => {})).toMatchObject({ released: true });
+  });
+});

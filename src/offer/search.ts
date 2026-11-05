@@ -2,7 +2,8 @@
  * Which offer items a customer's message is about (text -> structure, by a model). The items nearest
  * by meaning (bge-m3 vectors, any language; per part of a split request too) make a short list; one
  * pinned model call returns the ids of the items that ARE what the message asks for - and, when asked,
- * the quantities the customer gave for each item's price inputs (src/offer/quantities.ts prices them in code).
+ * the quantities the customer gave for each item's price inputs: a number, a period (its start and end) or an amount
+ * with the conversion the item states (src/pricing/quantity.ts counts them, src/offer/quantities.ts prices them).
  *
  * Was Jev judging item names one by one (2026-10-30, 40 hand-labelled messages, 7 businesses): Jev found
  * the right item 28/30, 25% of what it returned was wrong, trestles matched compactors, 23/40 identical
@@ -54,7 +55,8 @@ function firstJson(c: string): any {
 const KIND: Record<string, string> = { product: "product", service: "service", rental: "rental", package: "package", subscription: "subscription" };
 const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}${KIND[i.fields.kind || ""] ? ` [${KIND[i.fields.kind!]}]` : ""}${i.description ? ` - ${i.description.slice(0, 150)}` : ""}`;
 
-export interface ItemMatch { items: OfferItem[]; given: Map<OfferItem, Record<string, number>>; alternatives?: OfferItem[] }
+/** given: per item, the customer's quantities as read - numbers, periods, conversions (src/pricing/quantity.ts). */
+export interface ItemMatch { items: OfferItem[]; given: Map<OfferItem, Record<string, unknown>>; alternatives?: OfferItem[] }
 export interface MatchOptions {
   limit?: number;
   /** The business whose whole offer `items` is (its vectors are cached per business); otherwise per item text. */
@@ -65,10 +67,12 @@ export interface MatchOptions {
   alternatives?: boolean;
   /** The message is one part of a split request already (the network): no split for the short list. */
   onePart?: boolean;
+  /** The request's parts, split already (the chat's turn: one split per turn) - instead of splitting the message. */
+  parts?: Promise<string[]>;
 }
 
 // The same message against the same items gets the same answer for an hour (models vary run to run).
-const recent = new Map<string, { at: number; ids: number[]; q: { id: number; input: string; value: number }[]; alt: number[] }>();
+const recent = new Map<string, { at: number; ids: number[]; q: { id: number; input: string; value: unknown }[]; alt: number[] }>();
 const RECENT_MS = 60 * 60 * 1000;
 
 /** The items the message is about, best first; null when the model could not be asked. */
@@ -86,7 +90,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
     const near = (text: string, k: number) => (opts.tenant ? v.nearestItems(opts.tenant, items, text, k) : v.nearestOf(items, text, k));
     const [whole, parts] = await Promise.all([
       near(question, SHORTLIST),
-      opts.onePart ? Promise.resolve([] as string[]) : import("../projects/broadcast.js").then((b) => b.splitNeed(question, opts.tenant)).catch(() => [] as string[]),
+      opts.onePart ? Promise.resolve([] as string[]) : (opts.parts ?? import("../projects/broadcast.js").then((b) => b.splitNeed(question, opts.tenant))).catch(() => [] as string[]),
     ]);
     if (!whole) return null;
     // A one-part request too: the part is in Polish, the language of the items - a Ukrainian "віброплита"
@@ -103,7 +107,10 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
   const { INPUT_HELP, inputsOf } = await import("./quantities.js");
   const inputs = opts.quantities ? pool.map(inputsOf) : [];
   const list = pool.map((i, k) => `${k}: ${label(i)}${inputs[k]?.length ? ` [inputs: ${inputs[k].map((n) => `${n} = ${INPUT_HELP[n]}`).join("; ")}]` : ""}`).join("\n");
-  const key = createHash("sha1").update(`${opts.quantities ? "q" : ""}${opts.alternatives ? "a" : ""}\n${question}\n${list}`).digest("hex");
+  // The dates of a period are read against today (the same message tomorrow is another reading).
+  const { todayLine, isPeriod, convert, isConversion } = await import("../pricing/quantity.js");
+  const today = opts.quantities ? todayLine() : "";
+  const key = createHash("sha1").update(`${opts.quantities ? `q${today}` : ""}${opts.alternatives ? "a" : ""}\n${question}\n${list}`).digest("hex");
   let hit = recent.get(key);
   if (!hit || Date.now() - hit.at > RECENT_MS) {
     const { routingFor } = await import("../llm/pin.js");
@@ -117,7 +124,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
         body: JSON.stringify({
           model: MODEL, temperature: 0, max_tokens: 400, response_format: { type: "json_object" }, provider: r.provider, ...(r.seed !== undefined ? { seed: r.seed } : {}), reasoning: { enabled: false },
           messages: [
-            { role: "system", content: `Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. Items are marked product or service: when the customer asks for a product, a service done on it is not it; when they ask for a service, a product is not it. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.quantities ? ` Also, for each item you give that lists inputs, the value of each input the customer's latest message states or that follows directly from it (e.g. "Saturday and Sunday" = 48 hours, "4x5 m" = 20 m²) - leave out any the customer did not give, never assume a typical value, and leave out an input when the customer's quantity is of another kind (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known): "quantities": [{"id": <item id>, "input": "<input name>", "value": <number>}].` : ""}${opts.alternatives ? ` When no item is what the customer asks for, the items that could do the same job another way (e.g. a trencher when an excavator is asked for to dig a trench; not merely related items): "alternatives": [<item id>, ...] (at most 3; [] when none could).` : ""}` },
+            { role: "system", content: `Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. Items are marked product or service: when the customer asks for a product, a service done on it is not it; when they ask for a service, a product is not it. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.quantities ? ` Also, for each item you give that lists inputs, each input the customer's latest message gives: "quantities": [{"id": <item id>, "input": "<input name>", "value": <number in the input's unit>}] (e.g. "4x5 m" = 20 m²). For "hours" given as a start and an end ("from Friday to Monday") instead of "value": "from" and "to", each {"date": "YYYY-MM-DD", "time": "HH:MM" or null if not said} (today is ${today}). A quantity in another unit that the item itself converts (soup for 8 people, the item saying "1 l = 4 portions") instead of "value": "amount": 8, "equals": {"input": 1, "given": 4}, and "whole": true when the input counts whole pieces or packs. Leave out what the customer did not give, never assume a typical value, and leave out a quantity of another kind that the item does not convert (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known).` : ""}${opts.alternatives ? ` When no item is what the customer asks for, the items that could do the same job another way (e.g. a trencher when an excavator is asked for to dig a trench; not merely related items): "alternatives": [<item id>, ...] (at most 3; [] when none could).` : ""}` },
             { role: "user", content: `Customer: ${question}${splitParts.length ? `\n(What the customer asks for, in Polish: ${splitParts.join("; ")})` : ""}\n\nItems:\n${list}` },
           ],
         }),
@@ -127,14 +134,19 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
     } catch (e) { console.warn(`[items] no answer (attempt ${attempt}): ${(e as Error).message}`); }
     if (j === undefined) return null;
     const ids = (Array.isArray(j?.ids) ? j.ids : []).filter((k: unknown) => Number.isInteger(k) && pool[k as number]) as number[];
-    const q = (Array.isArray(j?.quantities) ? j.quantities : []).filter((x: any) => Number.isInteger(x?.id) && ids.includes(x.id) && inputs[x.id]?.includes(x.input) && typeof x.value === "number" && x.value > 0);
+    // Each quantity as its structure says: a number, a period (from / to) or an amount with the item's conversion.
+    const valueOf = (x: any): unknown => typeof x?.value === "number" && x.value > 0 ? x.value
+      : isPeriod(x) ? { from: x.from, to: x.to }
+      : isConversion(x) && convert(x) !== null ? { amount: x.amount, equals: x.equals, ...(x.whole === true ? { whole: true } : {}) } : undefined;
+    const q = (Array.isArray(j?.quantities) ? j.quantities : []).filter((x: any) => Number.isInteger(x?.id) && ids.includes(x.id) && inputs[x.id]?.includes(x.input) && valueOf(x) !== undefined)
+      .map((x: any) => ({ id: x.id as number, input: String(x.input), value: valueOf(x) }));
     const alt = ids.length ? [] : (Array.isArray(j?.alternatives) ? j.alternatives : []).filter((k: unknown) => Number.isInteger(k) && pool[k as number]).slice(0, 3) as number[];
     hit = { at: Date.now(), ids: [...new Set(ids)], q, alt };
     recent.set(key, hit);
     if (recent.size > 5000) recent.delete(recent.keys().next().value!);
     (await import("../llm/decision-log.js")).logDecision("items", MODEL, { question: question.slice(0, 1500), items: pool.map((i) => i.name.slice(0, 80)) }, { ids: hit.ids, quantities: q }, opts.tenant || "");
   }
-  const given = new Map<OfferItem, Record<string, number>>();
+  const given = new Map<OfferItem, Record<string, unknown>>();
   for (const x of hit.q) given.set(pool[x.id], { ...(given.get(pool[x.id]) || {}), [x.input]: x.value });
   return { items: hit.ids.slice(0, limit).map((k) => pool[k]), given, alternatives: (hit.alt || []).map((k) => pool[k]) };
 }

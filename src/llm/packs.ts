@@ -219,6 +219,10 @@ export const BEHAVIOUR = {
   offerNetwork: (parts: string[]) => `Then offer, once and in your own words, to check businesses from our local Whisp network for ${parts.join("; ")} - which our information does not show we offer - and ask whether the customer wants that.`,
   networkAccepted: "The customer agreed that we check our local Whisp network for their question. Recommend these businesses (their information is below) as businesses from our network (not partners we work with, without praising or vouching for them), saying what each offers using only their information - prices and totals as given - with their phone and e-mail, and each one's link exactly as given (markdown). Do not offer to pass the question to our team.",
   networkNone: "You have just checked our local Whisp network and found no business for this. Say so briefly, and give our phone or e-mail so the customer can ask us directly.",
+  // A part the coverage judged not ours (src/network/coverage.ts) that no network business is relayed for (romax-3, 2026-11-05).
+  notOffered: "For what is listed under \"Not in our offer\": say plainly that it is not in our offer, and say in a sentence what we do offer instead, from the information above.",
+  // The knowledge reply kept for a calculation that runs too long (chat.ts releaseReply, conversation.ts agentDelivery).
+  released: "The calculation we started for this request did not finish in time. Say that in one short sentence, then answer what our information shows (amounts only as computed or listed above). Promise nothing about a later result.",
   smalltalk: "This is a greeting, thanks or small talk: reply naturally and briefly and offer help with our business. No offers to pass anything on.",
 };
 
