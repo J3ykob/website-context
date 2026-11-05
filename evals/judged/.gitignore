@@ -1,3 +1,5 @@
 iter*/
 smoke*/
 .env
+offers/
+.live.json
