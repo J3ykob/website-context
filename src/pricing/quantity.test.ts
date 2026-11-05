@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { periodReadings, convert, countInputs, readingsOf, isPeriod, dayNumber, clockHours, sameAmount, describeReading, type Period } from "./quantity.js";
-import { priceRequest, renderQuote, catalogOf, type PricingBusiness } from "./model.js";
+import { priceRequest, renderQuote, catalogOf, TOTAL_ITEM, type PricingBusiness } from "./model.js";
 import { priceGiven, customerPriceLine, listedAmounts } from "../offer/quantities.js";
 import type { OfferItem } from "../offer/store.js";
 
@@ -156,9 +156,12 @@ describe("the business's program on counted quantities: line totals, the total, 
     expect(q.text).toContain("B: 480 PLN");
     expect(q.text).toContain("Total: A: 360 PLN; B: 480 PLN");
     expect(q.text).toContain("every calendar day from Friday 2026-11-06 to Monday 2026-11-09");
+    // One fact per reading: the check pairs an amount with the reading it is given for ("3 doby" is A's 72 h, not B's 96 h).
     expect(q.facts).toEqual([
-      { name: "Zagęszczarka 100 kg", amounts: [360, 480], line: expect.stringContaining("Zagęszczarka") },
-      { name: "total", amounts: [360, 480], line: expect.stringContaining("Total") },
+      { item: "Zagęszczarka 100 kg", kind: "computed", reading: "A", readingText: expect.stringContaining("= 72 h"), amounts: [360], line: expect.stringContaining("Zagęszczarka") },
+      { item: "Zagęszczarka 100 kg", kind: "computed", reading: "B", readingText: expect.stringContaining("= 96 h"), amounts: [480], line: expect.stringContaining("Zagęszczarka") },
+      { item: TOTAL_ITEM, kind: "computed", reading: "A", readingText: expect.stringContaining("= 72 h"), amounts: [360], line: expect.stringContaining("Total") },
+      { item: TOTAL_ITEM, kind: "computed", reading: "B", readingText: expect.stringContaining("= 96 h"), amounts: [480], line: expect.stringContaining("Total") },
     ]);
   });
   it("rentbud: with the times given, one reading (Friday 8:00 - Monday 12:00 = 76 h = 3 doby + 4 h)", async () => {
@@ -192,6 +195,32 @@ describe("the business's program on counted quantities: line totals, the total, 
     expect(q.missing).toBe(1);
     expect(q.text).toContain("- Barszczyk czerwony z uszkami: needs: quantity (ask the customer)");
     expect(q.text).toContain("Total of the priced lines only (without Barszczyk czerwony z uszkami): 152 PLN");
+  });
+});
+
+// Two options for one need whose cheapest flips between the readings (150 zł a doba vs a 520 zł package for up to 96 h):
+// every option keeps its amount under both readings, each reading with its own note (review 2026-11-05: "B: not priced").
+const OPTIONS = `
+const catalog = { business: "Test", currency: "PLN", shared: [{ name: "hours", meaning: "rental duration in hours", type: "number", unit: "h" }], items: [
+  { id: "daily", name: "Stawka dobowa", inputs: [] }, { id: "weekend", name: "Pakiet weekendowy (do 96 h)", inputs: [] }] };
+function needs(req) { return []; }
+function quote(req) {
+  const h = req.context.hours;
+  return { lines: req.lines.map((l) => l.item === "daily" ? { item: l.item, status: "price", amount: Math.ceil(h / 24) * 150, note: h + " h = " + Math.ceil(h / 24) + " doby" }
+    : h <= 96 ? { item: l.item, status: "price", amount: 520, note: h + " h within the package" } : { item: l.item, status: "not_offered" }), total: null, rules: [] };
+}`;
+const optionsBusiness: PricingBusiness = { tenantId: "test2", hash: "", builtAt: "", model: "", costUsd: 0, missing: [], parts: [{ catalog: { business: "Test", currency: "PLN", shared: [{ name: "hours", meaning: "rental duration in hours", type: "number", unit: "h" }], items: [{ id: "daily", name: "Stawka dobowa", inputs: [] }, { id: "weekend", name: "Pakiet weekendowy (do 96 h)", inputs: [] }] }, code: OPTIONS, source: "", model: "" }] };
+
+describe("two readings whose cheapest option flips", () => {
+  it("every option priced under both readings, each with its own note; a fact per reading", async () => {
+    const request = { context: { hours: period("2026-11-06", "2026-11-09", null, null, "hour") }, lines: [{ item: "daily", inputs: {}, need: "n0" }, { item: "weekend", inputs: {}, need: "n0" }] };
+    const { quotes, assumed } = await priceRequest(optionsBusiness, request);
+    const q = renderQuote(catalogOf(optionsBusiness), quotes, assumed);
+    expect(q.text).toContain("- Stawka dobowa (one option): A: 450 PLN for this request (the customer's quantities, everything in the note included) (72 h = 3 doby); B: 600 PLN");
+    expect(q.text).toContain("(96 h = 4 doby)");
+    expect(q.text).not.toContain("not priced");
+    expect(q.text).toContain("- Pakiet weekendowy (do 96 h) (another option for the same thing): 520 PLN");
+    expect(q.facts.map((f) => [f.item, f.reading ?? "", f.amounts])).toEqual([["Stawka dobowa", "A", [450]], ["Stawka dobowa", "B", [600]], ["Pakiet weekendowy (do 96 h)", "", [520]]]);
   });
 });
 

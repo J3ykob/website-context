@@ -406,12 +406,16 @@ describe("a member business whose answer leaves part unpriced", () => {
 describe("a calculation that runs too long: the knowledge reply kept when it started (chat.ts releaseReply)", () => {
   const KEPT = "Z naszego cennika: zagęszczarka 100 kg - 120 zł za dobę, 24 zł za godzinę.";
   const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+  // The run's marker (agentPending, set when the chat started it) and the reply kept for it, written a few seconds later.
+  const startedFor = (minutes: number) => { const at = Date.now() - minutes * 60_000; return { agentPending: at, releaseText: { at: at + 5000, run: at, text: KEPT } }; };
+  afterEach(() => { delete process.env.AGENT_RELEASE_MS; });
+
   it("goes out once after AGENT_RELEASE_MS while the run goes on; the result follows as usual", async () => {
     registry.createTenant("demo@late.pl", "https://late.pl");
-    const pid = await conversation("late_pl", { releaseText: { at: Date.now() - 1000, text: KEPT } });
-    await setMemory(pid, { agentRun: run({ runId: `run-${pid}`, status: "running", startedAt: minutesAgo(1) }) });
+    const pid = await conversation("late_pl", startedFor(1));
+    await setMemory(pid, { agentRun: run({ runId: `run-${pid}`, status: "running", startedAt: minutesAgo(0.9) }) });
     expect(await poll(pid)).toMatchObject({ status: "running", chat: [] });
-    await setMemory(pid, { agentRun: run({ runId: `run-${pid}`, status: "running", startedAt: minutesAgo(4) }) });
+    process.env.AGENT_RELEASE_MS = "30000"; // the run is now late
     expect(await poll(pid)).toMatchObject({ status: "released", message: KEPT, chat: [KEPT] });
     expect(await poll(pid)).toMatchObject({ status: "released", message: KEPT, chat: [] }); // once into the conversation
     await writeFile(pid, "odpowiedz.txt", DRAFT, "txt", "agent");
@@ -428,12 +432,35 @@ describe("a calculation that runs too long: the knowledge reply kept when it sta
 
   it("a run that fails: the kept reply instead of could not prepare - and nothing more when it went out already", async () => {
     registry.createTenant("demo@lost.pl", "https://lost.pl");
-    const a = await conversation("lost_pl", { releaseText: { at: Date.now(), text: KEPT } });
+    const a = await conversation("lost_pl", startedFor(0.5));
     await setMemory(a, { agentRun: run({ runId: `run-${a}`, status: "failed" }) });
     expect(await poll(a)).toMatchObject({ status: "failed", message: KEPT, files: [], chat: [KEPT] });
-    const b = await conversation("lost_pl", { releaseText: { at: 123, text: KEPT }, released: "123" });
+    const kept = startedFor(0.5);
+    const b = await conversation("lost_pl", { ...kept, released: String(kept.releaseText.at) });
     await setMemory(b, { agentRun: run({ runId: `run-${b}`, status: "failed" }) });
     expect(await poll(b)).toMatchObject({ status: "failed", message: KEPT, chat: [] });
     expect(await agentDelivery(b, async () => {})).toMatchObject({ released: true });
+  });
+
+  it("a later run - the network continuation, the owner's rework, a run started from the panel - never sends the first run's reply", async () => {
+    registry.createTenant("demo@later.pl", "https://later.pl");
+    process.env.AGENT_RELEASE_MS = "30000";
+    // The first run finished in time and asked the network; the businesses answered and the continuation (or the owner's
+    // rework) set a new marker: it runs long, then fails.
+    for (const memory of [{ networkContinued: true }, { ownerLoop: true }]) {
+      const first = startedFor(40);
+      const pid = await conversation("later_pl", { ...first, ...memory, agentPending: Date.now() - 5 * 60_000 });
+      await setMemory(pid, { agentRun: run({ runId: `run2-${pid}`, status: "running", startedAt: minutesAgo(4.9) }) });
+      expect(await poll(pid)).toMatchObject({ status: "running", chat: [] });
+      await setMemory(pid, { agentRun: run({ runId: `run2-${pid}`, status: "failed", startedAt: minutesAgo(4.9) }) });
+      expect(await poll(pid)).toMatchObject({ message: "WORDED NOTICE", chat: ["WORDED NOTICE"] }); // "could not prepare", worded
+    }
+    // The same marker, but the run in progress was started long after it (from the panel): not the reply's run.
+    const pid = await conversation("later_pl", startedFor(30));
+    await setMemory(pid, { agentRun: run({ runId: `panel-${pid}`, status: "running", startedAt: minutesAgo(5) }) });
+    expect(await poll(pid)).toMatchObject({ status: "running", chat: [] });
+    // Its retry (attempt 2) of the reply's own run still counts as that run.
+    await setMemory(pid, { agentRun: run({ runId: `retry-${pid}`, status: "running", startedAt: minutesAgo(5), attempt: 2 }) });
+    expect(await poll(pid)).toMatchObject({ status: "released", message: KEPT, chat: [KEPT] });
   });
 });

@@ -37,6 +37,9 @@ export interface Coverage {
   items: OfferItem[][];   // its confirmed items per part
   passages: string[][];   // its own passages per part, when the pages decided
   how: CoverageHow[];     // what decided it ("none" = not the business's)
+  // Its own pages say it is not offered (the page question's not_offered >= PAGES_MIN) - positive evidence, where "none"
+  // alone only means nothing confirmed it ("unknown" counts as none): only such a part may be told "not in our offer".
+  denied: boolean[];
   late?: boolean;         // not decided within the caller's time limit: every part counts as the business's
 }
 
@@ -59,11 +62,11 @@ const ADDON_MIN = 0.5;   // Jev: the part only goes with that other part's produ
 
 // A price of its own or in its components (rental rates, per-guest tiers): either prices the part.
 const hasPrice = (i: OfferItem) => i.price_value != null || i.components.some((c) => c.price_value != null);
-const none = (): Coverage => ({ parts: [], own: [], priced: [], items: [], passages: [], how: [] });
+const none = (): Coverage => ({ parts: [], own: [], priced: [], items: [], passages: [], how: [], denied: [] });
 // Every part the business's, unjudged (a failed step, or late for the caller).
 const allOwn = (parts: string[], late = false): Coverage => ({
   parts, own: parts.map(() => true), priced: parts.map(() => false), items: parts.map(() => []), passages: parts.map(() => []),
-  how: parts.map(() => "unjudged" as const), ...(late ? { late: true } : {}),
+  how: parts.map(() => "unjudged" as const), denied: parts.map(() => false), ...(late ? { late: true } : {}),
 });
 interface Entry { at: number; ttl: number; p: Promise<Coverage>; parts?: string[] }
 const memo = new Map<string, Entry>();
@@ -181,8 +184,8 @@ async function decide(tenantId: string, need: string, given: OfferItem[] | undef
   // <= 0.01. Not ours only when every check could be asked: what could not be judged is ours - also every part that is
   // not ours by its own checks when step 0 failed for several parts (it may be an add-on of one of ours).
   const offered = (o: Record<string, number>) => (o.offered ?? 0) + (o.several ?? 0) >= PAGES_MIN && (o.not_offered ?? 0) < PAGES_MIN;
-  const denied = (o: Record<string, number>) => (o.not_offered ?? 0) >= PAGES_MIN;
-  const byItems = judged.map(({ confirmed, page }) => (confirmed?.length && (confirmed.some(hasPrice) || !(page.odds && denied(page.odds))) ? confirmed : []));
+  const notOffered = (o: Record<string, number>) => (o.not_offered ?? 0) >= PAGES_MIN;
+  const byItems = judged.map(({ confirmed, page }) => (confirmed?.length && (confirmed.some(hasPrice) || !(page.odds && notOffered(page.odds))) ? confirmed : []));
   // Step 0 not answered for a part of several (the call failed, or Jev left out its key): whether it goes with another is unknown.
   const addonUnknown = (k: number) => splitAll.length > 1 && !(asked?.[`o${kept[k]}`] as { choice?: string } | undefined)?.choice;
   const how: CoverageHow[] = judged.map(({ confirmed, page }, k) => {
@@ -202,9 +205,10 @@ async function decide(tenantId: string, need: string, given: OfferItem[] | undef
     priced: parts.map((_, k) => own[k] && byItems[k].some(hasPrice)),
     items: byItems,
     passages: judged.map((j) => j.page.passages),
+    denied: judged.map(({ page }, k) => how[k] === "none" && !!page.odds && notOffered(page.odds)),
   };
-  console.log(`[coverage] ${tenantId}: ${parts.map((p, k) => `${own[k] ? "own" : "foreign"}:${how[k]}${c.priced[k] ? "$" : ""}${of[k] != null ? `(+${of[k]! + 1})` : ""} "${p.slice(0, 60)}"`).join(", ")} (${Date.now() - t0} ms)`);
-  (await import("../llm/decision-log.js")).logDecision("coverage", "matcher+jev", { need: need.slice(0, 3000), about, parts, of }, { own, priced: c.priced, how, items: byItems.map((l) => l.map((i) => i.name.slice(0, 80))), notAsked }, tenantId);
+  console.log(`[coverage] ${tenantId}: ${parts.map((p, k) => `${own[k] ? "own" : "foreign"}:${how[k]}${c.denied[k] ? "!" : ""}${c.priced[k] ? "$" : ""}${of[k] != null ? `(+${of[k]! + 1})` : ""} "${p.slice(0, 60)}"`).join(", ")} (${Date.now() - t0} ms)`);
+  (await import("../llm/decision-log.js")).logDecision("coverage", "matcher+jev", { need: need.slice(0, 3000), about, parts, of }, { own, priced: c.priced, how, denied: c.denied, odds: judged.map((j) => j.page.odds), items: byItems.map((l) => l.map((i) => i.name.slice(0, 80))), notAsked }, tenantId);
   return c;
 }
 
@@ -215,5 +219,5 @@ function note(need: string, c: Coverage): void {
   if (!u) return;
   const debug = (u.debug ||= {});
   const list = (debug.coverage ||= []) as Noted[];
-  if (!list.some((x) => x.need === need.slice(0, 300))) list.push({ need: need.slice(0, 300), parts: c.parts.map((p, k) => `${c.own[k] ? "own" : "foreign"}:${c.how[k]}${c.priced[k] ? "$" : ""} ${p}`), ...(c.late ? { late: true } : {}) });
+  if (!list.some((x) => x.need === need.slice(0, 300))) list.push({ need: need.slice(0, 300), parts: c.parts.map((p, k) => `${c.own[k] ? "own" : "foreign"}:${c.how[k]}${c.denied?.[k] ? "!" : ""}${c.priced[k] ? "$" : ""} ${p}`), ...(c.late ? { late: true } : {}) });
 }

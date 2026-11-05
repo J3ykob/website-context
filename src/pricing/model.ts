@@ -213,7 +213,8 @@ when the input counts hours, "4x5 m" = 20 m², "the bride and 3 bridesmaids" = 4
 say - never assume. A duration is not a choice of rate ("6 hours" sets the duration, not "pay per hour"). An input's
 value is one number in the catalogue's unit ("30 hours over two days" = 30 hours), or:
 - a duration given by its start and end ("from Friday to Monday", "pick-up Saturday 8:00"): {"from": {"date":
-  "YYYY-MM-DD", "time": "HH:MM" or null if not said}, "to": {...}} - code counts it in the input's unit;
+  "YYYY-MM-DD", "time": "HH:MM" or null if no clock time is said ("in the morning" is none)}, "to": {...}} - code counts
+  it in the input's unit;
 - a quantity in another unit than the input's, converted as the item states it (soup "for 8 people", the item saying
   "1 l = 4 portions"): {"amount": 8, "equals": {"input": 1, "given": 4}}, with "whole": true when the input counts
   whole pieces or packs; when nothing states the conversion, leave the input out.
@@ -416,8 +417,12 @@ export async function quoteText(pb: PricingBusiness, convo: string): Promise<str
   return (await quoteResult(pb, convo))?.text ?? null;
 }
 
-/** An amount the business's program computed for the request (a line, or the total) - evidence for the reply's check. */
-export interface QuoteFact { name: string; amounts: number[]; line: string }
+/**
+ * An amount the business's program computed for the request - a line's item, or the request's total; under one reading
+ * when a time is left open (`reading`: its letter, `readingText`: what it counts) - evidence for the reply's check.
+ */
+export interface QuoteFact { item: string; kind: "computed" | "listed"; reading?: string; readingText?: string; amounts: number[]; line: string }
+export const TOTAL_ITEM = "the request's total";
 /**
  * The quote for the reply: its text; whether it prices the whole request (every line that is not an alternative has a
  * price, or is included in another one - computed by the business's program, so the chat can give it, chat.ts); every
@@ -465,17 +470,23 @@ export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[]
   const several = new Set(kept.filter((l) => l.alternative).map((l) => l.need || ""));
   const tag = (l: QuoteLine) => (several.has(l.need || "") ? (l.alternative ? " (another option for the same thing)" : " (one option)") : "");
   const priceOf = (l: QuoteLine) => l.status === "price" ? `${zl(l.amount!)} for this request (the customer's quantities, everything in the note included)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer";
-  // The same line under the other readings (the same item for the same need).
-  const twin = (o: Quote, l: QuoteLine) => o.lines.find((x) => x.item === l.item && x.need === l.need && !!x.alternative === !!l.alternative);
+  // The same line under the other readings: the same item for the same need - whichever option is the cheapest there (a
+  // daily rate under one reading, the weekend package under the other, review 2026-11-05).
+  const twin = (o: Quote, l: QuoteLine) => o.lines.find((x) => x.item === l.item && x.need === l.need);
   const same = (a?: QuoteLine, b?: QuoteLine) => !!a && !!b && a.status === b.status && a.amount === b.amount && a.min === b.min && a.max === b.max;
   const amountsOf = (l?: QuoteLine) => (l ? [l.amount, l.min, l.max].filter((x): x is number => typeof x === "number" && Number.isFinite(x)) : []);
+  // What each reading assumes, for the check's pairing ("3 doby" is reading A's 72 h, not B's 96 h).
+  const readingOf = (k: number) => ({ reading: READING[k], readingText: (assumed[k] || []).join("; ") });
   const facts: QuoteFact[] = [];
   const lines = kept.map((l) => {
     const alts = others.map((o) => twin(o, l));
-    const body = alts.length && !alts.every((x) => same(x, l)) ? [l, ...alts].map((x, k) => `${READING[k]}: ${x ? priceOf(x) : "not priced"}`).join("; ") : priceOf(l);
-    const line = `- ${name(l.item)}${tag(l)}: ${body}${l.note ? ` (${l.note})` : ""}`;
-    const amounts = [...new Set([l, ...alts].flatMap(amountsOf))];
-    if (amounts.length) facts.push({ name: name(l.item), amounts, line });
+    const split = alts.length > 0 && !alts.every((x) => same(x, l));
+    // Each reading with its own note (the note says what that reading's amount counts: 72 h vs 96 h).
+    const body = split ? [l, ...alts].map((x, k) => `${READING[k]}: ${x ? `${priceOf(x)}${x.note ? ` (${x.note})` : ""}` : "not priced"}`).join("; ") : `${priceOf(l)}${l.note ? ` (${l.note})` : ""}`;
+    const line = `- ${name(l.item)}${tag(l)}: ${body}`;
+    // One fact per reading when they differ: an amount is paired with the reading it is stated for.
+    if (split) [l, ...alts].forEach((x, k) => { const a = amountsOf(x); if (a.length) facts.push({ item: name(l.item), kind: "computed", ...readingOf(k), amounts: a, line }); });
+    else if (amountsOf(l).length) facts.push({ item: name(l.item), kind: "computed", amounts: amountsOf(l), line });
     return line;
   });
   lines.unshift("Each amount already includes everything its note lists (e.g. travel) - nothing of it is added again.");
@@ -493,7 +504,9 @@ export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[]
     const body = totals.length > 1 && totals.some((t) => t?.min !== q.total!.min || t?.max !== q.total!.max) ? totals.map((t, k) => `${READING[k]}: ${tt(t)}`).join("; ") : tt(q.total);
     const line = open.length ? `Total of the priced lines only (without ${open.map((l) => name(l.item)).join(", ")}): ${body}` : `Total: ${body}`;
     lines.push(line);
-    facts.push({ name: "total", amounts: [...new Set(totals.flatMap((t) => (t ? [t.min, t.max] : [])).filter((x): x is number => typeof x === "number" && Number.isFinite(x)))], line });
+    const amountsIn = (t?: Quote["total"]) => [...new Set((t ? [t.min, t.max] : []).filter((x): x is number => typeof x === "number" && Number.isFinite(x)))];
+    if (totals.length > 1 && totals.some((t) => t?.min !== q.total!.min || t?.max !== q.total!.max)) totals.forEach((t, k) => { if (amountsIn(t).length) facts.push({ item: TOTAL_ITEM, kind: "computed", ...readingOf(k), amounts: amountsIn(t), line }); });
+    else facts.push({ item: TOTAL_ITEM, kind: "computed", amounts: amountsIn(q.total), line });
   }
   const covered = main.some((l) => l.status === "price") && main.every((l) => l.status === "price" || l.status === "included");
   return { text: lines.join("\n"), covered, facts, missing: main.filter((l) => l.status === "needs").length };
@@ -504,7 +517,7 @@ export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[]
  * on the catalogue alone, once per built model): a period the customer gives is counted in it (src/pricing/quantity.ts).
  * The reader itself named the unit before and took a rental's daily price for its input's unit: Rentbud's "hours" read
  * as 3 days in 1 of 2 smoke runs (3 h priced = 72 zł). {} when it could not be asked (a period is then left out and the
- * program asks for the duration): asked again after UNITS_RETRY_MS.
+ * program asks for the duration): asked again after UNITS_RETRY_MS; a decision after UNITS_KEEP_MS.
  */
 const UNIT_OF: Record<"none" | TimeUnit, string> = {
   none: "Not a length of time (a count of things, an amount, an area, a distance, a number of people)",
@@ -513,6 +526,10 @@ const UNIT_OF: Record<"none" | TimeUnit, string> = {
 };
 const UNITS_MIN = 0.5;
 const UNITS_RETRY_MS = 10 * 60_000;
+// A decision is asked again after this long (a slip is not kept until the process restarts - review 2026-11-05).
+const UNITS_KEEP_MS = 6 * 3600_000;
+// Over jevAsk's 2-6 s hedging window: a batch of up to 60 questions is sent once, not five times (src/llm/jev.ts).
+const UNITS_JEV_MS = 8000;
 const unitsMemo = new Map<string, { at: number; p: Promise<Record<string, TimeUnit> | null> }>();
 export function durationUnits(pb: PricingBusiness, catalog: Catalog): Promise<Record<string, TimeUnit>> {
   const key = `${pb.tenantId}\n${pb.hash}\n${pb.builtAt}`;
@@ -520,9 +537,12 @@ export function durationUnits(pb: PricingBusiness, catalog: Catalog): Promise<Re
   if (!hit || Date.now() - hit.at > UNITS_RETRY_MS) {
     const seen = new Set<string>();
     const specs = [...catalog.shared, ...catalog.items.flatMap((i) => i.inputs || [])].filter((x) => x?.name && x.type === "number" && !seen.has(x.name) && seen.add(x.name)).slice(0, 60);
+    // Each question names its input: asked by index alone ("inputs[7]"), Jev answered for the neighbouring input (Angelika's
+    // "girls" read as hours, next to "hours"; Dworek's "quantity" next to "event_hours" - review 2026-11-05). Named: girls,
+    // quantity none 1.00; hours, duration_hours, event_hours hour 0.99-1.00; nights night 0.90 (probe 2026-11-05).
     const p = !specs.length ? Promise.resolve({}) : import("../llm/jev.js").then(async ({ jevAsk }) => {
       const a = await jevAsk({ inputs: specs.map((x) => `${x.name}${x.unit ? ` (${x.unit})` : ""}: ${x.meaning}`) },
-        Object.fromEntries(specs.map((_, k) => [`u${k}`, { type: "choice" as const, instructions: `What is the value of \`inputs[${k}]\`, an input of a business's quoting program?`, criteria: UNIT_OF }])), 4000).catch(() => null);
+        Object.fromEntries(specs.map((x, k) => [`u${k}`, { type: "choice" as const, instructions: `Input "${x.name}" (\`inputs[${k}]\`) of a business's quoting program: what is its value?`, criteria: UNIT_OF }])), UNITS_JEV_MS).catch(() => null);
       if (!a) return null;
       return Object.fromEntries(specs.flatMap((x, k) => {
         const c = a[`u${k}`] as { choice?: string; probabilities?: Record<string, number> } | undefined;
@@ -530,8 +550,8 @@ export function durationUnits(pb: PricingBusiness, catalog: Catalog): Promise<Re
       })) as Record<string, TimeUnit>;
     });
     hit = { at: Date.now(), p };
-    // A decision is kept while the process runs; one that could not be asked only until UNITS_RETRY_MS.
-    p.then((u) => { if (u) hit!.at = Infinity; }, () => {});
+    // A decision is kept for UNITS_KEEP_MS; one that could not be asked only until UNITS_RETRY_MS.
+    p.then((u) => { if (u) hit!.at = Date.now() + UNITS_KEEP_MS - UNITS_RETRY_MS; }, () => {});
     if (unitsMemo.size > 500) unitsMemo.clear();
     unitsMemo.set(key, hit);
   }
@@ -552,19 +572,26 @@ export async function quoteResult(pb: PricingBusiness, convo: string, opts: { no
   const llm: Llm = async (sys, user, max = 1500) => (await or.chat([{ role: "system", content: sys }, { role: "user", content: user }], { maxTokens: max })).content;
   const today = todayLine();
   const unitsP = durationUnits(pb, catalog);
-  const once = async (notes?: string[]): Promise<QuoteResult | null> => {
+  const once = async (notes?: string[]) => {
     const request = await read(convo, catalog, llm, partShared, { today, notes });
     if (!request.lines.length) return null;
     const { quotes, assumed } = await priceRequest(pb, request, await unitsP);
-    return renderQuote(catalog, quotes, assumed);
+    return { r: renderQuote(catalog, quotes, assumed), request, quotes };
   };
   const first = await once();
-  if (first?.missing && opts.notes) {
+  // Read once more with the items' own words only when a line is left needing one of its item's own quantities (what an
+  // item's conversion can give - not a date, a choice or the number of guests: any open line cost a serial second read
+  // of up to ~40k catalogue characters), and taken only when it keeps every item of the first read and leaves fewer open
+  // (a re-read that dropped the open line passed as "covered" - review 2026-11-05).
+  const own = (item: string) => new Set((catalog.items.find((i) => i.id === item)?.inputs || []).filter((x) => x.type === "number").map((x) => x.name));
+  const fillable = !!first && first.quotes[0].lines.some((l) => !l.alternative && l.status === "needs" && (l.needs || []).some((n) => own(l.item).has(n)));
+  if (first && fillable && opts.notes) {
     const notes = (await opts.notes().catch(() => [] as string[])).filter(Boolean);
     if (notes.length) {
       const again = await once(notes).catch(() => null);
-      if (again && again.missing < first.missing) return again;
+      const items = (rq: Request) => new Set(rq.lines.map((l) => l.item));
+      if (again && again.r.missing < first.r.missing && [...items(first.request)].every((i) => items(again.request).has(i))) return again.r;
     }
   }
-  return first;
+  return first?.r ?? null;
 }

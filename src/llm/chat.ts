@@ -31,10 +31,11 @@ import { coverage, type Coverage } from "../network/coverage.js";
 import { agentEnabled } from "../projects/agent.js";
 import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY, NOTIFY, CONVERSATION, type Route } from "../projects/conversation.js";
 import { renderItem, type OfferItem } from "../offer/store.js";
+import { listedAmounts as listedAmountsOf } from "../offer/quantities.js";
 import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
 import { noteTurn, markTurn, turnVariant, turnUsage, newTurnUsage, turnCheap, turnIp, turnExempt } from "./turn-usage.js";
 import type { QuoteResult } from "../pricing/model.js";
-import { sameAmount } from "../pricing/quantity.js";
+import { AMOUNTS_PROMPT, amountsView, judgeAmounts, type AmountsVerdict } from "../pricing/amounts.js";
 import { auditKnowledge, type AuditReport } from "../knowledge/audit.js";
 import { keyFacts } from "../knowledge/facts.js";
 
@@ -316,10 +317,15 @@ const HANDOFF_ASK_MS = 4000;
 // agent starts only for a part some network business has (owner 2026-11-05). Late = answered in the chat, whose reply
 // still relays the businesses if the search finds them while it is written.
 const NETWORK_ROUTE_WAIT_MS = Number(process.env.NETWORK_ROUTE_WAIT_MS) || 3000;
-// How long a blocked reply's amounts check (one call of the network's JSON model, pairing each amount with a listed
-// price) may take: 2.3-2.7 s in the smoke (2026-11-05); late = the fact check's verdict stands, nothing is kept for the rewrite.
+// How long the page search and the item matcher wait for the request's split (from when the turn's work starts): a split
+// usually comes in 0.6-1.4 s, but took 2.7, 3.6 and 5.5 s in the offline replay of 2026-11-05 (the first word 9.3 s); late =
+// they go on with the customer's own words (the second search and the per-part shortlist are skipped this turn). The
+// coverage and the network still read the split.
+const SPLIT_WAIT_MS = Number(process.env.SPLIT_WAIT_MS) || 1500;
+// How long a draft's amounts check (one call of the network's JSON model reading what each amount is given for - every
+// draft with computed or listed prices, next to the other checks) may take: 0.7-2.4 s in the probes of 2026-11-05; late =
+// the amounts are not judged this round (the fact check's verdict stands, nothing is kept for the rewrite).
 const AMOUNTS_MS = Number(process.env.AMOUNTS_CHECK_MS) || 4000;
-const AMOUNTS = `You read a chat reply's statements next to a list of prices. For each numbered statement: "amounts" - every sum of money it states (not a quantity, a date or a time), each {"amount": <number, e.g. "1 704,87 zł" -> 1704.87>, "for": <the number of the listed price the statement gives it as - by what the statement says it is for, not by the number; a term of a sum: the price it adds; or null>}; "other": true when it also states something besides these prices, quantities and their sums (a term, a date, delivery, a discount, availability...). JSON {"statements": [{"n": <the statement's number>, "amounts": [...], "other": false}, ...]}.`;
 
 
 // A network search started alongside our own reply (see networkStart): its matches only for `parts` - the parts of the
@@ -329,8 +335,11 @@ interface NetworkAsk { need: string; lang: OfferLang; matches: Promise<Ecosystem
 type NetStart = { cov: Promise<Coverage>; net: Promise<NetworkAsk | null>; elsewhere: boolean };
 /** Our pages chosen for a turn (packs), as the reply's prompt text and as passages for its checks. */
 interface Knowledge { packText: string; used: Pack[]; passages: string[] }
-/** An amount the reply may state: computed by code for this request, or listed by an item; `line` = its computed line. */
-interface PriceFact { name: string; amounts: number[]; line: string }
+/**
+ * An amount the reply may state: computed by code for this request (an item's line or the request's total, per reading
+ * when a time is open) or listed by an item (its price or rate as the price list gives it); `line` = its computed line.
+ */
+type PriceFact = import("../pricing/model.js").QuoteFact;
 /**
  * One turn's work, started together as soon as the turn is routed (problem 7 of the iteration-5 judges: the calculation
  * route read its quote, items and our passages first, then the reply searched and scored the pages again - ostap-1's
@@ -346,9 +355,33 @@ interface TurnWork {
   products: Promise<ItemMatch | null>;
   quote: Promise<QuoteResult | null>;
   facts: Promise<{ s: string }[] | null>;
+  start: () => void;             // starts the pages, items, quote and key facts now (a deferred turn: on first use otherwise)
   net: () => NetStart | null;    // the network start (coverage + search), when the turn asks the network
   coverage: () => Promise<Coverage>;
   decided: () => Promise<Coverage> | undefined; // the coverage when a path started it (the network start, an order, a calculation)
+}
+
+/** A promise whose work starts at once (eager) or on first use - then, catch, finally - or start(). */
+type Lazy<T> = Promise<T> & { start: () => void };
+function lazy<T>(make: () => Promise<T>, eager: boolean): Lazy<T> {
+  let p: Promise<T> | undefined;
+  const get = () => (p ||= make());
+  if (eager) get();
+  return {
+    then: (a?: any, b?: any) => get().then(a, b),
+    catch: (b?: any) => get().catch(b),
+    finally: (f?: any) => get().finally(f),
+    start: () => { void get().catch(() => {}); },
+    [Symbol.toStringTag]: "Promise",
+  } as unknown as Lazy<T>;
+}
+
+/** The price facts of items priced for the customer's quantities: one per reading, and the item's listed prices. */
+function computedFacts(computed: import("../offer/quantities.js").CustomerPrice[], texts: string[]): PriceFact[] {
+  return computed.flatMap((c, j) => [
+    ...c.readings.map((r, k): PriceFact => ({ item: c.item.name, kind: "computed", ...(c.readings.length > 1 ? { reading: "ABCD"[k], readingText: r.what } : {}), amounts: [r.amount], line: texts[j] })),
+    ...(listedAmountsOf(c.item).length ? [{ item: c.item.name, kind: "listed" as const, amounts: listedAmountsOf(c.item), line: "" }] : []),
+  ]);
 }
 
 /** How a reply was produced (recorded per turn, reported in admin traces). */
@@ -516,7 +549,7 @@ export class WebsiteChat {
     const cs = this.collectSessions.get(effectiveSessionKey);
     if (cs) {
       const flow = this.context.flows.find((f) => f.id === cs.flowId && f.status === "active");
-      if (flow && Date.now() - cs.at < COLLECT_IDLE_MS) return this.runCollect(flow, cs, effectiveSessionKey, message, questionAnswered);
+      if (flow && Date.now() - cs.at < COLLECT_IDLE_MS) return this.runCollect(flow, cs, effectiveSessionKey, message, questionAnswered, messages);
       this.collectSessions.delete(effectiveSessionKey);
     }
 
@@ -558,7 +591,7 @@ export class WebsiteChat {
         // otherwise the agent with the network for the rest when a network business has it, or the answer like any question.
         const need = this.coverageNeed(messages, message, null, effectiveSessionKey);
         const cov = await this.coverageOf(need);
-        if (!cov.own.some((o) => !o)) return this.startCollect(picked, effectiveSessionKey, message);
+        if (!cov.own.some((o) => !o)) return this.startCollect(picked, effectiveSessionKey, message, undefined, undefined, messages);
         if (agentEnabled() && (await this.networkFound(null, cov, !!this.packStateOf(effectiveSessionKey).owner, need)).length) {
           const r = await this.agentTurn(messages, message, effectiveSessionKey, { coverage: cov });
           if (r) { this.packStateOf(effectiveSessionKey).calcStarted = true; return r; }
@@ -788,8 +821,12 @@ export class WebsiteChat {
     // The turn's work - the split, the page searches, the item match and the quote - starts now, together; the order,
     // the calculation and the reply below read the same promises (problem 7 of the iteration-5 judges). The network search
     // too, except for an order of one of our actions (one opening our own form needs none; a part we don't have starts it).
-    const work = rt?.intent === "chitchat" ? null : this.startWork(sanitizedMessages, question, rt, sessionKey);
-    if (work && !(rt?.intent === "order" && rt.flow >= 0)) work.net();
+    const ownOrder = rt?.intent === "order" && rt.flow >= 0;
+    const work = rt?.intent === "chitchat" ? null : this.startWork(sanitizedMessages, question, rt, sessionKey, ownOrder);
+    if (work && !ownOrder) work.net();
+    // An order or a calculation with a part we don't have whose background agent did not start (nobody in the network has
+    // it): answered in the chat, where that part may be told "not in our offer" (packsReply).
+    let foreignUnmet = false;
     // Starting one of our actions: decided here, so nothing falls back to the other path's texts.
     if (rt && rt.intent === "order" && rt.flow >= 0) {
       const flows = this.routableFlows();
@@ -800,11 +837,14 @@ export class WebsiteChat {
       // 4 such openings left the site's hours, travel terms or the machine's height unanswered). Asked next to the
       // coverage (it was asked after it).
       const asksP = collectOne ? jevAsk({ message: question }, { q: { type: "noul", instructions: "Besides wanting to order or book, does `message` also ask the business something - a price, availability, a term, a place, opening hours, whether something is possible or how something works?" } }, 3000).catch(() => null) : Promise.resolve(null);
+      // The order needs a reply when it also asks something: its pages, items and quote start then, next to the coverage.
+      if (work) void asksP.then((a) => { if (((a?.q as JevNoulAnswer | undefined)?.noul ?? 0) >= 0.7) work.start(); });
       // An order form only when every part of the order is ours (src/network/coverage.ts): "not clearly not offered"
       // started a form for paving at a renovation firm (Jev: offered 0.02, unknown 0.57), and one matching part
       // ("wiertnica" in "wiertnica + korona") kept the rest from the network (chain test 2026-10-29).
       const cov = collectOne && aboutOffer(rt) && work ? await work.coverage() : null;
       const elsewhere = !!cov && cov.own.some((o) => !o);
+      if (elsewhere) work?.start(); // the agent or the reply below reads them
       if (picked.length > 1) {
         this.pendingDisambig.set(sessionKey, { flows: picked.slice(0, 3), at: Date.now() });
         return this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.whichAction(picked.map((f) => `"${f.name}"`))], packs: [], rt });
@@ -813,9 +853,10 @@ export class WebsiteChat {
       // search found one (the owner's decision 2026-11-05: romax-3's windows at a floor and door salon went to a 4-minute
       // job nobody in the network could do). Otherwise it is answered below: not in our offer, and what we do.
       if (elsewhere && agentEnabled() && (await this.networkFound(work, cov!, !!st.owner)).length) {
-        const r = await this.agentTurn(messages, question, sessionKey, { coverage: cov!, work });
+        const r = await this.agentTurn(sanitizedMessages, question, sessionKey, { coverage: cov!, work });
         if (r) { st.calcStarted = true; onToken(r.message); return r; }
       }
+      foreignUnmet = elsewhere;
       if (picked.length === 1 && !elsewhere) {
         let r: ChatResponse;
         if (picked[0].executionMode === "agent") r = await this.startAgentFlow(picked[0], question);
@@ -824,11 +865,11 @@ export class WebsiteChat {
           // form still needs.
           const asks = ((await asksP)?.q as JevNoulAnswer | undefined)?.noul ?? 0;
           noteTurn("orderAlsoAsks", asks);
-          if (asks < 0.7) r = await this.startCollect(picked[0], sessionKey, question);
+          if (asks < 0.7) r = await this.startCollect(picked[0], sessionKey, question, undefined, undefined, sanitizedMessages);
           else {
             // The form opens (and reads the message) in the background while the answer streams: run one after the
             // other they took 14.7 s before the first word. The reply asks for the form's details itself.
-            const collectP = this.startCollect(picked[0], sessionKey, question);
+            const collectP = this.startCollect(picked[0], sessionKey, question, undefined, undefined, sanitizedMessages);
             const fields = picked[0].requiredInputs.filter((f) => f.required).map((f) => f.label).slice(0, 3);
             const answer = await this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, extra: [BEHAVIOUR.orderQuestion(fields)], formOpen: true, work });
             const started = await collectP.catch(() => null);
@@ -891,23 +932,24 @@ export class WebsiteChat {
       // (until 2026-10-29 such orders got only a quote offer and never reached the network) - only when the network
       // search found a business for that part (2026-11-05).
       if (cov?.own.some((o) => !o) && (await this.networkFound(work, cov, !!st.owner)).length) {
-        const r = await this.agentTurn(messages, question, sessionKey, { coverage: cov, work });
+        const r = await this.agentTurn(sanitizedMessages, question, sessionKey, { coverage: cov, work });
         if (r) { st.calcStarted = true; onToken(r.message); return r; }
       }
+      foreignUnmet = !!cov?.own.some((o) => !o);
       const simple = await simpleP;
       markTurn("simpleCheck");
-      if (simple) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc], work });
+      if (simple) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc], work, foreignUnmet });
       // More than a simple calculation (measuring, unlisted work, discounts, many items): quantities only, or every part of
       // ours priced -> the calculation and its approval; ours without prices -> answered here (partial: a quote request).
       const ownPriced = !!cov && cov.own.some(Boolean) && cov.own.every((o, k) => !o || cov.priced[k]);
       if (pure || ownPriced) {
-        const r = await this.agentTurn(messages, question, sessionKey, pure ? { pureCalc: true, work } : { coverage: cov!, work });
+        const r = await this.agentTurn(sanitizedMessages, question, sessionKey, pure ? { pureCalc: true, work } : { coverage: cov!, work });
         if (r) { st.calcStarted = true; onToken(r.message); return r; }
       }
-      return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work });
+      return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work, foreignUnmet });
     }
     if (rt?.intent === "chitchat") return { ...(await this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.smalltalk], rt })), turnKind: "chitchat" };
-    return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work });
+    return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work, foreignUnmet });
   }
 
   /**
@@ -916,7 +958,9 @@ export class WebsiteChat {
    * start and the coverage. The same conditions as each had in the reply: items, split and coverage only for a turn
    * about the offer (router), the quote for a price question or a calculation with the quoting model on.
    */
-  private startWork(messages: ChatMessage[], question: string, rt: TurnRoute | null, sessionKey: string): TurnWork {
+  // deferred (an order of one of our own forms): only the split starts now (the coverage on first ask); our pages, items, quote
+  // and key facts start on first use or start() - an order that opens its form needs none of them (review 2026-11-05).
+  private startWork(messages: ChatMessage[], question: string, rt: TurnRoute | null, sessionKey: string, deferred = false): TurnWork {
     const st = this.packStateOf(sessionKey);
     const convo = messages.slice(-8).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 700)}`).join("\n");
     const { query, followup } = this.turnQuery(messages, question, rt);
@@ -929,6 +973,10 @@ export class WebsiteChat {
     // coverage, the network, the item matcher and the second page search read it (the page search and the matcher split
     // the search query, with 200 characters of our own reply in it, besides the coverage's own split).
     const parts = offerTurn ? import("../projects/broadcast.js").then((b) => b.splitNeed(need, this.context.tenantId)).catch(() => [] as string[]) : Promise.resolve([] as string[]);
+    // The page search and the item matcher wait for it at most SPLIT_WAIT_MS.
+    let splitDone = false;
+    void parts.then(() => { splitDone = true; });
+    const partsSoon = !offerTurn ? parts : Promise.race([parts, new Promise<string[]>((r) => setTimeout(() => { if (!splitDone) noteTurn("splitLate", SPLIT_WAIT_MS); r([]); }, SPLIT_WAIT_MS))]);
     // Our offer items for this message: a shop's catalogue (or its live search), otherwise the items read from our pages
     // and the owner's offer - the same item matcher the network search uses. Pages alone missed them: "ubić podjazd"
     // ranked paving guides above the compactor price list (chain C1). null: the items could not be judged (Jev down) -
@@ -936,29 +984,30 @@ export class WebsiteChat {
     // matched item - a shop's too (empro-1: "3 aku" got no total, 3 x 699 zł) - priced by code.
     const quantities = !!rt && (rt.price >= 0.5 || rt.intent === "calculate");
     const none: ItemMatch = { items: [], given: new Map() };
-    const products: Promise<ItemMatch | null> = this.catalogue ? this.shopProducts(query, question, rt, quantities).catch(() => none)
-      : this.offerItems.length && offerTurn ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities, alternatives: !!rt && rt.specific >= 0.5, parts }).catch(() => null) : Promise.resolve(none);
-    if (this.catalogue || (this.offerItems.length && offerTurn)) void products.then(() => markTurn("itemsMatched"));
+    const later = <T,>(make: () => Promise<T>): Lazy<T> => lazy(make, !deferred);
+    const products = later<ItemMatch | null>(() => (this.catalogue ? this.shopProducts(query, question, rt, quantities).catch(() => none)
+      : this.offerItems.length && offerTurn ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities, alternatives: !!rt && rt.specific >= 0.5, parts: partsSoon }).catch(() => null) : Promise.resolve(none))
+      .then((m) => { if (this.catalogue || (this.offerItems.length && offerTurn)) markTurn("itemsMatched"); return m; }));
     // The business's own quoting model (src/pricing/model.ts), when it has one and it is switched on: the conversation
     // read into a request in its terms, its program quotes it. A line it leaves needing a quantity is read once more with
     // the matched items' own words when the customer gave quantities for them (an item's "1 l = 4 portions").
     const quoting = process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing");
-    const quote = quoting && rt && (rt.price >= 0.5 || rt.intent === "calculate")
-      ? this.quoteResultWithModel(convo, this.context.tenantId, async () => { const m = await products; return m?.given.size ? m.items.map((i) => renderItem(i)) : []; }).catch(() => null)
-      : null;
-    if (quote) void quote.then(() => markTurn("quoted"));
+    const quote = later<QuoteResult | null>(() => (quoting && rt && (rt.price >= 0.5 || rt.intent === "calculate")
+      ? this.quoteResultWithModel(convo, this.context.tenantId, async () => { const m = await products; return m?.given.size ? m.items.map((i) => renderItem(i)) : []; }).catch(() => null).then((q) => { markTurn("quoted"); return q; })
+      : Promise.resolve(null)));
     // Key facts (src/knowledge/facts.ts): the site's single sentences, found by meaning and kept by Jev - in parallel.
-    const facts = turnVariant().includes("facts")
+    const facts = later<{ s: string }[] | null>(() => (turnVariant().includes("facts")
       ? this.embeddingProvider.embed([query]).then((v) => keyFacts(this.context.tenantId, v[0] || null, convo, question)).catch(() => null)
-      : Promise.resolve(null);
-    const knowledge = this.turnKnowledge(convo, question, query, followup, parts, st).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: pages not chosen - ${(e as Error).message}`); return { packText: "", used: [], passages: [] } as Knowledge; });
+      : Promise.resolve(null)));
+    const knowledge = later<Knowledge>(() => this.turnKnowledge(convo, question, query, followup, partsSoon, st).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: pages not chosen - ${(e as Error).message}`); return { packText: "", used: [], passages: [] } as Knowledge; }));
     // A real need we can't meet may go to the network (its coverage and search run next to our own search and scoring).
     // The owner writing: the coverage only (our own pages for the reply), no search - the network is never offered or
     // relayed to the owner. Over a spend cap or from a site the business does not own: no network search.
     let net: NetStart | null | undefined;
     let cov: Promise<Coverage> | undefined;
     return {
-      convo, need, parts, knowledge, products, quote: quote || Promise.resolve(null), facts,
+      convo, need, parts, knowledge, products, quote, facts,
+      start: () => { for (const x of [knowledge, products, quote, facts]) x.start(); },
       net: () => (net === undefined ? (net = rt && !turnCheap() ? this.networkStart(question, messages, rt, !st.owner, sessionKey) : null) : net),
       coverage: () => (cov ||= net?.cov ?? this.coverageOf(need)),
       decided: () => net?.cov ?? cov,
@@ -1021,7 +1070,9 @@ export class WebsiteChat {
    */
   // opts.work: the turn's work, started when it was routed (TurnWork) - started here otherwise; opts.released: the
   // knowledge reply kept for a calculation that runs too long (agentTurn): no network, no offers to pass anything on.
-  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; networkParts?: string[]; t0?: number; formOpen?: boolean; work?: TurnWork | null; released?: boolean }): Promise<ChatResponse> {
+  // opts.foreignUnmet: an order or a calculation with a part we don't have that started no background agent (packsStream) -
+  // the one place a part may be told "not in our offer" (below).
+  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; networkParts?: string[]; t0?: number; formOpen?: boolean; work?: TurnWork | null; released?: boolean; foreignUnmet?: boolean }): Promise<ChatResponse> {
     const st = this.packStateOf(sessionKey);
     const question = messages.findLast((m) => m.role === "user")?.content || "";
     const rt = opts.rt ?? null;
@@ -1031,6 +1082,8 @@ export class WebsiteChat {
     let passages: string[] = [];
     let packText = "";
     let answered = true;
+    let answeredOwn = true;         // answered by our own information - not only by the "not in our offer" fact
+    let notOurs: string[] = [];     // the parts told "not in our offer" (opts.foreignUnmet)
     let network: { text: string; evidence: { content: string }[]; labels: string[]; links: string[]; partners: { tenantId: string; label: string }[] } | null = null;
     let searching: { matches: Promise<EcosystemMatch[]>; need: string; lang: OfferLang } | null = null;
     let offered: NetworkAsk | null = null; // the network offered for the parts we don't have (searched on a yes)
@@ -1088,14 +1141,17 @@ export class WebsiteChat {
           const texts = computed.map((c) => customerPriceLine(c));
           noteTurn("computed", texts);
           lines.push(`Computed for the customer's quantities (use these totals): ${texts.join("; ")}`);
-          computed.forEach((c, j) => priceFacts.push({ name: c.item.name, amounts: [...new Set([...c.readings.map((r) => r.amount), ...listedAmounts(c.item)])], line: texts[j] }));
+          // One fact per computed amount (each reading its own) and one for the item's listed prices: the check pairs an
+          // amount with what the reply gives it for, so "3 pieces for 699 zł" or "3 doby = 480 zł" is no match (review
+          // 2026-11-05: [2097, 699] and [360, 480] under one name let both through).
+          priceFacts.push(...computedFacts(computed, texts));
         }
         // A price question whose quantity was not clear ("half a day"): no total is computed, and the reply
         // must not work one out (C3: "6 h x 76 = 456 zł, hourly is cheaper" against a 380 zł daily rate).
         else if (!modelQuote && judged && rt && rt.price >= 0.5 && products.some((p) => inputsOf(p).length)) lines.push("No total is computed for this request: the customer's quantity is not clear from the message - give the prices, do not work out a total.");
         // Each item's own listed prices: amounts a reply may give as they are.
         const priced = new Set(computed.map((c) => c.item));
-        for (const p of products) if (!priced.has(p) && listedAmounts(p).length) priceFacts.push({ name: p.name, amounts: listedAmounts(p), line: "" });
+        for (const p of products) if (!priced.has(p) && listedAmounts(p).length) priceFacts.push({ item: p.name, kind: "listed", amounts: listedAmounts(p), line: "" });
         packText = `${packText ? `${packText}\n\n---\n\n` : ""}### ${this.catalogue ? "Products in our shop (from our catalogue)" : "Our offer and prices (from our price list)"}\n${lines.join("\n")}`;
         passages = [...passages, ...lines];
         productLinks = products.map((p) => p.url).filter(Boolean);
@@ -1122,9 +1178,10 @@ export class WebsiteChat {
       // COVERAGE_WAIT_MS once our own information is ready: one slow judgement (a matcher call timing out after 8 s) held
       // the first word of the reply. Late: no network this turn (fail closed) and no extra pages - except an explicit ask
       // for other businesses, which waits (in the same window) only for its split.
-      // The coverage an order or a calculation decided serves the reply too (the "not in our offer" fact below).
+      // The coverage an order or a calculation decided serves the reply too (the "not in our offer" fact below) - also the
+      // knowledge reply kept for a calculation (released: the coverage its agent was started with).
       const waited = new Promise<null>((r) => setTimeout(() => r(null), COVERAGE_WAIT_MS));
-      const covP = netStart ? netStart.cov : opts.released ? undefined : work.decided();
+      const covP = netStart ? netStart.cov : work.decided();
       const cov = covP ? await Promise.race([covP, waited]) : null;
       const net = !netStart ? null : netStart.elsewhere ? await Promise.race([netStart.net, waited]) : cov ? await netStart.net : null;
       if (covP && !cov) noteTurn("coverageLate", COVERAGE_WAIT_MS);
@@ -1138,7 +1195,7 @@ export class WebsiteChat {
         packText = `${packText ? `${packText}\n\n---\n\n` : ""}### More from our own pages\n${pagePassages.join("\n\n")}`;
         passages = [...passages, ...pagePassages];
       }
-      answered = passages.length > 0;
+      answered = answeredOwn = passages.length > 0;
       // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer to ask the team.
       let partial = false;
       if (answered && jevEnabled()) {
@@ -1167,15 +1224,19 @@ export class WebsiteChat {
           behaviour.push(alsoNetwork ? BEHAVIOUR.networkAlso : BEHAVIOUR.network);
         }
       }
-      // A part the coverage judged not ours (no item of ours is it, and our pages do not show it - every check could be
-      // asked) and that no network business is relayed for: that is a fact for the reply - not in our offer - with what
-      // we do instead (owner 2026-11-05, romax-3: windows at a floor and door salon). With nothing else asked, nothing of
-      // ours is left half-answered.
-      const notOurs = cov && !network && !searching ? cov.parts.filter((_, k) => !cov.own[k] && cov.how[k] === "none") : [];
+      // An order or a calculation with a part we don't have that started no background agent (no network business has it,
+      // packsStream): that part is told "not in our offer", with what we do instead (owner 2026-11-05, romax-3: windows
+      // at a floor and door salon) - only when our own pages say so (the coverage's page question: not offered >= 0.5),
+      // never because nothing was found: a "none" that is only "unknown" (Angelika's lashes, inside her packages) or a
+      // page the search does not reach (Zając's film, in his FAQ - denied by its 6 nearest pages too) would become a flat
+      // "we don't offer it" (review 2026-11-05). The page passages it was judged on come with it. The denial check and the
+      // owner's gap log stay on (below): a wrong one is caught or seen.
+      notOurs = opts.foreignUnmet && cov && !network && !searching ? cov.parts.filter((_, k) => !cov.own[k] && cov.how[k] === "none" && cov.denied?.[k]) : [];
       if (notOurs.length) {
-        const line = `Not in our offer (no item of our price list is it, and our pages do not show it): ${notOurs.join("; ")}.`;
-        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Not in our offer\n${line}`;
-        passages = [...passages, line];
+        const line = `Not in our offer (our pages show what we offer in this area, and this is not among it): ${notOurs.join("; ")}.`;
+        const seen = [...new Set(cov!.parts.flatMap((p, k) => (notOurs.includes(p) ? cov!.passages[k] : [])))].filter((t) => !passages.includes(t)).slice(0, 6);
+        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Not in our offer\n${line}${seen.length ? `\n\nOur pages on this area:\n${seen.join("\n\n")}` : ""}`;
+        passages = [...passages, line, ...seen];
         answered = true;
         if (notOurs.length === cov!.parts.length) partial = false;
         behaviour.push(BEHAVIOUR.notOffered);
@@ -1338,7 +1399,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       // Villa Mamma's customers in the sources line): tags are dropped from the title shown.
       const srcs = used.filter((p) => p.url).map((p) => ({ url: p.url, title: p.title.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim() }));
       // A question about us that our information doesn't answer goes to the owner's gap list (dashboard).
-      const gap = !answered && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
+      // A part told "not in our offer" too: the owner sees it, and corrects it when it is wrong.
+      const gap = (!answered || notOurs.length) && !opts.behaviour?.length && rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
       return { message: cleaned, sources: srcs, grounded: true, ...(gap ? { unknownQuestion: gap } : {}), ...(network ? { partners: network!.partners } : {}) };
     };
     let safeRewrite = false; // set once the fact check was found unavailable (one safe rewrite, not a loop)
@@ -1350,11 +1412,14 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const problems: string[] = [];
       if (!text.trim()) return { problems: ["it is empty - write the reply"], offers: 0, keep: [] };
       const statements = splitStatements(text);
-      const [unsup, checks] = await Promise.all([
+      // The amounts a draft states, each paired by an LLM with the price it gives it for (text -> structure), on every draft
+      // with computed or listed prices - next to the other checks: an amount the fact check let through was never compared
+      // with the quote (dworekstaropolski-1: the code's 285 x 60 = 17 100 zł, the reply's 305 zł = 18 300 zł went out).
+      const [unsup, checks, amounts] = await Promise.all([
         !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000)).catch(() => null) : Promise.resolve(null),
         jevEnabled() ? jevAsk({ conversation: convo, reply: text, ...(network ? { network_businesses: network.text.slice(0, 6000) } : {}) }, {
           offers: { type: "noul", instructions: opts.handoffKind === "network" ? "Does `reply` offer to check businesses from a local network for the customer (or ask whether to check them)?" : "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
-          denies: { type: "noul", instructions: "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
+          denies: { type: "noul", instructions: notOurs.length ? `Does \`reply\` flatly state that the business does NOT offer, sell, do or have something other than ${notOurs.map((p) => `"${p.slice(0, 200)}"`).join(", ")}?` : "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
           contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)? Saying we have no information on something and recommending another business for it is NOT a contradiction." },
           callUs: { type: "noul", instructions: "Does `reply` tell the customer to call us, phone us, or e-mail us (or mention our phone number or e-mail as a way to reach us)?" },
           promises: { type: "noul", instructions: `Does \`reply\` offer or promise an action outside this chat - check availability or stock, book or schedule a visit or appointment, reserve, measure, prepare a quote or document, call them back, send them something? (Offering to explain, describe or advise more in this chat, asking the customer for details, offering to pass the question on to the team, offering to check businesses from our local network, or inviting them to contact us does not count.${opts.formOpen ? " Nor does taking the customer's order details in this chat and saying it goes to the team once they confirm - this chat does that." : ""})` },
@@ -1368,6 +1433,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
           // W3: a wedding venue's chat gave a photographer's 3700 zł package as "the cheapest reportage we offer".
           ...(network ? { theirsAsOurs: { type: "noul", instructions: "Does `reply` present something that one of `network_businesses` offers - its service, product, package or price - as offered by us ('we offer', 'our', 'u nas', 'oferujemy', 'nasz')?" } as const } : {}),
         }, 4000).catch(() => null) : Promise.resolve(null),
+        priceFacts.length && statements.length ? this.amountsIn(statements, priceFacts).catch(() => null) : Promise.resolve(null),
       ]);
       const nl = (k: string) => ((checks?.[k] as JevNoulAnswer | undefined)?.noul ?? 0);
       let bad = unsup ? statements.filter((_, i) => unsup[i] >= (Number(process.env.JEV_VERIFY_MIN) || 0.6)) : [];
@@ -1380,7 +1446,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       }
       const factProblemAt = problems.length; // the unsupported statements go here once the amounts are checked (below)
       if (!wantOffer && nl("offers") >= 0.6) problems.push("it offers to pass the question on to our team, which this reply must not do");
-      if (!network && !answered && nl("denies") >= 0.6) problems.push("it says we do not offer or do something, although our information simply does not cover it");
+      if (!network && !answeredOwn && nl("denies") >= 0.6) problems.push("it says we do not offer or do something, although our information simply does not cover it");
       if (nl("contradicts") >= 0.6) problems.push("it contradicts itself");
       if (nl("promises") >= 0.6) problems.push("it offers or promises something this chat cannot do (checking availability, calculating, measuring, booking, calling back) - offer nothing of the kind");
       if (nl("meta") >= 0.6) problems.push("it talks about 'our information' / 'materials' / 'data' instead of speaking as the business");
@@ -1401,20 +1467,22 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const inCustomer = scripts(customerText);
       const stray = [...scripts(text)].filter((x) => !inCustomer.has(x));
       if (stray.length) problems.push(`it contains words in another alphabet (${stray.join(", ")}) - use only the customer's language and its alphabet`);
-      // A blocked draft that states prices: each amount paired with its listed price by an LLM (text -> structure), the
-      // numbers compared by code - a statement stating only amounts our code computed or our items list, each for its
-      // own item, is supported (sosnowydwor-3: the right "40 + 72 + 80 = 192 zł" was blocked); the computed lines the
-      // draft gave are kept in its rewrite.
+      // The numbers compared by code (structure -> structure): an amount given for a computed or listed price that it is
+      // not blocks the draft, and its rewrite gets that price's computed line; a statement stating only such amounts, each
+      // right for its own price, is supported (sosnowydwor-3: the right "40 + 72 + 80 = 192 zł" was blocked); the computed
+      // lines the first blocked draft gave are kept in its rewrites.
       let keep: string[] = [...(keepAll ? priceFacts.filter((f) => f.line).map((f) => f.line) : []), ...(keptFirst || [])];
-      if (priceFacts.length && (bad.length || (problems.length && keptFirst === null))) {
-        const a = await this.amountsIn(statements, priceFacts);
-        if (a) {
-          const ok = new Set(statements.filter((_, i) => a.supported[i]));
-          const passed = bad.filter((b) => ok.has(b));
-          if (passed.length) { noteTurn("amountsSupported", passed); bad = bad.filter((b) => !ok.has(b)); }
-          if (keptFirst === null) keptFirst = [...a.given].map((k) => priceFacts[k].line).filter(Boolean);
-          keep = [...keep, ...keptFirst];
+      if (amounts) {
+        const ok = new Set(statements.filter((_, i) => amounts.supported[i]));
+        const passed = bad.filter((b) => ok.has(b));
+        if (passed.length) { noteTurn("amountsSupported", passed); bad = bad.filter((b) => !ok.has(b)); }
+        if (amounts.wrong.length) {
+          noteTurn("amountsWrong", amounts.wrong.map((w) => w.text));
+          problems.push(`it gives amounts that are not ours for what it gives them for - correct them: ${amounts.wrong.map((w) => w.text).join("; ")}`);
+          keep = [...keep, ...amounts.wrong.flatMap((w) => w.facts.map((k) => priceFacts[k].line)).filter(Boolean)];
         }
+        if (keptFirst === null && (bad.length || problems.length)) keptFirst = [...amounts.given].map((k) => priceFacts[k].line).filter(Boolean);
+        keep = [...keep, ...(keptFirst || [])];
       }
       keep = [...new Set(keep)];
       if (bad.length) problems.splice(factProblemAt, 0, `these statements are not supported by our information (remove or correct them): ${bad.map((b) => `"${b}"`).join("; ")}`);
@@ -1596,40 +1664,31 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
   }
 
   /**
-   * The money amounts a reply's statements state, each paired with the listed price it is (one call of the network's
-   * JSON model: text -> structure), compared by code with what our code computed or our items list (structure ->
-   * structure). supported[i]: statement i states only such amounts, each for its own price, and nothing else; given: the
-   * prices (indexes into `facts`) the reply gave right. null when it could not be asked in time (AMOUNTS_MS).
+   * The money amounts a reply's statements state, each read by an LLM as what the statement gives it for - which item (or
+   * the request's total), as computed for the customer's quantity or as the price list lists it, under which reading (one
+   * call of the network's JSON model: text -> structure; the amounts are not shown to it) - and compared by code with that
+   * item's computed or listed amounts (structure -> structure, judgeAmounts). null when it could not be asked in time
+   * (AMOUNTS_MS).
    */
-  private async amountsIn(statements: string[], facts: PriceFact[]): Promise<{ supported: boolean[]; given: Set<number> } | null> {
+  private async amountsIn(statements: string[], facts: PriceFact[]): Promise<AmountsVerdict | null> {
     if (!statements.length || !facts.length) return null;
     const { llmJson } = await import("../projects/broadcast.js");
-    const ask = `Prices:\n${facts.map((f, k) => `${k}: ${f.name}: ${f.amounts.join(" / ")}`).join("\n")}\n\nStatements:\n${statements.map((t, k) => `${k}: ${t}`).join("\n")}`;
-    const j = await Promise.race([llmJson(AMOUNTS, ask.slice(0, 12000), 900).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), AMOUNTS_MS))]);
-    const list: any[] = Array.isArray(j?.statements) ? j.statements : [];
-    if (!list.length) return null;
-    const given = new Set<number>();
-    // By the statement's number: the model may answer one statement in several entries (all of them count).
-    const supported = statements.map((_, i) => {
-      const entries = list.filter((e) => e?.n === i);
-      const amounts: any[] = entries.flatMap((e) => (Array.isArray(e?.amounts) ? e.amounts : []));
-      const right = amounts.map((a) => {
-        const k = Number.isInteger(a?.for) && facts[a.for] ? (a.for as number) : -1;
-        const ok = k >= 0 && sameAmount(Number(a?.amount), facts[k].amounts);
-        if (ok) given.add(k);
-        return ok;
-      });
-      return entries.length > 0 && entries.every((e) => e.other === false) && right.length > 0 && right.every(Boolean);
-    });
-    return { supported, given };
+    const ask = `${amountsView(facts)}\n\nStatements:\n${statements.map((t, k) => `${k}: ${t}`).join("\n")}`;
+    const j = await Promise.race([llmJson(AMOUNTS_PROMPT, ask.slice(0, 12000), 900).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), AMOUNTS_MS))]);
+    const v = judgeAmounts(statements, facts, j);
+    noteTurn("amounts", v ? v.read : "late");
+    return v;
   }
 
   /**
    * The knowledge reply for a calculation that runs too long (src/projects/conversation.ts agentDelivery releases it after
    * AGENT_RELEASE_MS, or sends it when the run fails): written in the background from our own information, as a turn of
-   * its own (its own usage and session state - nothing offered, no network), and kept in the project.
+   * its own (its own usage and session state - nothing offered, no network), and kept in the project with the run's marker
+   * (`run`: released only for that run). The turn's work (its pages, items, quote and coverage) is reused - nothing is
+   * searched, scored, matched or quoted again; a part the agent was started for that our pages say we don't offer is told
+   * "not in our offer" (foreignUnmet).
    */
-  private async releaseReply(messages: ChatMessage[], sessionKey: string, projectId: string): Promise<void> {
+  private async releaseReply(messages: ChatMessage[], sessionKey: string, projectId: string, run: number, work?: TurnWork | null, foreignUnmet = false): Promise<void> {
     const parent = turnUsage.getStore();
     const u = { ...newTurnUsage(), ip: parent?.ip, tenantId: parent?.tenantId, sessionKey: parent?.sessionKey, exempt: parent?.exempt, variant: parent?.variant, cheap: true };
     const key = `${sessionKey}#released`;
@@ -1639,8 +1698,8 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
         Object.assign(st, { owner: own.owner, lang: own.lang, turns: own.turns, contactGiven: own.contactGiven, handoffDeclined: true });
         const question = messages.findLast((m) => m.role === "user")?.content || "";
         const rt = await this.routeTurn(messages, question).catch(() => null);
-        const r = await this.packsReply(messages, key, () => {}, { rt, extra: [BEHAVIOUR.released], released: true });
-        if (r.message.trim()) await setProjectMemory(projectId, { releaseText: { at: Date.now(), text: r.message.trim() } });
+        const r = await this.packsReply(messages, key, () => {}, { rt, extra: [BEHAVIOUR.released], released: true, work, foreignUnmet });
+        if (r.message.trim()) await setProjectMemory(projectId, { releaseText: { at: Date.now(), run, text: r.message.trim() } });
       });
     } catch (e) {
       console.warn(`[conversation] ${this.context.tenantId}: no knowledge reply kept for ${projectId}: ${(e as Error).message}`);
@@ -1727,15 +1786,18 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     // Our pages for the request: the turn's own (TurnWork - chosen with the conversation), else a search now.
     const chosen = opts?.work ? (await opts.work.knowledge.catch(() => null))?.passages : undefined;
     const knowledge = chosen?.length ? chosen : await this.knowledgePassages(message);
-    const [begun, lang] = await Promise.all([
+    const [start, lang] = await Promise.all([
       beginConversationAgent(projectId, messages, knowledge),
       jevAsk({ message }, { lang: { type: "choice", instructions: "In which language is `message` written?", criteria: { pl: "Polish", en: "English", uk: "Ukrainian", fr: "French", de: "German", other: "Another language" } } }, 3000),
     ]);
+    const begun = start.status;
     const l = ((lang?.lang as any)?.choice as string) || "en";
-    if (begun === "started") {
+    // The parts this calculation asks the network for (not ours by the coverage).
+    const foreign = c ? c.parts.filter((_, k) => !c.own[k]) : [];
+    if (start.status === "started") {
       countRun();
       // The answer from our own information, kept in case the calculation runs too long (released instead of silence).
-      void this.releaseReply(messages, sessionKey, projectId);
+      void this.releaseReply(messages, sessionKey, projectId, start.at, opts?.work, foreign.length > 0);
     }
     console.log(`[conversation] ${this.context.tenantId}: ${projectId} agent ${begun}`);
     const n = NOTIFY[l] || NOTIFY.en;
@@ -1752,8 +1814,10 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     let notice = (begun === "busy" ? BUSY : WORKING)[l] || (begun === "busy" ? BUSY : WORKING).en;
     {
       const { reviewMode } = await import("../projects/review.js");
+      // A part we don't have is asked of the network's businesses: said, so the notice is not our own quote for it (romax-3:
+      // "the quote for replacing 3 windows has just started" at a floor and door salon, iteration-5 judges).
       const what = begun === "busy" ? "We are still working on the customer's previous request; this new message will be handled once that is ready. Tell them briefly."
-        : reviewMode(this.context.tenantId) === "approve" && !opts?.pureCalc ? BEHAVIOUR.calcReviewed : BEHAVIOUR.calcStarted;
+        : `${reviewMode(this.context.tenantId) === "approve" && !opts?.pureCalc ? BEHAVIOUR.calcReviewed : BEHAVIOUR.calcStarted}${foreign.length ? ` ${BEHAVIOUR.calcNetwork(foreign)}` : ""}`;
       const follow = token && begun !== "busy" ? ` Then say plainly that this can take a while and that a button under your message (shown by the chat - don't write it or its label yourself) opens the status of their request in a new tab with live updates, where they can also choose to be notified (${channels.join(", ")}) - so they don't have to wait here.` : "";
       notice = (await this.backend.generate(`You are the website chat assistant of ${this.brandName || "our business"}, speaking as "we". ${what}${follow} Reply in the customer's language, naturally.${replyLanguage(await this.routeTurn(messages, message).catch(() => null))}`, messages.slice(-4), 500).catch(() => "")).trim() || notice;
     }
@@ -1781,20 +1845,58 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       : undefined;
   }
 
-  private startCollect(flow: FlowDefinition, sessionKey: string, message: string, via?: CollectVia, context?: string): Promise<ChatResponse> {
+  private startCollect(flow: FlowDefinition, sessionKey: string, message: string, via?: CollectVia, context?: string, messages?: ChatMessage[]): Promise<ChatResponse> {
     const remembered = this.sessionVia.get(sessionKey);
     const s = startSession(flow, via || (remembered && Date.now() - remembered.at < 30 * 60 * 1000 ? remembered.via : undefined));
     if (context) s.transcript.push(...context.split("\n").filter(Boolean));
     this.collectSessions.set(sessionKey, s);
-    return this.runCollect(flow, s, sessionKey, message);
+    return this.runCollect(flow, s, sessionKey, message, false, messages);
   }
 
-  private async runCollect(flow: FlowDefinition, s: CollectSession, sessionKey: string, message: string, questionAnswered = false): Promise<ChatResponse> {
+  /**
+   * The order's price for the form's summary (src/flows/collect.ts): the conversation priced as a reply prices it - the
+   * business's quoting model, else its items with the customer's quantities (code counts periods and conversions, the
+   * recipe prices them) - and a check that the form's reply states those amounts for what they are (amountsIn). null when
+   * nothing comes to a price. rentbud-3 (iteration-5 judges, offline replay 2026-11-05): "pickup Saturday 8:00, return
+   * Monday morning" was only noted in the form - 2 doby = 240 zł was never said.
+   */
+  private orderPrice(messages: ChatMessage[]): () => Promise<{ text: string; check: (reply: string) => Promise<string | null> } | null> {
+    return async () => {
+      const question = messages.findLast((m) => m.role === "user")?.content || "";
+      const convo = messages.slice(-8).map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content.slice(0, 700)}`).join("\n");
+      const { query } = this.turnQuery(messages, question, null);
+      const products: Promise<ItemMatch | null> = this.catalogue ? this.shopProducts(query, question, null, true).catch(() => null)
+        : this.offerItems.length ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: true }).catch(() => null) : Promise.resolve(null);
+      const quoting = process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing");
+      const quote = quoting ? this.quoteResultWithModel(convo, this.context.tenantId, async () => { const m = await products; return m?.given.size ? m.items.map((i) => renderItem(i)) : []; }).catch(() => null) : Promise.resolve(null);
+      const [q, m] = await Promise.all([quote, products]);
+      let priced: { text: string; facts: PriceFact[] } | null = q?.facts.some((f) => f.kind === "computed") ? { text: q.text, facts: q.facts } : null;
+      if (!priced && m?.given.size) {
+        const { priceGiven, customerPriceLine } = await import("../offer/quantities.js");
+        const computed = priceGiven(m.given);
+        if (computed.length) { const texts = computed.map((c) => customerPriceLine(c)); priced = { text: texts.join("\n"), facts: computedFacts(computed, texts) }; }
+      }
+      if (!priced) return null;
+      noteTurn("orderPrice", priced.text.slice(0, 600));
+      const facts = priced.facts;
+      return {
+        text: priced.text,
+        check: async (reply: string) => {
+          const v = await this.amountsIn(splitStatements(reply), facts).catch(() => null);
+          return v?.wrong.length ? `it gives amounts that are not ours for what it gives them for (${v.wrong.map((w) => w.text).join("; ")})` : null;
+        },
+      };
+    };
+  }
+
+  private async runCollect(flow: FlowDefinition, s: CollectSession, sessionKey: string, message: string, questionAnswered = false, messages?: ChatMessage[]): Promise<ChatResponse> {
     const llm = (system: string, user: string, maxTokens = 700) => this.backend.generate(system, [{ role: "user", content: user }], maxTokens);
     const status = (stage: NonNullable<ChatResponse["collect"]>["stage"]) => ({ flowId: flow.id, stage, missing: stage === "collecting" || stage === "confirming" ? missingLabels(flow, s) : [] });
     try {
-      // Whether the order is ours to take was decided before the form opened (coverage); the form only takes it.
-      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge(), questionAnswered);
+      // Whether the order is ours to take was decided before the form opened (coverage); the form only takes it. Its summary
+      // gives the order's price (an order or booking form, not the question for the owner).
+      const price = messages?.length && !isQuestionFlow(flow) ? this.orderPrice(messages) : undefined;
+      const r = await collectTurn(flow, s, message, this.brandName, llm, this.collectKnowledge(), questionAnswered, price);
       if ("cancelled" in r) { this.collectSessions.delete(sessionKey); return { message: r.reply, sources: [], collect: status("cancelled") }; }
       if ("inquiry" in r) {
         this.collectSessions.delete(sessionKey);
@@ -1878,7 +1980,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
         return { need, parts: need === question ? parts : await split(need) };
       });
       // Only for our own pages in the reply; an ask about hours, contact or terms elsewhere has no offer to judge.
-      cov = aboutOffer(rt) ? asked.then(({ need }) => this.coverageOf(need), () => this.coverageOf(question)) : Promise.resolve<Coverage>({ parts: [], own: [], priced: [], items: [], passages: [], how: [] });
+      cov = aboutOffer(rt) ? asked.then(({ need }) => this.coverageOf(need), () => this.coverageOf(question)) : Promise.resolve<Coverage>({ parts: [], own: [], priced: [], items: [], passages: [], how: [], denied: [] });
     } else {
       const need = this.coverageNeed(messages, question, rt, sessionKey);
       cov = this.coverageOf(need);
