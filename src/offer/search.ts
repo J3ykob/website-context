@@ -10,7 +10,8 @@
  * Was Jev judging item names one by one (2026-10-30, 40 hand-labelled messages, 7 businesses): Jev found
  * the right item 28/30, 25% of what it returned was wrong, trestles matched compactors, 23/40 identical
  * across runs. This, deepseek-v4.1-flash: 30/30, 9/10 messages with no item clean, 21% neighbouring items,
- * every quantity right (C9 15 x 240, C14 30 h = 2 days, C19 6 h = the daily rate), 0.9 s median; Haiku 5.5
+ * every quantity right (C9 15 x 240, C14 30 h = 2 days, C19 6 h = the daily rate - read in the pick's call then; the
+ * same three with the reading of their own, 2026-11-06: 3600, 280, 450 zł), 0.9 s median; Haiku 5.5
  * 30/30, 16%, missed quantities and read "grunt pod podłogę" (primer) as the floor, 2.3 s. The bge reranker
  * scores customer sentences ~0 (fine only on short phrases) - not usable here.
  */
@@ -25,6 +26,7 @@ const POOL_MAX = 100; // items the model sees at most
 const CAT_FROM = 8; // the nearest items whose whole category joins the list
 const PER_CATEGORY = 25; // items of one category at most
 const TIMEOUT_MS = 8000;
+const RETRY_MIN_MS = 1000; // a call's budget for both attempts (the reading's): asked again only with this much left
 
 /** Lower-case words of 3+ letters (split on anything that is not a letter or digit). */
 export function words(t: string): string[] {
@@ -57,8 +59,12 @@ function firstJson(c: string): any {
 const KIND: Record<string, string> = { product: "product", service: "service", rental: "rental", package: "package", subscription: "subscription" };
 const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}${KIND[i.fields.kind || ""] ? ` [${KIND[i.fields.kind!]}]` : ""}${i.description ? ` - ${i.description.slice(0, 150)}` : ""}`;
 
-/** given: per item, the customer's quantities as read - numbers, periods, conversions (src/pricing/quantity.ts). */
-export interface ItemMatch { items: OfferItem[]; given: Map<OfferItem, Record<string, unknown>>; alternatives?: OfferItem[] }
+/**
+ * given: per item, the customer's quantities as read - numbers, periods, conversions (src/pricing/quantity.ts). Read after
+ * the pick, so a promise: what needs only the items (the calculation route's simple check) does not wait for it. null:
+ * the reading got no answer - nothing is known about the quantities this turn (not "none given").
+ */
+export interface ItemMatch { items: OfferItem[]; given: Promise<Map<OfferItem, Record<string, unknown>> | null>; alternatives?: OfferItem[] }
 export interface MatchOptions {
   limit?: number;
   /** The business whose whole offer `items` is (its vectors are cached per business); otherwise per item text. */
@@ -81,29 +87,39 @@ const RECENT_MS = 60 * 60 * 1000;
 const RECENT_MAX = 5000;
 const remember = <V,>(m: Map<string, V>, key: string, v: V) => { m.set(key, v); if (m.size > RECENT_MAX) m.delete(m.keys().next().value!); };
 
-/** One pinned call of the matcher's model: its JSON answer; undefined when none could be read. */
-async function askJson(system: string, user: string): Promise<any> {
+/**
+ * One pinned call of the matcher's model: its JSON answer; undefined when none could be read. An answer that cannot be
+ * read (no JSON - once in a chain run; not the answer asked: `ok`) is asked again once - each attempt TIMEOUT_MS, or
+ * both within `budgetMs`.
+ */
+async function askJson(system: string, user: string, opts: { ok?: (j: any) => boolean; budgetMs?: number } = {}): Promise<any> {
   const { routingFor } = await import("../llm/pin.js");
   const r = routingFor(MODEL);
-  // An answer that cannot be read (no JSON - once in a chain run) is asked again once.
-  for (let attempt = 1; attempt <= 2; attempt++) try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST", signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL, temperature: 0, max_tokens: 400, response_format: { type: "json_object" }, provider: r.provider, ...(r.seed !== undefined ? { seed: r.seed } : {}), reasoning: { enabled: false },
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      }),
-    });
-    return firstJson(String(((await res.json()) as any)?.choices?.[0]?.message?.content || ""));
-  } catch (e) { console.warn(`[items] no answer (attempt ${attempt}): ${(e as Error).message}`); }
+  const end = Date.now() + (opts.budgetMs ?? Infinity);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const ms = Math.min(TIMEOUT_MS, end - Date.now());
+    if (ms < RETRY_MIN_MS) break;
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST", signal: AbortSignal.timeout(ms),
+        headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: MODEL, temperature: 0, max_tokens: 400, response_format: { type: "json_object" }, provider: r.provider, ...(r.seed !== undefined ? { seed: r.seed } : {}), reasoning: { enabled: false },
+          messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        }),
+      });
+      const j = firstJson(String(((await res.json()) as any)?.choices?.[0]?.message?.content || ""));
+      if (opts.ok && !opts.ok(j)) throw new Error("not the answer asked");
+      return j;
+    } catch (e) { console.warn(`[items] no answer (attempt ${attempt}): ${(e as Error).message}`); }
+  }
   return undefined;
 }
 
 /** The items the message is about, best first; null when the model could not be asked. */
 export async function matchItems(question: string, items: OfferItem[], opts: MatchOptions = {}): Promise<ItemMatch | null> {
   const limit = opts.limit ?? 8;
-  if (!items.length || !question.trim()) return { items: [], given: new Map() };
+  if (!items.length || !question.trim()) return { items: [], given: Promise.resolve(new Map()) };
   if (!process.env.OPENROUTER_API_KEY) return null;
   let pool = items;
   let splitParts: string[] = [];
@@ -144,7 +160,8 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
     (await import("../llm/decision-log.js")).logDecision("items", MODEL, { question: question.slice(0, 1500), items: pool.map((i) => i.name.slice(0, 80)) }, { ids: hit.ids }, opts.tenant || "");
   }
   const picked = hit.ids.slice(0, limit).map((k) => pool[k]);
-  return { items: picked, given: opts.quantities ? await readQuantities(asked, picked, opts.tenant) : new Map(), alternatives: (hit.alt || []).map((k) => pool[k]) };
+  const given = opts.quantities ? readQuantities(asked, picked, opts.tenant).catch(() => null) : Promise.resolve(new Map());
+  return { items: picked, given, alternatives: (hit.alt || []).map((k) => pool[k]) };
 }
 
 // The words the pick's call had for the quantities (2026-11-05), in a call of their own; one given for a thing counts for
@@ -155,9 +172,11 @@ const READ = (today: string) => `The customer's message is about these items of 
 /**
  * The customer's quantities for the picked items' price inputs, read over those items alone (the pick's list has up to 100
  * items; asked there, they were dropped - see the top). Only an item whose recipe inputs we can describe is listed; none,
- * no call. No answer: no quantities this turn (not kept). A step of the turn's trace: memo / model, how many were read.
+ * no call. No answer within TIMEOUT_MS (both attempts; an answer without "quantities" is none): null - not kept, and
+ * not "none given" (the reply then claims nothing about the quantity). A step of the turn's trace: memo / model, how
+ * many were read.
  */
-async function readQuantities(asked: string, items: OfferItem[], tenant = ""): Promise<Map<OfferItem, Record<string, unknown>>> {
+async function readQuantities(asked: string, items: OfferItem[], tenant = ""): Promise<Map<OfferItem, Record<string, unknown>> | null> {
   const given = new Map<OfferItem, Record<string, unknown>>();
   const { INPUT_HELP, inputsOf } = await import("./quantities.js");
   const inputs = items.map(inputsOf);
@@ -173,13 +192,13 @@ async function readQuantities(asked: string, items: OfferItem[], tenant = ""): P
   let hit = readRecent.get(key);
   const memo = !!hit && Date.now() - hit.at <= RECENT_MS;
   if (!hit || !memo) {
-    const j = await askJson(READ(today), user);
-    if (j === undefined) { stepTurn("quantities", t0, "failed"); return given; }
+    const j = await askJson(READ(today), user, { ok: (x) => Array.isArray(x?.quantities), budgetMs: TIMEOUT_MS });
+    if (j === undefined) { stepTurn("quantities", t0, "failed"); return null; }
     // Each quantity as its structure says: a number, a period (from / to) or an amount with the item's conversion.
     const valueOf = (x: any): unknown => typeof x?.value === "number" && x.value > 0 ? x.value
       : isPeriod(x) ? { from: x.from, to: x.to }
       : isConversion(x) && convert(x) !== null ? { amount: x.amount, equals: x.equals, ...(x.whole === true ? { whole: true } : {}) } : undefined;
-    const q = (Array.isArray(j?.quantities) ? j.quantities : []).filter((x: any) => Number.isInteger(x?.id) && inputs[x.id]?.includes(x.input) && valueOf(x) !== undefined)
+    const q = (j.quantities as any[]).filter((x: any) => Number.isInteger(x?.id) && inputs[x.id]?.includes(x.input) && valueOf(x) !== undefined)
       .map((x: any) => ({ id: x.id as number, input: String(x.input), value: valueOf(x) }));
     hit = { at: Date.now(), q };
     remember(readRecent, key, hit);
