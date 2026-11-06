@@ -4,8 +4,8 @@
  * 140 zł (chain C14, C19). Now, by the owner's rule (text -> structure by a model, structure -> structure
  * by code, structure -> text by a model):
  *   - the item matcher (src/offer/search.ts) reads the quantities the customer gave for each picked item's
- *     recipe inputs, in the same call that picks the items - a number, a period (its start and end) or an amount
- *     with the conversion the item states (src/pricing/quantity.ts);
+ *     recipe inputs, in a call of its own after the pick (asked in the pick's call, they were dropped - empro-1) - a
+ *     number, a period (its start and end) or an amount with the conversion the item states (src/pricing/quantity.ts);
  *   - code counts them (periods, conversions) and prices them here with the item's recipe (src/offer/recipe.ts: the
  *     cheapest combination of rates) - for each reading when a period lacks a time;
  *   - the reply gets the results as facts and only words them.

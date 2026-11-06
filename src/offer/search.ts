@@ -1,14 +1,17 @@
 /**
  * Which offer items a customer's message is about (text -> structure, by a model). The items nearest
  * by meaning (bge-m3 vectors, any language; per part of a split request too) make a short list; one
- * pinned model call returns the ids of the items that ARE what the message asks for - and, when asked,
- * the quantities the customer gave for each item's price inputs: a number, a period (its start and end) or an amount
- * with the conversion the item states (src/pricing/quantity.ts counts them, src/offer/quantities.ts prices them).
+ * pinned model call returns the ids of the items that ARE what the message asks for - and, when asked, a call of its
+ * own reads the quantities the customer gave for each picked item's price inputs: a number, a period (its start and
+ * end) or an amount with the conversion the item states (src/pricing/quantity.ts counts them, src/offer/quantities.ts
+ * prices them). Asked in the pick's call, they were lost: over a shop's 46 nearest catalogue items the answer was
+ * {"ids": [8]} for "ile za 3 aku 18V 5,5Ah" (empro-1, 5 of 5 offline runs, 2026-11-06), so 3 x 699 zł was never priced.
  *
  * Was Jev judging item names one by one (2026-10-30, 40 hand-labelled messages, 7 businesses): Jev found
  * the right item 28/30, 25% of what it returned was wrong, trestles matched compactors, 23/40 identical
  * across runs. This, deepseek-v4.1-flash: 30/30, 9/10 messages with no item clean, 21% neighbouring items,
- * every quantity right (C9 15 x 240, C14 30 h = 2 days, C19 6 h = the daily rate), 0.9 s median; Haiku 5.5
+ * every quantity right (C9 15 x 240, C14 30 h = 2 days, C19 6 h = the daily rate - read in the pick's call then; the
+ * same three with the reading of their own, 2026-11-06: 3600, 280, 450 zł), 0.9 s median; Haiku 5.5
  * 30/30, 16%, missed quantities and read "grunt pod podłogę" (primer) as the floor, 2.3 s. The bge reranker
  * scores customer sentences ~0 (fine only on short phrases) - not usable here.
  */
@@ -23,6 +26,7 @@ const POOL_MAX = 100; // items the model sees at most
 const CAT_FROM = 8; // the nearest items whose whole category joins the list
 const PER_CATEGORY = 25; // items of one category at most
 const TIMEOUT_MS = 8000;
+const RETRY_MIN_MS = 1000; // a call's budget for both attempts (the reading's): asked again only with this much left
 
 /** Lower-case words of 3+ letters (split on anything that is not a letter or digit). */
 export function words(t: string): string[] {
@@ -55,13 +59,17 @@ function firstJson(c: string): any {
 const KIND: Record<string, string> = { product: "product", service: "service", rental: "rental", package: "package", subscription: "subscription" };
 const label = (i: OfferItem) => `${i.name}${i.category ? ` (${i.category})` : ""}${KIND[i.fields.kind || ""] ? ` [${KIND[i.fields.kind!]}]` : ""}${i.description ? ` - ${i.description.slice(0, 150)}` : ""}`;
 
-/** given: per item, the customer's quantities as read - numbers, periods, conversions (src/pricing/quantity.ts). */
-export interface ItemMatch { items: OfferItem[]; given: Map<OfferItem, Record<string, unknown>>; alternatives?: OfferItem[] }
+/**
+ * given: per item, the customer's quantities as read - numbers, periods, conversions (src/pricing/quantity.ts). Read after
+ * the pick, so a promise: what needs only the items (the calculation route's simple check) does not wait for it. null:
+ * the reading got no answer - nothing is known about the quantities this turn (not "none given").
+ */
+export interface ItemMatch { items: OfferItem[]; given: Promise<Map<OfferItem, Record<string, unknown>> | null>; alternatives?: OfferItem[] }
 export interface MatchOptions {
   limit?: number;
   /** The business whose whole offer `items` is (its vectors are cached per business); otherwise per item text. */
   tenant?: string;
-  /** Also read the customer's quantities for the picked items' price inputs. */
+  /** Also read the customer's quantities for every picked item's price inputs (a call of its own, over those items). */
   quantities?: boolean;
   /** When none is what was asked: the items that could do the same job another way (a trencher for a trench). */
   alternatives?: boolean;
@@ -71,14 +79,47 @@ export interface MatchOptions {
   parts?: Promise<string[]>;
 }
 
-// The same message against the same items gets the same answer for an hour (models vary run to run).
-const recent = new Map<string, { at: number; ids: number[]; q: { id: number; input: string; value: unknown }[]; alt: number[] }>();
+// The same message against the same items gets the same answer for an hour (models vary run to run) - the pick and the
+// reading of the quantities each (5,000 kept).
+const recent = new Map<string, { at: number; ids: number[]; alt: number[] }>();
+const readRecent = new Map<string, { at: number; q: { id: number; input: string; value: unknown }[] }>();
 const RECENT_MS = 60 * 60 * 1000;
+const RECENT_MAX = 5000;
+const remember = <V,>(m: Map<string, V>, key: string, v: V) => { m.set(key, v); if (m.size > RECENT_MAX) m.delete(m.keys().next().value!); };
+
+/**
+ * One pinned call of the matcher's model: its JSON answer; undefined when none could be read. An answer that cannot be
+ * read (no JSON - once in a chain run; not the answer asked: `ok`) is asked again once - each attempt TIMEOUT_MS, or
+ * both within `budgetMs`.
+ */
+async function askJson(system: string, user: string, opts: { ok?: (j: any) => boolean; budgetMs?: number } = {}): Promise<any> {
+  const { routingFor } = await import("../llm/pin.js");
+  const r = routingFor(MODEL);
+  const end = Date.now() + (opts.budgetMs ?? Infinity);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const ms = Math.min(TIMEOUT_MS, end - Date.now());
+    if (ms < RETRY_MIN_MS) break;
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST", signal: AbortSignal.timeout(ms),
+        headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: MODEL, temperature: 0, max_tokens: 400, response_format: { type: "json_object" }, provider: r.provider, ...(r.seed !== undefined ? { seed: r.seed } : {}), reasoning: { enabled: false },
+          messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        }),
+      });
+      const j = firstJson(String(((await res.json()) as any)?.choices?.[0]?.message?.content || ""));
+      if (opts.ok && !opts.ok(j)) throw new Error("not the answer asked");
+      return j;
+    } catch (e) { console.warn(`[items] no answer (attempt ${attempt}): ${(e as Error).message}`); }
+  }
+  return undefined;
+}
 
 /** The items the message is about, best first; null when the model could not be asked. */
 export async function matchItems(question: string, items: OfferItem[], opts: MatchOptions = {}): Promise<ItemMatch | null> {
   const limit = opts.limit ?? 8;
-  if (!items.length || !question.trim()) return { items: [], given: new Map() };
+  if (!items.length || !question.trim()) return { items: [], given: Promise.resolve(new Map()) };
   if (!process.env.OPENROUTER_API_KEY) return null;
   let pool = items;
   let splitParts: string[] = [];
@@ -104,51 +145,68 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
     const siblings = cats.flatMap((c) => items.filter((i) => i.category === c).slice(0, PER_CATEGORY));
     pool = [...new Set([...nearest.slice(0, CAT_FROM), ...siblings, ...nearest])].slice(0, POOL_MAX);
   }
-  const { INPUT_HELP, inputsOf } = await import("./quantities.js");
-  const inputs = opts.quantities ? pool.map(inputsOf) : [];
-  const list = pool.map((i, k) => `${k}: ${label(i)}${inputs[k]?.length ? ` [inputs: ${inputs[k].map((n) => `${n} = ${INPUT_HELP[n]}`).join("; ")}]` : ""}`).join("\n");
-  // The dates of a period are read against today (the same message tomorrow is another reading).
-  const { todayLine, isPeriod, convert, isConversion } = await import("../pricing/quantity.js");
-  const today = opts.quantities ? todayLine() : "";
-  const key = createHash("sha1").update(`${opts.quantities ? `q${today}` : ""}${opts.alternatives ? "a" : ""}\n${question}\n${list}`).digest("hex");
+  const list = pool.map((i, k) => `${k}: ${label(i)}`).join("\n");
+  const asked = `Customer: ${question}${splitParts.length ? `\n(What the customer asks for, in Polish: ${splitParts.join("; ")})` : ""}`;
+  // The memo's key holds everything the call is asked - the split's parts and the limit too.
+  const key = createHash("sha1").update(`${limit}${opts.alternatives ? "a" : ""}\n${asked}\n${list}`).digest("hex");
   let hit = recent.get(key);
   if (!hit || Date.now() - hit.at > RECENT_MS) {
-    const { routingFor } = await import("../llm/pin.js");
-    const r = routingFor(MODEL);
-    let j: any;
-    // An answer that cannot be read (no JSON - once in a chain run) is asked again once.
-    for (let attempt = 1; attempt <= 2 && j === undefined; attempt++) try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST", signal: AbortSignal.timeout(TIMEOUT_MS),
-        headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: MODEL, temperature: 0, max_tokens: 400, response_format: { type: "json_object" }, provider: r.provider, ...(r.seed !== undefined ? { seed: r.seed } : {}), reasoning: { enabled: false },
-          messages: [
-            { role: "system", content: `Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. Items are marked product or service: when the customer asks for a product, a service done on it is not it; when they ask for a service, a product is not it. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.quantities ? ` Also, for each item you give that lists inputs, each input the customer's latest message gives: "quantities": [{"id": <item id>, "input": "<input name>", "value": <number in the input's unit>}] (e.g. "4x5 m" = 20 m²). For "hours" given as a start and an end ("from Friday to Monday") instead of "value": "from" and "to", each {"date": "YYYY-MM-DD", "time": "HH:MM" or null if no clock time is said ("in the morning" is none)} (today is ${today}). A quantity in another unit that the item itself converts (soup for 8 people, the item saying "1 l = 4 portions") instead of "value": "amount": 8, "equals": {"input": 1, "given": 4}, and "whole": true when the input counts whole pieces or packs. Leave out what the customer did not give, never assume a typical value, and leave out a quantity of another kind that the item does not convert (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known).` : ""}${opts.alternatives ? ` When no item is what the customer asks for, the items that could do the same job another way (e.g. a trencher when an excavator is asked for to dig a trench; not merely related items): "alternatives": [<item id>, ...] (at most 3; [] when none could).` : ""}` },
-            { role: "user", content: `Customer: ${question}${splitParts.length ? `\n(What the customer asks for, in Polish: ${splitParts.join("; ")})` : ""}\n\nItems:\n${list}` },
-          ],
-        }),
-      });
-      const c = String(((await res.json()) as any)?.choices?.[0]?.message?.content || "");
-      j = firstJson(c);
-    } catch (e) { console.warn(`[items] no answer (attempt ${attempt}): ${(e as Error).message}`); }
+    const j = await askJson(`Which of the business's items is what the customer's message asks for or needs for the job it describes - that product or service itself, not a related or neighbouring one? Several only when each one is that. Items are marked product or service: when the customer asks for a product, a service done on it is not it; when they ask for a service, a product is not it. None when nothing is. Answer JSON: {"ids": [<item id>, ...]} (at most ${limit}, best first).${opts.alternatives ? ` When no item is what the customer asks for, the items that could do the same job another way (e.g. a trencher when an excavator is asked for to dig a trench; not merely related items): "alternatives": [<item id>, ...] (at most 3; [] when none could).` : ""}`, `${asked}\n\nItems:\n${list}`);
     if (j === undefined) return null;
     const ids = (Array.isArray(j?.ids) ? j.ids : []).filter((k: unknown) => Number.isInteger(k) && pool[k as number]) as number[];
+    const alt = ids.length ? [] : (Array.isArray(j?.alternatives) ? j.alternatives : []).filter((k: unknown) => Number.isInteger(k) && pool[k as number]).slice(0, 3) as number[];
+    hit = { at: Date.now(), ids: [...new Set(ids)], alt };
+    remember(recent, key, hit);
+    (await import("../llm/decision-log.js")).logDecision("items", MODEL, { question: question.slice(0, 1500), items: pool.map((i) => i.name.slice(0, 80)) }, { ids: hit.ids }, opts.tenant || "");
+  }
+  const picked = hit.ids.slice(0, limit).map((k) => pool[k]);
+  const given = opts.quantities ? readQuantities(asked, picked, opts.tenant).catch(() => null) : Promise.resolve(new Map());
+  return { items: picked, given, alternatives: (hit.alt || []).map((k) => pool[k]) };
+}
+
+// The words the pick's call had for the quantities (2026-11-05), in a call of their own; one given for a thing counts for
+// each matched item that is it (Ostap's two crank trestles for "4 szt": both priced, 2 of 2 offline runs 2026-11-06 - only
+// the first without it).
+const READ = (today: string) => `The customer's message is about these items of the business. For each item, each of its inputs that the customer's latest message gives (given for a thing, it counts for every item that is that thing) - answer JSON {"quantities": [{"id": <item id>, "input": "<input name>", "value": <number in the input's unit>}]} (e.g. "4x5 m" = 20 m²; [] when it gives none). For "hours" given as a start and an end ("from Friday to Monday") instead of "value": "from" and "to", each {"date": "YYYY-MM-DD", "time": "HH:MM" or null if no clock time is said ("in the morning" is none)} (today is ${today}). A quantity in another unit that the item itself converts (soup for 8 people, the item saying "1 l = 4 portions") instead of "value": "amount": 8, "equals": {"input": 1, "given": 4}, and "whole": true when the input counts whole pieces or packs. Leave out what the customer did not give, never assume a typical value, and leave out a quantity of another kind that the item does not convert (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known).`;
+
+/**
+ * The customer's quantities for the picked items' price inputs, read over those items alone (the pick's list has up to 100
+ * items; asked there, they were dropped - see the top). Only an item whose recipe inputs we can describe is listed; none,
+ * no call. No answer within TIMEOUT_MS (both attempts; an answer without "quantities" is none): null - not kept, and
+ * not "none given" (the reply then claims nothing about the quantity). A step of the turn's trace: memo / model, how
+ * many were read.
+ */
+async function readQuantities(asked: string, items: OfferItem[], tenant = ""): Promise<Map<OfferItem, Record<string, unknown>> | null> {
+  const given = new Map<OfferItem, Record<string, unknown>>();
+  const { INPUT_HELP, inputsOf } = await import("./quantities.js");
+  const inputs = items.map(inputsOf);
+  if (!inputs.some((x) => x.length)) return given;
+  const list = items.map((i, k) => (inputs[k].length ? `${k}: ${label(i)} [inputs: ${inputs[k].map((n) => `${n} = ${INPUT_HELP[n]}`).join("; ")}]` : "")).filter(Boolean).join("\n");
+  // The dates of a period are read against today (the same message tomorrow is another reading).
+  const { todayLine, isPeriod, convert, isConversion } = await import("../pricing/quantity.js");
+  const today = todayLine();
+  const user = `${asked}\n\nItems:\n${list}`;
+  const key = createHash("sha1").update(`${today}\n${user}`).digest("hex");
+  const { stepTurn } = await import("../llm/turn-usage.js");
+  const t0 = Date.now();
+  let hit = readRecent.get(key);
+  const memo = !!hit && Date.now() - hit.at <= RECENT_MS;
+  if (!hit || !memo) {
+    const j = await askJson(READ(today), user, { ok: (x) => Array.isArray(x?.quantities), budgetMs: TIMEOUT_MS });
+    if (j === undefined) { stepTurn("quantities", t0, "failed"); return null; }
     // Each quantity as its structure says: a number, a period (from / to) or an amount with the item's conversion.
     const valueOf = (x: any): unknown => typeof x?.value === "number" && x.value > 0 ? x.value
       : isPeriod(x) ? { from: x.from, to: x.to }
       : isConversion(x) && convert(x) !== null ? { amount: x.amount, equals: x.equals, ...(x.whole === true ? { whole: true } : {}) } : undefined;
-    const q = (Array.isArray(j?.quantities) ? j.quantities : []).filter((x: any) => Number.isInteger(x?.id) && ids.includes(x.id) && inputs[x.id]?.includes(x.input) && valueOf(x) !== undefined)
+    const q = (j.quantities as any[]).filter((x: any) => Number.isInteger(x?.id) && inputs[x.id]?.includes(x.input) && valueOf(x) !== undefined)
       .map((x: any) => ({ id: x.id as number, input: String(x.input), value: valueOf(x) }));
-    const alt = ids.length ? [] : (Array.isArray(j?.alternatives) ? j.alternatives : []).filter((k: unknown) => Number.isInteger(k) && pool[k as number]).slice(0, 3) as number[];
-    hit = { at: Date.now(), ids: [...new Set(ids)], q, alt };
-    recent.set(key, hit);
-    if (recent.size > 5000) recent.delete(recent.keys().next().value!);
-    (await import("../llm/decision-log.js")).logDecision("items", MODEL, { question: question.slice(0, 1500), items: pool.map((i) => i.name.slice(0, 80)) }, { ids: hit.ids, quantities: q }, opts.tenant || "");
+    hit = { at: Date.now(), q };
+    remember(readRecent, key, hit);
+    (await import("../llm/decision-log.js")).logDecision("quantities", MODEL, { question: asked.slice(0, 1500), items: items.map((i) => i.name.slice(0, 80)) }, { quantities: q }, tenant);
   }
-  const given = new Map<OfferItem, Record<string, unknown>>();
-  for (const x of hit.q) given.set(pool[x.id], { ...(given.get(pool[x.id]) || {}), [x.input]: x.value });
-  return { items: hit.ids.slice(0, limit).map((k) => pool[k]), given, alternatives: (hit.alt || []).map((k) => pool[k]) };
+  stepTurn("quantities", t0, `${memo ? "memo" : "model"} ${hit.q.length}`);
+  for (const x of hit.q) given.set(items[x.id], { ...(given.get(items[x.id]) || {}), [x.input]: x.value });
+  return given;
 }
 
 /** The items the message is about, best first (at most `limit`); null when they could not be judged. */

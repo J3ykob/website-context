@@ -982,8 +982,9 @@ export class WebsiteChat {
     // ranked paving guides above the compactor price list (chain C1). null: the items could not be judged (Jev down) -
     // then nothing is said about them. A price question or a calculation also reads the customer's quantities for every
     // matched item - a shop's too (empro-1: "3 aku" got no total, 3 x 699 zł) - priced by code.
+    // The match resolves with the pick (the trace's itemsMatched), its quantities when read (given, the "quantities" step).
     const quantities = !!rt && (rt.price >= 0.5 || rt.intent === "calculate");
-    const none: ItemMatch = { items: [], given: new Map() };
+    const none: ItemMatch = { items: [], given: Promise.resolve(new Map()) };
     const later = <T,>(make: () => Promise<T>): Lazy<T> => lazy(make, !deferred);
     const products = later<ItemMatch | null>(() => (this.catalogue ? this.shopProducts(query, question, rt, quantities).catch(() => none)
       : this.offerItems.length && offerTurn ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities, alternatives: !!rt && rt.specific >= 0.5, parts: partsSoon }).catch(() => null) : Promise.resolve(none))
@@ -993,7 +994,7 @@ export class WebsiteChat {
     // the matched items' own words when the customer gave quantities for them (an item's "1 l = 4 portions").
     const quoting = process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing");
     const quote = later<QuoteResult | null>(() => (quoting && rt && (rt.price >= 0.5 || rt.intent === "calculate")
-      ? this.quoteResultWithModel(convo, this.context.tenantId, async () => { const m = await products; return m?.given.size ? m.items.map((i) => renderItem(i)) : []; }).catch(() => null).then((q) => { markTurn("quoted"); return q; })
+      ? this.quoteResultWithModel(convo, this.context.tenantId, async () => { const m = await products; return m && (await m.given)?.size ? m.items.map((i) => renderItem(i)) : []; }).catch(() => null).then((q) => { markTurn("quoted"); return q; })
       : Promise.resolve(null)));
     // Key facts (src/knowledge/facts.ts): the site's single sentences, found by meaning and kept by Jev - in parallel.
     const facts = later<{ s: string }[] | null>(() => (turnVariant().includes("facts")
@@ -1134,9 +1135,12 @@ export class WebsiteChat {
         noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
         const lines = products.map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
         const { priceGiven, customerPriceLine, inputsOf, listedAmounts } = await import("../offer/quantities.js");
-        // A price question: the customer's quantities read with the items, priced by code (src/offer/quantities.ts) - a
-        // shop's catalogue items too (empro-1, iteration 5: "3 aku" got "I won't total it", 3 x 699 = 2097 zł).
-        const computed = !modelQuote && judged?.given.size ? priceGiven(judged.given) : [];
+        // A price question: the customer's quantities read for every matched item (src/offer/search.ts, a reading of its
+        // own after the pick), priced by code (src/offer/quantities.ts) - a shop's catalogue items too (empro-1: "3 aku"
+        // got "I won't total it", 3 x 699 = 2097 zł). null: the reading got no answer - no total, nothing said about the
+        // quantity (told "not clear", the reply refused to total it: the empro-1 symptom again, from an outage).
+        const given = modelQuote || !judged ? null : await judged.given;
+        const computed = given?.size ? priceGiven(given) : [];
         if (computed.length) {
           const texts = computed.map((c) => customerPriceLine(c));
           noteTurn("computed", texts);
@@ -1148,7 +1152,7 @@ export class WebsiteChat {
         }
         // A price question whose quantity was not clear ("half a day"): no total is computed, and the reply
         // must not work one out (C3: "6 h x 76 = 456 zł, hourly is cheaper" against a 380 zł daily rate).
-        else if (!modelQuote && judged && rt && rt.price >= 0.5 && products.some((p) => inputsOf(p).length)) lines.push("No total is computed for this request: the customer's quantity is not clear from the message - give the prices, do not work out a total.");
+        else if (given && rt && rt.price >= 0.5 && products.some((p) => inputsOf(p).length)) lines.push("No total is computed for this request: the customer's quantity is not clear from the message - give the prices, do not work out a total.");
         // Each item's own listed prices: amounts a reply may give as they are.
         const priced = new Set(computed.map((c) => c.item));
         for (const p of products) if (!priced.has(p) && listedAmounts(p).length) priceFacts.push({ item: p.name, kind: "listed", amounts: listedAmounts(p), line: "" });
@@ -1531,7 +1535,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
    * shop's own live search (a catalogue larger than our index, or a product added since the last scrape).
    */
   private async shopProducts(query: string, question: string, rt: TurnRoute | null, quantities = false): Promise<ItemMatch> {
-    const none: ItemMatch = { items: [], given: new Map() };
+    const none: ItemMatch = { items: [], given: Promise.resolve(new Map()) };
     if (!this.catalogue || (rt && rt.intent === "chitchat")) return none;
     const items = this.offerItems.filter((i) => i.source === "shop");
     const { nearestItems } = await import("../offer/vectors.js");
@@ -1868,12 +1872,13 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       const products: Promise<ItemMatch | null> = this.catalogue ? this.shopProducts(query, question, null, true).catch(() => null)
         : this.offerItems.length ? matchItems(query, this.offerItems, { limit: 8, tenant: this.context.tenantId, quantities: true }).catch(() => null) : Promise.resolve(null);
       const quoting = process.env.PRICING_CHAT === "on" || turnVariant().includes("pricing");
-      const quote = quoting ? this.quoteResultWithModel(convo, this.context.tenantId, async () => { const m = await products; return m?.given.size ? m.items.map((i) => renderItem(i)) : []; }).catch(() => null) : Promise.resolve(null);
+      const quote = quoting ? this.quoteResultWithModel(convo, this.context.tenantId, async () => { const m = await products; return m && (await m.given)?.size ? m.items.map((i) => renderItem(i)) : []; }).catch(() => null) : Promise.resolve(null);
       const [q, m] = await Promise.all([quote, products]);
       let priced: { text: string; facts: PriceFact[] } | null = q?.facts.some((f) => f.kind === "computed") ? { text: q.text, facts: q.facts } : null;
-      if (!priced && m?.given.size) {
+      const given = !priced && m ? await m.given : null;
+      if (!priced && given?.size) {
         const { priceGiven, customerPriceLine } = await import("../offer/quantities.js");
-        const computed = priceGiven(m.given);
+        const computed = priceGiven(given);
         if (computed.length) { const texts = computed.map((c) => customerPriceLine(c)); priced = { text: texts.join("\n"), facts: computedFacts(computed, texts) }; }
       }
       if (!priced) return null;
