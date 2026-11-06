@@ -35,6 +35,7 @@ judge agents. Used for the November 2026 improvement loop (iterations 0-4).
 | 3 | 4151af8 | 3.14 | 3.22 | 3.27 | 2.9 / 5.1 / 9.5 s | 41 - 15 - 7 |
 | 4 | 439c2fe | 3.33 | 3.32 | 3.22 | 3.0 / 4.5 / 9.4 s | 29 - 24 - 10 |
 | 5 | 2cadf10 | 3.17 | 3.19 | 3.32 | 3.4 / 5.7 / 8.9 s | no pairs (iteration 4's run was not kept) |
+| 6 | 8518411 (+fb95593 shop totals) | 3.52 | 3.25 | 3.44 | 3.1 / 5.1 / 8.0 s | 27 - 25 - 11 vs iteration 5 |
 
 Iteration 5 = the network only for what the business lacks, demos release results, password reset, privacy fixes. Its
 first-word times are production's real speed: iterations 2-4 replayed stored request splits (cache key v2), iteration 5
