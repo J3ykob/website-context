@@ -1134,8 +1134,9 @@ export class WebsiteChat {
         noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
         const lines = products.map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
         const { priceGiven, customerPriceLine, inputsOf, listedAmounts } = await import("../offer/quantities.js");
-        // A price question: the customer's quantities read with the items, priced by code (src/offer/quantities.ts) - a
-        // shop's catalogue items too (empro-1, iteration 5: "3 aku" got "I won't total it", 3 x 699 = 2097 zł).
+        // A price question: the customer's quantities read for every matched item (src/offer/search.ts, a reading of its
+        // own after the pick), priced by code (src/offer/quantities.ts) - a shop's catalogue items too (empro-1: "3 aku"
+        // got "I won't total it", 3 x 699 = 2097 zł).
         const computed = !modelQuote && judged?.given.size ? priceGiven(judged.given) : [];
         if (computed.length) {
           const texts = computed.map((c) => customerPriceLine(c));
