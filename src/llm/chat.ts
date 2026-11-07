@@ -317,6 +317,15 @@ const HANDOFF_ASK_MS = 4000;
 // agent starts only for a part some network business has (owner 2026-11-05). Late = answered in the chat, whose reply
 // still relays the businesses if the search finds them while it is written.
 const NETWORK_ROUTE_WAIT_MS = Number(process.env.NETWORK_ROUTE_WAIT_MS) || 3000;
+// Launch switches (owner 2026-11-07; render.yaml): an x-test-variant word turns each on for one admin request (evals).
+// NETWORK_CHAT=off: no other businesses in the chat - no search, referral or broadcast (the coverage of our own pages stays).
+const networkInChat = (): boolean => process.env.NETWORK_CHAT !== "off" && !turnVariant().includes("nonet");
+// CALC_AGENT=off: the calculation split's two agent branches (our own priced multi-step work, quantities only) are answered
+// here as a request our team prices, with the offer to pass it on - no background calculation.
+const calcAgentOn = (): boolean => process.env.CALC_AGENT !== "off" && !turnVariant().includes("noagent");
+// UNSURE_FALLBACK=on: a reply still stating unsupported things or wrong amounts after its rewrites is not sent; the customer
+// is told we don't have that information, with the offer to pass the question on (and it goes to the owner's gap list).
+const unsureFallback = (): boolean => process.env.UNSURE_FALLBACK === "on" || turnVariant().includes("abstain");
 // How long the page search and the item matcher wait for the request's split (from when the turn's work starts): a split
 // usually comes in 0.6-1.4 s, but took 2.7, 3.6 and 5.5 s in the offline replay of 2026-11-05 (the first word 9.3 s); late =
 // they go on with the customer's own words (the second search and the per-part shortlist are skipped this turn). The
@@ -942,10 +951,12 @@ export class WebsiteChat {
       // More than a simple calculation (measuring, unlisted work, discounts, many items): quantities only, or every part of
       // ours priced -> the calculation and its approval; ours without prices -> answered here (partial: a quote request).
       const ownPriced = !!cov && cov.own.some(Boolean) && cov.own.every((o, k) => !o || cov.priced[k]);
-      if (pure || ownPriced) {
+      if ((pure || ownPriced) && calcAgentOn()) {
         const r = await this.agentTurn(sanitizedMessages, question, sessionKey, pure ? { pureCalc: true, work } : { coverage: cov!, work });
         if (r) { st.calcStarted = true; onToken(r.message); return r; }
       }
+      // The same branch with the agent off: our team prices it - the reply gives what we show and offers to pass it on.
+      if ((pure || ownPriced) && !calcAgentOn()) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work, foreignUnmet, teamQuote: true });
       return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work, foreignUnmet });
     }
     if (rt?.intent === "chitchat") return { ...(await this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.smalltalk], rt })), turnKind: "chitchat" };
@@ -1009,7 +1020,7 @@ export class WebsiteChat {
     return {
       convo, need, parts, knowledge, products, quote, facts,
       start: () => { for (const x of [knowledge, products, quote, facts]) x.start(); },
-      net: () => (net === undefined ? (net = rt && !turnCheap() ? this.networkStart(question, messages, rt, !st.owner, sessionKey) : null) : net),
+      net: () => (net === undefined ? (net = rt && !turnCheap() ? this.networkStart(question, messages, rt, !st.owner && networkInChat(), sessionKey) : null) : net),
       coverage: () => (cov ||= net?.cov ?? this.coverageOf(need)),
       decided: () => net?.cov ?? cov,
     };
@@ -1073,7 +1084,7 @@ export class WebsiteChat {
   // knowledge reply kept for a calculation that runs too long (agentTurn): no network, no offers to pass anything on.
   // opts.foreignUnmet: an order or a calculation with a part we don't have that started no background agent (packsStream) -
   // the one place a part may be told "not in our offer" (below).
-  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; networkParts?: string[]; t0?: number; formOpen?: boolean; work?: TurnWork | null; released?: boolean; foreignUnmet?: boolean }): Promise<ChatResponse> {
+  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; networkParts?: string[]; t0?: number; formOpen?: boolean; work?: TurnWork | null; released?: boolean; foreignUnmet?: boolean; teamQuote?: boolean }): Promise<ChatResponse> {
     const st = this.packStateOf(sessionKey);
     const question = messages.findLast((m) => m.role === "user")?.content || "";
     const rt = opts.rt ?? null;
@@ -1248,9 +1259,14 @@ export class WebsiteChat {
       }
       // Offered at most once per question: again only for a new question two or more turns later, never after a decline.
       const offerOk = !!rt && !owner && !opts.released && !!this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
+      // A calculation our team prices (CALC_AGENT off): what we show for it, and the offer to pass the request on as a quote request.
+      if (opts.teamQuote) {
+        behaviour.push(BEHAVIOUR.teamQuote);
+        if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "quote"; }
+      }
       if (!answered && !network && !searching) {
         behaviour.push(owner || contactGiven ? BEHAVIOUR.noInfoBare : BEHAVIOUR.noInfo);
-        if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
+        if (offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
       }
       if (answered && !network && !searching) {
         behaviour.unshift(BEHAVIOUR.answer);
@@ -1412,7 +1428,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     // dropped the carp line the code had priced at 80 zł); otherwise the computed lines its draft gave.
     const keepAll = behaviour.includes(BEHAVIOUR.simpleCalc);
     let keptFirst: string[] | null = null; // the computed lines the first blocked draft gave: kept through every rewrite
-    const check = async (text: string): Promise<{ problems: string[]; offers: number; keep: string[] }> => {
+    const check = async (text: string): Promise<{ problems: string[]; offers: number; keep: string[]; factual?: boolean }> => {
       const problems: string[] = [];
       if (!text.trim()) return { problems: ["it is empty - write the reply"], offers: 0, keep: [] };
       const statements = splitStatements(text);
@@ -1490,7 +1506,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       }
       keep = [...new Set(keep)];
       if (bad.length) problems.splice(factProblemAt, 0, `these statements are not supported by our information (remove or correct them): ${bad.map((b) => `"${b}"`).join("; ")}`);
-      return { problems, offers: nl("offers"), keep };
+      // Facts wrong (not only form): what the unsure fallback acts on when it is still so after the rewrites.
+      const factual = bad.length > 0 || !!amounts?.wrong.length;
+      return { problems, offers: nl("offers"), keep, factual };
     };
     let final = raw;
     let verdict = await check(raw);
@@ -1504,6 +1522,15 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (!again) break;
       final = again;
       verdict = await check(final);
+    }
+    // Still unsupported or wrong after the rewrites (UNSURE_FALLBACK): not sent. In its place: we don't have that
+    // information, and the offer to pass the question on - worded by the model from no facts but the official info.
+    if (verdict.factual && unsureFallback() && !opts.noFacts && !opts.formOpen && !network) {
+      noteTurn("unsureFallback", { problems: verdict.problems.map((p) => p.slice(0, 300)), draft: final.slice(0, 1500) });
+      const offerOk = !!rt && !owner && !!this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
+      const r = await this.packsReply(messages, sessionKey, () => {}, { behaviour: [owner || contactGiven ? BEHAVIOUR.noInfoBare : BEHAVIOUR.noInfo, ...(offerOk ? [BEHAVIOUR.handoff] : [])], packs: [], noFacts: true, rt, ...(offerOk ? { handoffKind: "question" as const } : {}) });
+      const gap = rt && ["ask", "order", "calculate"].includes(rt.intent) ? question.trim().slice(0, 200) : undefined;
+      return { ...r, ...(gap ? { unknownQuestion: gap } : {}) };
     }
     return finish(final, verdict.offers);
   }
@@ -1657,7 +1684,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
   private async networkFound(work: TurnWork | null, cov: Coverage, owner: boolean, need?: string): Promise<EcosystemMatch[]> {
     const foreign = cov.parts.filter((_, k) => !cov.own[k]);
     const askEcosystem = this.askEcosystem;
-    if (!foreign.length || owner || !askEcosystem || turnCheap()) return [];
+    if (!foreign.length || owner || !askEcosystem || turnCheap() || !networkInChat()) return [];
     const started = work?.net();
     const matches = (started ? started.net.then((n) => n?.matches ?? null, () => null) : Promise.resolve(null))
       .then((m) => m ?? askEcosystem([{ role: "user", content: need || work?.need || foreign.join("\n") }], undefined, foreign))
@@ -1999,7 +2026,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       : Promise.all([asked, cov]).then(([{ need }, c]): NetworkAsk | null => {
         const foreign = c.parts.filter((_, k) => !c.own[k]);
         if (!search || !foreign.length) {
-          console.log(`[ecosystem] ${this.context.tenantId}: not asked - ${!search ? "the owner is writing" : c.parts.length ? "every part is ours" : "no part to search"}: "${question.slice(0, 60)}"`);
+          console.log(`[ecosystem] ${this.context.tenantId}: not asked - ${!search ? "no search (the owner is writing, or NETWORK_CHAT off)" :c.parts.length ? "every part is ours" : "no part to search"}: "${question.slice(0, 60)}"`);
           return null;
         }
         return { need, lang: rt.lang, matches, parts: foreign, allForeign: foreign.length === c.parts.length };

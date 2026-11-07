@@ -139,6 +139,14 @@ services:
       # construction checks green); a business without a model keeps the old path.
       - key: PRICING_CHAT
         value: "on"
+      # Launch switches (src/llm/chat.ts, owner 2026-11-07): other businesses in the chat, the calculation agent,
+      # and "we don't have that information + pass it on" for a reply still unsupported after its rewrites.
+      - key: NETWORK_CHAT
+        value: "on"
+      - key: CALC_AGENT
+        value: "on"
+      - key: UNSURE_FALLBACK
+        value: "off"
       - key: PORT
         value: "3210"
       - key: RESEND_API_KEY
