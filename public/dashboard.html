@@ -77,17 +77,8 @@
     .topbar-left { display:flex; align-items:center; gap:16px; }
     .logo-mark {
       width: 32px; height: 32px;
-      background: linear-gradient(135deg, var(--blue), var(--blue-hover));
-      border-radius: 8px;
-      position: relative;
+      background: url(/logo.png) center / contain no-repeat;
       flex-shrink: 0;
-    }
-    .logo-mark::before {
-      content: "";
-      position: absolute;
-      inset: 5px;
-      border: 2px solid rgba(255,255,255,0.85);
-      border-radius: 4px;
     }
     .site-info h1 {
       font-family: var(--serif);

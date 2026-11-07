@@ -465,7 +465,7 @@ app.get("/for/:tenantId", async (req, res) => {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Assistant for ${brand}</title>
-<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link href="/fonts/fonts.css" rel="stylesheet">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -773,7 +773,7 @@ app.get("/demo/:tenantId", async (req, res) => {
 <meta charset="UTF-8">\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">\
 <title>' + brand + (demoPl ? ' - czat na stronie (Whisp)' : ' - AI assistant by Whisp') + '</title>\
-<link rel="icon" type="image/svg+xml" href="/logo.svg">\
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">\
 <link href="/fonts/fonts.css" rel="stylesheet">\
 <style>\
 * { margin:0; padding:0; box-sizing:border-box; }\
@@ -886,7 +886,7 @@ body {\
 <body>\
 <header class="demo-header">\
   <div class="demo-brand">\
-    <svg class="demo-mark" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#3b82f6"/><path d="M8.5 11.5C8.5 9.567 10.067 8 12 8h8c1.933 0 3.5 1.567 3.5 3.5v5c0 1.933-1.567 3.5-3.5 3.5h-5l-3 2.5V20H12c-1.933 0-3.5-1.567-3.5-3.5v-5z" fill="white" opacity="0.95"/><path d="M13.5 12.5c1.5-.8 3.5-.8 5 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/><path d="M14.5 15c1-.5 2.5-.5 3 0" stroke="#3b82f6" stroke-width="1.3" stroke-linecap="round"/></svg>\
+    <img class="demo-mark" src="/logo.png" alt="" width="32" height="32">\
     <span class="demo-name">Whisp</span>\
     <span class="demo-badge">' + (demoPl ? 'Pokaz na żywo' : 'Live demo') + '</span>\
   </div>\

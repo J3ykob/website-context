@@ -77,7 +77,7 @@ function renderCustomHtml(tenant: SiteTenant, baseUrl: string, editToken: string
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(brand)}</title>
-<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link href="/fonts/fonts.css" rel="stylesheet">
 <style>
   :root{--accent:${accent};}
@@ -215,7 +215,7 @@ export function renderSitePage(tenant: SiteTenant, baseUrl: string, editToken: s
 <title>${esc(brand)}</title>
 <meta name="description" content="${escAttr(tagline)}">
 <meta name="theme-color" content="${bgLiteral}">
-<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link href="/fonts/fonts.css" rel="stylesheet">
 <script>document.documentElement.classList.add("js");</script>
 <style>
