@@ -142,9 +142,9 @@ services:
       # Launch switches (src/llm/chat.ts, owner 2026-11-07): other businesses in the chat, the calculation agent,
       # and "we don't have that information + pass it on" for a reply still unsupported after its rewrites.
       - key: NETWORK_CHAT
-        value: "on"
+        value: "off"
       - key: CALC_AGENT
-        value: "on"
+        value: "off"
       - key: UNSURE_FALLBACK
         value: "off"
       - key: PORT
