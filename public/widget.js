@@ -1987,6 +1987,7 @@
   scrollbar-color:rgba(10,10,10,0.18) transparent;\
 }\
 .wctx-state-chat .wctx-messages { display:flex; }\
+.wctx-messages::before { content:attr(data-ai-note); display:block; align-self:center; text-align:center; font-size:11px; line-height:1.4; color:rgba(10,10,10,0.45); max-width:520px; margin:-16px auto 4px; }\
 .wctx-messages::-webkit-scrollbar { width:6px; }\
 .wctx-messages::-webkit-scrollbar-track { background:transparent; }\
 .wctx-messages::-webkit-scrollbar-thumb { background:rgba(10,10,10,0.18); border-radius:999px; }\
@@ -2185,6 +2186,7 @@
 #wctx-overlay.wctx-dark .wctx-send-btn { color:rgba(255,255,255,0.7); }\
 #wctx-overlay.wctx-dark .wctx-send-btn:hover { color:#fff; }\
 #wctx-overlay.wctx-dark .wctx-idle-footnote { color:rgba(255,255,255,0.3); }\
+#wctx-overlay.wctx-dark .wctx-messages::before { color:rgba(255,255,255,0.45); }\
 #wctx-overlay.wctx-dark .wctx-idle-footnote kbd {\
   background:rgba(255,255,255,0.08);\
   border-color:rgba(255,255,255,0.12);\
@@ -2324,7 +2326,7 @@
   </div>\
   <div class="wctx-main wctx-state-idle">\
     <div class="wctx-idle-prompt">' + wctxT("What can I help you with?", "W czym mogę pomóc?") + '</div>\
-    <div class="wctx-messages"></div>\
+    <div class="wctx-messages" data-ai-note="' + wctxT("Answers are written automatically by AI from this business’s information and may contain mistakes.", "Odpowiedzi pisze automatycznie AI na podstawie informacji tej firmy. Mogą zawierać błędy.") + '"></div>\
     <div class="wctx-input-zone">\
       <div class="wctx-input-frame">\
         <div class="wctx-input-icon">\
@@ -2337,7 +2339,7 @@
       </div>\
       <div class="wctx-idle-footnote">\
         <span><kbd>↵</kbd>' + wctxT("Send", "Wyślij") + '</span>\
-        <span>' + wctxT("Ask anything about this website", "Zapytaj o cokolwiek na tej stronie") + '</span>\
+        <span>' + wctxT("Answered by AI - it can make mistakes", "Odpowiada AI - może się pomylić") + '</span>\
       </div>\
     </div>\
   </div>\

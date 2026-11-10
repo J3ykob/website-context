@@ -135,7 +135,7 @@
     <li>adres IP Twojego urządzenia;</li>
     <li>gdy czat prowadzi Cię przez proces na stronie firmy (np. rezerwację): adres i tytuł strony, jej widoczny tekst oraz etykiety i wartości pól formularzy (bez haseł, plików i pól ukrytych).</li>
   </ul>
-  <p>Nie musisz podawać w czacie danych osobowych. Dane kontaktowe są potrzebne tylko wtedy, gdy chcesz złożyć zapytanie lub zamówienie albo dostać powiadomienie. Nie podawaj w czacie danych o zdrowiu ani innych danych szczególnych kategorii (art. 9 RODO), chyba że firma prosi o nie, żeby załatwić Twoją sprawę. Link do strony statusu zapytania (whisp.so/p/...) pokazuje treść zapytania, wynik i oferty firm każdemu, kto go zna - nie udostępniaj go osobom, które nie powinny ich widzieć.</p>
+  <p>Nie musisz podawać w czacie danych osobowych. Dane kontaktowe są potrzebne tylko wtedy, gdy chcesz złożyć zapytanie lub zamówienie albo dostać powiadomienie. Nie podawaj w czacie danych o zdrowiu ani innych danych szczególnych kategorii (art. 9 RODO), chyba że firma prosi o nie, żeby załatwić Twoją sprawę. Jeśli takie dane napiszesz, trafią także do zapisu decyzji modeli AI (pkt 2) i będą w nim przechowywane przez {{CHAT_RETENTION_DAYS}} dni, jak wiadomości z czatu - możesz w każdej chwili zażądać ich usunięcia (pkt 9). Link do strony statusu zapytania (whisp.so/p/...) pokazuje treść zapytania, wynik i oferty firm każdemu, kto go zna - nie udostępniaj go osobom, które nie powinny ich widzieć.</p>
   <p><strong>W imieniu firmy</strong> (pkt 2) te dane służą do: odpowiedzi na Twoje pytania na podstawie informacji firmy; przekazania firmie Twojego zapytania lub zamówienia (e-mailem i w jej panelu) oraz pytań, na które czat nie znał odpowiedzi; statystyk w panelu firmy (np. o co najczęściej pytają klienci); wycen i dłuższych zleceń, takich jak zestawienia czy porównania; wysłania Ci wyniku zapytania, gdy się na to zgodzisz. Podstawę prawną tego przetwarzania określa firma. Rozmowy z czatem firmy, która nie zaakceptowała Regulaminu, przetwarzamy w tych samych celach jako administrator: wynik zapytania wysyłamy na podstawie Twojej zgody (lit. a), a resztę na podstawie lit. f - prezentacja i rozwój usługi oraz przekazanie Twojej prośby firmie, do której ją kierujesz.</p>
   <p><strong>Dla naszych własnych celów:</strong></p>
   <table class="t-purpose">
@@ -181,7 +181,7 @@
 
   <h2 id="ai">5. Sztuczna inteligencja</h2>
   <ul>
-    <li>Odpowiedzi w czacie pisze automatycznie model sztucznej inteligencji (AI) na podstawie informacji firmy - jej strony, cennika i notatek, a w sieci firm Whisp także informacji innych firm z sieci. Mogą zawierać błędy.</li>
+    <li>Odpowiedzi w czacie pisze automatycznie model sztucznej inteligencji (AI) na podstawie informacji firmy - jej strony, cennika i notatek, a w sieci firm Whisp także informacji innych firm z sieci. Mogą zawierać błędy - mówi o tym także informacja w okienku czatu.</li>
     <li>Kwoty w wycenach system wylicza z cennika firmy. Ceny firm, które nie dołączyły do Whisp, pochodzą z ich publicznych danych, dopóki firma sama ich nie potwierdzi. Wyniki dłuższych zleceń trafiają do Ciebie od razu albo po sprawdzeniu przez firmę, która może je poprawić - zależnie od jej ustawień.</li>
     <li>Rozmowę telefoniczną może prowadzić nasz automat głosowy, który mówi o tym na początku rozmowy (pkt 3.4).</li>
     <li>Nie podejmujemy wobec Ciebie decyzji opartych wyłącznie na zautomatyzowanym przetwarzaniu, które wywoływałyby skutki prawne lub w podobny sposób istotnie na Ciebie wpływały (art. 22 RODO).</li>
@@ -243,7 +243,7 @@
     <thead><tr><th>Dane</th><th>Jak długo</th></tr></thead>
     <tbody>
     <tr><td>Wiadomości z czatu</td><td>{{CHAT_RETENTION_DAYS}} dni od zapisania wiadomości, potem usuwamy je automatycznie (raz dziennie)</td></tr>
-    <tr><td>Zapis decyzji modeli AI</td><td>{{CHAT_RETENTION_DAYS}} dni; podział zapytania na części, który zapamiętujemy, żeby takie samo zapytanie dzielić tak samo (model pomija w nim dane osobowe) - bez określonego terminu</td></tr>
+    <tr><td>Zapis decyzji modeli AI</td><td>{{CHAT_RETENTION_DAYS}} dni (także dane o zdrowiu, jeśli zostały napisane w rozmowie); podział zapytania na części, który zapamiętujemy, żeby takie samo zapytanie dzielić tak samo (model pomija w nim dane osobowe) - bez określonego terminu</td></tr>
     <tr><td>Każdą rozmowę zapisujemy też jako sprawę: dziennik rozmowy, pliki, wyniki, zapytania do firm z sieci i ich oferty, kontakt do powiadomień i zgody, link do strony statusu</td><td>usuwamy automatycznie po 30 dniach bez żadnej aktywności w sprawie (raz dziennie, partiami)</td></tr>
     <tr><td>Zapytania i zamówienia złożone w czacie</td><td>wysyłamy je e-mailem do firmy; w jej skrzynce zapytań przechowujemy 500 ostatnich, bez określonego terminu</td></tr>
     <tr><td>Pytania, na które czat nie znał odpowiedzi</td><td>bez określonego terminu - do czasu, gdy firma usunie je w panelu</td></tr>

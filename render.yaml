@@ -81,9 +81,9 @@ services:
         sync: false
       # Each legal page's "Obowiązuje od", set when its text changes (src/legal/pages.ts). Without these the
       # code default (2026-10-31) showed, and the Terms and the DPA took the privacy policy's date.
-      # The privacy policy text of 2026-11-04: set this to the day it goes live.
+      # The privacy policy text of 2026-11-10 (the AI-decision log may hold health data; the chat window's AI notice).
       - key: PRIVACY_EFFECTIVE_DATE
-        value: "2026-11-04"
+        value: "2026-11-10"
       # The Terms and the DPA (unchanged since 2026-10-31); also the version recorded when an owner accepts them.
       - key: TERMS_EFFECTIVE_DATE
         value: "2026-10-31"
