@@ -17,7 +17,7 @@
  * Everything is recorded in the project (memory, participants, events, usage).
  */
 import { findOfferItems } from "../offer/search.js";
-import { recipeFromFields, evaluate } from "../offer/recipe.js";
+import { recipeFromFields, evaluate, periodLength, periodUnits } from "../offer/recipe.js";
 import { jevAsk, type JevQuestion } from "../llm/jev.js";
 import { FIELDS, validValue } from "../offer/schema.js";
 import type { OfferItem } from "../offer/store.js";
@@ -92,8 +92,6 @@ ${catalogSample.length ? `The business's catalog names items like this: ${catalo
   }).filter((l: Line) => l.need);
 }
 
-const HOURS: Record<string, number> = { godzina: 1, doba: 24, tydzien: 168, miesiac: 720 };
-
 /** Price of one offer item for one line - from the item's fields only. */
 export function priceLine(it: OfferItem, line: Line, b: Business): Quote {
   const f = it.fields;
@@ -116,12 +114,12 @@ export function priceLine(it: OfferItem, line: Line, b: Business): Quote {
         const low = [...priced].sort((a, b) => a.price_value! - b.price_value!)[0];
         return { ...base, unitPrice: low.price_value, unit: low.unit, priceNote: "warianty", tbd: [`${it.name} (wariant: ${priced.map((c) => c.label).join(" / ")})`] };
       }
-      // Rates for time (hour, day, week, month): the requested time costed in each rate - whole units of it,
-      // a day is 24 h - and the cheapest for the customer is taken.
-      const hours = line.quantity !== null ? HOURS[line.unit] : undefined;
-      if (hours !== undefined && priced.every((c) => HOURS[c.unit] !== undefined)) {
-        const need = line.quantity! * hours;
-        const best = priced.map((c) => { const n = Math.ceil(need / HOURS[c.unit] - 1e-9); return { c, n, total: r2(c.price_value! * n) }; }).sort((a, b) => a.total - b.total)[0];
+      // Rates for time (hour, day, week, month): the requested time costed in each rate - whole units of it, as the item
+      // recipes count them (recipe.ts periodUnits: a day is 24 h, a monthly rate one per calendar month - 52 weeks are 12,
+      // not 8736 h / 720 h = 13) - and the cheapest for the customer is taken.
+      const length = line.quantity !== null ? periodLength(line.quantity, line.unit) : null;
+      if (length && priced.every((c) => periodUnits(c.unit, length) !== null)) {
+        const best = priced.map((c) => { const n = periodUnits(c.unit, length)!; return { c, n, total: r2(c.price_value! * n) }; }).sort((a, b) => a.total - b.total)[0];
         return { ...base, unitPrice: best.c.price_value, unit: best.c.unit, total: best.total, priceNote: `${best.c.label} × ${best.n}` };
       }
       // Otherwise the rate in the customer's unit, else the lowest shown (no total).

@@ -194,12 +194,12 @@ async function readQuantities(asked: string, items: OfferItem[], tenant = ""): P
   if (!hit || !memo) {
     const j = await askJson(READ(today), user, { ok: (x) => Array.isArray(x?.quantities), budgetMs: TIMEOUT_MS });
     if (j === undefined) { stepTurn("quantities", t0, "failed"); return null; }
-    // Each quantity as its structure says: a number, a period (from / to), a length in a calendar unit (count / unit) or an
-    // amount with the item's conversion. A length in calendar units first (also sent with a "value" in hours, that
-    // would be 8760 h for a year - 13 monthly rates).
-    const valueOf = (x: any): unknown => isDuration(x) ? { count: x.count, unit: x.unit }
+    // Each quantity as its structure says: a period (from / to), a length in a calendar unit (count / unit), a number or an
+    // amount with the item's conversion. The most structure first: a period's dates over a length (Friday to Monday keeps
+    // its two readings), a length in the customer's unit over a "value" sent with it.
+    const valueOf = (x: any): unknown => isPeriod(x) ? { from: x.from, to: x.to }
+      : isDuration(x) ? { count: x.count, unit: x.unit }
       : typeof x?.value === "number" && x.value > 0 ? x.value
-      : isPeriod(x) ? { from: x.from, to: x.to }
       : isConversion(x) && convert(x) !== null ? { amount: x.amount, equals: x.equals, ...(x.whole === true ? { whole: true } : {}) } : undefined;
     const q = (j.quantities as any[]).filter((x: any) => Number.isInteger(x?.id) && inputs[x.id]?.includes(x.input) && valueOf(x) !== undefined)
       .map((x: any) => ({ id: x.id as number, input: String(x.input), value: valueOf(x) }));

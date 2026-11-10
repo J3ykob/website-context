@@ -11,7 +11,7 @@
  *   { kind: "on_request" }               no price without the business (quote, visit, design)
  */
 
-import { isSpan, MONTH_HOURS, YEAR_HOURS, type Span } from "../pricing/quantity.js";
+import { isSpan, durationSpan, MONTH_HOURS, YEAR_HOURS, type Span, type DurationUnit } from "../pricing/quantity.js";
 
 // A length of time may come as a Span (src/pricing/quantity.ts): its calendar months, and its whole length in hours.
 export type InputValue = number | string | Span;
@@ -32,7 +32,7 @@ export type Rule =
   | { rule: "cheapest"; options: Rule[] }                                                // alternatives: the cheapest that can be priced
   | { rule: "extra"; input: string; free?: number; price: number }                      // travel: free up to N km, then per km
   | { rule: "optional"; input: string; price: Rule }                                    // an add-on the customer may choose (breakfast, a second photographer)
-  | { rule: "either"; options: Rule[] }                                                  // several prices, the page does not say which applies -> a range, quoted
+  | { rule: "either"; options: Rule[]; open?: boolean }                                 // several prices, the page does not say which applies -> a range, quoted; open: no highest ("from")
   | { rule: "on_request" };
 
 export interface Recipe { inputs: RecipeInput[]; price: Rule; currency?: string; note?: string }
@@ -133,7 +133,7 @@ export function evaluate(rule: Rule, given: Record<string, InputValue | undefine
       const lows = rs.map((r) => (r.kind === "price" ? r.amount : r.kind === "range" ? r.min : NaN)).filter(Number.isFinite);
       const highs = rs.map((r) => (r.kind === "price" ? r.amount : r.kind === "range" ? r.max : NaN));
       if (!lows.length) return { kind: "on_request" };
-      return { kind: "range", min: Math.min(...lows), max: highs.some((h) => h === null || Number.isNaN(h as number)) ? null : Math.max(...(highs as number[])) };
+      return { kind: "range", min: Math.min(...lows), max: rule.open || highs.some((h) => h === null || Number.isNaN(h as number)) ? null : Math.max(...(highs as number[])) };
     }
     case "cheapest": {
       const rs = rule.options.map((o) => evaluate(o, given));
@@ -157,6 +157,23 @@ export function missingInputs(recipe: Recipe, given: Record<string, InputValue |
 const PERIOD_HOURS: Record<string, number> = { godzina: 1, doba: 24, tydzien: 168, miesiac: MONTH_HOURS };
 const PERIOD_MONTHS: Record<string, number> = { miesiac: 1 };
 const periodRate = (u: string, price: number): PeriodRate => ({ per: PERIOD_HOURS[u], price, ...(PERIOD_MONTHS[u] ? { months: PERIOD_MONTHS[u] } : {}) });
+// The same units as a length in the calendar (src/pricing/quantity.ts Duration).
+const PERIOD_UNIT: Record<string, DurationUnit> = { godzina: "hour", doba: "day", tydzien: "week", miesiac: "month" };
+
+/**
+ * A length given as a count of one of our period units (3 doba, 12 miesiac, 52 tydzien) as the recipes price it (a Span:
+ * its calendar months, src/pricing/quantity.ts durationSpan); null for a unit that is not a period. `from`: the day an
+ * undated length is counted from (today by default).
+ */
+export function periodLength(count: number, unit: string, from?: number): Span | null {
+  return count > 0 && unit in PERIOD_UNIT ? durationSpan({ count, unit: PERIOD_UNIT[unit] }, from) : null;
+}
+/** How many of one period rate (`unit`) cover a length - a monthly rate per calendar month; null for a unit that is not one. */
+export function periodUnits(unit: string, length: Span): number | null {
+  if (!(unit in PERIOD_HOURS)) return null;
+  const r = evaluate({ rule: "rates", input: "hours", rates: [periodRate(unit, 1)] }, { hours: length });
+  return r.kind === "price" ? Math.round(r.amount) : null;
+}
 const INPUT_OF: Record<string, string> = { szt: "pieces", kg: "kg", t: "tonnes", m2: "m2", m3: "m3", mb: "metres", worek: "bags", paleta: "pallets", litr: "litres", osoba: "people", komplet: "sets", wizyta: "visits" };
 
 interface FieldsLike { fields: Record<string, string | undefined>; price_value: number | null; price_max: number | null; currency?: string; components?: { label: string; price_type: string; price_value: number | null; price_max: number | null; unit: string; quantity_from: "fixed" | "customer"; quantity_label: string; combine: "sum" | "alternative" | "tier"; applies_from?: number | null; applies_to?: number | null }[] }
@@ -167,9 +184,12 @@ function ruleOf(priceType: string | undefined, value: number | null, max: number
   if (priceType === "free" || priceType === "included") return { rule: "fixed", price: 0 };
   if (value === null) return null;
   const input = qtyLabel || (u in PERIOD_HOURS ? "hours" : INPUT_OF[u] || "");
-  // A range per period (100-150 zł a doba): each end priced as a rate for the customer's length, in the rate's own unit
-  // (not the range times the hours).
-  if (priceType === "range" && u in PERIOD_HOURS && max !== null) return { rule: "either", options: [{ rule: "rates", input: "hours", rates: [periodRate(u, value)] }, { rule: "rates", input: "hours", rates: [periodRate(u, max)] }] };
+  // A range per period (100-150 zł a doba, or 100 zł a doba with no highest): each end priced as a rate for the customer's
+  // length, in the rate's own unit (not the range times the hours, nor the rate as the total); an open range keeps no highest.
+  if (priceType === "range" && u in PERIOD_HOURS) {
+    const rate = (p: number): Rule => ({ rule: "rates", input: "hours", rates: [periodRate(u, p)] });
+    return max === null ? { rule: "either", options: [rate(value)], open: true } : { rule: "either", options: [rate(value), rate(max)] };
+  }
   if (priceType === "range") return { rule: "range", min: value, max, ...(input && u && !(u in PERIOD_HOURS) && !["usluga", "projekt"].includes(u) ? { per: input } : {}) };
   if (priceType === "from") return { rule: "range", min: value, max: null };
   if (u in PERIOD_HOURS) return { rule: "rates", input: "hours", rates: [periodRate(u, value)] };

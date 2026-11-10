@@ -11,7 +11,8 @@
  *   - an amount in another unit with the conversion the item itself states: {amount, equals: {input, given}} -
  *     `input` of the input's unit = `given` of the customer's; `whole` rounds up to whole pieces or packs.
  *     sosnowydwor-3: soup for 8 people at "1 l = 4 portions" stayed "needs: quantity" - 8 x 1 / 4 = 2 l;
- *   - a length in a calendar unit without dates {count, unit}: "a year", "3 months", "6 weeks", "2 doby".
+ *   - a length in a calendar unit without dates {count, unit}: "a year", "3 months", "6 weeks", "2 doby"; a number of
+ *     hours counts as one in hours (src/offer/quantities.ts).
  *
  * A length counted in hours also keeps its calendar months (a Span): an item's monthly rate is priced per calendar month,
  * not per 720 h - whisp_so (2026-11-07): "na cały rok" read as 8760 h came to 13 x 149 zł, and the check rejected the
@@ -31,7 +32,8 @@ export interface Duration { count: number; unit: DurationUnit }
 /**
  * A length of time as the calendar counts it (whisp_so 2026-11-07: a year as 8760 h was 13 monthly rates, not 12):
  * `months` whole calendar months (a year = 12), `rest` the hours beyond them, `hours` the whole length in hours - for
- * rates that are not monthly. A month without dates is 30 x 24 h (the monthly rate's convention), a year 365 x 24 h.
+ * rates that are not monthly. A month without dates is 30 x 24 h (the monthly rate's convention), a year 365 x 24 h;
+ * hours, days and weeks without dates hold the calendar months from today (durationSpan).
  */
 export interface Span { months: number; rest: number; hours: number }
 /** What a reading assumes: both times given; the end at the start's time of day; the end as late as its day allows; the
@@ -80,11 +82,18 @@ export const isDuration = (v: unknown): v is Duration =>
 export const isSpan = (v: unknown): v is Span =>
   !!v && typeof v === "object" && [(v as Span).months, (v as Span).rest, (v as Span).hours].every((x) => typeof x === "number" && Number.isFinite(x) && x >= 0);
 
-/** A length given in a calendar unit, as the calendar counts it: months and years in whole months, the rest in hours. */
-export function durationSpan(d: Duration): Span {
-  const months = d.unit === "year" ? d.count * 12 : d.unit === "month" ? d.count : 0;
+/**
+ * A length given in a calendar unit, as the calendar counts it: months and years in whole months (a month 30 x 24 h, a year
+ * 365 x 24 h for the other rates); hours, days and weeks in the whole calendar months they hold counted from `from` (a day
+ * number, today by default) and the hours beyond - 52 weeks or 365 days at a monthly rate are 12 rates, not 8736 h or 8760 h
+ * / 720 h = 13.
+ */
+export function durationSpan(d: Duration, from: number = todayDay()): Span {
+  const hours = round(d.count * DURATION_UNITS[d.unit]);
+  if (d.unit !== "month" && d.unit !== "year") return monthsIn(from, 0, hours);
+  const months = d.unit === "year" ? d.count * 12 : d.count;
   const whole = Math.floor(months + 1e-9);
-  return { months: whole, rest: round((months - whole) * MONTH_HOURS), hours: round(d.count * DURATION_UNITS[d.unit]) };
+  return { months: whole, rest: round((months - whole) * MONTH_HOURS), hours };
 }
 
 /** The whole calendar months from day `a` at `startHour` within `hours` (Jan 31 + 1 month = Feb 28), and the hours beyond. */
@@ -131,9 +140,9 @@ export function periodReadings(p: Period, unit: TimeUnit = "hour"): Reading[] {
   return out;
 }
 
-/** A length given in a calendar unit counted in `unit` (rounded up to whole units); one reading. */
-export function durationReadings(d: Duration, unit: TimeUnit = "hour"): Reading[] {
-  const span = durationSpan(d);
+/** A length given in a calendar unit counted in `unit` (rounded up to whole units); one reading. `from`: as durationSpan. */
+export function durationReadings(d: Duration, unit: TimeUnit = "hour", from?: number): Reading[] {
+  const span = durationSpan(d, from);
   if (!(span.hours > 0)) return [];
   const per = unit === "week" ? 168 : unit === "hour" ? 1 : 24;
   const value = per === 1 ? span.hours : Math.ceil(span.hours / per - 1e-9);
@@ -148,13 +157,16 @@ export function convert(c: Conversion): number | null {
   return c.whole ? Math.ceil(v - 1e-9) : round(v, 4);
 }
 
-/** The readings of one value: null = not a period or a conversion (it stays as it is); [] = it cannot be counted. */
-export function readingsOf(v: unknown, unit?: TimeUnit): Reading[] | null {
+/**
+ * The readings of one value: null = not a period, a length or a conversion (it stays as it is); [] = it cannot be counted.
+ * `from`: the day an undated length is counted from (durationSpan; today by default).
+ */
+export function readingsOf(v: unknown, unit?: TimeUnit, from?: number): Reading[] | null {
   if (isPeriod(v)) {
     const u = v.counts && UNITS.has(v.counts) ? v.counts : unit;
     return u ? periodReadings(v, u) : [];
   }
-  if (isDuration(v)) return unit ? durationReadings(v, unit) : [];
+  if (isDuration(v)) return unit ? durationReadings(v, unit, from) : [];
   if (isConversion(v)) {
     const x = convert(v);
     return x === null ? [] : [{ value: x, basis: "converted" }];
@@ -182,9 +194,12 @@ const monthsText = (s: Span) => `${plural(s.months, "calendar month")}${s.rest >
 export function describeReading(name: string, v: unknown, r: Reading, unit?: TimeUnit): string {
   if (isConversion(v)) return `${name} ${r.value} (${v.amount} as the customer gives it; ${v.equals.input} of ${name} = ${v.equals.given}, as the item states${v.whole ? ", rounded up to whole units" : ""})`;
   if (isDuration(v)) {
-    const u = unit || "hour", days = round((r.hours ?? 0) / 24);
-    const counted = u !== "hour" ? COUNT[u](r) : r.span ? `${monthsText(r.span)}; ${days} x 24 h for rates that are not monthly` : COUNT.hour(r);
-    return `${name} ${plural(v.count, v.unit)} = ${counted}`;
+    const u = unit || "hour", days = round((r.hours ?? 0) / 24), given = v.unit === "hour" ? `${v.count} h` : plural(v.count, v.unit);
+    // Hours, days and weeks hold calendar months counted from today (durationSpan).
+    const from = v.unit === "month" || v.unit === "year" ? "" : " counted from today";
+    if (u === "hour" && !r.span && v.unit === "hour") return `${name} ${v.count}`;
+    const counted = u !== "hour" ? COUNT[u](r) : r.span ? `${monthsText(r.span)}${from}; ${days} x 24 h for rates that are not monthly` : COUNT.hour(r);
+    return `${name} ${given} = ${counted}`;
   }
   if (!isPeriod(v)) return `${name} ${r.value}`;
   const u = (v.counts && UNITS.has(v.counts) ? v.counts : unit) || "hour";
@@ -226,11 +241,16 @@ export function countInputs(records: Record<string, unknown>[], unitOf?: (name: 
   return { sets, assumed };
 }
 
+const warsawDate = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 /** Today as the readers get it (they write dates as YYYY-MM-DD): "Thursday 2026-11-05", Warsaw time. */
 export function todayLine(now = new Date()): string {
-  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  const date = warsawDate(now);
   const n = dayNumber(date);
   return n === null ? date : `${WEEKDAYS[new Date(n * DAY_MS).getUTCDay()]} ${date}`;
+}
+/** Today's day number (dayNumber), Warsaw time - the day an undated length is counted from. */
+export function todayDay(now = new Date()): number {
+  return dayNumber(warsawDate(now)) ?? Math.floor(now.getTime() / DAY_MS);
 }
 
 /** An amount equal to one of `known` (cents apart at most). */

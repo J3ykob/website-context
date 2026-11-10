@@ -12,11 +12,11 @@
  */
 import type { OfferItem } from "./store.js";
 import { recipeFromFields, evaluate, type InputValue } from "./recipe.js";
-import { readingsOf, describeReading, type TimeUnit } from "../pricing/quantity.js";
+import { readingsOf, describeReading, todayDay, type TimeUnit } from "../pricing/quantity.js";
 
 // How each input a recipe from fields can have is described to the model (recipe.ts INPUT_OF / rates).
 export const INPUT_HELP: Record<string, string> = {
-  hours: "length of time (of use, of a subscription): in hours, or as the customer counts it - days (doby), weeks, months, years",
+  hours: "length of time (of use, of a subscription), as the customer counts it (count / unit: days or doby, weeks, months, years); in hours only when they say hours",
   pieces: "number of pieces", kg: "weight in kg", tonnes: "weight in tonnes", m2: "area in m²", m3: "volume in m³",
   metres: "length in metres", bags: "number of bags", pallets: "number of pallets", litres: "litres", people: "number of people",
   sets: "number of sets", visits: "number of visits", quantity: "the amount the price depends on (as the item counts it)",
@@ -39,14 +39,18 @@ export interface CustomerPrice { item: OfferItem; readings: PricedReading[]; com
 /**
  * The items priced for the quantities read from the customer - only those that come to a single price. `given`: the
  * values as the matcher read them (numbers, periods, conversions); a period without a time is priced for both of its
- * readings.
+ * readings. A number for the time input is a length in hours ({count, unit: "hour"}), so it keeps its calendar months too
+ * (counted from `today`, a day number): 8760 h at a monthly rate is 12 rates, as a year is, whichever form the reader sent.
  */
-export function priceGiven(given: Map<OfferItem, Record<string, unknown>>): CustomerPrice[] {
+export function priceGiven(given: Map<OfferItem, Record<string, unknown>>, today: number = todayDay()): CustomerPrice[] {
   const out: CustomerPrice[] = [];
   for (const [item, g] of given) {
     const recipe = recipeFromFields(item);
     if (!recipe) continue;
-    const inputs = Object.entries(g).map(([name, v]) => ({ name, v, rs: readingsOf(v, TIME_INPUT[name]) }));
+    const inputs = Object.entries(g).map(([name, raw]) => {
+      const v = TIME_INPUT[name] === "hour" && typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? { count: raw, unit: "hour" } : raw;
+      return { name, v, rs: readingsOf(v, TIME_INPUT[name], today) };
+    });
     const n = Math.max(1, ...inputs.map((x) => (x.rs?.length ? x.rs.length : 1)));
     const readings: PricedReading[] = [];
     for (let k = 0; k < n; k++) {

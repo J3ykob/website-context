@@ -36,6 +36,8 @@ const reads = () => calls.filter((c) => !isPick(c));
 // What a reading of the quantities answers for the battery's id (a test sets its own): by default 3 pieces for "3 aku".
 const threePieces = (id: number, user: string): unknown => ({ quantities: user.includes("3 aku") ? [{ id, input: "pieces", value: 3 }] : [] });
 let reading: (id: number, user: string) => unknown | Promise<unknown> = threePieces;
+// The item the stub picks and reads for (a test sets its own).
+let wantedName = battery.name;
 
 beforeAll(() => {
   process.env.OPENROUTER_API_KEY = "test-key";
@@ -45,14 +47,14 @@ beforeAll(() => {
     const body = JSON.parse(init?.body || "{}");
     const call = { system: String(body.messages?.[0]?.content || ""), user: String(body.messages?.[1]?.content || "") };
     calls.push(call);
-    const wanted = listed(call.user).filter((x) => x.name === battery.name).map((x) => x.id);
+    const wanted = listed(call.user).filter((x) => x.name === wantedName).map((x) => x.id);
     // The pick: the items asked for, by id - the answer deepseek gave for the shop's list, quantities asked or not.
     if (isPick(call)) return answer({ ids: wanted });
     const a = await reading(wanted[0], call.user);
     return a instanceof Response ? a : answer(a);
   });
 });
-afterEach(() => { reading = threePieces; });
+afterEach(() => { reading = threePieces; wantedName = battery.name; });
 afterAll(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -155,5 +157,28 @@ describe("the customer's quantities for every matched item (matchItems)", () => 
     expect(read).toBe(false);
     open();
     expect((await given)?.get(battery)).toEqual({ pieces: 3 });
+  });
+
+  it("whisp_so: a length in the customer's unit wins over a value in hours sent with it - a year at 149 zł a month = 1788 zł", async () => {
+    const panel = item("Whisp business panel", { category: "Panel", fields: { kind: "service", price_type: "per_unit", unit: "miesiac" }, price_value: 149 });
+    wantedName = panel.name;
+    reading = (id) => ({ quantities: [{ id, input: "hours", value: 8760, count: 1, unit: "year" }] });
+    const m = await matchItems("a jakbym wzial panel na caly rok to ile wyjdzie?", [panel], { limit: 6, quantities: true });
+    expect(m?.items).toEqual([panel]);
+    const given = await m!.given;
+    expect(given?.get(panel)).toEqual({ hours: { count: 1, unit: "year" } });
+    expect(priceGiven(given!)[0].readings.map((r) => r.amount)).toEqual([1788]);
+    expect(reads().at(-1)!.user).toContain("[inputs: hours = length of time");
+  });
+
+  it("a period's dates win over a length sent with them: Friday to Monday keeps its two readings", async () => {
+    const plate = item("Zagęszczarka 100 kg", { category: "Wynajem", fields: { kind: "rental", price_type: "per_unit", unit: "doba" }, price_value: 120 });
+    wantedName = plate.name;
+    const from = { date: "2026-11-06", time: null }, to = { date: "2026-11-09", time: null };
+    reading = (id) => ({ quantities: [{ id, input: "hours", from, to, count: 3, unit: "day" }] });
+    const m = await matchItems("zageszczarka od piatku do poniedzialku ile?", [plate], { limit: 6, quantities: true });
+    const given = await m!.given;
+    expect(given?.get(plate)).toEqual({ hours: { from, to } });
+    expect(priceGiven(given!)[0].readings.map((r) => r.amount)).toEqual([360, 480]);
   });
 });
