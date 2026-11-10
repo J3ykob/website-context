@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import * as cs from "./conversation-store.js";
+import { SELF_TEST_QUESTIONS } from "../knowledge/audit.js";
 
 let mem: Database.Database;
 function makeQuery(db: Database.Database) {
@@ -118,6 +119,18 @@ describe("conversation-store (D1) gaps", () => {
     await cs.clearUnknownQuestions(T);
     await flush();
     expect((await cs.getUnknownQuestions(T)).length).toBe(0);
+  });
+
+  it("rows the knowledge audit's test questions left are not listed or counted; the rows stay", async () => {
+    expect(SELF_TEST_QUESTIONS.length).toBe(16); // 8 questions, pl + en
+    for (const q of SELF_TEST_QUESTIONS) await cs.logUnknownQuestion(T, q);
+    await cs.logUnknownQuestion(T, "Czy robicie dachy płaskie?");
+    // Only an exact copy of our own text is a test row: a customer's own wording of a similar question stays.
+    await cs.logUnknownQuestion(T, "jak mogę się z wami skontaktować?");
+    const gaps = await cs.getUnknownQuestions(T);
+    expect(gaps.map((g) => g.question).sort()).toEqual(["Czy robicie dachy płaskie?", "jak mogę się z wami skontaktować?"]);
+    const kept = mem.prepare("SELECT COUNT(*) AS n FROM unknown_questions WHERE tenant_id = ?").get(T) as { n: number };
+    expect(kept.n).toBe(18); // legacy rows are not deleted
   });
 
   it("gaps are tenant-scoped", async () => {

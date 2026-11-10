@@ -2097,17 +2097,15 @@ app.get("/api/dashboard/conversations", authMiddleware, async (req, res) => {
   res.json(await getConversations(tenantId, limit));
 });
 
-// Unknown questions (from D1 unknown_questions)
 // Knowledge audit (src/knowledge/audit.ts): what the assistant can't answer from the scraped site.
-// Saved per tenant; questions it can't answer go to the unanswered-questions list for the owner.
+// Saved per tenant and shown in the panel as optional hints ("Worth adding"); its test questions are not
+// customer questions, so they no longer go to the unanswered-questions list (2026-11-10).
 async function runKnowledgeAudit(tenantId: string) {
   const chat = await tenantManager.getChatForTenant(tenantId);
   if (!chat) throw new Error("tenant not loaded");
-  const report = await chat.auditKnowledge();
   const { uploadToR2 } = await import("../src/storage/r2.js");
-  await uploadToR2(`tenants/${tenantId}/knowledge-audit.json`, JSON.stringify(report), "application/json");
-  const known = new Set((await getUnknownQuestions(tenantId)).map((g: any) => String(g.question).trim().toLowerCase()));
-  for (const i of report.items) if (i.kind === "question" && i.status !== "ok" && i.question && !known.has(i.question.trim().toLowerCase())) await logUnknownQuestion(tenantId, i.question).catch(() => {});
+  const { runAndSaveAudit } = await import("../src/knowledge/audit-run.js");
+  const report = await runAndSaveAudit(tenantId, () => chat.auditKnowledge(), uploadToR2);
   console.log(`[audit] ${tenantId}: ${JSON.stringify(report.summary)}`);
   return report;
 }

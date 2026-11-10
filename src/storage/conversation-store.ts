@@ -9,6 +9,8 @@
  * SQLite (no network, no mocks).
  */
 
+import { SELF_TEST_QUESTIONS } from "../knowledge/audit.js";
+
 const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
 const D1_DATABASE_ID = process.env.D1_DATABASE_ID || "0dec9229-fea2-4343-bf87-d36ac3205979";
 const D1_BASE = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${D1_DATABASE_ID}/query`;
@@ -250,11 +252,14 @@ export async function logUnknownQuestion(tenantId: string, question: string): Pr
   } catch { /* never breaks chat */ }
 }
 
+/** The questions customers asked that the chat could not answer. Rows the knowledge audit's own test questions
+ * left there before it stopped logging (src/knowledge/audit.ts SELF_TEST_QUESTIONS) are left out here, so every
+ * list and count of gaps (they all read this) shows only real customer questions; the rows stay in D1. */
 export async function getUnknownQuestions(tenantId: string): Promise<UnknownQuestionEntry[]> {
   try {
     const rows = await query(
-      "SELECT id, tenant_id, question, created_at FROM unknown_questions WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200",
-      [tenantId]
+      `SELECT id, tenant_id, question, created_at FROM unknown_questions WHERE tenant_id = ? AND question NOT IN (${SELF_TEST_QUESTIONS.map(() => "?").join(", ")}) ORDER BY created_at DESC LIMIT 200`,
+      [tenantId, ...SELF_TEST_QUESTIONS]
     );
     const seen = new Set<string>();
     return rows

@@ -7,7 +7,8 @@
  *   recorded conversation), judged the way the assistant itself judges them - answered, partly answered
  *   (it covers the topic but not the detail) or not answered - plus a Jev check that an "answer" really
  *   gives the information and doesn't just say "call us".
- * Questions not answered go to the dashboard's list of unanswered questions, where the owner answers them.
+ * The report (tenants/<id>/knowledge-audit.json) is shown in the panel as optional hints ("Worth adding"), never
+ * in the list of questions customers asked: these are our own test questions, not a customer's.
  */
 import type { WebsiteContext } from "../context/types.js";
 import type { KnowledgeCatalog } from "./catalog.js";
@@ -28,6 +29,10 @@ const QUESTIONS: { topic: string; pl: string; en: string }[] = [
   { topic: "warranty", pl: "Czy dajecie gwarancję na swoje usługi? Na jak długo?", en: "Do you give a warranty on your work? For how long?" },
   { topic: "lead_time", pl: "Jak szybko możecie zacząć i ile zwykle trwa realizacja?", en: "How soon can you start and how long does a job usually take?" },
 ];
+
+/** Every wording of the test questions. Rows the audit logged as unanswered questions before 2026-11-10 carry
+ * exactly one of these; the gaps list and its counts leave them out (exact match on our own text only). */
+export const SELF_TEST_QUESTIONS: readonly string[] = QUESTIONS.flatMap((q) => [q.pl, q.en]);
 
 function siteLanguage(context: WebsiteContext, catalog: KnowledgeCatalog | null): "pl" | "en" {
   const sample = (catalog?.chunks || []).slice(0, 40).map((c) => c.content).join(" ") || context.pages.slice(0, 5).map((p) => p.title).join(" ");
