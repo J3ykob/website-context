@@ -14,7 +14,7 @@
  * Numbers in anything the customer reads must come from files (prices, computed totals); the checks
  * enforce it. Env: PROJECT_AGENT_URL, PROJECT_AGENT_SECRET, PROJECT_AGENT_MODEL, PROJECT_AGENT_FALLBACK_MODEL.
  */
-import { recipeFromFields, evaluate } from "../offer/recipe.js";
+import { recipeFromFields, evaluate, periodLength, type InputValue } from "../offer/recipe.js";
 import { getProject, setMemory, addEvent, addUsage, listParticipants, claimAgentCollect, type Project } from "./store.js";
 import { listFiles, readFile, writeFile, writeBinaryFile, addRequirement, listRequirements, recordVerification, toCsv, type FileKind, type ReqStatus } from "./repo.js";
 import { loadOffer, priceText, type OfferItem } from "../offer/store.js";
@@ -944,9 +944,6 @@ export async function checkChoices(projectId: string, raw: string): Promise<stri
   return choiceProblems(choices, items);
 }
 
-// Units the agent may give a duration in (the enum wybor.json asks for), in hours.
-const DURATION_HOURS: Record<string, number> = { godzina: 1, doba: 24, tydzien: 168, miesiac: 720 };
-
 /** The structure-only part of checkChoices: choices against items keyed by their 8-character id. */
 export function choiceProblems(choices: any[], items: Map<string, Pick<OfferItem, "name"> & Parameters<typeof recipeFromFields>[0]>): string[] {
   const problems: string[] = [];
@@ -959,8 +956,10 @@ export function choiceProblems(choices: any[], items: Map<string, Pick<OfferItem
       const recipe = item ? recipeFromFields(item) : null;
       if (!recipe || typeof o.ilosc !== "number") continue;
       const unit = String(o.jednostka || "");
-      const given: Record<string, number> = {};
-      for (const inp of recipe.inputs) given[inp.name] = inp.name === "hours" ? o.ilosc * (DURATION_HOURS[unit] ?? 1) : o.ilosc;
+      const given: Record<string, InputValue> = {};
+      // A duration in the units wybor.json asks for (godzina, doba, tydzien, miesiac; hours otherwise), counted as the item
+      // recipes count it (recipe.ts periodLength - a monthly rate per calendar month, 52 tydzien = 12 of them).
+      for (const inp of recipe.inputs) given[inp.name] = inp.name === "hours" && o.ilosc > 0 ? (periodLength(o.ilosc, unit) ?? periodLength(o.ilosc, "godzina")!) : o.ilosc;
       const r = evaluate(recipe.price, given);
       if (r.kind === "price" && Math.abs(r.amount - o.suma) > 0.01) problems.push(`${label}: ${item!.name} for ${o.ilosc} ${unit} costs ${r.amount} by the price list${r.amount < o.suma ? " (a cheaper rate combination)" : ""}, not ${o.suma}`);
     }

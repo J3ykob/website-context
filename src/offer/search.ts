@@ -167,7 +167,7 @@ export async function matchItems(question: string, items: OfferItem[], opts: Mat
 // The words the pick's call had for the quantities (2026-11-05), in a call of their own; one given for a thing counts for
 // each matched item that is it (Ostap's two crank trestles for "4 szt": both priced, 2 of 2 offline runs 2026-11-06 - only
 // the first without it).
-const READ = (today: string) => `The customer's message is about these items of the business. For each item, each of its inputs that the customer's latest message gives (given for a thing, it counts for every item that is that thing) - answer JSON {"quantities": [{"id": <item id>, "input": "<input name>", "value": <number in the input's unit>}]} (e.g. "4x5 m" = 20 m²; [] when it gives none). For "hours" given as a start and an end ("from Friday to Monday") instead of "value": "from" and "to", each {"date": "YYYY-MM-DD", "time": "HH:MM" or null if no clock time is said ("in the morning" is none)} (today is ${today}). A quantity in another unit that the item itself converts (soup for 8 people, the item saying "1 l = 4 portions") instead of "value": "amount": 8, "equals": {"input": 1, "given": 4}, and "whole": true when the input counts whole pieces or packs. Leave out what the customer did not give, never assume a typical value, and leave out a quantity of another kind that the item does not convert (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known).`;
+const READ = (today: string) => `The customer's message is about these items of the business. For each item, each of its inputs that the customer's latest message gives (given for a thing, it counts for every item that is that thing) - answer JSON {"quantities": [{"id": <item id>, "input": "<input name>", "value": <number in the input's unit>}]} (e.g. "4x5 m" = 20 m²; [] when it gives none). For "hours" given as a start and an end ("from Friday to Monday") instead of "value": "from" and "to", each {"date": "YYYY-MM-DD", "time": "HH:MM" or null if no clock time is said ("in the morning" is none)} (today is ${today}); given as a length in the customer's own unit ("a year", "3 months", "6 weeks", "2 doby") instead of "value": "count": <number>, "unit": "hour" | "day" | "week" | "month" | "year" (as said, not converted). A quantity in another unit that the item itself converts (soup for 8 people, the item saying "1 l = 4 portions") instead of "value": "amount": 8, "equals": {"input": 1, "given": 4}, and "whole": true when the input counts whole pieces or packs. Leave out what the customer did not give, never assume a typical value, and leave out a quantity of another kind that the item does not convert (an area or a length for an item counted in pieces, buckets or bags: how many cover it is not known).`;
 
 /**
  * The customer's quantities for the picked items' price inputs, read over those items alone (the pick's list has up to 100
@@ -183,7 +183,7 @@ async function readQuantities(asked: string, items: OfferItem[], tenant = ""): P
   if (!inputs.some((x) => x.length)) return given;
   const list = items.map((i, k) => (inputs[k].length ? `${k}: ${label(i)} [inputs: ${inputs[k].map((n) => `${n} = ${INPUT_HELP[n]}`).join("; ")}]` : "")).filter(Boolean).join("\n");
   // The dates of a period are read against today (the same message tomorrow is another reading).
-  const { todayLine, isPeriod, convert, isConversion } = await import("../pricing/quantity.js");
+  const { todayLine, isPeriod, isDuration, convert, isConversion } = await import("../pricing/quantity.js");
   const today = todayLine();
   const user = `${asked}\n\nItems:\n${list}`;
   const key = createHash("sha1").update(`${today}\n${user}`).digest("hex");
@@ -194,9 +194,12 @@ async function readQuantities(asked: string, items: OfferItem[], tenant = ""): P
   if (!hit || !memo) {
     const j = await askJson(READ(today), user, { ok: (x) => Array.isArray(x?.quantities), budgetMs: TIMEOUT_MS });
     if (j === undefined) { stepTurn("quantities", t0, "failed"); return null; }
-    // Each quantity as its structure says: a number, a period (from / to) or an amount with the item's conversion.
-    const valueOf = (x: any): unknown => typeof x?.value === "number" && x.value > 0 ? x.value
-      : isPeriod(x) ? { from: x.from, to: x.to }
+    // Each quantity as its structure says: a period (from / to), a length in a calendar unit (count / unit), a number or an
+    // amount with the item's conversion. The most structure first: a period's dates over a length (Friday to Monday keeps
+    // its two readings), a length in the customer's unit over a "value" sent with it.
+    const valueOf = (x: any): unknown => isPeriod(x) ? { from: x.from, to: x.to }
+      : isDuration(x) ? { count: x.count, unit: x.unit }
+      : typeof x?.value === "number" && x.value > 0 ? x.value
       : isConversion(x) && convert(x) !== null ? { amount: x.amount, equals: x.equals, ...(x.whole === true ? { whole: true } : {}) } : undefined;
     const q = (j.quantities as any[]).filter((x: any) => Number.isInteger(x?.id) && inputs[x.id]?.includes(x.input) && valueOf(x) !== undefined)
       .map((x: any) => ({ id: x.id as number, input: String(x.input), value: valueOf(x) }));
