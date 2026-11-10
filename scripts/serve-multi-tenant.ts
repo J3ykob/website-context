@@ -2145,8 +2145,31 @@ app.post("/api/admin/audit/:tenantId", async (req, res) => {
 });
 app.get("/api/dashboard/knowledge-audit", authMiddleware, async (req, res) => {
   const { downloadTenantFile } = await import("../src/storage/r2.js");
-  const buf = await downloadTenantFile((req as any).tenantId, "knowledge-audit.json").catch(() => null);
-  res.json(buf ? JSON.parse(buf.toString("utf-8")) : { items: [] });
+  const tenantId = (req as any).tenantId;
+  const [buf, addrBuf] = await Promise.all([
+    downloadTenantFile(tenantId, "knowledge-audit.json").catch(() => null),
+    downloadTenantFile(tenantId, "audit-addressed.json").catch(() => null),
+  ]);
+  const { auditView } = await import("../src/knowledge/audit-addressed.js");
+  // With the hints the owner saved knowledge for after this report was made - shown as handled in the panel.
+  res.json(auditView(buf?.toString("utf-8"), addrBuf?.toString("utf-8")));
+});
+// The owner saved knowledge from a "Worth adding" hint: remember its key ("<kind>.<topic>", our own list) and when.
+app.post("/api/dashboard/knowledge-audit/addressed", authMiddleware, async (req, res) => {
+  const tenantId = (req as any).tenantId;
+  const { isHintKey, parseAddressed, markAddressed } = await import("../src/knowledge/audit-addressed.js");
+  const key = req.body?.key;
+  if (!isHintKey(key)) { res.status(400).json({ error: "unknown hint" }); return; }
+  try {
+    const { downloadTenantFileStrict, uploadToR2 } = await import("../src/storage/r2.js");
+    const cur = parseAddressed((await downloadTenantFileStrict(tenantId, "audit-addressed.json"))?.toString("utf-8"));
+    const next = markAddressed(cur, key, new Date().toISOString());
+    if (!(await uploadToR2(`tenants/${tenantId}/audit-addressed.json`, JSON.stringify(next), "application/json"))) throw new Error("save failed");
+    res.json({ ok: true });
+  } catch (e) {
+    console.warn(`[dashboard:audit-addressed] ${tenantId}: ${(e as Error).message}`);
+    res.status(500).json({ error: "save failed" });
+  }
 });
 
 // The inquiries and orders customers confirmed in the chat (tenants/<id>/inquiries.json, kept by recordInquiry),

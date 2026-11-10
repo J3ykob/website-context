@@ -9,7 +9,7 @@
  * SQLite (no network, no mocks).
  */
 
-import { SELF_TEST_QUESTIONS } from "../knowledge/audit.js";
+import { SELF_TEST_QUESTIONS } from "../knowledge/audit-questions.js";
 
 const CF_ACCOUNT_ID = "98e447c9e14d384e1b7e6f4d42c39ad2";
 const D1_DATABASE_ID = process.env.D1_DATABASE_ID || "0dec9229-fea2-4343-bf87-d36ac3205979";
@@ -253,7 +253,7 @@ export async function logUnknownQuestion(tenantId: string, question: string): Pr
 }
 
 /** The questions customers asked that the chat could not answer. Rows the knowledge audit's own test questions
- * left there before it stopped logging (src/knowledge/audit.ts SELF_TEST_QUESTIONS) are left out here, so every
+ * left there before it stopped logging (src/knowledge/audit-questions.ts SELF_TEST_QUESTIONS) are left out here, so every
  * list and count of gaps (they all read this) shows only real customer questions; the rows stay in D1. */
 export async function getUnknownQuestions(tenantId: string): Promise<UnknownQuestionEntry[]> {
   try {

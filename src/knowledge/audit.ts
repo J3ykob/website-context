@@ -13,26 +13,17 @@
 import type { WebsiteContext } from "../context/types.js";
 import type { KnowledgeCatalog } from "./catalog.js";
 import { jevAsk, type JevNoulAnswer } from "../llm/jev.js";
+import { AUDIT_QUESTIONS } from "./audit-questions.js";
 
 export type AuditStatus = "ok" | "partial" | "missing";
-export interface AuditItem { kind: "data" | "question"; topic: string; status: AuditStatus; detail: string; question?: string; reply?: string }
+/** `failed`: the test question could not be run (the probe threw twice) - the status says nothing about the
+ * knowledge then, and the panel shows no hint for it. `urls`: the pages item's pages that gave no text. */
+export interface AuditItem { kind: "data" | "question"; topic: string; status: AuditStatus; detail: string; question?: string; reply?: string; failed?: true; urls?: string[] }
 export interface AuditReport { tenantId: string; at: string; language: "pl" | "en"; items: AuditItem[]; summary: Record<AuditStatus, number> }
 export interface ProbeResult { reply: string; behaviour: string[]; route: string }
 
-const QUESTIONS: { topic: string; pl: string; en: string }[] = [
-  { topic: "contact", pl: "Jak mogę się z wami skontaktować - jaki jest numer telefonu i e-mail?", en: "How can I contact you - what is your phone number and e-mail?" },
-  { topic: "hours", pl: "W jakich godzinach jesteście dostępni? Kiedy można do was dzwonić?", en: "What are your opening hours? When can I call you?" },
-  { topic: "area", pl: "Na jakim terenie działacie? Dojeżdżacie poza miasto?", en: "Which area do you serve? Do you travel outside the city?" },
-  { topic: "prices", pl: "Ile kosztują wasze usługi? Macie cennik?", en: "How much do your services cost? Do you have a price list?" },
-  { topic: "quote", pl: "Czy wycena jest bezpłatna? Jak wygląda wycena?", en: "Is a quote free? How does a quote work?" },
-  { topic: "payment", pl: "Jakie formy płatności akceptujecie? Czy trzeba wpłacić zaliczkę?", en: "Which payment methods do you accept? Is a deposit needed?" },
-  { topic: "warranty", pl: "Czy dajecie gwarancję na swoje usługi? Na jak długo?", en: "Do you give a warranty on your work? For how long?" },
-  { topic: "lead_time", pl: "Jak szybko możecie zacząć i ile zwykle trwa realizacja?", en: "How soon can you start and how long does a job usually take?" },
-];
-
-/** Every wording of the test questions. Rows the audit logged as unanswered questions before 2026-11-10 carry
- * exactly one of these; the gaps list and its counts leave them out (exact match on our own text only). */
-export const SELF_TEST_QUESTIONS: readonly string[] = QUESTIONS.flatMap((q) => [q.pl, q.en]);
+const QUESTIONS = AUDIT_QUESTIONS;
+export { SELF_TEST_QUESTIONS, AUDIT_HINT_KEYS } from "./audit-questions.js";
 
 function siteLanguage(context: WebsiteContext, catalog: KnowledgeCatalog | null): "pl" | "en" {
   const sample = (catalog?.chunks || []).slice(0, 40).map((c) => c.content).join(" ") || context.pages.slice(0, 5).map((p) => p.title).join(" ");
@@ -47,7 +38,7 @@ export function dataChecks(context: WebsiteContext, catalog: KnowledgeCatalog | 
   const pages = context.siteMap.filter((p) => !/\.(jpe?g|png|gif|webp|svg|zip|docx?|xlsx?)$/i.test(p.url));
   const empty = catalog ? pages.filter((p) => !withText.has(norm(p.url))) : [];
   items.push(empty.length
-    ? { kind: "data", topic: "pages", status: empty.length > pages.length / 4 ? "missing" : "partial", detail: `${empty.length} of ${pages.length} pages gave no text the assistant can use: ${empty.slice(0, 8).map((p) => p.url).join(", ")}` }
+    ? { kind: "data", topic: "pages", status: empty.length > pages.length / 4 ? "missing" : "partial", urls: empty.slice(0, 8).map((p) => p.url), detail: `${empty.length} of ${pages.length} pages gave no text the assistant can use: ${empty.slice(0, 8).map((p) => p.url).join(", ")}` }
     : { kind: "data", topic: "pages", status: "ok", detail: `${pages.length} pages read` });
   const garbled = (catalog?.chunks || []).filter((c) => /�/.test(c.content) || /\d\d-\d{3}[A-ZŁŚŻ]/.test(c.content));
   if (garbled.length) items.push({ kind: "data", topic: "garbled", status: "partial", detail: `${garbled.length} passages with unreadable characters or run-together text, e.g. ${garbled[0].url}` });
@@ -65,7 +56,7 @@ export async function questionChecks(probe: (q: string) => Promise<ProbeResult>,
     const question = q[language];
     let r: ProbeResult | null = null, error = "";
     for (let attempt = 0; attempt < 2 && !r; attempt++) r = await probe(question).catch((e) => { error = (e as Error).message; return null; });
-    if (!r) return { kind: "question", topic: q.topic, status: "missing", detail: `the test question failed to run: ${error.slice(0, 160)}`, question };
+    if (!r) return { kind: "question", topic: q.topic, status: "missing", failed: true, detail: `the test question failed to run: ${error.slice(0, 160)}`, question };
     if (r.route === "collect") return { kind: "question", topic: q.topic, status: "ok", detail: "started the order / inquiry form", question, reply: r.reply.slice(0, 600) };
     // By what the reply gives: the facts asked (ok), some of them (partial), or none (missing).
     const a = await jevAsk({ question, reply: r.reply }, {
