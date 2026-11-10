@@ -257,6 +257,10 @@
     /* Hints from the knowledge audit ("Worth adding") - optional, styled like the gaps list */
     .hint-intro { padding: 16px 24px; font-size: 13px; line-height: 1.5; color: var(--text-2); border-bottom: 1px solid var(--border); }
     .hint-text { font-size: 14px; color: var(--text); line-height: 1.5; }
+    .gap-item.resolved .hint-text { text-decoration: line-through; }
+    .hint-urls { margin: 8px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+    .hint-urls a { color: var(--blue); text-decoration: none; word-break: break-all; }
+    .hint-urls a:hover { text-decoration: underline; }
     .gap-answer-form { display:none; margin-top:14px; flex-direction:column; gap:10px; }
     .gap-answer-form.open { display:flex; }
     .gap-answer-form textarea {
@@ -787,7 +791,7 @@
 
         <div id="hints-section" style="display:none">
           <div class="section-head" style="margin-top:32px">
-            <span class="section-title"><span data-i18n="hints.title">Worth adding</span><span class="badge badge-blue" id="hints-badge">0</span></span>
+            <span class="section-title"><span data-i18n="hints.title">Worth adding</span><span class="badge badge-blue" id="hints-badge" style="display:none">0</span></span>
           </div>
           <div class="card" id="hints-panel"></div>
         </div>
@@ -1143,21 +1147,21 @@
         "gaps.answerPh": "Wpisz odpowiedź...",
         "gaps.resolved": "Uzupełnione",
         "hints.title": "Co warto uzupełnić",
-        "hints.data.pages": "Część podstron nie dała tekstu, z którego czat może korzystać (np. tekst na obrazkach). Jeśli ważne informacje są tylko tam, dodajcie je jako tekst.",
-        "hints.data.garbled": "Część tekstu ze strony jest nieczytelna (zlepione słowa lub dziwne znaki). Jeśli czat poda coś źle, dodajcie te informacje własnymi słowami.",
-        "hints.data.phone": "Na stronie nie ma numeru telefonu. Jeśli go macie, dodajcie go - czat będzie go podawał.",
-        "hints.data.email": "Na stronie nie ma adresu e-mail. Jeśli go macie, dodajcie go - czat będzie go podawał.",
-        "hints.data.address": "Na stronie nie ma adresu firmy. Jeśli chcecie, żeby czat go podawał, dodajcie go.",
-        "hints.data.hours": "Na stronie nie ma godzin pracy ani informacji, kiedy można dzwonić. Jeśli je macie, dodajcie je - czat będzie je podawał.",
-        "hints.question.contact": "Czat nie ma pełnych danych kontaktowych. Jeśli chcecie, dodajcie, jak najlepiej się z wami kontaktować.",
-        "hints.question.hours": "Czat nie ma pełnych informacji o tym, kiedy jesteście dostępni. Jeśli macie stałe godziny, dodajcie je.",
-        "hints.question.area": "Czat nie ma pełnych informacji o tym, na jakim terenie działacie. Jeśli chcecie, dodajcie miasta lub region i czy dojeżdżacie dalej.",
-        "hints.question.prices": "Czat ma mało informacji o cenach albo nie ma ich wcale. Jeśli możecie podać orientacyjne ceny lub widełki, dodajcie je.",
-        "hints.question.quote": "Czat nie ma pełnych informacji o wycenie. Jeśli chcecie, opiszcie, jak wygląda i czy jest bezpłatna.",
-        "hints.question.payment": "Czat nie ma pełnych informacji o płatnościach. Jeśli chcecie, dodajcie formy płatności i czy pobieracie zaliczkę.",
-        "hints.question.warranty": "Czat ma mało informacji o gwarancji albo nie ma ich wcale. Jeśli ją dajecie, dodajcie, co obejmuje i na jak długo.",
-        "hints.question.lead_time": "Czat nie ma pełnych informacji o terminach. Jeśli chcecie, dodajcie, jak szybko możecie zacząć i ile zwykle trwa realizacja.",
-        "hints.intro": function(p) { return "Podpowiedzi z automatycznego sprawdzenia czatu po wczytaniu strony" + (p.d ? " (" + p.d + ")" : "") + ". Uzupełnijcie tylko to, co dotyczy waszej firmy - nic tu nie jest obowiązkowe."; },
+        "hints.data.pages": "Część podstron nie dała tekstu, z którego czat może korzystać (np. tekst na obrazkach). Jeśli ważne informacje są tylko tam, dodaj je jako tekst.",
+        "hints.data.garbled": "Część tekstu ze strony jest nieczytelna (zlepione słowa lub dziwne znaki). Jeśli czat poda coś źle, dodaj te informacje własnymi słowami.",
+        "hints.data.phone": "Na stronie nie ma numeru telefonu. Jeśli go masz, dodaj go - czat będzie go podawał.",
+        "hints.data.email": "Na stronie nie ma adresu e-mail. Jeśli go masz, dodaj go - czat będzie go podawał.",
+        "hints.data.address": "Na stronie nie ma adresu firmy. Jeśli chcesz, żeby czat go podawał, dodaj go.",
+        "hints.data.hours": "Na stronie nie ma godzin pracy ani informacji, kiedy można dzwonić. Jeśli je masz, dodaj je - czat będzie je podawał.",
+        "hints.question.contact": "Czat nie ma pełnych danych kontaktowych. Jeśli chcesz, dodaj, jak klienci mogą się z Tobą najlepiej skontaktować.",
+        "hints.question.hours": "Czat nie ma pełnych informacji o tym, kiedy jesteś dostępny. Jeśli masz stałe godziny, dodaj je.",
+        "hints.question.area": "Czat nie ma pełnych informacji o tym, na jakim terenie działa firma. Jeśli chcesz, dodaj miasta lub region i czy dojeżdżasz dalej.",
+        "hints.question.prices": "Czat ma mało informacji o cenach albo nie ma ich wcale. Jeśli możesz podać orientacyjne ceny lub widełki, dodaj je.",
+        "hints.question.quote": "Czat nie ma pełnych informacji o wycenie. Jeśli chcesz, opisz, jak wygląda i czy jest bezpłatna.",
+        "hints.question.payment": "Czat nie ma pełnych informacji o płatnościach. Jeśli chcesz, dodaj formy płatności i czy pobierasz zaliczkę.",
+        "hints.question.warranty": "Czat ma mało informacji o gwarancji albo nie ma ich wcale. Jeśli jej udzielasz, dodaj, co obejmuje i na jak długo.",
+        "hints.question.lead_time": "Czat nie ma pełnych informacji o terminach. Jeśli chcesz, dodaj, jak szybko możesz zacząć i ile zwykle trwa realizacja.",
+        "hints.intro": function(p) { return "Podpowiedzi z automatycznego sprawdzenia czatu po wczytaniu strony" + (p.d ? " (" + p.d + ")" : "") + ". Uzupełnij tylko to, co dotyczy Twojej firmy - nic tu nie jest obowiązkowe."; },
         "activity.title": "Ostatnie rozmowy",
         "inq.title": "Zapytania od klientów",
         "inq.empty": "Gdy klient wyśle w czacie zapytanie albo zamówienie, zobaczysz je tutaj (dostajesz je też mailem).",
@@ -1698,40 +1702,70 @@
 
     // "Worth adding": the knowledge audit after the site was read (GET /api/dashboard/knowledge-audit), shown as
     // optional hints - our own checks, not questions customers asked. Each item's kind + topic picks a fixed
-    // dictionary text (the report's detail text is never shown or read); topics with no text are skipped.
-    // A question hint is left out when a data hint already says what is missing (contact -> phone / e-mail).
+    // dictionary text (the report's detail text is never shown or read); topics with no text are skipped, and so
+    // are test questions that failed to run (item.failed). A question hint is left out when a data hint already
+    // says what is missing (contact -> phone / e-mail). The hint's button opens the add-knowledge window with the
+    // hint's key; saving knowledge from it marks the hint handled (data.addressed, keys handled after the report).
     var HINT_COVERED_BY = { "question.contact": ["phone", "email"], "question.hours": ["hours"] };
     async function loadHints() {
       try {
         var res = await authFetch(API + "/api/dashboard/knowledge-audit");
         if (!res.ok) throw new Error(String(res.status));
         var data = await res.json();
-        renderHints((data && Array.isArray(data.items)) ? data.items : [], data && data.at);
+        renderHints((data && Array.isArray(data.items)) ? data.items : [], data && data.at, (data && Array.isArray(data.addressed)) ? data.addressed : []);
       } catch (e) {
         document.getElementById("hints-section").style.display = "none";
       }
     }
 
-    function renderHints(items, at) {
-      REDRAW["hints-panel"] = function() { renderHints(items, at); };
+    function hintUrls(i) {
+      var urls = Array.isArray(i.urls) ? i.urls.filter(function(u) {
+        try { var p = new URL(u).protocol; return p === "http:" || p === "https:"; } catch (e) { return false; }
+      }).slice(0, 5) : [];
+      if (!urls.length) return "";
+      return '<ul class="hint-urls">' + urls.map(function(u) {
+        return '<li><a href="' + escAttr(u) + '" target="_blank" rel="noopener noreferrer">' + esc(u) + '</a></li>';
+      }).join("") + '</ul>';
+    }
+
+    function renderHints(items, at, addressed) {
+      REDRAW["hints-panel"] = function() { renderHints(items, at, addressed); };
+      var done = new Set(addressed || []);
       var flagged = {};
       items.forEach(function(i) { if (i && i.kind === "data" && i.status !== "ok") flagged[i.topic] = true; });
       var hints = items.filter(function(i) {
-        if (!i || i.status === "ok" || typeof i18n.en["hints." + i.kind + "." + i.topic] !== "string") return false;
+        if (!i || i.status === "ok" || i.failed || typeof i18n.en["hints." + i.kind + "." + i.topic] !== "string") return false;
         var cover = HINT_COVERED_BY[i.kind + "." + i.topic];
         return !(cover && cover.some(function(k) { return flagged[k]; }));
-      });
+      }).map(function(i) { return { item: i, key: i.kind + "." + i.topic }; });
       var section = document.getElementById("hints-section");
       section.style.display = hints.length ? "" : "none";
       if (!hints.length) return;
-      document.getElementById("hints-badge").textContent = fmtNum(hints.length);
+      // Handled hints go to the bottom, struck through like a resolved gap, and leave the badge count.
+      hints.sort(function(a, b) { return (done.has(a.key) ? 1 : 0) - (done.has(b.key) ? 1 : 0); });
+      var open = hints.filter(function(h) { return !done.has(h.key); }).length;
+      var badge = document.getElementById("hints-badge");
+      badge.style.display = open ? "" : "none";
+      badge.textContent = fmtNum(open);
       var d = at ? new Date(at) : null;
       var when = d && !isNaN(d) ? d.toLocaleDateString(currentLang === "pl" ? "pl-PL" : undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
       document.getElementById("hints-panel").innerHTML = '<div class="hint-intro">' + esc(t('hints.intro', { d: when })) + '</div>' +
-        hints.map(function(i) {
-          return '<div class="gap-item"><div class="hint-text">' + esc(t("hints." + i.kind + "." + i.topic)) + '</div>' +
-            '<div class="gap-actions"><button class="btn btn-sm btn-outline" onclick="openChunkModal()">' + t('gaps.addKnowledge') + '</button></div></div>';
+        hints.map(function(h) {
+          var resolved = done.has(h.key);
+          return '<div class="gap-item' + (resolved ? ' resolved' : '') + '"><div class="hint-text">' + esc(t("hints." + h.key)) + '</div>' +
+            (resolved ? '' : hintUrls(h.item)) +
+            '<div class="gap-actions">' + (resolved
+              ? '<span style="font-size:11px;color:var(--green);font-weight:600;text-transform:uppercase;letter-spacing:0.06em">' + t('gaps.resolved') + '</span>'
+              : '<button class="btn btn-sm btn-outline" onclick="openChunkModal(\'' + escAttr(h.key) + '\')">' + t('gaps.addKnowledge') + '</button>') +
+            '</div></div>';
         }).join("");
+    }
+
+    // A "Worth adding" hint the add-knowledge window was opened from: once knowledge is saved, it is marked handled.
+    function hintAddressed(key) {
+      if (!key) return;
+      authFetch(API + "/api/dashboard/knowledge-audit/addressed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: key }) })
+        .then(function(r) { if (r.ok) loadHints(); }).catch(function() {});
     }
 
     function renderActivity(conversations) {
@@ -2094,12 +2128,14 @@
       } else { el.contentEditable="true"; el.focus(); el.style.background="rgba(245,158,11,0.06)"; el.style.border="1px solid rgba(245,158,11,0.2)"; el.parentElement.querySelector(".btn-tiny").textContent=t('common.save'); }
     }
     function deleteChunk(id) { if (!confirm(t('kb.deleteConfirm'))) return; authFetch(API+"/api/dashboard/chunks/"+id,{method:"DELETE"}).then(loadChunks); }
-    function openChunkModal() { document.getElementById("add-chunk-modal").classList.add("open"); }
-    document.getElementById("add-chunk-btn").addEventListener("click", openChunkModal);
-    function closeChunkModal() { document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; var st=document.getElementById("kb-file-status"); if(st) st.textContent=""; var fi=document.getElementById("kb-file-input"); if(fi) fi.value=""; var ui=document.getElementById("kb-url-input"); if(ui) ui.value=""; var us=document.getElementById("kb-url-status"); if(us) us.textContent=""; }
+    var CHUNK_HINT = null; // the "Worth adding" hint key the window was opened from, if any
+    function openChunkModal(hintKey) { CHUNK_HINT = typeof hintKey === "string" ? hintKey : null; document.getElementById("add-chunk-modal").classList.add("open"); }
+    document.getElementById("add-chunk-btn").addEventListener("click", function() { openChunkModal(); });
+    function closeChunkModal() { CHUNK_HINT = null; document.getElementById("add-chunk-modal").classList.remove("open"); document.getElementById("new-chunk-title").value=""; document.getElementById("new-chunk-content").value=""; var st=document.getElementById("kb-file-status"); if(st) st.textContent=""; var fi=document.getElementById("kb-file-input"); if(fi) fi.value=""; var ui=document.getElementById("kb-url-input"); if(ui) ui.value=""; var us=document.getElementById("kb-url-status"); if(us) us.textContent=""; }
     // Upload a document (PDF/XLSX/CSV/DOCX/TXT) — extracted, chunked and embedded server-side.
     document.getElementById("kb-file-input").addEventListener("change", function() {
       var f = this.files && this.files[0]; if (!f) return;
+      var hint = CHUNK_HINT;
       var status = document.getElementById("kb-file-status");
       var btn = document.getElementById("kb-file-btn");
       status.textContent = t('kb.reading', { name: f.name }); btn.disabled = true;
@@ -2112,6 +2148,7 @@
         btn.disabled = false;
         if (!res.ok) { status.textContent = apiErr(res.d, 'kb.fileError'); return; }
         status.textContent = "";
+        hintAddressed(hint);
         closeChunkModal();
         alert(t('kb.fileAdded', { n: res.d.added, name: f.name }));
         setTimeout(loadChunks, 1500);
@@ -2122,6 +2159,7 @@
       var st = document.getElementById("kb-url-status");
       var btn = document.getElementById("kb-url-btn");
       if (!url) { st.style.color = "var(--amber)"; st.textContent = t('kb.urlFirst'); return; }
+      var hint = CHUNK_HINT;
       st.style.color = "var(--text-3)"; st.textContent = t('kb.fetching');
       btn.disabled = true;
       authFetch(API + "/api/dashboard/scrape-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url }) })
@@ -2131,6 +2169,7 @@
           if (!res.ok) { st.style.color = "var(--amber)"; st.textContent = apiErr(res.d, 'kb.urlError'); return; }
           st.style.color = "var(--green)";
           st.textContent = t('kb.urlAdded', { n: res.d.added, title: res.d.title || url });
+          hintAddressed(hint);
           document.getElementById("kb-url-input").value = "";
           loadChunks();
         })
@@ -2140,8 +2179,10 @@
     function saveNewChunk() {
       var title=document.getElementById("new-chunk-title").value.trim(), c=document.getElementById("new-chunk-content").value.trim();
       if (!c) return;
+      var hint = CHUNK_HINT;
       authFetch(API+"/api/dashboard/chunks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:c,title:title})}).then(function(r){
         if (!r.ok) throw new Error("save failed");
+        hintAddressed(hint);
         closeChunkModal();
         alert(t('kb.saved'));
         setTimeout(loadChunks, 1500);
