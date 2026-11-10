@@ -11,17 +11,18 @@
  *   - the reply gets the results as facts and only words them.
  */
 import type { OfferItem } from "./store.js";
-import { recipeFromFields, evaluate } from "./recipe.js";
+import { recipeFromFields, evaluate, type InputValue } from "./recipe.js";
 import { readingsOf, describeReading, type TimeUnit } from "../pricing/quantity.js";
 
 // How each input a recipe from fields can have is described to the model (recipe.ts INPUT_OF / rates).
 export const INPUT_HELP: Record<string, string> = {
-  hours: "duration of use in hours (a day / doba = 24 h, a week = 168 h)",
+  hours: "length of time (of use, of a subscription): in hours, or as the customer counts it - days (doby), weeks, months, years",
   pieces: "number of pieces", kg: "weight in kg", tonnes: "weight in tonnes", m2: "area in m²", m3: "volume in m³",
   metres: "length in metres", bags: "number of bags", pallets: "number of pallets", litres: "litres", people: "number of people",
   sets: "number of sets", visits: "number of visits", quantity: "the amount the price depends on (as the item counts it)",
 };
-// The recipe input that counts time: recipe.ts turns every period rate (hour, doba, week, month) into hours.
+// The recipe input that counts time: recipe.ts has every period rate (hour, doba, week, month) in hours, a monthly one
+// also in calendar months (a reading's Span).
 const TIME_INPUT: Record<string, TimeUnit> = { hours: "hour" };
 
 /** The price inputs an item's recipe needs, when they are all ones we can describe; [] otherwise. */
@@ -49,15 +50,18 @@ export function priceGiven(given: Map<OfferItem, Record<string, unknown>>): Cust
     const n = Math.max(1, ...inputs.map((x) => (x.rs?.length ? x.rs.length : 1)));
     const readings: PricedReading[] = [];
     for (let k = 0; k < n; k++) {
-      const values: Record<string, number> = {}, what: string[] = [];
+      // values: as the reading counts them; priced: the same, a length with calendar months as its Span (a monthly rate
+      // is one per calendar month - a year is 12 of them, not 8760 h / 720 = 13).
+      const values: Record<string, number> = {}, priced: Record<string, InputValue> = {}, what: string[] = [];
       for (const { name, v, rs } of inputs) {
-        if (rs === null) { if (typeof v === "number" && Number.isFinite(v)) { values[name] = v; what.push(`${name} ${v}`); } continue; }
+        if (rs === null) { if (typeof v === "number" && Number.isFinite(v)) { values[name] = priced[name] = v; what.push(`${name} ${v}`); } continue; }
         if (!rs.length) continue;
         const r = rs[Math.min(k, rs.length - 1)];
         values[name] = r.value;
+        priced[name] = r.span ?? r.value;
         what.push(describeReading(name, v, r, TIME_INPUT[name]));
       }
-      const res = evaluate(recipe.price, values);
+      const res = evaluate(recipe.price, priced);
       if (res.kind !== "price") break;
       readings.push({ given: values, amount: res.amount, what: what.join(", ") });
     }
