@@ -2337,10 +2337,6 @@
         <input class="wctx-chat-input" type="text" placeholder="' + wctxT("Tell me what you need…", "Napisz, czego potrzebujesz…") + '" autocomplete="off" spellcheck="false" autofocus />\
         <button class="wctx-send-btn" type="button">' + wctxT("Send", "Wyślij") + '</button>\
       </div>\
-      <div class="wctx-idle-footnote">\
-        <span><kbd>↵</kbd>' + wctxT("Send", "Wyślij") + '</span>\
-        <span>' + wctxT("Answered by AI - it can make mistakes", "Odpowiada AI - może się pomylić") + '</span>\
-      </div>\
     </div>\
   </div>\
 </div>\
