@@ -1249,8 +1249,12 @@ export class WebsiteChat {
         asksPrice: (!!rt && (rt.price >= 0.5 || rt.intent === "calculate")) || askedLast,
         parts: cov ? cov.parts.map((_, k) => ({ ours: cov.how[k] === "none" ? "no" as const : cov.how[k] === "unjudged" ? "unclear" as const : "yes" as const, priced: !!cov.priced[k], denied: !!cov.denied?.[k] })) : [],
         info,
-        price: hasComputed || modelQuote?.covered ? "computed" : pricedHere ? "listed" : "none",
-        missing, askedLast, formOpen, calc: opts.calc ?? "none", network: seen, owner, canOffer: offerOk,
+        // A quote that prices nothing ("price on request" for every line) is no price here: the chain's pricedHere counts
+        // it, and offered a concrete plant's unpriced B20 to the team as a question, not a quote request (smoke 2026-11-15).
+        price: hasComputed || modelQuote?.covered ? "computed" : products.some((p) => p.price_value != null || p.components.some((c) => c.price_value != null)) || modelQuote?.facts.length || modelQuote?.missing ? "listed" : "none",
+        // The quote's own open lines name what they need in its text (above, in our information).
+        missing: missing.length || !modelQuote?.missing ? missing : ["what the prices computed above say is still needed"],
+        askedLast, formOpen, calc: opts.calc ?? "none", network: seen, owner, canOffer: offerOk,
       });
       let decision: Decision | undefined;
       if (turnTable()) {
