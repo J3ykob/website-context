@@ -37,6 +37,21 @@ const CONTENT_PAGE_PATHS = [
 /** The share of the body's text a "main content" area must hold to be used instead of the body. */
 const MAIN_AREA_MIN_SHARE = 0.5;
 
+/**
+ * A read-only or disabled field with a value is text the visitor reads, not a field to fill in (a cake
+ * shop showed "165,- zł" and "cena za ok. 0.25 kg" in read-only inputs on 187 product pages - every one
+ * of those prices was lost). It becomes a paragraph in the field's place, marked data-shown-value.
+ */
+export function readOnlyFieldsToText($: cheerio.CheerioAPI): void {
+  $("input[readonly], input[disabled], textarea[readonly], textarea[disabled]").each((_, el) => {
+    const $el = $(el);
+    const type = ($el.attr("type") || "text").toLowerCase();
+    if (!["text", "number", "tel", "email", "url", "search"].includes(type) && (el as Element).tagName !== "textarea") return;
+    const value = ((el as Element).tagName === "textarea" ? $el.text() : $el.attr("value") || "").replace(/\s+/g, " ").trim();
+    if (value) $el.replaceWith($("<p data-shown-value></p>").text(value));
+  });
+}
+
 export function htmlToMarkdown(fetchResult: FetchResult): MarkdownResult {
   const $ = cheerio.load(fetchResult.html);
 
@@ -51,16 +66,7 @@ export function htmlToMarkdown(fetchResult: FetchResult): MarkdownResult {
     "form[action*='subscribe'], form[action*='newsletter']"
   ).remove();
 
-  // A read-only or disabled field with a value is text the visitor reads, not a field to fill in (a cake
-  // shop showed "165,- zł" and "cena za ok. 0.25 kg" in read-only inputs on 187 product pages - every one
-  // of those prices was lost). It becomes a paragraph in the field's place.
-  $("input[readonly], input[disabled], textarea[readonly], textarea[disabled]").each((_, el) => {
-    const $el = $(el);
-    const type = ($el.attr("type") || "text").toLowerCase();
-    if (!["text", "number", "tel", "email", "url", "search"].includes(type) && (el as Element).tagName !== "textarea") return;
-    const value = ((el as Element).tagName === "textarea" ? $el.text() : $el.attr("value") || "").replace(/\s+/g, " ").trim();
-    if (value) $el.replaceWith($("<p></p>").text(value));
-  });
+  readOnlyFieldsToText($);
 
   // NOTE: We do NOT remove .menu here — on restaurant sites .menu IS the content.
   // Navigation menus are already removed via <nav> and [role='navigation'].

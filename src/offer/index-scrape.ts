@@ -3,7 +3,7 @@
  *
  *   1. Structured data (JSON-LD Product / Service / Offer): exact values, mapped
  *      by code.
- *   2. The readable text of every page is kept (no HTML). Jev skips pages that
+ *   2. The readable text of every page is kept (no HTML), one block per line. Jev skips pages that
  *      show no offer (blog posts, contact, policies) - one yes/no per page.
  *   3. An LLM reads each remaining page (long pages in overlapping windows - a price list's prices came
  *      after 6000 characters) and fills the schema; Jev confirms each item and its prices against the
@@ -14,6 +14,7 @@ import { jevAsk, type JevQuestion } from "../llm/jev.js";
 import { BUSINESS_TYPES, FIELDS, type BusinessType, type FieldId } from "./schema.js";
 import { clean, mergeItems, type OfferItem } from "./store.js";
 import { extractFromBlock, type Llm } from "./extract.js";
+import { readOnlyFieldsToText } from "../scraper/markdown.js";
 
 const MAX_PAGES = 150;      // pages an LLM reads per site
 const PAGE_TEXT = 6000;     // characters the model reads at once
@@ -83,27 +84,45 @@ export function fromJsonLd($: cheerio.CheerioAPI, url: string): OfferItem[] {
 // its sentence. Taking each element's own text nodes pulled inline text out of it: "W cenę <strong>nie
 // wliczony</strong> jest alkohol" became "W cenę jest alkohol" + "nie wliczony" - the opposite meaning.
 const BLOCK_TAGS = new Set(["p", "li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "dt", "dd", "blockquote", "figcaption", "caption", "pre", "address", "div", "section", "article", "main", "aside", "header", "footer", "ul", "ol", "dl", "table", "tbody", "thead", "tr", "figure", "form", "fieldset", "nav", "details", "summary"]);
+// A list entry or a table row is ONE line, its parts joined by " | ": a product tile is a name and a code in
+// two boxes of one <li>, a price row is a label cell and a price cell. As separate blocks in one flat stream
+// ("name code name code ...") nothing said which code goes with which name - a cake shop's listing pages
+// gave every product the code of the tile before it (2026-11-14).
+const ROW_TAGS = new Set(["li", "tr"]);
+const ROW_MAX = 300; // a longer entry is a container of content, not a row: its blocks stay separate
 export function textBlocks($: cheerio.CheerioAPI): string[] {
-  const out: string[] = [];
   const isBlock = (n: any) => n?.type === "tag" && BLOCK_TAGS.has(String(n.name).toLowerCase());
-  const hasBlockInside = (el: any): boolean => (el.children || []).some((c: any) => isBlock(c) || (c.type === "tag" && hasBlockInside(c)));
+  const isRow = (n: any) => n?.type === "tag" && ROW_TAGS.has(String(n.name).toLowerCase());
+  const hasInside = (el: any, test: (n: any) => boolean): boolean => (el.children || []).some((c: any) => test(c) || (c.type === "tag" && hasInside(c, test)));
+  const hasBlockInside = (el: any) => hasInside(el, isBlock);
   // One walk in reading order: a leaf block gives its whole text (inline elements in place); in a block that
   // holds blocks, loose text and inline runs between its child blocks are blocks of their own, in place.
-  const walk = (el: any): void => {
+  const walk = (el: any, out: string[]): void => {
     if (!hasBlockInside(el)) { const t = squash($(el).text()); if (t.length >= 2) out.push(t); return; }
+    if (isRow(el) && !hasInside(el, isRow)) {
+      const parts: string[] = [];
+      inside(el, parts);
+      const line = parts.join(" | ");
+      if (line.length <= ROW_MAX) { if (line) out.push(line); } else out.push(...parts);
+      return;
+    }
+    inside(el, out);
+  };
+  const inside = (el: any, out: string[]): void => {
     let run = "";
     const flush = () => { const t = squash(run); if (t.length >= 2) out.push(t); run = ""; };
     for (const c of el.children || []) {
       if (c.type === "text") run += ` ${c.data}`;
       else if (c.type === "tag" && !isBlock(c) && !hasBlockInside(c)) run += ` ${$(c).text()}`;
-      else if (c.type === "tag") { flush(); walk(c); }
+      else if (c.type === "tag") { flush(); walk(c, out); }
     }
     flush();
   };
   // A line break separates words ("pokoi.<br>Posiadamy" read as "pokoi.Posiadamy").
   $("br").replaceWith(" ");
+  const out: string[] = [];
   const body = $("body").get(0);
-  if (body) walk(body);
+  if (body) walk(body, out);
   return out;
 }
 
@@ -123,18 +142,26 @@ export function createOfferIndexer() {
         const $ = cheerio.load(html);
         jsonLd = mergeItems(jsonLd, fromJsonLd($, url));
         const title = squash($("title").first().text()).slice(0, 150);
-        $("script,style,noscript,nav,header,footer,form,[role='navigation'],[role='contentinfo']").remove();
+        // Values a form only SHOWS (read-only fields: a shop's price and unit) are page text; a form with none
+        // is a form to fill in and is left out - of the others only the controls go.
+        readOnlyFieldsToText($);
+        $("form").filter((_: any, f: any) => $(f).find("[data-shown-value]").length === 0).remove();
+        $("script,style,noscript,nav,header,footer,[role='navigation'],[role='contentinfo'],form input,form select,form textarea,form button,form label").remove();
         const blocks = textBlocks($);
         for (const b of new Set(blocks)) seenOn.set(b, (seenOn.get(b) || 0) + 1);
         pages.push({ url, title, blocks });
       } catch {}
     },
     get size() { return pages.length; },
-    finish: (llm: Llm) => {
+    /** Each page's text as the model reads it: one block per line, blocks most pages share left out. */
+    pageTexts(): { url: string; title: string; text: string }[] {
       const limit = Math.max(3, Math.ceil(pages.length * 0.4));
-      const texts = pages
-        .map((p) => ({ url: p.url, title: p.title, text: p.blocks.filter((b) => pages.length < 4 || (seenOn.get(b) || 0) < limit).join(" ").slice(0, PAGE_MAX) }))
+      return pages
+        .map((p) => ({ url: p.url, title: p.title, text: p.blocks.filter((b) => pages.length < 4 || (seenOn.get(b) || 0) < limit).join("\n").slice(0, PAGE_MAX) }))
         .filter((p) => p.text.length >= 80);
+    },
+    finish(llm: Llm) {
+      const texts = this.pageTexts();
       return buildIndex(texts, jsonLd, llm);
     },
   };

@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import * as cheerio from "cheerio";
 import type { CrawlResult, ScrapedPage } from "../scraper/types.js";
 import { htmlToMarkdown, type MarkdownSection } from "../scraper/markdown.js";
+import { dropRepeatedText } from "./repeated-text.js";
 import { fetchPage } from "../scraper/fetcher.js";
 import { extractOfficialInfo } from "./business-profile.js";
 import { verifyOfficialInfo } from "./profile-verify.js";
@@ -82,8 +83,9 @@ function pageVisibleText(html: string): string {
 }
 
 /**
- * Incremental context builder: each crawled page is converted to sections and
- * chunks as soon as it arrives (addPage), and its HTML is dropped right away.
+ * Incremental context builder: each crawled page is converted to sections as soon as it arrives
+ * (addPage), and its HTML is dropped right away. Chunks are built at the end (finish), once the text
+ * that repeats across the site's pages is known and removed (repeated-text.ts).
  * Only a slim digest per page (JSON-LD, footer, tel:/mailto: links, plain text)
  * is kept for the Official Business Info extractor. Holding every page's full
  * HTML until the end of a 500-page crawl OOM-killed the server (2026-09-28).
@@ -91,6 +93,8 @@ function pageVisibleText(html: string): string {
 export function createContextBuilder() {
   const pages: PageContext[] = [];
   const chunks: ContentChunk[] = [];
+  // Each page's sections wait here until finish(): what repeats across pages is only known then.
+  const pending: { page: PageContext; scraped: ScrapedPage; sections: MarkdownSection[] }[] = [];
   const siteMap: SiteMapEntry[] = [];
   const contactPhones = new Set<string>();
   const contactEmails = new Set<string>();
@@ -131,8 +135,6 @@ export function createContextBuilder() {
     extractHeaderFooterText(fetchResult.html).forEach((b) => headerFooterBlocks.add(b));
 
     const pageId = generatePageId(scrapedPage.url);
-    const sections = buildSections(markdown.sections, pageId);
-    const pageChunks = buildChunks(markdown.sections, pageId, scrapedPage);
 
     const page: PageContext = {
       id: pageId,
@@ -141,7 +143,7 @@ export function createContextBuilder() {
       description: scrapedPage.description,
       lastScraped: scrapedPage.scrapedAt,
       contentHash: hashContent(markdown.fitMarkdown),
-      sections,
+      sections: [],
       forms: scrapedPage.forms.map((f) => ({
         id: randomUUID(),
         name: f.name || f.id || "Form",
@@ -161,7 +163,7 @@ export function createContextBuilder() {
     };
 
     pages.push(page);
-    chunks.push(...pageChunks);
+    pending.push({ page, scraped: scrapedPage, sections: markdown.sections });
 
     // Build site map entry
     const path = new URL(scrapedPage.url).pathname;
@@ -176,6 +178,15 @@ export function createContextBuilder() {
   }
 
   async function finish(homeUrl?: string): Promise<WebsiteContext> {
+    // Menus, link lists and footers that most pages share stay on the first page showing them only.
+    const cleaned = dropRepeatedText(pending.map((p) => p.sections));
+    if (cleaned.stats.charsAfter < cleaned.stats.charsBefore) console.log(`[buildContext] repeated text removed: ${cleaned.stats.charsBefore} -> ${cleaned.stats.charsAfter} chars over ${cleaned.stats.pages} pages (${cleaned.stats.sharedLines} shared lines)`);
+    pending.forEach((p, k) => {
+      p.page.sections = buildSections(cleaned.pages[k], p.page.id);
+      chunks.push(...buildChunks(cleaned.pages[k], p.page.id, p.scraped));
+    });
+    pending.length = 0;
+
     // Add ONE reliable contact chunk from the collected tel:/mailto: links, so the bot
     // can give the real phone/email even when the header/footer didn't survive markdown
     // extraction and the dedicated contact page wasn't crawled.

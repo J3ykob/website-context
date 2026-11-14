@@ -62,8 +62,8 @@ export async function scrapeTenant(
   const ceiling = Number(process.env.SCRAPE_MAX_PAGES) || 500;
   const pageBudget = maxPages >= 50 ? Math.min(maxPages, ceiling) : ceiling;
   console.log(`[scrape-pipeline] Crawling ${siteUrl} (full site, ceiling ${pageBudget} pages) for tenant ${tenantId}`);
-  // Pages are converted to chunks as they arrive (their HTML dropped at once),
-  // so memory stays flat however large the site is.
+  // Pages are converted to text as they arrive (their HTML dropped at once), so memory stays small
+  // however large the site is; chunks are built at the end, when the text pages share is known.
   const builder = createContextBuilder();
   // Products & services index: JSON-LD + each page's readable text, taken
   // before the context builder drops the page's HTML.

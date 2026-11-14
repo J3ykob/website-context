@@ -55,4 +55,19 @@ describe("page text", () => {
     const text = p!.content.map((c) => c.content).join("\n");
     expect(text).toMatch(/Kozioł B-S \|[^\n]*\| 520/);
   }, 60000);
+
+  it("keeps text that repeats across a site's pages once (menus, footer link lists), a page's own text on each", async () => {
+    const urls = ["", "1011,Faworki.html", "1005,Ciasto-czekoladowo-piernikowe.html", "1029,Piernik-staropolski.html", "1007,Piernik-swiatecznie-dekorowany.html", "776,Keks-swiateczny-z-zurawina.html"].map((p) => `https://www.sweet-home.pl/${p}`);
+    const b = createContextBuilder();
+    for (const url of urls) await b.addPage({ url, title: url, description: "", content: [], links: [], forms: [], structuredData: [], metadata: {}, scrapedAt: "", fetch: await fetchPage(url) } as any);
+    const ctx = await b.finish(urls[0]);
+    const text = (url: string) => ctx.chunks.filter((c) => c.metadata.url === url).map((c) => c.content).join("\n");
+    const footerLink = "Makaroniki na zamówienie z dostawą Warszawa";
+    expect(urls.filter((u) => text(u).includes(footerLink)).length).toBe(1);       // on the first product page only
+    const last = text(urls[5]);
+    expect(last).toMatch(/SH-\d+/);
+    expect(last).toMatch(/\d+,- zł/);
+    expect(last).not.toContain("Skomplikowane zamówienie");
+    expect(text(urls[0]).length).toBeGreaterThan(3000);                             // the home page is untouched
+  }, 180000);
 });
