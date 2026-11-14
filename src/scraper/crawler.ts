@@ -10,6 +10,7 @@ const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip" 
   maxDepth: 10,
   respectRobotsTxt: true,
   rateLimit: 100,
+  minGap: 500,
   useSitemap: true,
   concurrency: 6,
   includePatterns: [],
@@ -50,6 +51,11 @@ export async function crawlSite(
   // attempts), and from then on requests go one at a time, `politeDelay` apart across all workers (doubled
   // on each new throttle, max 8 s). Six workers resuming together after a pause were throttled together
   // again: a florist's shop stuck at 25 of 150 pages for half an hour, the scrape queue behind it.
+  // Pace: requests to one site START at least `minGap` apart, however many workers there are (they still
+  // overlap, so a slow page does not hold the rest). Unpaced, 12 workers read a cake shop's 430 pages in
+  // 20 s - about 21 requests a second at a small host, twice in one day - and its firewall then refused
+  // our server (2026-11-14: three re-scrapes failed on the home page, hours apart).
+  const minGap = Math.max(0, opts.minGap);
   let pausedUntil = 0;
   let politeDelay = opts.rateLimit;
   let throttled = false;
@@ -63,8 +69,8 @@ export async function crawlSite(
   const waitTurn = async (): Promise<void> => {
     for (;;) {
       const now = Date.now();
-      const at = Math.max(pausedUntil, throttled ? nextSlot : 0);
-      if (at <= now) { if (throttled) nextSlot = now + politeDelay; return; }
+      const at = Math.max(pausedUntil, nextSlot);
+      if (at <= now) { nextSlot = now + Math.max(minGap, throttled ? politeDelay : 0); return; }
       await sleep(at - now);
     }
   };

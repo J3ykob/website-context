@@ -93,7 +93,8 @@ export interface CrawlOptions {
   maxPages?: number;
   maxDepth?: number;
   respectRobotsTxt?: boolean;
-  rateLimit?: number; // ms between requests per host
+  rateLimit?: number; // ms a worker rests after each page
+  minGap?: number; // ms between the starts of two requests to the site, across all workers (default 500)
   includePatterns?: RegExp[];
   excludePatterns?: RegExp[];
   timeout?: number; // per-page timeout in ms

@@ -131,6 +131,10 @@ services:
       # sites are in Europe - pages took ~12 s each with 6 workers while CPU sat at 10-33%.
       - key: SCRAPE_CONCURRENCY
         value: "12"
+      # Milliseconds between the starts of two requests to one site (2 requests a second). Unpaced crawls
+      # ran at ~21 requests a second and got our server refused by a shop's host (2026-11-14).
+      - key: SCRAPE_MIN_GAP_MS
+        value: "500"
       # Scrapes run side by side (the fleet re-scrape took days one at a time; memory 250-550 MB of 2 GB, CPU < 45%).
       - key: SCRAPE_JOBS
         value: "2"
