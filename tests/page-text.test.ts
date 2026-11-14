@@ -18,6 +18,13 @@ describe("page text", () => {
     expect(md.fullMarkdown.length).toBeGreaterThan(1000);
   }, 30000);
 
+  it("keeps a price shown in a read-only field", async () => {
+    const md = htmlToMarkdown(await fetchPage("https://www.sweet-home.pl/1011,Faworki.html"));
+    expect(md.fullMarkdown).toMatch(/\d+,- zł\s+cena za kg/);
+    expect(md.fullMarkdown).toMatch(/cena za ok\. [\d.,]+ kg/);
+    expect(md.fullMarkdown).not.toContain("Szukaj");      // the search box is still not content
+  }, 30000);
+
   it("keeps line breaks apart (street number and postal code)", async () => {
     const md = htmlToMarkdown(await fetchPage("https://bostabeton.pl/kontakt/wytwornie/wytwornie-warszawa/"));
     expect(md.fullMarkdown).toContain("Płytowa 1\n03-046");
