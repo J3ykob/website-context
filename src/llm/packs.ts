@@ -178,7 +178,7 @@ export function renderPacks(packs: Pack[], budget = 40000, hits?: string[]): { t
 
 /** The conversation's state as facts for the model (what was already offered, declined, started). */
 // requests: the request (the coverage text, chat.ts coverageNeed) of the latest two customer messages, by message.
-export interface PackState { handoffOfferedAt?: number; handoffDeclined?: boolean; referred?: string[]; calcStarted?: boolean; turns: number; lang?: string; lastPacks?: string[]; owner?: boolean; contactGiven?: boolean; requests?: Record<string, string> }
+export interface PackState { handoffOfferedAt?: number; handoffDeclined?: boolean; referred?: string[]; calcStarted?: boolean; turns: number; lang?: string; lastPacks?: string[]; owner?: boolean; contactGiven?: boolean; requests?: Record<string, string>; askedInputsAt?: number }
 export function renderState(s: PackState | undefined): string {
   if (!s) return "";
   const lines: string[] = [];
@@ -216,6 +216,8 @@ export const BEHAVIOUR = {
   // said it - "Podana cena jest netto, czyli bez VAT" for a shop's 699 zł, a gross price (empro, 2026-11-05).
   // CALC_AGENT off (chat.ts): the calculation split's agent branches - our own priced multi-step work, quantities only.
   teamQuote: "The customer's request needs a calculation or quote that our team prepares (several items, measuring, discounts or work not listed). Give what our information shows for it - prices as listed, amounts only as computed above, no totals of your own - and say plainly that our team prepares the full calculation for their request.",
+  // The turn table's clarifying question (src/llm/turn-table.ts): a listed price whose total needs a quantity not given yet.
+  askInputs: (needs: string[]) => `A total for the customer needs something they have not given yet: ${needs.join("; ")}. Give the prices our information lists, do not work out a total yourself, and end by asking for that in one short question.`,
   simpleCalc: "The customer asks for a simple calculation: give the totals our information shows as computed for the customer's quantities, briefly shown - do not work out totals yourself; where none is computed, give the prices.",
   networkCheckAlso: "The customer asks for recommendations. Give briefly what our own information says that bears on it (exactly as it states it, without presenting it as more than it says), then say in one short sentence that you are also checking businesses from our local Whisp network right now. Nothing more: no business names yet, no questions.",
   networkCheck: "Our information doesn't cover this, or shows it isn't something we do. Say that briefly, as our information supports it (missing information is not a 'no'), then say in one short sentence that you are checking businesses from our local Whisp network right now. Nothing more: no business names yet, no questions.",

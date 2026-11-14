@@ -33,6 +33,8 @@ import { conversationProject, recordTurn, beginConversationAgent, WORKING, BUSY,
 import { renderItem, type OfferItem } from "../offer/store.js";
 import { listedAmounts as listedAmountsOf } from "../offer/quantities.js";
 import { collectTurn, startSession, missingLabels, type CollectSession, type CollectVia, type Inquiry } from "../flows/collect.js";
+import { decide, type TurnState, type Decision } from "./turn-table.js";
+import { logDecision } from "./decision-log.js";
 import { noteTurn, markTurn, turnVariant, turnUsage, newTurnUsage, turnCheap, turnIp, turnExempt } from "./turn-usage.js";
 import type { QuoteResult } from "../pricing/model.js";
 import { AMOUNTS_PROMPT, amountsView, judgeAmounts, type AmountsVerdict } from "../pricing/amounts.js";
@@ -325,6 +327,10 @@ const networkInChat = (): boolean => process.env.NETWORK_CHAT !== "off" && !turn
 const calcAgentOn = (): boolean => process.env.CALC_AGENT !== "off" && !turnVariant().includes("noagent");
 // UNSURE_FALLBACK=on: a reply still stating unsupported things or wrong amounts after its rewrites is not sent; the customer
 // is told we don't have that information, with the offer to pass the question on (and it goes to the owner's gap list).
+// TURN_TABLE=on: the reply's decisions (answer / totals / ask for quantities / team quote / not in our offer / no information /
+// network, and which offer goes with it) come from the turn's state record and its table (src/llm/turn-table.ts) instead of
+// the chain of conditions in packsReply. Off: the chain decides, and the table's decision is only recorded next to it.
+const turnTable = (): boolean => process.env.TURN_TABLE === "on" || turnVariant().includes("table");
 const unsureFallback = (): boolean => process.env.UNSURE_FALLBACK === "on" || turnVariant().includes("abstain");
 // How long the page search and the item matcher wait for the request's split (from when the turn's work starts): a split
 // usually comes in 0.6-1.4 s, but took 2.7, 3.6 and 5.5 s in the offline replay of 2026-11-05 (the first word 9.3 s); late =
@@ -900,7 +906,7 @@ export class WebsiteChat {
     // guessed gates before ("we have prices" counted the network's prices as ours, "every item ours?") sent our own
     // products to a 2-4 minute calculation and to competitors (betonlazy-1: Bosta asked to quote Łazy's own B20; djmw-2,
     // 2026-11-04 eval). Its quote, items, passages and coverage are the turn's (work): the reply reads the same.
-    if (rt && rt.intent === "calculate" && agentEnabled() && work) {
+    if (rt && rt.intent === "calculate" && (agentEnabled() || turnTable()) && work) {
       // A calculation needs figures in the conversation; "how much for a bathroom?" is a quote question.
       const figures = /\d/.test(sanitizedMessages.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join(" "));
       const pure = (rt.price < 0.5 || rt.ownPrices >= 0.5) && figures;
@@ -916,7 +922,7 @@ export class WebsiteChat {
       // Our own program priced every line it read - but it reads no line for a need its catalogue has no item for, so a part
       // we don't have is not "covered": the reply's coverage still offers (or relays) the network for it (chain C7: Rentbud's
       // vibrator and trowel priced, the concrete left out - a "covered" quote with the network off never offered it).
-      if (routeQuote?.covered) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc], work });
+      if (routeQuote?.covered) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, calc: "simple", work });
       // Listed unit prices times the customer's quantities: answered here (the owner's decision 2026-10-26); asked next to
       // the coverage (a part we don't have does not wait for it). Our price list's items for this request and our pages -
       // the reply's own (the simple check saw only 8 loose passages before: Ostap's trestles + posts, 2080 + 4 x 42 zl,
@@ -940,23 +946,24 @@ export class WebsiteChat {
       // A part we don't have: the agent with the network for it - the owner's wish 2026-10-26 to reach out to the companies
       // (until 2026-10-29 such orders got only a quote offer and never reached the network) - only when the network
       // search found a business for that part (2026-11-05).
-      if (cov?.own.some((o) => !o) && (await this.networkFound(work, cov, !!st.owner)).length) {
+      if (agentEnabled() && cov?.own.some((o) => !o) && (await this.networkFound(work, cov, !!st.owner)).length) {
         const r = await this.agentTurn(sanitizedMessages, question, sessionKey, { coverage: cov, work });
         if (r) { st.calcStarted = true; onToken(r.message); return r; }
       }
       foreignUnmet = !!cov?.own.some((o) => !o);
       const simple = await simpleP;
       markTurn("simpleCheck");
-      if (simple) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, extra: [BEHAVIOUR.simpleCalc], work, foreignUnmet });
+      if (simple) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, calc: "simple", work, foreignUnmet });
       // More than a simple calculation (measuring, unlisted work, discounts, many items): quantities only, or every part of
       // ours priced -> the calculation and its approval; ours without prices -> answered here (partial: a quote request).
       const ownPriced = !!cov && cov.own.some(Boolean) && cov.own.every((o, k) => !o || cov.priced[k]);
-      if ((pure || ownPriced) && calcAgentOn()) {
+      const agentCalc = calcAgentOn() && agentEnabled();
+      if ((pure || ownPriced) && agentCalc) {
         const r = await this.agentTurn(sanitizedMessages, question, sessionKey, pure ? { pureCalc: true, work } : { coverage: cov!, work });
         if (r) { st.calcStarted = true; onToken(r.message); return r; }
       }
       // The same branch with the agent off: our team prices it - the reply gives what we show and offers to pass it on.
-      if ((pure || ownPriced) && !calcAgentOn()) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work, foreignUnmet, teamQuote: true });
+      if ((pure || ownPriced) && !agentCalc) return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work, foreignUnmet, calc: "team" });
       return this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, t0, work, foreignUnmet });
     }
     if (rt?.intent === "chitchat") return { ...(await this.packsReply(sanitizedMessages, sessionKey, onToken, { behaviour: [BEHAVIOUR.smalltalk], rt })), turnKind: "chitchat" };
@@ -978,7 +985,10 @@ export class WebsiteChat {
     // A question about hours, contact, terms or the business itself (no price, product or need - router) has no offer
     // items to match: the model call that picks them (~1 s) was in front of every such reply. A calculation always has
     // (its route matched our items whatever the scores).
-    const offerTurn = (aboutOffer(rt) || rt?.intent === "calculate") && rt?.intent !== "chitchat";
+    // Our previous reply asked for the quantities a total needs (the turn table's clarifying question): this message is
+    // read for them whatever the router makes of a bare "12 m3".
+    const askedLast = turnTable() && st.askedInputsAt === st.turns - 1;
+    const offerTurn = (aboutOffer(rt) || rt?.intent === "calculate" || askedLast) && rt?.intent !== "chitchat";
     const need = offerTurn ? this.coverageNeed(messages, question, rt, sessionKey) : question;
     // The request's parts in Polish (the network's split - a model, stored per request): one split per turn - the
     // coverage, the network, the item matcher and the second page search read it (the page search and the matcher split
@@ -994,7 +1004,7 @@ export class WebsiteChat {
     // then nothing is said about them. A price question or a calculation also reads the customer's quantities for every
     // matched item - a shop's too (empro-1: "3 aku" got no total, 3 x 699 zł) - priced by code.
     // The match resolves with the pick (the trace's itemsMatched), its quantities when read (given, the "quantities" step).
-    const quantities = !!rt && (rt.price >= 0.5 || rt.intent === "calculate");
+    const quantities = !!rt && (rt.price >= 0.5 || rt.intent === "calculate" || askedLast);
     const none: ItemMatch = { items: [], given: Promise.resolve(new Map()) };
     const later = <T,>(make: () => Promise<T>): Lazy<T> => lazy(make, !deferred);
     const products = later<ItemMatch | null>(() => (this.catalogue ? this.shopProducts(query, question, rt, quantities).catch(() => none)
@@ -1084,7 +1094,7 @@ export class WebsiteChat {
   // knowledge reply kept for a calculation that runs too long (agentTurn): no network, no offers to pass anything on.
   // opts.foreignUnmet: an order or a calculation with a part we don't have that started no background agent (packsStream) -
   // the one place a part may be told "not in our offer" (below).
-  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; networkParts?: string[]; t0?: number; formOpen?: boolean; work?: TurnWork | null; released?: boolean; foreignUnmet?: boolean; teamQuote?: boolean }): Promise<ChatResponse> {
+  private async packsReply(messages: ChatMessage[], sessionKey: string, onToken: (d: string) => void, opts: { behaviour?: string[]; extra?: string[]; packs?: Pack[]; noFacts?: boolean; rt?: TurnRoute | null; keepOffer?: boolean; handoffKind?: "question" | "quote" | "network"; networkNeed?: string; networkParts?: string[]; t0?: number; formOpen?: boolean; work?: TurnWork | null; released?: boolean; foreignUnmet?: boolean; calc?: "simple" | "team" }): Promise<ChatResponse> {
     const st = this.packStateOf(sessionKey);
     const question = messages.findLast((m) => m.role === "user")?.content || "";
     const rt = opts.rt ?? null;
@@ -1103,6 +1113,9 @@ export class WebsiteChat {
     // The amounts the reply may state (computed by code for this request, or listed by the items) and the computed lines
     // (src/pricing/model.ts, src/offer/quantities.ts): evidence for the check, required content of a rewrite.
     const priceFacts: PriceFact[] = [];
+    let hasComputed = false;        // totals computed by code for the customer's quantities
+    let missing: string[] = [];     // the quantities a listed price still needs from the customer (the turn table's question)
+    const askedLast = turnTable() && st.askedInputsAt === st.turns - 1;
     const owner = !!st.owner;
     // Our own phone numbers / e-mails, and whether an earlier reply of this conversation already gave one.
     const prof = this.context.businessProfile;
@@ -1145,7 +1158,7 @@ export class WebsiteChat {
       if (products.length) {
         noteTurn("products", products.map((p) => `${p.name} | ${p.price_value ?? "-"} ${p.currency}`));
         const lines = products.map((p) => `- ${renderItem(p)}${p.url ? ` | Link: ${p.url}` : ""}`);
-        const { priceGiven, customerPriceLine, inputsOf, listedAmounts } = await import("../offer/quantities.js");
+        const { priceGiven, customerPriceLine, inputsOf, listedAmounts, INPUT_HELP } = await import("../offer/quantities.js");
         // A price question: the customer's quantities read for every matched item (src/offer/search.ts, a reading of its
         // own after the pick), priced by code (src/offer/quantities.ts) - a shop's catalogue items too (empro-1: "3 aku"
         // got "I won't total it", 3 x 699 = 2097 zł). null: the reading got no answer - no total, nothing said about the
@@ -1160,10 +1173,13 @@ export class WebsiteChat {
           // amount with what the reply gives it for, so "3 pieces for 699 zł" or "3 doby = 480 zł" is no match (review
           // 2026-11-05: [2097, 699] and [360, 480] under one name let both through).
           priceFacts.push(...computedFacts(computed, texts));
+          hasComputed = true;
         }
+        // No total came out: the inputs of the matched items' prices that the customer has not given (by name, from the recipes).
+        else if (given) missing = [...new Set(products.flatMap((p) => inputsOf(p).filter((n) => given.get(p)?.[n] == null)))].map((n) => INPUT_HELP[n]);
         // A price question whose quantity was not clear ("half a day"): no total is computed, and the reply
         // must not work one out (C3: "6 h x 76 = 456 zł, hourly is cheaper" against a 380 zł daily rate).
-        else if (given && rt && rt.price >= 0.5 && products.some((p) => inputsOf(p).length)) lines.push("No total is computed for this request: the customer's quantity is not clear from the message - give the prices, do not work out a total.");
+        if (!computed.length && given && rt && rt.price >= 0.5 && products.some((p) => inputsOf(p).length)) lines.push("No total is computed for this request: the customer's quantity is not clear from the message - give the prices, do not work out a total.");
         // Each item's own listed prices: amounts a reply may give as they are.
         const priced = new Set(computed.map((c) => c.item));
         for (const p of products) if (!priced.has(p) && listedAmounts(p).length) priceFacts.push({ item: p.name, kind: "listed", amounts: listedAmounts(p), line: "" });
@@ -1221,72 +1237,131 @@ export class WebsiteChat {
         markTurn("full");
         partial = ((f?.full as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5;
       }
-      // The network only for the parts we don't have (net.parts; the coverage replaced a whole-message "is it ours?" score -
-      // < 0.35 relayed at once, < 0.8 offered - that sent our own products to competitors 7 times in the 2026-11-04 eval).
-      // At once when nothing of ours answers, when none of the need is ours, or when the customer asks for other
-      // businesses (router intent; W3: the venue's 120 zł "photographer service" fee was judged ours and the
-      // photographers found were dropped).
-      const alsoNetwork = !!net && answered && !net.allForeign && rt?.intent === "elsewhere";
-      if (net && !owner && (!answered || net.allForeign || alsoNetwork)) {
-        // Matches already there: one reply. Still searching and the widget can show it: say so now, show the
-        // search, continue the message when the matches come (the owner's wish 2026-10-27, like Gemini's search).
-        const quick = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), this.statusOf.has(sessionKey) ? 400 : 10000))]); // no live status (API / tests): wait for the network search (3-8 s since it splits the need into parts)
-        if (quick === null && this.statusOf.has(sessionKey)) {
-          searching = { matches: net.matches, need: net.need, lang: net.lang };
-          behaviour.push(alsoNetwork ? BEHAVIOUR.networkCheckAlso : BEHAVIOUR.networkCheck);
-        } else if (quick?.length) {
-          network = await this.networkBlock(quick, net.need, net.lang);
-          behaviour.push(alsoNetwork ? BEHAVIOUR.networkAlso : BEHAVIOUR.network);
-        }
-      }
-      // An order or a calculation with a part we don't have that started no background agent (no network business has it,
-      // packsStream): that part is told "not in our offer", with what we do instead (owner 2026-11-05, romax-3: windows
-      // at a floor and door salon) - only when our own pages say so (the coverage's page question: not offered >= 0.5),
-      // never because nothing was found: a "none" that is only "unknown" (Angelika's lashes, inside her packages) or a
-      // page the search does not reach (Zając's film, in his FAQ - denied by its 6 nearest pages too) would become a flat
-      // "we don't offer it" (review 2026-11-05). The page passages it was judged on come with it. The denial check and the
-      // owner's gap log stay on (below): a wrong one is caught or seen.
-      notOurs = opts.foreignUnmet && cov && !network && !searching ? cov.parts.filter((_, k) => !cov.own[k] && cov.how[k] === "none" && cov.denied?.[k]) : [];
-      if (notOurs.length) {
-        const line = `Not in our offer (our pages show what we offer in this area, and this is not among it): ${notOurs.join("; ")}.`;
-        const seen = [...new Set(cov!.parts.flatMap((p, k) => (notOurs.includes(p) ? cov!.passages[k] : [])))].filter((t) => !passages.includes(t)).slice(0, 6);
-        packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Not in our offer\n${line}${seen.length ? `\n\nOur pages on this area:\n${seen.join("\n\n")}` : ""}`;
-        passages = [...passages, line, ...seen];
-        answered = true;
-        if (notOurs.length === cov!.parts.length) partial = false;
-        behaviour.push(BEHAVIOUR.notOffered);
-        noteTurn("notOffered", notOurs);
-      }
       // Offered at most once per question: again only for a new question two or more turns later, never after a decline.
       const offerOk = !!rt && !owner && !opts.released && !!this.ensureQuestionFlow && ["ask", "order", "calculate"].includes(rt.intent) && !st.handoffDeclined && (!st.handoffOfferedAt || st.turns - st.handoffOfferedAt >= 2) && !this.collectSessions.has(sessionKey);
-      // A calculation our team prices (CALC_AGENT off): what we show for it, and the offer to pass the request on as a quote request.
-      if (opts.teamQuote) {
-        behaviour.push(BEHAVIOUR.teamQuote);
-        if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "quote"; }
-      }
-      if (!answered && !network && !searching) {
-        behaviour.push(owner || contactGiven ? BEHAVIOUR.noInfoBare : BEHAVIOUR.noInfo);
-        if (offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
-      }
-      if (answered && !network && !searching) {
-        behaviour.unshift(BEHAVIOUR.answer);
-        // A mixed turn: our parts answered, the parts we don't have only offered to check in the network when it has
-        // businesses for them - our own answer first, the customer decides. Waited for only when it can be offered (not
-        // after a decline, not twice in a row, no open form); the search started with the split, next to the coverage.
-        const found = net && offerOk ? await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), 1500))]) : undefined;
-        const netHas = found?.length ?? 0;
-        if (netHas) { offered = net; opts.handoffKind = "network"; }
-        // A missing detail of ours goes to our own team, never to the network: what we know, the detail not given, and the
-        // offer to pass it on - as a quote request when a price is asked that no item or quote here gives (an instruction
-        // "we have no prices here" contradicted prices that our pages give).
-        const pricedHere = !!modelQuote || products.some((p) => p.price_value != null || p.components.some((c) => c.price_value != null));
-        if (partial) {
-          behaviour.push(owner || contactGiven ? BEHAVIOUR.partialBare : BEHAVIOUR.partial);
-          if (offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = rt && rt.price >= 0.5 && !pricedHere ? "quote" : "question"; }
+      const pricedHere = !!modelQuote || products.some((p) => p.price_value != null || p.components.some((c) => c.price_value != null));
+      // The turn's state record (src/llm/turn-table.ts): every model's answer about this turn, written once. `seen`: what
+      // is known of the network search for the parts we don't have.
+      const info: TurnState["info"] = !answered ? "none" : partial ? "partial" : "full";
+      const formOpen = !!opts.formOpen || this.collectSessions.has(sessionKey);
+      const stateOf = (seen: TurnState["network"]): TurnState => ({
+        intent: rt?.intent ?? null,
+        asksPrice: (!!rt && (rt.price >= 0.5 || rt.intent === "calculate")) || askedLast,
+        parts: cov ? cov.parts.map((_, k) => ({ ours: cov.how[k] === "none" ? "no" as const : cov.how[k] === "unjudged" ? "unclear" as const : "yes" as const, priced: !!cov.priced[k], denied: !!cov.denied?.[k] })) : [],
+        info,
+        price: hasComputed || modelQuote?.covered ? "computed" : pricedHere ? "listed" : "none",
+        missing, askedLast, formOpen, calc: opts.calc ?? "none", network: seen, owner, canOffer: offerOk,
+      });
+      let decision: Decision | undefined;
+      if (turnTable()) {
+        // The table decides. A row that depends on the network search waits for it first (a relay as long as the chain
+        // did: 400 ms with a live status line, else the whole search; an offer 1.5 s), then the table is read again.
+        let seen: TurnState["network"] = net ? "unknown" : "off";
+        let found: EcosystemMatch[] | null = null;
+        decision = decide(stateOf(seen));
+        if (decision.needs && net) {
+          const live = decision.needs === "relay" && this.statusOf.has(sessionKey);
+          found = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), decision!.needs === "offer" ? 1500 : live ? 400 : 10000))]);
+          seen = found?.length ? "found" : found === null && live ? "searching" : "none";
+          decision = decide(stateOf(seen));
         }
-        if (offered) behaviour.push(BEHAVIOUR.offerNetwork(offered.parts));
-        noteTurn("partialOffer", { netHas, late: found === null, offerOk, partial, pricedHere, kind: opts.handoffKind || null });
+        const d: Decision = decision;
+        if (d.body === "network") { network = await this.networkBlock(found!, net!.need, net!.lang); behaviour.push(d.withOurs ? BEHAVIOUR.networkAlso : BEHAVIOUR.network); }
+        else if (d.body === "networkChecking") { searching = { matches: net!.matches, need: net!.need, lang: net!.lang }; behaviour.push(d.withOurs ? BEHAVIOUR.networkCheckAlso : BEHAVIOUR.networkCheck); }
+        else if (d.body === "noInfo") behaviour.push(owner || contactGiven ? BEHAVIOUR.noInfoBare : BEHAVIOUR.noInfo);
+        else {
+          behaviour.push(BEHAVIOUR.answer);
+          // A part our own pages say we don't offer (the coverage's page question): told so, with the passages it was judged
+          // on and what we do instead - whatever the kind of turn (the chain: only an order or a calculation).
+          if (d.notOffered.length && cov) {
+            notOurs = d.notOffered.map((k) => cov.parts[k]);
+            const line = `Not in our offer (our pages show what we offer in this area, and this is not among it): ${notOurs.join("; ")}.`;
+            const shown = [...new Set(d.notOffered.flatMap((k) => cov.passages[k] || []))].filter((t) => !passages.includes(t)).slice(0, 6);
+            packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Not in our offer\n${line}${shown.length ? `\n\nOur pages on this area:\n${shown.join("\n\n")}` : ""}`;
+            passages = [...passages, line, ...shown];
+            answered = true;
+            behaviour.push(BEHAVIOUR.notOffered);
+            noteTurn("notOffered", notOurs);
+          }
+          if (d.price === "teamQuote") behaviour.push(BEHAVIOUR.teamQuote);
+          else if (d.price === "compute") behaviour.push(BEHAVIOUR.simpleCalc);
+          else if (d.price === "askInputs") { behaviour.push(BEHAVIOUR.askInputs(missing)); st.askedInputsAt = st.turns; }
+          if (d.partial) behaviour.push(owner || contactGiven ? BEHAVIOUR.partialBare : BEHAVIOUR.partial);
+        }
+        if (d.offer === "network" && net) { offered = net; opts.handoffKind = "network"; behaviour.push(BEHAVIOUR.offerNetwork(net.parts)); }
+        else if (d.offer === "question" || d.offer === "quote") { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = d.offer; }
+      } else {
+        // The network only for the parts we don't have (net.parts; the coverage replaced a whole-message "is it ours?" score -
+        // < 0.35 relayed at once, < 0.8 offered - that sent our own products to competitors 7 times in the 2026-11-04 eval).
+        // At once when nothing of ours answers, when none of the need is ours, or when the customer asks for other
+        // businesses (router intent; W3: the venue's 120 zł "photographer service" fee was judged ours and the
+        // photographers found were dropped).
+        const alsoNetwork = !!net && answered && !net.allForeign && rt?.intent === "elsewhere";
+        if (net && !owner && (!answered || net.allForeign || alsoNetwork)) {
+          // Matches already there: one reply. Still searching and the widget can show it: say so now, show the
+          // search, continue the message when the matches come (the owner's wish 2026-10-27, like Gemini's search).
+          const quick = await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), this.statusOf.has(sessionKey) ? 400 : 10000))]); // no live status (API / tests): wait for the network search (3-8 s since it splits the need into parts)
+          if (quick === null && this.statusOf.has(sessionKey)) {
+            searching = { matches: net.matches, need: net.need, lang: net.lang };
+            behaviour.push(alsoNetwork ? BEHAVIOUR.networkCheckAlso : BEHAVIOUR.networkCheck);
+          } else if (quick?.length) {
+            network = await this.networkBlock(quick, net.need, net.lang);
+            behaviour.push(alsoNetwork ? BEHAVIOUR.networkAlso : BEHAVIOUR.network);
+          }
+        }
+        // An order or a calculation with a part we don't have that started no background agent (no network business has it,
+        // packsStream): that part is told "not in our offer", with what we do instead (owner 2026-11-05, romax-3: windows
+        // at a floor and door salon) - only when our own pages say so (the coverage's page question: not offered >= 0.5),
+        // never because nothing was found: a "none" that is only "unknown" (Angelika's lashes, inside her packages) or a
+        // page the search does not reach (Zając's film, in his FAQ - denied by its 6 nearest pages too) would become a flat
+        // "we don't offer it" (review 2026-11-05). The page passages it was judged on come with it. The denial check and the
+        // owner's gap log stay on (below): a wrong one is caught or seen.
+        notOurs = opts.foreignUnmet && cov && !network && !searching ? cov.parts.filter((_, k) => !cov.own[k] && cov.how[k] === "none" && cov.denied?.[k]) : [];
+        if (notOurs.length) {
+          const line = `Not in our offer (our pages show what we offer in this area, and this is not among it): ${notOurs.join("; ")}.`;
+          const seen = [...new Set(cov!.parts.flatMap((p, k) => (notOurs.includes(p) ? cov!.passages[k] : [])))].filter((t) => !passages.includes(t)).slice(0, 6);
+          packText = `${packText ? `${packText}\n\n---\n\n` : ""}### Not in our offer\n${line}${seen.length ? `\n\nOur pages on this area:\n${seen.join("\n\n")}` : ""}`;
+          passages = [...passages, line, ...seen];
+          answered = true;
+          if (notOurs.length === cov!.parts.length) partial = false;
+          behaviour.push(BEHAVIOUR.notOffered);
+          noteTurn("notOffered", notOurs);
+        }
+        // A calculation our team prices (CALC_AGENT off): what we show for it, and the offer to pass the request on as a quote request.
+        if (opts.calc === "team") {
+          behaviour.push(BEHAVIOUR.teamQuote);
+          if (offerOk) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "quote"; }
+        }
+        if (!answered && !network && !searching) {
+          behaviour.push(owner || contactGiven ? BEHAVIOUR.noInfoBare : BEHAVIOUR.noInfo);
+          if (offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "question"; }
+        }
+        if (answered && !network && !searching) {
+          behaviour.unshift(BEHAVIOUR.answer);
+          // A mixed turn: our parts answered, the parts we don't have only offered to check in the network when it has
+          // businesses for them - our own answer first, the customer decides. Waited for only when it can be offered (not
+          // after a decline, not twice in a row, no open form); the search started with the split, next to the coverage.
+          const found = net && offerOk ? await Promise.race([net.matches, new Promise<null>((r) => setTimeout(() => r(null), 1500))]) : undefined;
+          const netHas = found?.length ?? 0;
+          if (netHas) { offered = net; opts.handoffKind = "network"; }
+          // A missing detail of ours goes to our own team, never to the network: what we know, the detail not given, and the
+          // offer to pass it on - as a quote request when a price is asked that no item or quote here gives (an instruction
+          // "we have no prices here" contradicted prices that our pages give).
+          if (partial) {
+            behaviour.push(owner || contactGiven ? BEHAVIOUR.partialBare : BEHAVIOUR.partial);
+            if (offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = rt && rt.price >= 0.5 && !pricedHere ? "quote" : "question"; }
+          }
+          if (offered) behaviour.push(BEHAVIOUR.offerNetwork(offered.parts));
+          noteTurn("partialOffer", { netHas, late: found === null, offerOk, partial, pricedHere, kind: opts.handoffKind || null });
+        }
+        if (opts.calc === "simple") behaviour.push(BEHAVIOUR.simpleCalc);
       }
+      // The record as the turn ended, with the table's decision for it - also when the chain decided (recorded, not used).
+      const state = stateOf(network ? "found" : searching ? "searching" : offered ? "found" : net ? "none" : "off");
+      decision ??= decide(state);
+      noteTurn("state", state);
+      noteTurn("table", { used: turnTable(), ...decision });
+      logDecision("turn", turnTable() ? "table" : "chain", state, { table: decision, behaviour: behaviour.map(behaviourName) }, this.context.tenantId);
     }
     behaviour.push(...(opts.extra || []));
     if (owner) behaviour.unshift(BEHAVIOUR.owner);
