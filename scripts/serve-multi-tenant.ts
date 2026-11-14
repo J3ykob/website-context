@@ -3427,6 +3427,30 @@ app.post("/api/admin/upload-file/:tenantId/:filename", (req, res) => {
   });
 });
 
+// Admin: a site's pages read on another machine (scripts/crawl-to-file.ts), for a host that refuses this
+// server's address. The file is stored and the business's scrape queued at once - the scrape takes the
+// pages from the file in place of its own crawl (src/scraper/page-file.ts) and removes it when done.
+app.post("/api/admin/crawl-file/:tenantId", async (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  const safe = safeTenantDir(req.params.tenantId);
+  const tenant = safe ? getTenant(safe.id) : null;
+  if (!safe || !tenant) { res.status(404).json({ error: "Tenant not found" }); return; }
+  const siteUrl = tenant.siteUrl || `https://${tenant.domain}`;
+  const { crawlFilePath, dropCrawlFile } = await import("../src/scraper/page-file.js");
+  const { createWriteStream } = await import("fs");
+  const { pipeline } = await import("stream/promises");
+  try {
+    await pipeline(req, createWriteStream(crawlFilePath(safe.id)));
+  } catch (e) {
+    await dropCrawlFile(safe.id);
+    res.status(400).json({ error: `upload failed: ${(e as Error).message}` }); return;
+  }
+  console.log(`[crawl-file] ${safe.id}: pages received, scrape queued`);
+  worker.enqueuePriority(safe.id, siteUrl, 0);
+  tenantManager.evictTenant(safe.id);
+  res.json({ ok: true, queued: true });
+});
+
 // Resend webhook (delivery, open, click, bounce events)
 function resendSignatureOk(req: express.Request): boolean {
   const secret = process.env.RESEND_WEBHOOK_SECRET || "";

@@ -870,3 +870,9 @@ S = scripts/serve-multi-tenant.ts. Traces from `git log -S` / `git log -L`. "Int
 
 ## Non-limit finding
 - src/multi-tenant/tenant-manager.ts:176 default model "qwen/qwen3-235b-a22b-2507" - STALE fallback (prod is anthropic/claude-haiku-5.5 via render.yaml); only matters if OPENROUTER_MODEL is unset.
+
+### Pages brought in as a file (2026-11-14)
+
+| Limit | Value | Where | Trace | Verdict | Note |
+|---|---|---|---|---|---|
+| Brought-in page file: lifetime | used by one scrape, removed after it succeeds; kept in the system temp folder, so a restart drops it | src/scraper/page-file.ts; scrape-pipeline.ts | 2026-11-14 sweet-home.pl's host refused the server's address for a day (five re-scrapes failed on the home page) while the site answered a workstation | KEEP | No size limit on the upload (admin only). A file left by a scrape that failed three times is used by that business's next scrape unless the server restarted in between |

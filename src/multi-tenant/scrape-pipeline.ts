@@ -8,6 +8,7 @@ import { writeFile, readFile, rm } from "fs/promises";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { crawlSite, closeBrowser } from "../scraper/index.js";
+import type { ScrapedPage } from "../scraper/types.js";
 import { createContextBuilder } from "../context/store.js";
 import { createOfferIndexer } from "../offer/index-scrape.js";
 import { loadOffer, saveOffer, mergeItems } from "../offer/store.js";
@@ -76,12 +77,20 @@ export async function scrapeTenant(
   const { readCatalogue, coveredByCatalogue } = await import("../scraper/catalogue.js");
   const catalogue = await readCatalogue(siteUrl).catch((e) => { console.warn(`[scrape-pipeline] catalogue: ${(e as Error).message}`); return null; });
   if (catalogue) console.log(`[scrape-pipeline] Catalogue (${catalogue.source}): ${catalogue.items.length} products for ${tenantId}; their pages (${catalogue.productPrefixes.join(", ") || "listed URLs"}) are not crawled`);
-  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxTime: crawlTime, maxDepth: 10, rateLimit: 100, minGap: Number(process.env.SCRAPE_MIN_GAP_MS) || 500, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, skip: catalogue ? (u) => coveredByCatalogue(catalogue, u) : undefined,
-    // Large sites: Jev picks the pages worth reading by address and link text (scraper/triage.ts).
-    triage: (await import("../scraper/triage.js")).makeTriage(catalogue ? "This is a shop whose products are read from its catalogue separately, so category and product listings are not needed." : ""), forceTriage: !!catalogue, onPage: (page) => {
+  const onPage = (page: ScrapedPage) => {
     if (page.fetch?.html) offerIndexer.addPage(page.fetch.html, page.url);
     return builder.addPage(page);
-  } });
+  };
+  // Pages read on another machine and brought in as a file (a host that refuses this server's address:
+  // scraper/page-file.ts) take the place of the crawl; everything after it is the same.
+  const pageFile = await import("../scraper/page-file.js");
+  const broughtIn = pageFile.hasCrawlFile(tenantId);
+  if (broughtIn) console.log(`[scrape-pipeline] ${tenantId}: pages brought in as a file are used in place of a crawl`);
+  const crawlResult = broughtIn
+    ? await pageFile.replayCrawlFile(pageFile.crawlFilePath(tenantId), siteUrl, onPage)
+    : await crawlSite(siteUrl, { maxPages: pageBudget, maxTime: crawlTime, maxDepth: 10, rateLimit: 100, minGap: Number(process.env.SCRAPE_MIN_GAP_MS) || 500, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, skip: catalogue ? (u) => coveredByCatalogue(catalogue, u) : undefined,
+    // Large sites: Jev picks the pages worth reading by address and link text (scraper/triage.ts).
+    triage: (await import("../scraper/triage.js")).makeTriage(catalogue ? "This is a shop whose products are read from its catalogue separately, so category and product listings are not needed." : ""), forceTriage: !!catalogue, onPage });
   await closeBrowser();
 
   const pagesScraped = crawlResult.stats.successPages;
@@ -449,6 +458,7 @@ export async function scrapeTenant(
     console.log(`[scrape-pipeline] Synced on-disk artifacts to R2 for ${tenantId}`);
   }
 
+  if (broughtIn) await pageFile.dropCrawlFile(tenantId); // used once: the next scrape crawls again
   return {
     pages: pagesScraped,
     chunks: embedResult.embeddedChunks,
