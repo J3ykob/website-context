@@ -55,13 +55,16 @@ export async function scrapeTenant(
 
   // Crawl the WHOLE site: sitemap + links, 6 pages in parallel. Callers' small
   // page caps (15/20, from when the crawl was sequential) no longer limit it;
-  // SCRAPE_MAX_PAGES is only a safety ceiling for huge sites.
-  // The ceiling is hard (a client-sent maxPages of 1e6 meant an unbounded crawl until 2026-10-29). Old
-  // small caps (<50) still mean "whole site"; a cap of 50+ is a real limit (onboarding before the owner
-  // has claimed the business: ONBOARD_MAX_PAGES).
-  const ceiling = Number(process.env.SCRAPE_MAX_PAGES) || 500;
-  const pageBudget = maxPages >= 50 ? Math.min(maxPages, ceiling) : ceiling;
-  console.log(`[scrape-pipeline] Crawling ${siteUrl} (full site, ceiling ${pageBudget} pages) for tenant ${tenantId}`);
+  // no page count decides what is read (owner, 2026-11-14: the 500-page ceiling cut a cake shop's 691
+  // declared pages) - on a large site each page is judged worth reading or not (scraper/triage.ts).
+  // Old small caps (<50) still mean "whole site"; a cap of 50+ is a real limit (onboarding before the owner
+  // has claimed the business: ONBOARD_MAX_PAGES - anyone can submit any domain). What stops a runaway crawl
+  // is time: after SCRAPE_CRAWL_MIN minutes it hands over the pages it has, half of the job's 90 minutes
+  // left to build the bot from them. SCRAPE_MAX_PAGES, when set, is still honoured as an emergency brake.
+  const brake = Number(process.env.SCRAPE_MAX_PAGES) || Infinity;
+  const pageBudget = maxPages >= 50 ? Math.min(maxPages, brake) : brake;
+  const crawlTime = (Number(process.env.SCRAPE_CRAWL_MIN) || 45) * 60 * 1000;
+  console.log(`[scrape-pipeline] Crawling ${siteUrl} (full site${Number.isFinite(pageBudget) ? `, at most ${pageBudget} pages` : ""}) for tenant ${tenantId}`);
   // Pages are converted to text as they arrive (their HTML dropped at once), so memory stays small
   // however large the site is; chunks are built at the end, when the text pages share is known.
   const builder = createContextBuilder();
@@ -73,7 +76,7 @@ export async function scrapeTenant(
   const { readCatalogue, coveredByCatalogue } = await import("../scraper/catalogue.js");
   const catalogue = await readCatalogue(siteUrl).catch((e) => { console.warn(`[scrape-pipeline] catalogue: ${(e as Error).message}`); return null; });
   if (catalogue) console.log(`[scrape-pipeline] Catalogue (${catalogue.source}): ${catalogue.items.length} products for ${tenantId}; their pages (${catalogue.productPrefixes.join(", ") || "listed URLs"}) are not crawled`);
-  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxDepth: 10, rateLimit: 100, minGap: Number(process.env.SCRAPE_MIN_GAP_MS) || 500, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, skip: catalogue ? (u) => coveredByCatalogue(catalogue, u) : undefined,
+  const crawlResult = await crawlSite(siteUrl, { maxPages: pageBudget, maxTime: crawlTime, maxDepth: 10, rateLimit: 100, minGap: Number(process.env.SCRAPE_MIN_GAP_MS) || 500, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 6, signal, skip: catalogue ? (u) => coveredByCatalogue(catalogue, u) : undefined,
     // Large sites: Jev picks the pages worth reading by address and link text (scraper/triage.ts).
     triage: (await import("../scraper/triage.js")).makeTriage(catalogue ? "This is a shop whose products are read from its catalogue separately, so category and product listings are not needed." : ""), forceTriage: !!catalogue, onPage: (page) => {
     if (page.fetch?.html) offerIndexer.addPage(page.fetch.html, page.url);
@@ -82,7 +85,7 @@ export async function scrapeTenant(
   await closeBrowser();
 
   const pagesScraped = crawlResult.stats.successPages;
-  console.log(`[scrape-pipeline] ${pagesScraped} pages scraped`);
+  console.log(`[scrape-pipeline] ${pagesScraped} pages scraped${crawlResult.stats.leftUnread ? ` - stopped by ${crawlResult.stats.stoppedBy}, ${crawlResult.stats.leftUnread} address(es) left unread` : ""}`);
 
   // Build context
   const context = await builder.finish(crawlResult.pages[0]?.url);

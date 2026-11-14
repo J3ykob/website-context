@@ -16,7 +16,6 @@ import { clean, mergeItems, type OfferItem } from "./store.js";
 import { extractFromBlock, type Llm } from "./extract.js";
 import { readOnlyFieldsToText } from "../scraper/markdown.js";
 
-const MAX_PAGES = 150;      // pages an LLM reads per site
 const PAGE_TEXT = 6000;     // characters the model reads at once
 const PAGE_MAX = 24000;     // characters of a page kept: a long page is read in windows of PAGE_TEXT
 const WINDOW_OVERLAP = 500; // windows overlap, so an item on the border is whole in one of them
@@ -249,7 +248,10 @@ async function buildIndex(pages: { url: string; title: string; text: string }[],
   const t0 = Date.now();
   if (!pages.length && !jsonLd.length) return { businessTypes: [], items: [], stats: { pages: 0 } };
   const types = await businessTypes(pages[0]?.text || "");
-  const withOffer = (await offerPages(pages)).slice(0, MAX_PAGES);
+  // Every page that shows an offer is read (Jev's yes/no per page is the selection). Until 2026-11-14 only
+  // the first 150 were: a cake shop's 430 product pages gave prices for 66 of 529 items. OFFER_MAX_PAGES,
+  // when set, is an emergency brake on the model's cost.
+  const withOffer = (await offerPages(pages)).slice(0, Number(process.env.OFFER_MAX_PAGES) || undefined);
   let items = jsonLd;
   const windows = withOffer.flatMap((p) => {
     const out: { url: string; title: string; text: string }[] = [];

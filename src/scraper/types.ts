@@ -87,10 +87,14 @@ export interface CrawlStats {
   totalTime: number;
   staticPages: number;
   dynamicPages: number;
+  /** Set when the crawl stopped with addresses still unread: what stopped it and how many were left. */
+  stoppedBy?: "time" | "pages";
+  leftUnread?: number;
 }
 
 export interface CrawlOptions {
-  maxPages?: number;
+  maxPages?: number; // a caller's page count (default none: the whole site is read)
+  maxTime?: number; // ms after which no new page is started (default none)
   maxDepth?: number;
   respectRobotsTxt?: boolean;
   rateLimit?: number; // ms a worker rests after each page

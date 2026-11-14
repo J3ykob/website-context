@@ -5,8 +5,11 @@ import { fetchPdfAsPage } from "./pdf.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
 import { createHash } from "crypto";
 
-const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip" | "triage" | "forceTriage">> = {
-  maxPages: 500,
+const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip" | "triage" | "forceTriage" | "maxTime">> = {
+  // No page count decides what is read (owner, 2026-11-14: a 500-page ceiling cut a cake shop's 691 declared
+  // pages, and the cake a customer asked about was among the unread). Which pages are read is the triage's
+  // judgement; a caller may still pass a count (onboarding before the owner has claimed the business).
+  maxPages: Infinity,
   maxDepth: 10,
   respectRobotsTxt: true,
   rateLimit: 100,
@@ -88,6 +91,10 @@ export async function crawlSite(
   const pendingSeen = new Set<string>();
   let triaging: Promise<void> | null = null;
   let skippedByTriage = 0;
+  // From this many addresses on, each further page is judged before it is read: declared in the sitemap,
+  // or pages already read on a site that declares none (candidates still waiting are judged too).
+  const triageMin = Number(process.env.TRIAGE_MIN_URLS) || 300;
+  let stoppedBy: "time" | "pages" | undefined;
   const runTriage = async (): Promise<void> => {
     const batch = pending.splice(0, 60); // smaller batches: each address gets attention
     if (!batch.length) return;
@@ -125,7 +132,7 @@ export async function crawlSite(
   // reachable within a few link hops from the homepage.
   if (opts.useSitemap) {
     const sitemapUrls = await fetchSitemapUrls(baseUrl.origin, robots.sitemaps, opts.userAgent, ownPages);
-    if (options.triage && sitemapUrls.length >= (Number(process.env.TRIAGE_MIN_URLS) || 300)) triageOn = true;
+    if (options.triage && sitemapUrls.length >= triageMin) triageOn = true;
     let added = 0;
     for (const u of sitemapUrls) {
       try { if (!allowedHosts.has(new URL(u).hostname)) continue; } catch { continue; }
@@ -145,7 +152,7 @@ export async function crawlSite(
   };
 
   const handle = async (item: { url: string; depth: number; parent?: string; attempt?: number }, normalizedUrl: string): Promise<void> => {
-    console.log(`  [${pages.length + 1}/${opts.maxPages}] Crawling: ${normalizedUrl} (depth: ${item.depth})`);
+    console.log(`  [${pages.length + 1}${Number.isFinite(opts.maxPages) ? `/${opts.maxPages}` : ""}] Crawling: ${normalizedUrl} (depth: ${item.depth})`);
 
     // PDFs take a dedicated extraction path (text via unpdf), never the HTML fetcher.
     if (/\.pdf(\?|$)/i.test(normalizedUrl)) {
@@ -264,8 +271,16 @@ export async function crawlSite(
 
   const worker = async (): Promise<void> => {
     while (true) {
-      if (pages.length + inFlight >= opts.maxPages) return;
+      if (pages.length + inFlight >= opts.maxPages) { stoppedBy = "pages"; return; }
+      // Safety stop, not a selection: the crawl hands over what it has read while the job still has time
+      // to build the bot from it (a job that runs out of time fails whole and keeps nothing).
+      if (options.maxTime && Date.now() - startTime >= options.maxTime) { stoppedBy = "time"; return; }
       if (options.signal?.aborted || givenUp) return; // the job timed out (or the site throttles everything): stop
+      if (options.triage && !triageOn && pages.length >= triageMin) {
+        triageOn = true;
+        console.log(`  [triage] ${pages.length} pages read - further pages are judged before they are read`);
+        for (const waiting of queue.splice(0)) enqueue(waiting);
+      }
       if (!queue.length && pending.length) {
         if (!triaging) triaging = runTriage().finally(() => { triaging = null; });
         await triaging;
@@ -301,7 +316,11 @@ export async function crawlSite(
   await closeBrowser();
 
   if (triageOn) console.log(`  [triage] ${skippedByTriage} page(s) judged not worth reading, ${pending.length} left unjudged`);
+  // Never silent: a crawl stopped by its time or a caller's page count says how many addresses it left.
+  const leftUnread = stoppedBy ? queue.filter((q) => !visited.has(normalizeUrl(q.url))).length + pending.length : 0;
+  if (stoppedBy && leftUnread) console.warn(`  [STOPPED] by ${stoppedBy === "time" ? "the crawl's time" : `the caller's ${opts.maxPages}-page count`}: ${pages.length} pages read, ${leftUnread} address(es) left unread`);
   const stats: CrawlStats = {
+    ...(stoppedBy && leftUnread ? { stoppedBy, leftUnread } : {}),
     totalPages: visited.size,
     successPages: pages.length,
     failedPages: failures.length,
@@ -393,7 +412,7 @@ async function fetchRobotsTxt(origin: string, userAgent: string): Promise<{ disa
 function isAllowedUrl(
   url: string,
   allowedHosts: Set<string>,
-  opts: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip" | "triage" | "forceTriage">>,
+  opts: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip" | "triage" | "forceTriage" | "maxTime">>,
   disallowedPaths: string[]
 ): boolean {
   try {

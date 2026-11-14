@@ -1983,7 +1983,7 @@ app.post("/api/auth/setup-password", async (req, res) => {
   updateTenant(tenantId, { ownerPasswordHash: hash, setupToken: null, ...(Object.keys(marks).length ? { settings: { ...(tenant.settings || {}), ...marks } } : {}) });
   // The owner has claimed it: a crawl stopped at the onboarding cap now covers the whole site.
   const onboardCap = Number(process.env.ONBOARD_MAX_PAGES) || 150;
-  if (tenant.siteUrl && (tenant.pagesCount || 0) >= onboardCap && tenant.status !== "scraping") worker.enqueue(tenant.id, tenant.siteUrl, Number(process.env.SCRAPE_MAX_PAGES) || 500);
+  if (tenant.siteUrl && (tenant.pagesCount || 0) >= onboardCap && tenant.status !== "scraping") worker.enqueue(tenant.id, tenant.siteUrl, 0); // 0 = the whole site
 
   const sessionToken = await createSession(tenantId);
   res.json({ token: sessionToken, tenantId });

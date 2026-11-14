@@ -135,6 +135,11 @@ services:
       # ran at ~21 requests a second and got our server refused by a shop's host (2026-11-14).
       - key: SCRAPE_MIN_GAP_MS
         value: "500"
+      # No page ceiling since 2026-11-14 (it cut a 691-page shop at 500): a crawl reads every page judged
+      # worth reading and stops after this many minutes with what it has - half of the job's 90, so the
+      # bot is still built. About 5,400 pages at 2 requests a second.
+      - key: SCRAPE_CRAWL_MIN
+        value: "45"
       # Scrapes run side by side (the fleet re-scrape took days one at a time; memory 250-550 MB of 2 GB, CPU < 45%).
       - key: SCRAPE_JOBS
         value: "2"
