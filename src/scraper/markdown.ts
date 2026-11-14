@@ -34,6 +34,9 @@ const CONTENT_PAGE_PATHS = [
   "carta", "speisekarte", "katalog", "catalog", "lista",
 ];
 
+/** The share of the body's text a "main content" area must hold to be used instead of the body. */
+const MAIN_AREA_MIN_SHARE = 0.5;
+
 export function htmlToMarkdown(fetchResult: FetchResult): MarkdownResult {
   const $ = cheerio.load(fetchResult.html);
 
@@ -96,7 +99,11 @@ export function htmlToMarkdown(fetchResult: FetchResult): MarkdownResult {
     const bodyLen = textLen($("body"));
     for (const selector of mainSelectors) {
       const found = $(selector);
-      if (found.length > 0 && textLen(found.first()) >= Math.max(1, bodyLen * 0.3)) {
+      // The area must hold at least half of the page's text (menus, header and footer are already removed).
+      // A third was enough before, and the other two thirds never reached the bot: 20 paragraphs of a cake
+      // shop's Christmas offer, the phone and e-mail on ostap.pl's contact page (its <article> held 33%).
+      // Below that share the whole body is the content.
+      if (found.length > 0 && textLen(found.first()) >= Math.max(1, bodyLen * MAIN_AREA_MIN_SHARE)) {
         $main = found.first();
         break;
       }

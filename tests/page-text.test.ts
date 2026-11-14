@@ -25,6 +25,12 @@ describe("page text", () => {
     expect(md.fullMarkdown).not.toContain("Szukaj");      // the search box is still not content
   }, 30000);
 
+  it("uses the whole body when the main area holds under half of the page's text", async () => {
+    const md = htmlToMarkdown(await fetchPage("https://www.ostap.pl/kontakt.html"));   // its <article> holds a third
+    expect(md.fullMarkdown).toContain("22 610 94 49");
+    expect(md.fullMarkdown).toContain("biuro@ostap.pl");
+  }, 30000);
+
   it("keeps line breaks apart (street number and postal code)", async () => {
     const md = htmlToMarkdown(await fetchPage("https://bostabeton.pl/kontakt/wytwornie/wytwornie-warszawa/"));
     expect(md.fullMarkdown).toContain("Płytowa 1\n03-046");
