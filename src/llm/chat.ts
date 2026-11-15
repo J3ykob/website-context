@@ -1071,6 +1071,10 @@ export class WebsiteChat {
       markTurn("packsScored");
       noteTurn("candidates", cands.map((p, i) => `${scores ? scores[i].toFixed(2) : "?"} ${p.title.slice(0, 60)}${p.url ? ` | ${p.url}` : ""}`));
       if (scores) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.5).sort((a, b) => b.s - a.s).slice(0, 4);
+      // Nothing reached the mark: the nearest pages go to the reply all the same (test variant "grey", measured before it
+      // becomes the rule). A hall's wedding page says "music is not included in the price" - the answer to "do you have a
+      // DJ?" - and scored 0.35; with no page at all the reply could only say it has no information (2026-11-15).
+      if (scores && !scored.length && turnVariant().includes("grey")) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.3).sort((a, b) => b.s - a.s).slice(0, 4);
       // Jev unavailable: the search's best pages instead of "no information" for everything.
       else { scored = cands.slice(0, 3).map((p) => ({ p, s: 0.5 })); console.warn(`[packs] ${this.context.tenantId}: pack scoring unavailable - search order used`); }
       console.log(`[packs] ${this.context.tenantId}: ${hits.length} hits (${hits.filter((h) => byId.has(String(h.metadata.id || ""))).length} in catalog, ids e.g. ${hits.slice(0, 2).map((h) => String(h.metadata.id || "?").slice(0, 24)).join(",")}), ${cands.length} candidates [${cands.map((p) => p.title.slice(0, 30)).join("; ")}] scores ${scores?.map((x) => x.toFixed(2)).join(",")} -> ${scored.map((x) => `${x.p.title.slice(0, 40)}=${x.s.toFixed(2)}`).join(" | ") || "none"}`);
@@ -1516,7 +1520,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       // with the quote (dworekstaropolski-1: the code's 285 x 60 = 17 100 zł, the reply's 305 zł = 18 300 zł went out).
       const [unsup, checks, amounts] = await Promise.all([
         !opts.noFacts && statements.length && jevEnabled() ? jevUnsupportedStatements(messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n"), statements, this.verifySources(sources, messages, 20000)).catch(() => null) : Promise.resolve(null),
-        jevEnabled() ? jevAsk({ conversation: convo, reply: text, ...(network ? { network_businesses: network.text.slice(0, 6000) } : {}) }, {
+        jevEnabled() ? jevAsk({ conversation: convo, reply: text, today: new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", day: "numeric", month: "long", year: "numeric" }).format(new Date()), ...(network ? { network_businesses: network.text.slice(0, 6000) } : {}) }, {
           offers: { type: "noul", instructions: opts.handoffKind === "network" ? "Does `reply` offer to check businesses from a local network for the customer (or ask whether to check them)?" : "Does `reply` offer to pass the customer's question or request on to the business's team (or ask whether to pass it on)?" },
           denies: { type: "noul", instructions: notOurs.length ? `Does \`reply\` flatly state that the business does NOT offer, sell, do or have something other than ${notOurs.map((p) => `"${p.slice(0, 200)}"`).join(", ")}?` : "Does `reply` flatly state that the business does NOT offer, sell, do or have something?" },
           contradicts: { type: "noul", instructions: "Does `reply` contradict itself (e.g. says it cannot recommend anyone and then recommends someone, or says something is unavailable and then offers it)? Saying we have no information on something and recommending another business for it is NOT a contradiction." },
@@ -1528,6 +1532,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
           meta: { type: "noul", instructions: "Does `reply` talk about an internal resource it was given instead of speaking as the business - e.g. 'in our information', 'w dostępnych informacjach', 'z naszych informacji wynika', 'w naszych materiałach / danych / źródłach', 'in the information provided', 'according to the data I have'? NOT this: naming the business's own website, price list, menu, offer, terms or regulations ('z naszego cennika wynika', 'na naszej stronie', 'our price list shows', 'w regulaminie'), answering a question about this chat itself (what it is, where its answers come from) by naming the website, the price list or the business's Whisp panel, or plain 'I don't have that information' / 'nie mam tej informacji' / 'we don't list it on our website'." },
           unanswered: { type: "noul", instructions: "Does the customer's latest message in `conversation` ask about several things, and does `reply` skip one of them without saying anything about it?" },
           claimsSent: { type: "noul", instructions: "Does `reply` say that the customer's request, question or details HAVE BEEN passed on, sent, forwarded or registered (already done, not offered)?" },
+          // A floor shop's October promotion was confirmed as still on in mid-November, with a total computed from it - the
+          // reply itself gave its dates ("obowiązuje od 1 do 31 października 2026", 2026-11-15); the date is in the prompt.
+          expired: { type: "noul", instructions: "Does `reply` present a promotion, offer, price or term as current or still available although the period `reply` itself gives for it ended before `today`?" },
           vouches: { type: "noul", instructions: "Does `reply` praise or vouch for another company (e.g. 'reliable', 'trusted', 'experienced', 'sprawdzona')?" },
           // W3: a wedding venue's chat gave a photographer's 3700 zł package as "the cheapest reportage we offer".
           ...(network ? { theirsAsOurs: { type: "noul", instructions: "Does `reply` present something that one of `network_businesses` offers - its service, product, package or price - as offered by us ('we offer', 'our', 'u nas', 'oferujemy', 'nasz')?" } as const } : {}),
@@ -1547,6 +1554,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (!wantOffer && nl("offers") >= 0.6) problems.push("it offers to pass the question on to our team, which this reply must not do");
       if (!network && !answeredOwn && nl("denies") >= 0.6) problems.push("it says we do not offer or do something, although our information simply does not cover it");
       if (nl("contradicts") >= 0.6) problems.push("it contradicts itself");
+      if (nl("expired") >= 0.6) { noteTurn("expired", nl("expired")); problems.push("it presents an offer as current although the period it gives for it has already ended - say plainly that it has ended, give no total from it, and say the current price needs confirming with us"); }
       if (nl("promises") >= 0.6) problems.push("it offers or promises something this chat cannot do (checking availability, calculating, measuring, booking, calling back) - offer nothing of the kind");
       if (nl("meta") >= 0.6) problems.push("it talks about 'our information' / 'materials' / 'data' instead of speaking as the business");
       if (nl("unanswered") >= 0.6) problems.push("it skips a part of the customer's question - answer every part, or say for that part that you don't know");
