@@ -1680,7 +1680,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
     const p = (async () => {
       const m = await import("../pricing/model.js");
       let hit = this.pricingCache.get(tenantId);
-      if (!hit || Date.now() - hit.at > 10 * 60_000) this.pricingCache.set(tenantId, (hit = { at: Date.now(), pb: await m.loadPricing(tenantId) }));
+      if (!hit || Date.now() - hit.at > 10 * 60_000) this.pricingCache.set(tenantId, (hit = { at: Date.now(), pb: await m.loadCurrentPricing(tenantId) }));
       const pb = hit.pb;
       if (!pb?.parts.length) return null;
       return m.quoteResult(pb, convo, { notes });

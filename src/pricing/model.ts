@@ -337,7 +337,7 @@ function partsOf(pages: { url: string; text: string }[], rules: Set<string>): { 
 export async function buildBusiness(tenantId: string, business: string, pages: { url: string; text: string }[], offerNames: string[], model = process.env.PRICING_MODEL || "anthropic/claude-opus-5.5", llms?: { gen: Llm; check: Llm }): Promise<PricingBusiness> {
   const usage = { usd: 0 };
   const llm = llms?.gen || reasonedLlm(model, usage);
-  const hash = createHash("sha1").update(`${model}\n${pages.map((p) => `${p.url}\n${p.text}`).join("\n")}`).digest("hex");
+  const hash = pagesHash(model, pages);
   // Rules pages (terms, delivery, deposits, discounts that apply to every offer) go into every part.
   const { jevAsk } = await import("../llm/jev.js");
   const rj = pages.length > 1 ? await jevAsk({ pages: pages.map((p) => `${p.url} - ${p.text.slice(0, 300)}`) }, Object.fromEntries(pages.map((_, k) => [`r${k}`, { type: "noul" as const, instructions: `Is \`pages[${k}]\` about terms that apply to all of the business's offers (rental or order conditions, delivery, deposits, discounts, minimums) rather than particular products?` }])), 15000).catch(() => null) : null;
@@ -400,6 +400,25 @@ const KEY = (tenantId: string) => `tenants/${tenantId}/pricing.json`;
 export async function savePricing(pb: PricingBusiness): Promise<void> {
   const { uploadToR2 } = await import("../storage/r2.js");
   await uploadToR2(KEY(pb.tenantId), JSON.stringify(pb), "application/json");
+}
+/** What a quoting model was built from: the builder's name and the offer pages' text (build-job.ts skips an unchanged one). */
+export function pagesHash(model: string, pages: { url: string; text: string }[]): string {
+  return createHash("sha1").update(`${model}\n${pages.map((p) => `${p.url}\n${p.text}`).join("\n")}`).digest("hex");
+}
+/**
+ * The business's quoting model when it was built from the offer pages its last scrape kept - null otherwise. A model
+ * outlived its pages: a make-up artist's packages went from 2500 / 3500 zł to 3000 / 4200 zł, the site was read again,
+ * and the chat kept quoting the model's old amounts as computed prices over the fresh price list (2026-11-15). A stale
+ * model is not used until it is built again (build-job.ts, scripts/pricing-build-local.ts).
+ */
+export async function loadCurrentPricing(tenantId: string): Promise<PricingBusiness | null> {
+  const pb = await loadPricing(tenantId);
+  if (!pb?.parts.length) return pb;
+  const { downloadFromR2 } = await import("../storage/r2.js");
+  const pages: { url: string; text: string }[] = await downloadFromR2(`tenants/${tenantId}/offer-pages.json`).then((b) => (b ? JSON.parse(b.toString("utf-8")) : [])).catch(() => []);
+  if (pagesHash(pb.model, pages) === pb.hash) return pb;
+  console.log(`[pricing] ${tenantId}: the quoting model of ${pb.builtAt?.slice(0, 10)} was built from other pages than the last scrape kept - not used until rebuilt`);
+  return null;
 }
 export async function loadPricing(tenantId: string): Promise<PricingBusiness | null> {
   const { downloadFromR2 } = await import("../storage/r2.js");

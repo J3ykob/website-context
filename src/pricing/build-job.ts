@@ -2,8 +2,7 @@
  * Builds and stores a business's quoting model (model.ts) from the offer pages its last scrape kept
  * (tenants/<id>/offer-pages.json). Skipped when the stored model was built from the same pages (hash).
  */
-import { createHash } from "node:crypto";
-import { buildBusiness, loadPricing, savePricing, type PricingBusiness } from "./model.js";
+import { buildBusiness, loadPricing, savePricing, pagesHash, type PricingBusiness } from "./model.js";
 
 const running = new Set<string>();
 
@@ -15,7 +14,7 @@ export async function buildPricingFor(tenantId: string, opts: { force?: boolean 
     const pages: { url: string; text: string }[] = await downloadFromR2(`tenants/${tenantId}/offer-pages.json`).then((b) => (b ? JSON.parse(b.toString("utf-8")) : [])).catch(() => []);
     if (!pages.length) return { skipped: "no offer pages kept - re-scrape the business first" };
     const model = process.env.PRICING_MODEL || "anthropic/claude-opus-5.5";
-    const hash = createHash("sha1").update(`${model}\n${pages.map((p) => `${p.url}\n${p.text}`).join("\n")}`).digest("hex");
+    const hash = pagesHash(model, pages);
     const prev = await loadPricing(tenantId);
     if (!opts.force && prev?.hash === hash) return { skipped: "pages unchanged since the last build" };
     const { loadOffer } = await import("../offer/store.js");

@@ -193,7 +193,7 @@ async function priceLists(project: Project, adverts: Advert[], mustAsk: string[]
   const quoting = process.env.PRICING_CHAT === "on";
   const quoteOf = async (tenantId: string, text: string) => {
     const m = await import("../pricing/model.js");
-    const pb = await m.loadPricing(tenantId).catch(() => null);
+    const pb = await m.loadCurrentPricing(tenantId).catch(() => null);
     return pb?.parts.length ? Promise.race([m.quoteText(pb, text).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 20000))]) : null;
   };
   const ids = [own, ...adverts.map((a) => a.tenantId).filter((id) => id !== own)];
