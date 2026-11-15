@@ -27,9 +27,16 @@ if (!siteUrl) { console.error(`No site address for ${tenantId} - pass it as the 
 
 const file = resolve(tmpdir(), `whisp-crawl-${tenantId}.jsonl.gz`);
 const writer = crawlFileWriter(file);
+// A shop with a catalogue (store API): its product pages are not read, as on the server (scrape-pipeline.ts) - the
+// server reads the catalogue itself when it builds the bot.
+const { readCatalogue, coveredByCatalogue } = await import("../src/scraper/catalogue.js");
+const catalogue = await readCatalogue(siteUrl).catch(() => null);
+if (catalogue) console.log(`Catalogue (${catalogue.source}): ${catalogue.items.length} products - their pages are not read`);
 const result = await crawlSite(siteUrl, {
   maxDepth: 10, rateLimit: 100, minGap: Number(process.env.SCRAPE_MIN_GAP_MS) || 500, concurrency: Number(process.env.SCRAPE_CONCURRENCY) || 12,
-  maxTime: (Number(process.env.SCRAPE_CRAWL_MIN) || 45) * 60 * 1000, triage: makeTriage(""), onPage: writer.onPage,
+  maxTime: (Number(process.env.SCRAPE_CRAWL_MIN) || 45) * 60 * 1000, onPage: writer.onPage,
+  skip: catalogue ? (u) => coveredByCatalogue(catalogue, u) : undefined, forceTriage: !!catalogue,
+  triage: makeTriage(catalogue ? "This is a shop whose products are read from its catalogue separately, so category and product listings are not needed." : ""),
 });
 const written = await writer.close();
 const size = (await stat(file)).size;

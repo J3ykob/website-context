@@ -166,6 +166,11 @@ export async function scrapeTenant(
     if (prevPages >= 5 && pagesScraped < prevPages * 0.3) {
       throw new Error(`Re-scrape of ${tenantId} found ${pagesScraped} page(s), its last scrape ${prevPages} - kept the last scrape`);
     }
+    // The site throttled every request and the crawl gave up: fewer pages than the bot has are not a newer picture of the
+    // site (2026-11-15: a florist's 19 pages were replaced by the 8 read before its host's 429s - 42%, above the gate above).
+    if (prevPages && crawlResult.stats.stoppedBy === "throttle" && pagesScraped < prevPages) {
+      throw new Error(`Re-scrape of ${tenantId} was throttled by the site after ${pagesScraped} page(s), its last scrape ${prevPages} - kept the last scrape`);
+    }
   }
 
   // --- Dedup for Vectorize: deterministic IDs + orphan cleanup ---

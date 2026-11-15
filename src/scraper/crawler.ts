@@ -95,7 +95,7 @@ export async function crawlSite(
   // From this many addresses on, each further page is judged before it is read: declared in the sitemap,
   // or pages already read on a site that declares none (candidates still waiting are judged too).
   const triageMin = Number(process.env.TRIAGE_MIN_URLS) || 300;
-  let stoppedBy: "time" | "pages" | "memory" | undefined;
+  let stoppedBy: "time" | "pages" | "memory" | "throttle" | undefined;
   // The server's memory is the other brake (2026-11-15: a shop's 1,400 product pages filled the 384 MB heap and the
   // whole server restarted, dropping 14 queued re-scrapes): at this share of the heap limit the crawl hands over the
   // pages it has, leaving the rest of the heap for building the bot from them.
@@ -182,7 +182,7 @@ export async function crawlSite(
       pausedUntil = Math.max(pausedUntil, Date.now() + waitMs);
       throttled = true;
       politeDelay = Math.min(8000, Math.max(1000, politeDelay * 2));
-      if (++throttledInRow >= 12 && !givenUp) { givenUp = true; console.warn(`  [${fetchResult.statusCode}] ${baseUrl.hostname} throttles every request - stopping with ${pages.length} page(s)`); }
+      if (++throttledInRow >= 12 && !givenUp) { givenUp = true; stoppedBy ??= "throttle"; console.warn(`  [${fetchResult.statusCode}] ${baseUrl.hostname} throttles every request - stopping with ${pages.length} page(s)`); }
       if (attempt <= 3) {
         console.log(`  [${fetchResult.statusCode}] throttled on ${normalizedUrl}, pausing ${Math.round(waitMs / 1000)}s (attempt ${attempt}/3)`);
         visited.delete(normalizedUrl);
@@ -325,9 +325,9 @@ export async function crawlSite(
   if (triageOn) console.log(`  [triage] ${skippedByTriage} page(s) judged not worth reading, ${pending.length} left unjudged`);
   // Never silent: a crawl stopped by its time or a caller's page count says how many addresses it left.
   const leftUnread = stoppedBy ? queue.filter((q) => !visited.has(normalizeUrl(q.url))).length + pending.length : 0;
-  if (stoppedBy && leftUnread) console.warn(`  [STOPPED] by ${stoppedBy === "time" ? "the crawl's time" : stoppedBy === "memory" ? `the server's memory (heap at ${Math.round(heapShare() * 100)}%)` : `the caller's ${opts.maxPages}-page count`}: ${pages.length} pages read, ${leftUnread} address(es) left unread`);
+  if (stoppedBy && leftUnread) console.warn(`  [STOPPED] by ${stoppedBy === "time" ? "the crawl's time" : stoppedBy === "throttle" ? "the site throttling every request" : stoppedBy === "memory" ? `the server's memory (heap at ${Math.round(heapShare() * 100)}%)` : `the caller's ${opts.maxPages}-page count`}: ${pages.length} pages read, ${leftUnread} address(es) left unread`);
   const stats: CrawlStats = {
-    ...(stoppedBy && leftUnread ? { stoppedBy, leftUnread } : {}),
+    ...(stoppedBy && (leftUnread || stoppedBy === "throttle") ? { stoppedBy, leftUnread } : {}),
     totalPages: visited.size,
     successPages: pages.length,
     failedPages: failures.length,
