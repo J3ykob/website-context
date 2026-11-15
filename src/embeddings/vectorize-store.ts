@@ -225,7 +225,11 @@ export class CloudflareVectorizeStore implements VectorStore {
 
   async delete(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    const prefixed = ids.map((id) => this.vecId(id));
+    const all = ids.map((id) => this.vecId(id));
+    // Vectorize takes at most 100 ids per delete (40007 "max id count is 100, got 644" - three re-scrapes of 2026-11-15
+    // left their removed passages searchable).
+    for (let k = 0; k < all.length; k += 100) {
+    const prefixed = all.slice(k, k + 100);
     const resp = await fetch(`${this.base}/delete_by_ids`, {
       method: "POST",
       headers: headers(),
@@ -236,6 +240,7 @@ export class CloudflareVectorizeStore implements VectorStore {
       // vectors (e.g. old pricing) live forever while the caller believes cleanup
       // happened — permanent retrieval pollution.
       throw new Error(`Vectorize delete failed (HTTP ${resp.status}): ${(await resp.text()).slice(0, 200)}`);
+    }
     }
   }
 

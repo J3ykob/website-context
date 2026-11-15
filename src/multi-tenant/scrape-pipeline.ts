@@ -168,8 +168,10 @@ export async function scrapeTenant(
     }
     // The site throttled every request and the crawl gave up: fewer pages than the bot has are not a newer picture of the
     // site (2026-11-15: a florist's 19 pages were replaced by the 8 read before its host's 429s - 42%, above the gate above).
-    if (prevPages && crawlResult.stats.stoppedBy === "throttle" && pagesScraped < prevPages) {
-      throw new Error(`Re-scrape of ${tenantId} was throttled by the site after ${pagesScraped} page(s), its last scrape ${prevPages} - kept the last scrape`);
+    // The same for a crawl the server's memory stopped (four bots lost a quarter to a half of their pages that night).
+    const cut = crawlResult.stats.stoppedBy;
+    if (prevPages && (cut === "throttle" || cut === "memory") && pagesScraped < prevPages) {
+      throw new Error(`Re-scrape of ${tenantId} was stopped by ${cut === "throttle" ? "the site's throttling" : "the server's memory"} after ${pagesScraped} page(s), its last scrape ${prevPages} - kept the last scrape`);
     }
   }
 

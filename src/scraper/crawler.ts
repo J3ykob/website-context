@@ -1,10 +1,18 @@
 import { safeFetch } from "./safe-url.js";
-import { getHeapStatistics } from "v8";
+import { getHeapStatistics, setFlagsFromString } from "v8";
+import { runInNewContext } from "vm";
 import { fetchPage, closeBrowser } from "./fetcher.js";
 import { extractPage } from "./extractor.js";
 import { fetchPdfAsPage } from "./pdf.js";
 import type { ScrapedPage, CrawlResult, CrawlOptions, CrawlStats, SiteMapNode } from "./types.js";
 import { createHash } from "crypto";
+
+// The collector, callable (node has it behind a flag; switched on here, for the crawl's memory brake only).
+let gc: (() => void) | null | undefined;
+function collect(): void {
+  if (gc === undefined) { try { setFlagsFromString("--expose-gc"); gc = runInNewContext("gc") as () => void; } catch { gc = null; } }
+  try { gc?.(); } catch { /* measured as it is */ }
+}
 
 const DEFAULT_OPTIONS: Required<Omit<CrawlOptions, "onPage" | "signal" | "skip" | "triage" | "forceTriage" | "maxTime">> = {
   // No page count decides what is read (owner, 2026-11-14: a 500-page ceiling cut a cake shop's 691 declared
@@ -99,8 +107,12 @@ export async function crawlSite(
   // The server's memory is the other brake (2026-11-15: a shop's 1,400 product pages filled the 384 MB heap and the
   // whole server restarted, dropping 14 queued re-scrapes): at this share of the heap limit the crawl hands over the
   // pages it has, leaving the rest of the heap for building the bot from them.
+  // What counts is what is still in use: the raw figure includes what the collector has not freed yet, and after a large
+  // crawl it stayed at 70-80% - the next eight crawls were stopped after 13-41 pages (2026-11-15). Over the mark, the
+  // collector runs first and the heap is measured again.
   const heapStop = Number(process.env.SCRAPE_HEAP_STOP) || 0.7;
   const heapShare = () => process.memoryUsage().heapUsed / getHeapStatistics().heap_size_limit;
+  const heapFull = () => { if (heapShare() < heapStop) return false; collect(); return heapShare() >= heapStop; };
   const runTriage = async (): Promise<void> => {
     const batch = pending.splice(0, 60); // smaller batches: each address gets attention
     if (!batch.length) return;
@@ -281,7 +293,7 @@ export async function crawlSite(
       // Safety stop, not a selection: the crawl hands over what it has read while the job still has time
       // to build the bot from it (a job that runs out of time fails whole and keeps nothing).
       if (options.maxTime && Date.now() - startTime >= options.maxTime) { stoppedBy = "time"; return; }
-      if (heapShare() >= heapStop) { stoppedBy = "memory"; return; }
+      if (heapFull()) { stoppedBy = "memory"; return; }
       if (options.signal?.aborted || givenUp) return; // the job timed out (or the site throttles everything): stop
       if (options.triage && !triageOn && pages.length >= triageMin) {
         triageOn = true;
