@@ -1071,10 +1071,6 @@ export class WebsiteChat {
       markTurn("packsScored");
       noteTurn("candidates", cands.map((p, i) => `${scores ? scores[i].toFixed(2) : "?"} ${p.title.slice(0, 60)}${p.url ? ` | ${p.url}` : ""}`));
       if (scores) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.5).sort((a, b) => b.s - a.s).slice(0, 4);
-      // Nothing reached the mark: the nearest pages go to the reply all the same (test variant "grey", measured before it
-      // becomes the rule). A hall's wedding page says "music is not included in the price" - the answer to "do you have a
-      // DJ?" - and scored 0.35; with no page at all the reply could only say it has no information (2026-11-15).
-      if (scores && !scored.length && turnVariant().includes("grey")) scored = cands.map((p, i) => ({ p, s: scores[i] })).filter((x) => x.s >= 0.3).sort((a, b) => b.s - a.s).slice(0, 4);
       // Jev unavailable: the search's best pages instead of "no information" for everything.
       else { scored = cands.slice(0, 3).map((p) => ({ p, s: 0.5 })); console.warn(`[packs] ${this.context.tenantId}: pack scoring unavailable - search order used`); }
       console.log(`[packs] ${this.context.tenantId}: ${hits.length} hits (${hits.filter((h) => byId.has(String(h.metadata.id || ""))).length} in catalog, ids e.g. ${hits.slice(0, 2).map((h) => String(h.metadata.id || "?").slice(0, 24)).join(",")}), ${cands.length} candidates [${cands.map((p) => p.title.slice(0, 30)).join("; ")}] scores ${scores?.map((x) => x.toFixed(2)).join(",")} -> ${scored.map((x) => `${x.p.title.slice(0, 40)}=${x.s.toFixed(2)}`).join(" | ") || "none"}`);
@@ -1474,6 +1470,9 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       { content: `This is ${account ? "the chat on the website of" : "a demo of the chat, made by Whisp, for the website of"} ${brand}${this.getAllowedDomain() ? ` (${this.getAllowedDomain()})` : ""}: it answers customers' questions for the business from the business's own website and price list and what the business added.` },
       // Offering to check the network is something this chat really does (on a yes it searches) - not a claim about the business.
       ...(opts.handoffKind === "network" ? [{ content: "This chat can check businesses from our local Whisp network for the customer's question, if the customer wants that." }] : []),
+      // The date is a fact too: "today is 15 November 2026, so the promotion has ended" was blocked as unsupported, and the
+      // rewrite could no longer say why an October offer is over (2026-11-15).
+      { content: `Today is ${new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date())} (Warsaw time).` },
       ...(about ? [{ content: about }] : [])];
     const factsText = `${renderOfficialInfo(this.context.businessProfile)}\n${passages.join("\n")}`;
     const hasPhone = /(?:\+?\d[\d\s().-]{7,}\d)/.test(factsText.replace(/\d{2}-\d{3}/g, "")), hasEmail = /[\w.+-]+@[\w-]+\.[\w.]+/.test(factsText);
