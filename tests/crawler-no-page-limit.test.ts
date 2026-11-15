@@ -51,4 +51,12 @@ describe("crawl without a page limit", () => {
     expect(r.stats.stoppedBy).toBe("time");
     expect(r.stats.leftUnread).toBeGreaterThan(200);
   }, 120000);
+
+  it("the server's memory stops it before the heap is full", async () => {
+    process.env.SCRAPE_HEAP_STOP = "0.000001"; // any heap is over this share: the crawl hands over at once
+    const { crawlSite } = await import("../src/scraper/crawler.js");
+    const r = await crawlSite("https://cukiernia.example/", base).finally(() => { delete process.env.SCRAPE_HEAP_STOP; });
+    expect(r.stats.stoppedBy).toBe("memory");
+    expect(r.pages.length).toBeLessThan(20);
+  }, 120000);
 });

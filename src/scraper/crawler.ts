@@ -1,4 +1,5 @@
 import { safeFetch } from "./safe-url.js";
+import { getHeapStatistics } from "v8";
 import { fetchPage, closeBrowser } from "./fetcher.js";
 import { extractPage } from "./extractor.js";
 import { fetchPdfAsPage } from "./pdf.js";
@@ -94,7 +95,12 @@ export async function crawlSite(
   // From this many addresses on, each further page is judged before it is read: declared in the sitemap,
   // or pages already read on a site that declares none (candidates still waiting are judged too).
   const triageMin = Number(process.env.TRIAGE_MIN_URLS) || 300;
-  let stoppedBy: "time" | "pages" | undefined;
+  let stoppedBy: "time" | "pages" | "memory" | undefined;
+  // The server's memory is the other brake (2026-11-15: a shop's 1,400 product pages filled the 384 MB heap and the
+  // whole server restarted, dropping 14 queued re-scrapes): at this share of the heap limit the crawl hands over the
+  // pages it has, leaving the rest of the heap for building the bot from them.
+  const heapStop = Number(process.env.SCRAPE_HEAP_STOP) || 0.7;
+  const heapShare = () => process.memoryUsage().heapUsed / getHeapStatistics().heap_size_limit;
   const runTriage = async (): Promise<void> => {
     const batch = pending.splice(0, 60); // smaller batches: each address gets attention
     if (!batch.length) return;
@@ -275,6 +281,7 @@ export async function crawlSite(
       // Safety stop, not a selection: the crawl hands over what it has read while the job still has time
       // to build the bot from it (a job that runs out of time fails whole and keeps nothing).
       if (options.maxTime && Date.now() - startTime >= options.maxTime) { stoppedBy = "time"; return; }
+      if (heapShare() >= heapStop) { stoppedBy = "memory"; return; }
       if (options.signal?.aborted || givenUp) return; // the job timed out (or the site throttles everything): stop
       if (options.triage && !triageOn && pages.length >= triageMin) {
         triageOn = true;
@@ -318,7 +325,7 @@ export async function crawlSite(
   if (triageOn) console.log(`  [triage] ${skippedByTriage} page(s) judged not worth reading, ${pending.length} left unjudged`);
   // Never silent: a crawl stopped by its time or a caller's page count says how many addresses it left.
   const leftUnread = stoppedBy ? queue.filter((q) => !visited.has(normalizeUrl(q.url))).length + pending.length : 0;
-  if (stoppedBy && leftUnread) console.warn(`  [STOPPED] by ${stoppedBy === "time" ? "the crawl's time" : `the caller's ${opts.maxPages}-page count`}: ${pages.length} pages read, ${leftUnread} address(es) left unread`);
+  if (stoppedBy && leftUnread) console.warn(`  [STOPPED] by ${stoppedBy === "time" ? "the crawl's time" : stoppedBy === "memory" ? `the server's memory (heap at ${Math.round(heapShare() * 100)}%)` : `the caller's ${opts.maxPages}-page count`}: ${pages.length} pages read, ${leftUnread} address(es) left unread`);
   const stats: CrawlStats = {
     ...(stoppedBy && leftUnread ? { stoppedBy, leftUnread } : {}),
     totalPages: visited.size,

@@ -88,7 +88,7 @@ export interface CrawlStats {
   staticPages: number;
   dynamicPages: number;
   /** Set when the crawl stopped with addresses still unread: what stopped it and how many were left. */
-  stoppedBy?: "time" | "pages";
+  stoppedBy?: "time" | "pages" | "memory";
   leftUnread?: number;
 }
 
