@@ -1043,19 +1043,25 @@ export class WebsiteChat {
     // A second search with the request's parts finds the pages that the customer's own words or language miss - a
     // Ukrainian "віброплита" found no compactor page (2026-11-04).
     const search = (q: string) => searchContext(q, this.embeddingProvider, this.store, { topK: Math.max(this.topK, 20) }).catch((e) => { console.warn(`[packs] ${this.context.tenantId}: search failed - ${(e as Error).message}`); return [] as Awaited<ReturnType<typeof searchContext>>; });
-    const [first, parts] = await Promise.all([search(query), partsP]);
+    // A follow-up's query carries the previous question and the start of our own reply (turnQuery): a new question
+    // in it ("give me the NIP" after "what is this chat?") was searched mostly by the old subject, and by words of
+    // ours that differ from run to run - its passage ranked 1st alone and 49th in that query (traces 2026-11-18).
+    // The message is searched on its own too, and comes first.
+    const alone = followup && query !== question && (process.env.SEARCH_OWN_QUESTION === "on" || turnVariant().includes("ownq"));
+    const [own, first, parts] = await Promise.all([alone ? search(question) : Promise.resolve([]), search(query), partsP]);
+    const lists = [own, first];
+    if (parts.length) { lists.push(await search(parts.join("\n"))); noteTurn("parts", parts); }
     let hits = first;
-    if (parts.length) {
-      // Both searches' hits by rank, taken in turn (each list keeps its order), each passage once.
-      const more = await search(parts.join("\n"));
+    if (lists.filter((l) => l.length).length > 1) {
+      // The searches' hits by rank, taken in turn (each list keeps its order), each passage once.
       const seen = new Set<string>();
       hits = [];
-      for (let k = 0; k < Math.max(first.length, more.length); k++) for (const h of [first[k], more[k]]) {
+      for (let k = 0; k < Math.max(...lists.map((l) => l.length)); k++) for (const h of lists.map((l) => l[k])) {
         const id = h ? String(h.metadata.id || h.content.slice(0, 80)) : "";
         if (h && !seen.has(id)) { seen.add(id); hits.push(h); }
       }
-      noteTurn("parts", parts);
     }
+    if (alone) noteTurn("searchedAlone", own.length);
     markTurn("searched");
     let scored: { p: Pack; s: number }[] = [];
     let hitIds: string[] | undefined;
