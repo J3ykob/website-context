@@ -275,7 +275,7 @@ async function authMiddleware(req: express.Request, res: express.Response, next:
   }
   next();
 }
-const PANEL_FREE = ["/api/dashboard/embed-code", "/api/dashboard/billing"];
+const PANEL_FREE = ["/api/dashboard/embed-code", "/api/dashboard/billing", "/api/dashboard/sites", "/api/dashboard/switch-site"];
 // Where Stripe sends the business back: our own address (BASE_URL), never the request's Host header.
 function publicBase(): string {
   let base = (process.env.BASE_URL || "").trim();
@@ -2075,6 +2075,26 @@ app.get("/build", (_, res) => {
 });
 
 // Stats
+// One owner, several businesses (src/multi-tenant/sites.ts): the sites this session's owner may open, and a new
+// session for one of them. Open without a subscription (PANEL_FREE): an unpaid site must not trap the owner in it.
+app.get("/api/dashboard/sites", authMiddleware, async (req, res) => {
+  const { ownedSites } = await import("../src/multi-tenant/sites.js");
+  const current = getTenant((req as any).tenantId);
+  const sites = current ? ownedSites(current) : [];
+  res.json({ current: current?.id || null, sites: sites.map((t) => ({ tenantId: t.id, domain: t.domain, name: t.settings?.siteCard?.brand || t.brandName || t.domain, status: t.status })) });
+});
+app.post("/api/dashboard/switch-site", authMiddleware, async (req, res) => {
+  const { maySwitch } = await import("../src/multi-tenant/sites.js");
+  const current = getTenant((req as any).tenantId);
+  const target = String(req.body?.tenantId || "");
+  // The same answer for a site that does not exist and one that is somebody else's.
+  if (!current || !target || !maySwitch(current, target)) { res.status(403).json({ error: "Not your site" }); return; }
+  const admin = String(req.headers.authorization || "").slice(7).startsWith("adm-");
+  const token = await createSession(target, { admin });
+  console.log(`[sites] ${current.id} -> ${target}: switched${admin ? " (admin session)" : ""}`);
+  res.json({ token, tenantId: target });
+});
+
 app.get("/api/dashboard/stats", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId;
   try {

@@ -137,6 +137,16 @@
     .btn-success:hover { background: rgba(16,185,129,0.2); }
     .btn-ghost { background:none; color:var(--text-3); }
     .btn-ghost:hover { color:var(--text); }
+    /* One owner, several sites: the switch sits next to the site's name (shown only with two or more). */
+    .site-switch {
+      font-family: var(--font); font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+      color: var(--text); background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.14); border-radius: 10px;
+      padding: 9px 12px; max-width: 220px; cursor: pointer; transition: border-color 0.15s;
+    }
+    .site-switch:hover, .site-switch:focus { border-color: var(--line-bright); outline: none; }
+    .site-switch option { color: #0b1220; background: #fff; }
+    .site-switch:disabled { opacity: 0.6; cursor: wait; }
     .btn.lang-toggle { color: var(--text-3); min-width: 44px; justify-content: center; }
     .btn.lang-toggle:hover { color: var(--text); }
 
@@ -737,6 +747,7 @@
             <span id="site-url">&mdash;</span>
           </div>
         </div>
+        <select class="site-switch" id="site-switch" hidden onchange="switchSite(this.value)" title="Switch site" data-i18n-title="top.switchSite" aria-label="Switch site"></select>
       </div>
       <div class="topbar-right">
         <a class="btn btn-outline" id="open-site-btn" href="#" target="_blank" data-i18n="top.openSite">Open site</a>
@@ -944,6 +955,7 @@
         "top.recordFlow": "Record flow",
         "top.billing": "Billing",
         "top.logout": "Logout",
+        "top.switchSite": "Switch site",
         "header.fallback": "Dashboard",
         "header.yourBusiness": "Your business",
         "stats.today": "Conversations today",
@@ -1124,6 +1136,7 @@
         "top.recordFlow": "Nagraj proces",
         "top.billing": "Płatności",
         "top.logout": "Wyloguj",
+        "top.switchSite": "Przełącz stronę",
         "header.fallback": "Panel",
         "header.yourBusiness": "Twoja firma",
         "stats.today": "Rozmowy dzisiaj",
@@ -1440,6 +1453,42 @@
     }
 
     var API = window.location.origin;
+
+    // One owner, several sites: the list comes from the server (only sites this owner has proven are theirs); a
+    // choice gets a new session for that site and the panel reloads in it. Hidden with a single site.
+    async function loadSites() {
+      try {
+        var d = await (await authFetch(API + "/api/dashboard/sites")).json();
+        var sel = document.getElementById("site-switch");
+        if (!d || !d.sites || d.sites.length < 2) { sel.hidden = true; return; }
+        sel.textContent = "";
+        d.sites.forEach(function(x) {
+          var o = document.createElement("option");
+          var host = String(x.domain || "").replace(/^www\./, "");
+          o.value = x.tenantId;
+          o.textContent = x.name && x.name !== x.domain ? x.name + " (" + host + ")" : host || x.tenantId;
+          if (x.tenantId === d.current) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.dataset.current = d.current || "";
+        sel.hidden = false;
+      } catch (e) {}
+    }
+    async function switchSite(tenantId) {
+      var sel = document.getElementById("site-switch");
+      if (!tenantId || tenantId === sel.dataset.current) return;
+      sel.disabled = true;
+      try {
+        var r = await authFetch(API + "/api/dashboard/switch-site", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenantId }) });
+        var d = await r.json();
+        if (!r.ok || !d.token) throw new Error("switch refused");
+        localStorage.setItem("wctx-dashboard-token", d.token);
+        localStorage.setItem("wctx-tenant-id", d.tenantId);
+        window.location.reload();
+      } catch (e) { sel.value = sel.dataset.current; sel.disabled = false; }
+    }
+    if (AUTH_TOKEN) loadSites();
+
     var refreshTimer = null;
     var chunksPage = 0;
     var chunksSearch = "";
