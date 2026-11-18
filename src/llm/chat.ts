@@ -1047,7 +1047,7 @@ export class WebsiteChat {
     // in it ("give me the NIP" after "what is this chat?") was searched mostly by the old subject, and by words of
     // ours that differ from run to run - its passage ranked 1st alone and 49th in that query (traces 2026-11-18).
     // The message is searched on its own too, and comes first.
-    const alone = followup && query !== question && (process.env.SEARCH_OWN_QUESTION === "on" || turnVariant().includes("ownq"));
+    const alone = followup && query !== question && process.env.SEARCH_OWN_QUESTION !== "off";
     const [own, first, parts] = await Promise.all([alone ? search(question) : Promise.resolve([]), search(query), partsP]);
     const lists = [own, first];
     if (parts.length) { lists.push(await search(parts.join("\n"))); noteTurn("parts", parts); }
