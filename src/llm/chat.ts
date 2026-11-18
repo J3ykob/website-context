@@ -770,7 +770,7 @@ export class WebsiteChat {
       const what = offer.kind === "network" ? "to check businesses from our local network for the customer's question" : "to pass the customer's question on to our team";
       const a = await jevAsk({ our_offer: `We offered ${what} and asked whether they want that. Our reply was: ${ourReply.slice(-600)}`, message: question }, {
         answer: { type: "choice", instructions: "How does the customer's `message` answer `our_offer`?", criteria: {
-          yes: offer.kind === "network" ? "Explicitly agrees (e.g. 'tak', 'tak, sprawdź', 'yes please', 'proszę')." : "Explicitly agrees to have it passed on (e.g. 'tak, przekaż', 'yes please', 'proszę'), or replies with their contact details (name, phone, e-mail, address).",
+          yes: offer.kind === "network" ? "Explicitly agrees (e.g. 'tak', 'tak, sprawdź', 'yes please', 'proszę')." : "Explicitly agrees to have it passed on (e.g. 'tak, przekaż', 'yes please', 'proszę'), or replies with their contact details (name, phone, e-mail, address), or goes on with the details of what they need for it to be passed on (a date, a place, a number of people, a quantity).",
           what: "Asks what that means or how it works.",
           no: "Declines (e.g. 'nie', 'nie trzeba', 'no thanks').",
           other: "Anything else: thanks or ok without agreeing, a new question, another topic.",
@@ -884,13 +884,7 @@ export class WebsiteChat {
           else {
             // The form opens (and reads the message) in the background while the answer streams: run one after the
             // other they took 14.7 s before the first word. The reply asks for the form's details itself.
-            const collectP = this.startCollect(picked[0], sessionKey, question, undefined, undefined, sanitizedMessages);
-            const fields = picked[0].requiredInputs.filter((f) => f.required).map((f) => f.label).slice(0, 3);
-            const answer = await this.packsReply(sanitizedMessages, sessionKey, onToken, { rt, extra: [BEHAVIOUR.orderQuestion(fields)], formOpen: true, work });
-            const started = await collectP.catch(() => null);
-            const s = this.collectSessions.get(sessionKey);
-            if (s?.transcript.length && s.transcript[s.transcript.length - 1].startsWith("Assistant:")) s.transcript[s.transcript.length - 1] = `Assistant: ${answer.message}`;
-            return { ...answer, ...(started?.collect ? { collect: started.collect } : {}) };
+            return this.answerAndCollect(picked[0], sanitizedMessages, sessionKey, question, onToken, rt, work);
           }
         }
         else { const started = this.beginFlowSession(sessionKey, picked[0]); r = { message: started.message, sources: [], flowSession: { active: true, status: "choosing", flowId: picked[0].id, complete: false } }; }
@@ -898,6 +892,19 @@ export class WebsiteChat {
         return r;
       }
       // Not offered here (or nothing to start): answered like any question - the network may have it.
+    }
+    // A quote asked for ("wyceń mi zlecenie") that nothing here prices - no priced item of ours, no quote of our own
+    // program - at a business with one inquiry form: the form opens with the answer, as for an order that also asks.
+    // It was answered "this chat only answers questions" and the request went nowhere (greatevents.pl, 2026-11-18).
+    if (rt && rt.intent === "calculate" && work && !st.owner && !this.collectSessions.has(sessionKey)) {
+      const forms = this.routableFlows().filter((f) => f.executionMode === "collect");
+      if (forms.length === 1) {
+        work.start();
+        const [m, q] = await Promise.all([work.products.catch(() => null), work.quote.catch(() => null)]);
+        const priced = !!m?.items.some((i) => i.price_value != null || i.components.some((c) => c.price_value != null)) || !!q?.facts.length || !!q?.covered;
+        noteTurn("quoteToForm", !priced);
+        if (!priced) return this.answerAndCollect(forms[0], sanitizedMessages, sessionKey, question, onToken, rt, work);
+      }
     }
     // A calculation. The business's own quote for the whole request, and quantities only (pure), decide as before;
     // otherwise which parts are ours (src/network/coverage.ts): a part we don't have that a network business has -> the
@@ -1635,6 +1642,18 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       return { ...r, ...(gap ? { unknownQuestion: gap } : {}) };
     }
     return finish(final, verdict.offers);
+  }
+
+  /** A form opened together with the checked answer, which asks for the first details the form still needs. The form
+   * opens (and reads the message) in the background while the answer streams: one after the other took 14.7 s. */
+  private async answerAndCollect(flow: FlowDefinition, messages: ChatMessage[], sessionKey: string, question: string, onToken: (t: string) => void, rt: TurnRoute | null, work: TurnWork | null): Promise<ChatResponse> {
+    const collectP = this.startCollect(flow, sessionKey, question, undefined, undefined, messages);
+    const fields = flow.requiredInputs.filter((f) => f.required).map((f) => f.label).slice(0, 3);
+    const answer = await this.packsReply(messages, sessionKey, onToken, { rt, extra: [BEHAVIOUR.orderQuestion(fields)], formOpen: true, work });
+    const started = await collectP.catch(() => null);
+    const s = this.collectSessions.get(sessionKey);
+    if (s?.transcript.length && s.transcript[s.transcript.length - 1].startsWith("Assistant:")) s.transcript[s.transcript.length - 1] = `Assistant: ${answer.message}`;
+    return { ...answer, ...(started?.collect ? { collect: started.collect } : {}) };
   }
 
   /** The turn's search query: a follow-up or a short message keeps its subject - the previous question and what our last reply was about. */
