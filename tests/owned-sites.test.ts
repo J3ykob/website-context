@@ -47,3 +47,14 @@ describe("the sites one owner may switch between", () => {
     expect(ownedSites(site("nopass", { ownerPasswordHash: null }), [victim])).toEqual([]);
   });
 });
+
+describe("a switched session remembers the account it came from", () => {
+  it("reads the origin out of a switched token, with or without the admin mark, and nothing out of a login's token", async () => {
+    const { sessionOrigin } = await import("../src/multi-tenant/d1-auth.js");
+    const via = `via.${Buffer.from("www_firma_pl").toString("base64url")}.${"a".repeat(64)}`;
+    expect(sessionOrigin(via)).toBe("www_firma_pl");
+    expect(sessionOrigin(`adm-${via}`)).toBe("www_firma_pl");
+    expect(sessionOrigin("a".repeat(64))).toBeNull();
+    expect(sessionOrigin(`adm-${"a".repeat(64)}`)).toBeNull();
+  });
+});

@@ -39,12 +39,26 @@ export function generateApiKey(): string {
   return randomBytes(16).toString("hex");
 }
 
-/** Create a 7-day session for a tenant; stored in D1. An admin's session (support) is marked "adm-". */
-export async function createSession(tenantId: string, opts: { admin?: boolean } = {}): Promise<string> {
-  const token = `${opts.admin ? "adm-" : ""}${randomBytes(32).toString("hex")}`;
+/**
+ * Create a 7-day session for a tenant; stored in D1. An admin's session (support) is marked "adm-". A session opened
+ * by switching sites (src/multi-tenant/sites.ts) carries the account the owner logged in to (`via`): the site switched
+ * to may have no password of its own, and the way back is judged by that account. The token is ours and looked up
+ * whole, so what it carries cannot be made up by a client.
+ */
+export async function createSession(tenantId: string, opts: { admin?: boolean; via?: string } = {}): Promise<string> {
+  const via = opts.via ? `via.${Buffer.from(opts.via).toString("base64url")}.` : "";
+  const token = `${opts.admin ? "adm-" : ""}${via}${randomBytes(32).toString("hex")}`;
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   await query("INSERT INTO sessions (token, tenant_id, expires_at) VALUES (?, ?, ?)", [token, tenantId, expiresAt]);
   return token;
+}
+
+/** The account a switched session came from (createSession `via`), or null for a login's own session. */
+export function sessionOrigin(token: string): string | null {
+  const t = token.startsWith("adm-") ? token.slice(4) : token;
+  if (!t.startsWith("via.")) return null;
+  const enc = t.split(".")[1] || "";
+  try { return Buffer.from(enc, "base64url").toString("utf-8") || null; } catch { return null; }
 }
 
 /** Validate a session token; returns tenantId or null. Deletes expired tokens. */

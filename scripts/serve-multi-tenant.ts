@@ -2077,21 +2077,31 @@ app.get("/build", (_, res) => {
 // Stats
 // One owner, several businesses (src/multi-tenant/sites.ts): the sites this session's owner may open, and a new
 // session for one of them. Open without a subscription (PANEL_FREE): an unpaid site must not trap the owner in it.
+// The owner's account is the one they logged in to: a session opened by a switch carries it (d1-auth.ts `via`), since
+// the site switched to may have no password of its own - judged by itself it listed nothing, and there was no way back.
+async function siteOwner(req: express.Request): Promise<{ account: ReturnType<typeof getTenant>; admin: boolean }> {
+  const { sessionOrigin } = await import("../src/multi-tenant/d1-auth.js");
+  const token = String(req.headers.authorization || "").slice(7);
+  return { account: getTenant(sessionOrigin(token) || (req as any).tenantId), admin: token.startsWith("adm-") };
+}
 app.get("/api/dashboard/sites", authMiddleware, async (req, res) => {
   const { ownedSites } = await import("../src/multi-tenant/sites.js");
-  const current = getTenant((req as any).tenantId);
-  const sites = current ? ownedSites(current) : [];
-  res.json({ current: current?.id || null, sites: sites.map((t) => ({ tenantId: t.id, domain: t.domain, name: t.settings?.siteCard?.brand || t.brandName || t.domain, status: t.status })) });
+  const here = String((req as any).tenantId);
+  const { account } = await siteOwner(req);
+  const sites = account ? ownedSites(account) : [];
+  // A switched session whose account no longer owns the site it is in lists nothing.
+  const mine = sites.some((t) => t.id === here) ? sites : [];
+  res.json({ current: here, sites: mine.map((t) => ({ tenantId: t.id, domain: t.domain, name: t.settings?.siteCard?.brand || t.brandName || t.domain, status: t.status })) });
 });
 app.post("/api/dashboard/switch-site", authMiddleware, async (req, res) => {
   const { maySwitch } = await import("../src/multi-tenant/sites.js");
-  const current = getTenant((req as any).tenantId);
+  const here = String((req as any).tenantId);
+  const { account, admin } = await siteOwner(req);
   const target = String(req.body?.tenantId || "");
   // The same answer for a site that does not exist and one that is somebody else's.
-  if (!current || !target || !maySwitch(current, target)) { res.status(403).json({ error: "Not your site" }); return; }
-  const admin = String(req.headers.authorization || "").slice(7).startsWith("adm-");
-  const token = await createSession(target, { admin });
-  console.log(`[sites] ${current.id} -> ${target}: switched${admin ? " (admin session)" : ""}`);
+  if (!account || !target || !maySwitch(account, here) || !maySwitch(account, target)) { res.status(403).json({ error: "Not your site" }); return; }
+  const token = await createSession(target, { admin, ...(target === account.id ? {} : { via: account.id }) });
+  console.log(`[sites] ${account.id}: ${here} -> ${target}${admin ? " (admin session)" : ""}`);
   res.json({ token, tenantId: target });
 });
 
