@@ -1235,10 +1235,16 @@ export class WebsiteChat {
       answered = answeredOwn = passages.length > 0;
       // Relevant packs, but do they answer it fully? If not: what we know + the missing detail + the offer to ask the team.
       let partial = false;
+      // A price or a quote is asked; whether our information gives it (unknown counts as given: no offer on a guess).
+      const asksPriceNow = !!rt && (rt.price >= 0.5 || rt.intent === "calculate");
+      let priceGiven = true;
       if (answered && jevEnabled()) {
         const f = await jevAsk({ conversation: convo, our_information: passages.join("\n\n").slice(0, 40000) }, {
           full: { type: "noul", instructions: "Does `our_information` contain everything needed to answer the customer's LATEST message in `conversation` (every part and detail asked)?" },
+          // Asked with it when a price is asked: "priced individually" answers the question in full, and gives no price.
+          ...(asksPriceNow ? { priceGiven: { type: "noul" as const, instructions: "Does `our_information` give the price of what the customer asks about in their LATEST message in `conversation` - an amount for it, or the rates it is computed from? A starting price only (\"from ...\"), or a statement that prices are set individually or on request, is not the price." } } : {}),
         }, 5000).catch(() => null);
+        if (asksPriceNow) { priceGiven = ((f?.priceGiven as JevNoulAnswer | undefined)?.noul ?? 1) >= 0.5; noteTurn("priceGiven", (f?.priceGiven as JevNoulAnswer | undefined)?.noul); }
         noteTurn("full", (f?.full as JevNoulAnswer | undefined)?.noul);
         markTurn("full");
         partial = ((f?.full as JevNoulAnswer | undefined)?.noul ?? 1) < 0.5;
@@ -1361,6 +1367,10 @@ export class WebsiteChat {
             behaviour.push(owner || contactGiven ? BEHAVIOUR.partialBare : BEHAVIOUR.partial);
             if (offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = rt && rt.price >= 0.5 && !pricedHere ? "quote" : "question"; }
           }
+          // A price asked that our information does not give, though it answers the question ("we price individually",
+          // a starting price): the quote request is offered too - it was offered only for a missing detail, and
+          // greatevents.pl's customer with a date and 240 guests was told the starting price five times (2026-11-18).
+          else if (asksPriceNow && !priceGiven && !pricedHere && offerOk && !opts.handoffKind) { behaviour.push(BEHAVIOUR.handoff); opts.handoffKind = "quote"; noteTurn("quoteOffered", true); }
           if (offered) behaviour.push(BEHAVIOUR.offerNetwork(offered.parts));
           noteTurn("partialOffer", { netHas, late: found === null, offerOk, partial, pricedHere, kind: opts.handoffKind || null });
         }

@@ -51,6 +51,17 @@ export class TenantManager {
   private bgeProvider: BGEEmbeddingProvider;
   private evictionInterval: ReturnType<typeof setInterval>;
 
+  /**
+   * The business's forms. One that somebody owns on Whisp has the default inquiry form (src/flows/collect-store.ts),
+   * created on its first load: before, only the network's members got it, and a business that signed up on its own had
+   * no form at all - a customer asking for a quote was told the chat "only answers questions" (greatevents.pl,
+   * 2026-11-18). Never for an unclaimed demo: its inquiries would go to a scraped address that never asked for them.
+   */
+  private async flowsOf(tenantId: string) {
+    if (hasOwnerAccount(tenantId)) await ensureCollectFlow(tenantId).catch((e) => console.warn(`[flows] ${tenantId}: no inquiry form - ${(e as Error).message}`));
+    return getFlows(tenantId);
+  }
+
   constructor() {
     // Shared BGE provider across all tenants
     this.bgeProvider = new BGEEmbeddingProvider({
@@ -159,7 +170,7 @@ export class TenantManager {
       })),
       // Flows come from the R2-backed flow-store (source of truth), not meta.flows
       // (which was scrape-time only) — so owner-recorded flows actually reach the bot.
-      flows: await getFlows(meta.tenantId),
+      flows: await this.flowsOf(meta.tenantId),
       chunks: [], // Chunks live in Vectorize, not in memory
       businessProfile: meta.officialInfo || undefined,
     };
