@@ -2090,6 +2090,7 @@
 }\
 \
 .wctx-sources {\
+  display:none;\
   margin-top:12px;\
   font-size:11px;\
   color:rgba(10,10,10,0.3);\
