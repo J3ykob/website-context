@@ -60,27 +60,34 @@ export function buildPackIndex(catalog: KnowledgeCatalog | null, articles?: Set<
 /** Candidate packs for this turn: the pages of the passages vector search found, best first, plus the
  *  small topic packs of their catalogs and the contact/locations topics. */
 export function candidatePacks(index: PackIndex, hits: { content?: string; metadata: Record<string, unknown> }[], max = 14): Pack[] {
-  // A small site: every pack is judged (search had ranked the services page out of a 25-passage site).
+  const out: Pack[] = [];
+  // Search hits the catalog doesn't know (what the owner typed or uploaded in the panel, pages scraped after it was
+  // built): a pack of their own - per page, and per entry when it has no page (two typed entries are two subjects).
+  const loose = new Map<string, Pack>();
+  const looseHit = (h: { content?: string; metadata: Record<string, unknown> }): boolean => {
+    const url = String(h.metadata.url || "");
+    if (index.byUrl.has(url) || !h.content) return false;
+    const key = url || `entry:${String(h.metadata.id || h.content.slice(0, 80))}`;
+    let p = loose.get(key);
+    if (!p) { p = { id: `hit:${key}`, title: String(h.metadata.title || url), url, catalogs: [], chunks: [], chars: 0 }; loose.set(key, p); out.push(p); }
+    p.chunks.push({ id: String(h.metadata.id || `${key}#${p.chunks.length}`), catalogId: "", content: h.content, url, title: p.title, type: String(h.metadata.type || "") });
+    p.chars += h.content.length;
+    return true;
+  };
+  // A small site: every pack is judged (search had ranked the services page out of a 25-passage site) - and the
+  // owner's own entries the search found with them (they were left out: "wyceny" typed in the panel, 2026-11-18).
   if (index.packs.size <= 18) {
+    for (const h of hits) looseHit(h);
     const all = [...index.packs.values()];
     const rank = (p: Pack) => { const i = hits.findIndex((h) => String(h.metadata.url || "") === p.url); return i < 0 ? 999 : i; };
-    return all.sort((a, b) => rank(a) - rank(b));
+    return [...out, ...all.sort((a, b) => rank(a) - rank(b))];
   }
-  const out: Pack[] = [];
   // Articles (blog posts) take at most a few places: a blog-heavy site's posts outranked its own offer pages.
   let articles = 0;
   const push = (id?: string) => { const p = id ? index.packs.get(id) : undefined; if (!p || out.includes(p) || (p.article && articles >= 4)) return; if (p.article) articles++; out.push(p); };
-  // Search hits the catalog doesn't know (pages scraped after it was built): a pack of their own per page.
-  const loose = new Map<string, Pack>();
   for (const h of hits) {
     const url = String(h.metadata.url || "");
-    if (!index.byUrl.has(url) && h.content) {
-      let p = loose.get(url);
-      if (!p) { p = { id: `hit:${url}`, title: String(h.metadata.title || url), url, catalogs: [], chunks: [], chars: 0 }; loose.set(url, p); if (!out.includes(p)) out.push(p); }
-      p.chunks.push({ id: String(h.metadata.id || `${url}#${p.chunks.length}`), catalogId: "", content: h.content, url, title: p.title, type: String(h.metadata.type || "") });
-      p.chars += h.content.length;
-      continue;
-    }
+    if (looseHit(h)) continue;
     push(index.byUrl.get(url));
     const cat = String(h.metadata.catalog || "");
     if (cat) push(index.topics.get(cat));

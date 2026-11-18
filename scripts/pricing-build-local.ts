@@ -11,13 +11,22 @@ import { homedir } from "node:os";
 import { buildBusiness, savePricing, catalogOf, type Llm } from "../src/pricing/model.js";
 
 const BIN = process.env.CLAUDE_BIN || `${homedir()}/.local/bin/claude`;
-const claude = (model: string): Llm => (system, user) => new Promise((ok, fail) => {
+// A call that hangs (2026-11-16: four calls sat 9-12 h with no output) is killed after CALL_MIN and asked again.
+const CALL_MIN = Number(process.env.PRICING_CALL_MIN) || 45;
+const once = (model: string, system: string, user: string) => new Promise<string>((ok, fail) => {
   const p = spawn(BIN, ["-p", "--model", model, "--system-prompt", system, "--tools", "", "--output-format", "text"], { stdio: ["pipe", "pipe", "pipe"] });
   let out = "", err = "";
+  const timer = setTimeout(() => { err = `no answer in ${CALL_MIN} min`; p.kill("SIGKILL"); }, CALL_MIN * 60_000);
   p.stdout.on("data", (d) => (out += d)); p.stderr.on("data", (d) => (err += d));
-  p.on("close", (code) => (code === 0 ? ok(out) : fail(new Error(`claude exited ${code}: ${err.slice(0, 200)}`))));
+  p.on("close", (code) => { clearTimeout(timer); code === 0 ? ok(out) : fail(new Error(`claude exited ${code}: ${err.slice(0, 200)}`)); });
   p.stdin.end(user);
 });
+const claude = (model: string): Llm => async (system, user) => {
+  for (let k = 1; ; k++) {
+    try { return await once(model, system, user); }
+    catch (e) { console.log(`[claude] ${model} call ${k} failed: ${(e as Error).message}`); if (k >= 3) throw e; }
+  }
+};
 
 const ids = process.argv.slice(2);
 if (!ids.length) { console.error("Give tenant ids."); process.exit(1); }
