@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ownedSites, maySwitch } from "../src/multi-tenant/sites.js";
+import { ownedSites, maySwitch, addressPlan } from "../src/multi-tenant/sites.js";
 
 const site = (id: string, over: Record<string, unknown> = {}): any => ({
   id, email: "owner@firma.pl", domain: `${id}.pl`, siteUrl: `https://${id}.pl`, brandName: null, status: "active",
@@ -56,5 +56,33 @@ describe("a switched session remembers the account it came from", () => {
     expect(sessionOrigin(`adm-${via}`)).toBe("www_firma_pl");
     expect(sessionOrigin("a".repeat(64))).toBeNull();
     expect(sessionOrigin(`adm-${"a".repeat(64)}`)).toBeNull();
+  });
+});
+
+describe("a plan given to an address", () => {
+  const partner = site("partner", { settings: { confirmedEmail: "owner@firma.pl", billingExemptAddress: true } });
+  const added = site("added", { ownerPasswordHash: null, settings: { setupEmail: "owner@firma.pl" } });
+
+  it("opens the panel of every site the partner's account may open, the new unclaimed one included", () => {
+    expect(addressPlan(partner, "partner", [partner, added])).toBe(true);
+    expect(addressPlan(partner, "added", [partner, added])).toBe(true);
+    // Logged in to another confirmed site of the same address: the mark on the first one still counts.
+    const second = site("second");
+    expect(addressPlan(second, "second", [partner, second])).toBe(true);
+  });
+
+  it("opens nothing for a session that has not proven the mailbox, or for another address", () => {
+    // Signed up typing the partner's address: no password, or one set with the apiKey.
+    expect(addressPlan(added, "added", [partner, added])).toBe(false);
+    const typed = site("typed", { settings: { confirmedEmail: "owner@firma.pl", claimedWithApiKey: true } });
+    expect(addressPlan(typed, "typed", [partner, typed])).toBe(false);
+    const client = site("client", { email: "client@firma.pl", settings: { confirmedEmail: "client@firma.pl" } });
+    expect(addressPlan(client, "client", [partner, client])).toBe(false);
+    expect(addressPlan(partner, "client", [partner, client])).toBe(false);
+  });
+
+  it("no mark, no plan", () => {
+    const a = site("a"), b = site("b");
+    expect(addressPlan(a, "b", [a, b])).toBe(false);
   });
 });

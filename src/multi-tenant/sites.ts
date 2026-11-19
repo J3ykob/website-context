@@ -30,3 +30,15 @@ export function ownedSites(current: TenantRecord, all: TenantRecord[] = listTena
 export function maySwitch(current: TenantRecord, targetId: string, all?: TenantRecord[]): boolean {
   return ownedSites(current, all).some((t) => t.id === targetId);
 }
+
+/**
+ * A plan given to an ADDRESS, not to one site (owner 2026-11-19 - a partner who demos Whisp to clients adds a domain
+ * and needs its full panel at once; a client who tries it with their own address gets the ordinary paid panel).
+ * The mark (settings.billingExemptAddress, set by an admin) sits on one of the address's sites; it opens the panel of
+ * every site the SESSION's account may open - the same proof of the mailbox as the switch, so typing the partner's
+ * address at sign-up opens nothing.
+ */
+export function addressPlan(account: TenantRecord, targetId: string, all?: TenantRecord[]): boolean {
+  const sites = ownedSites(account, all);
+  return sites.some((t) => t.id === targetId) && sites.some((t) => t.settings?.billingExemptAddress === true);
+}

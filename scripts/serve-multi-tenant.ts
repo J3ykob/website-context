@@ -270,10 +270,19 @@ async function authMiddleware(req: express.Request, res: express.Response, next:
   // The panel is paid (src/billing/plan.ts); the widget is free, so its install code and the plan itself
   // stay open. An admin's support session is let in.
   if (!token.startsWith("adm-") && !PANEL_FREE.some((p) => req.path === p || req.path.startsWith(`${p}/`))) {
-    const { hasPanel } = await import("../src/billing/plan.js");
-    if (!(await hasPanel(tenantId).catch(() => false))) { res.status(402).json({ error: "Subscription required", plan: true }); return; }
+    if (!(await panelOpen(req, tenantId))) { res.status(402).json({ error: "Subscription required", plan: true }); return; }
   }
   next();
+}
+// The panel is open: the site's own subscription or exemption, or a plan given to the address of the account this
+// session logged in to (src/multi-tenant/sites.ts addressPlan).
+async function panelOpen(req: express.Request, tenantId: string): Promise<boolean> {
+  const { hasPanel } = await import("../src/billing/plan.js");
+  if (await hasPanel(tenantId).catch(() => false)) return true;
+  const { account } = await siteOwner(req);
+  if (!account) return false;
+  const { addressPlan } = await import("../src/multi-tenant/sites.js");
+  return addressPlan(account, tenantId);
 }
 const PANEL_FREE = ["/api/dashboard/embed-code", "/api/dashboard/billing", "/api/dashboard/sites", "/api/dashboard/switch-site"];
 // Where Stripe sends the business back: our own address (BASE_URL), never the request's Host header.
@@ -1307,7 +1316,7 @@ app.get("/api/dashboard/billing", authMiddleware, async (req, res) => {
   const tenantId = (req as any).tenantId as string;
   const plan = await import("../src/billing/plan.js");
   const t = getTenant(tenantId);
-  res.json({ access: await plan.hasPanel(tenantId).catch(() => false), subscribed: await plan.subscribed(tenantId).catch(() => false), exempt: t?.settings?.billingExempt === true,
+  res.json({ access: await panelOpen(req, tenantId), subscribed: await plan.subscribed(tenantId).catch(() => false), exempt: t?.settings?.billingExempt === true,
     pricePln: plan.PRICE_PLN(), payments: !!plan.stripeKey(), manage: !!t?.settings?.stripeCustomer && !!plan.stripeKey() });
 });
 app.post("/api/dashboard/billing/checkout", authMiddleware, async (req, res) => {
@@ -3330,7 +3339,7 @@ app.post("/api/admin/update-tenant/:tenantId", (req, res) => {
 });
 
 // Admin: a business's place in the network (src/projects/network.ts isListed, src/projects/invite.ts).
-// body: { tenantIds: [...], network?: "listed" | "member", inviteEmail?: string, networkOptOut?: boolean, clearBilling?: true, billingExempt?: boolean }
+// body: { tenantIds: [...], network?: "listed" | "member", inviteEmail?: string, networkOptOut?: boolean, clearBilling?: true, billingExempt?: boolean, billingExemptAddress?: boolean }
 // "listed" = in the network from its public data, nobody runs it; "member" (default) = it has joined.
 // Admin (support / tests): close a request's wait for other businesses now - the ones still waiting
 // count as "no answer" (as at the 24 h deadline) and the customer's result is finished with what came in.
@@ -3362,6 +3371,8 @@ app.post("/api/admin/network-status", (req, res) => {
     if (typeof req.body?.networkOptOut === "boolean") { if (req.body.networkOptOut) settings.networkOptOut = true; else delete settings.networkOptOut; }
     if (req.body?.clearBilling === true) { delete settings.stripeCustomer; delete settings.stripeSubscription; }
     // The panel without a subscription (support, pilots, accounts from before the paid panel - src/billing/plan.ts).
+    // The same for every site of this one's address (src/multi-tenant/sites.ts addressPlan).
+    if (typeof req.body?.billingExemptAddress === "boolean") { if (req.body.billingExemptAddress) settings.billingExemptAddress = true; else delete settings.billingExemptAddress; }
     if (typeof req.body?.billingExempt === "boolean") { if (req.body.billingExempt) settings.billingExempt = true; else delete settings.billingExempt; }
     updateTenant(id, { settings });
     tenantManager.evictTenant(id);
