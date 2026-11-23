@@ -98,6 +98,11 @@ Rules:
   delivery charge, and how they combine. Rules that span items (a package replacing single services, a fee
   charged once per order, a minimum order) go in quote().
 - A price the pages do not give -> status "on_request". Never invent a price or a typical value.
+- An item's id: the product's own code or symbol exactly as the pages print it, when they print one (the same
+  product on another page then gets the same id); otherwise a short id of your own.
+- These pages may be only some of the business's pages. A product a list here only names, without its price, may
+  have its price on a page of its own: such an item is "on_request" here, and its note does not say that the
+  business or its site gives no price.
 - status is EXACTLY one of "price", "range", "needs", "on_request", "not_offered", "included" (no other words).
   "included" = its price is part of another item's price (a service inside a package): say which in the note -
   never "price" 0 for that ("price" 0 only when the pages say it is free).
@@ -334,14 +339,17 @@ function partsOf(pages: { url: string; text: string }[], rules: Set<string>): { 
 }
 
 /** The business's quoting model, built once from its offer pages (and its extracted items for completeness). */
-export async function buildBusiness(tenantId: string, business: string, pages: { url: string; text: string }[], offerNames: string[], model = process.env.PRICING_MODEL || "anthropic/claude-opus-5.5", llms?: { gen: Llm; check: Llm }): Promise<PricingBusiness> {
+/** `terms`: the business's general terms that are not offer pages (build-job.ts termsPages) - in every part, as rules. */
+export async function buildBusiness(tenantId: string, business: string, offerPages: { url: string; text: string }[], offerNames: string[], model = process.env.PRICING_MODEL || "anthropic/claude-opus-5.5", llms?: { gen: Llm; check: Llm }, terms: { url: string; text: string }[] = []): Promise<PricingBusiness> {
   const usage = { usd: 0 };
   const llm = llms?.gen || reasonedLlm(model, usage);
-  const hash = pagesHash(model, pages);
+  const hash = pagesHash(model, offerPages);
+  const extra = terms.filter((t) => !offerPages.some((p) => p.url === t.url));
+  const pages = [...extra, ...offerPages];
   // Rules pages (terms, delivery, deposits, discounts that apply to every offer) go into every part.
   const { jevAsk } = await import("../llm/jev.js");
   const rj = pages.length > 1 ? await jevAsk({ pages: pages.map((p) => `${p.url} - ${p.text.slice(0, 300)}`) }, Object.fromEntries(pages.map((_, k) => [`r${k}`, { type: "noul" as const, instructions: `Is \`pages[${k}]\` about terms that apply to all of the business's offers (rental or order conditions, delivery, deposits, discounts, minimums) rather than particular products?` }])), 15000).catch(() => null) : null;
-  const rules = new Set(pages.filter((_, k) => ((((rj as any)?.[`r${k}`]?.noul) as number) ?? 0) >= 0.5).map((p) => p.url));
+  const rules = new Set([...extra.map((p) => p.url), ...pages.filter((_, k) => ((((rj as any)?.[`r${k}`]?.noul) as number) ?? 0) >= 0.5).map((p) => p.url)]);
   const built: PricingModel[] = [], failed: string[] = [];
   for (const part of partsOf(pages, rules)) {
     const pm = await build(business, part, llm, llm, model, 2, [], built.flatMap((b) => b.catalog.shared || [])).catch((e) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; });
@@ -363,16 +371,44 @@ export async function buildBusiness(tenantId: string, business: string, pages: {
 }
 
 /**
- * A quote over every part: each line goes to the part whose catalogue has its item (the first part that has
- * it - an item found on two pages is quoted once). Lines sharing a "need" are alternatives for one thing: only
+ * Which part quotes an item that several parts have: the first one whose program gives it an amount or asks for
+ * what its price needs (asked with no inputs, once per loaded model), else the first that has it. Sweet Home's
+ * category lists (a cake's name, symbol and weight, no price) were one part and its product pages others; the list
+ * part came first, so 374 of 1,013 items were "on request" though another part had their price per kg (2026-11-23).
+ */
+const owners = new WeakMap<PricingBusiness, Promise<Map<string, number>>>();
+export function ownersOf(pb: PricingBusiness): Promise<Map<string, number>> {
+  let p = owners.get(pb);
+  if (!p) owners.set(pb, (p = (async () => {
+    const where = new Map<string, number[]>();
+    pb.parts.forEach((part, k) => { for (const i of part.catalog.items || []) { const ks = where.get(i.id) || []; if (!ks.includes(k)) ks.push(k); where.set(i.id, ks); } });
+    const owner = new Map([...where].map(([id, ks]) => [id, ks[0]] as const));
+    const shared = [...where].filter(([, ks]) => ks.length > 1);
+    if (!shared.length) return owner;
+    const PRICES = new Set(["price", "range", "needs", "included"]);
+    const gives = new Map<number, Set<string>>();
+    await Promise.all([...new Set(shared.flatMap(([, ks]) => ks))].map(async (k) => {
+      const ids = shared.filter(([, ks]) => ks.includes(k)).map(([id]) => id);
+      const q = (await run(pb.parts[k].code, "quote", { context: {}, lines: ids.map((item) => ({ item, inputs: {} })) }, 3000).catch(() => null)) as Quote | null;
+      gives.set(k, new Set((q?.lines || []).filter((l) => PRICES.has(l.status)).map((l) => l.item)));
+    }));
+    for (const [id, ks] of shared) owner.set(id, ks.find((k) => gives.get(k)?.has(id)) ?? ks[0]);
+    return owner;
+  })()));
+  return p;
+}
+
+/**
+ * A quote over every part: each line goes to the part that quotes its item (ownersOf - an item found on two
+ * pages is quoted once). Lines sharing a "need" are alternatives for one thing: only
  * the cheapest priced one counts in the total, the others are listed as alternatives (a make-up package and
  * the single services it replaces were added up: 6045 zł instead of 2545).
  */
 export async function quoteBusiness(pb: PricingBusiness, request: Request): Promise<Quote> {
   const lines: QuoteLine[] = [], rules: string[] = [];
-  const owner = (id: string) => pb.parts.findIndex((p) => p.catalog.items.some((i) => i.id === id));
+  const owner = await ownersOf(pb);
   for (let k = 0; k < pb.parts.length; k++) {
-    const own = request.lines.filter((l) => owner(l.item) === k);
+    const own = request.lines.filter((l) => owner.get(l.item) === k);
     if (!own.length) continue;
     const q = (await run(pb.parts[k].code, "quote", { context: request.context, lines: own.map(({ item, inputs }) => ({ item, inputs })) }).catch((e) => ({ lines: own.map((l) => ({ item: l.item, status: "on_request", note: `could not compute: ${(e as Error).message.slice(0, 60)}` })) }))) as Quote;
     for (const l of q.lines || []) lines.push({ ...l, need: own.find((x) => x.item === l.item)?.need });
@@ -395,6 +431,13 @@ export async function quoteBusiness(pb: PricingBusiness, request: Request): Prom
 
 /** The catalogue of all parts (what the reader maps a message onto). */
 export const catalogOf = (pb: PricingBusiness): Catalog => ({ business: pb.parts[0]?.catalog.business || pb.tenantId, currency: pb.parts[0]?.catalog.currency || "PLN", shared: pb.parts.flatMap((p) => p.catalog.shared || []), items: pb.parts.flatMap((p) => p.catalog.items || []) });
+
+/** The same with an item several parts have given once, as the part that quotes it describes it (its inputs). */
+export async function catalogFor(pb: PricingBusiness): Promise<Catalog> {
+  const owner = await ownersOf(pb), seen = new Set<string>();
+  const items = pb.parts.flatMap((p, k) => (p.catalog.items || []).filter((i) => owner.get(i.id) === k && !seen.has(i.id) && !!seen.add(i.id)));
+  return { ...catalogOf(pb), items };
+}
 
 const KEY = (tenantId: string) => `tenants/${tenantId}/pricing.json`;
 export async function savePricing(pb: PricingBusiness): Promise<void> {
@@ -589,7 +632,7 @@ export function durationUnits(pb: PricingBusiness, catalog: Catalog): Promise<Re
  * its terms ("for 8 people").
  */
 export async function quoteResult(pb: PricingBusiness, convo: string, opts: { notes?: () => Promise<string[]>; own?: boolean } = {}): Promise<QuoteResult | null> {
-  const catalog = catalogOf(pb);
+  const catalog = await catalogFor(pb);
   const { OpenRouterProvider } = await import("../llm/openrouter-provider.js");
   const or = new OpenRouterProvider({ model: "anthropic/claude-haiku-5.5", maxTokens: 1500, temperature: 0 });
   const partShared = new Map(pb.parts.flatMap((p) => (p.catalog.items || []).map((i) => [i.id, new Set((p.catalog.shared || []).map((x) => x.name))] as const)));

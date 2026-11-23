@@ -9,6 +9,7 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { buildBusiness, savePricing, catalogOf, type Llm } from "../src/pricing/model.js";
+import { termsPages } from "../src/pricing/build-job.js";
 
 const BIN = process.env.CLAUDE_BIN || `${homedir()}/.local/bin/claude`;
 // A call that hangs (2026-11-16: four calls sat 9-12 h with no output) is killed after CALL_MIN and asked again.
@@ -40,8 +41,10 @@ for (const id of ids) {
   if (!pages.length) { console.log(`${id}: no offer pages kept - re-scrape it first`); continue; }
   const t = getTenant(id);
   const offer = (await loadOffer(id).catch(() => null))?.items || [];
+  const terms = await termsPages(id);
+  console.log(`${id}: ${pages.length} offer pages, general terms from ${terms.length} page(s) (${terms.reduce((n, p) => n + p.text.length, 0)} chars)`);
   try {
-    const pb = await buildBusiness(id, t?.brandName || t?.domain || id, pages, offer.map((i) => i.name), "claude-code:opus", { gen: claude("opus"), check: claude("sonnet") });
+    const pb = await buildBusiness(id, t?.brandName || t?.domain || id, pages, offer.map((i) => i.name), "claude-code:opus", { gen: claude("opus"), check: claude("sonnet") }, terms);
     if (pb.parts.length) await savePricing(pb);
     console.log(`${id}: ${pb.parts.length} part(s), ${catalogOf(pb).items.length} items, checks ${pb.parts.reduce((n, p) => n + (p.verified?.agreed || 0), 0)}/${pb.parts.reduce((n, p) => n + (p.verified?.cases || 0), 0)}, missing ${pb.missing.length}, ${((Date.now() - t0) / 60000).toFixed(1)} min, from ${pages.length} pages${pb.failed?.length ? `, ${pb.failed.length} part(s) FAILED: ${pb.failed[0]}` : ""}`);
   } catch (e) { console.log(`${id}: failed - ${(e as Error).message}`); }

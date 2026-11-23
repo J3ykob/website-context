@@ -155,8 +155,13 @@ export function createOfferIndexer() {
     /** Each page's text as the model reads it: one block per line, blocks most pages share left out. */
     pageTexts(): { url: string; title: string; text: string }[] {
       const limit = Math.max(3, Math.ceil(pages.length * 0.4));
+      const shared = (b: string | undefined) => b !== undefined && pages.length >= 4 && (seenOn.get(b) || 0) >= limit;
+      // A menu or footer is a RUN of blocks most pages share. One shared block alone between the page's own blocks
+      // is the page's content - a label: a cake shop's "cena za kg tortu" stood under the price on every cake page,
+      // was dropped, and "95,- zł" was read as the price of the cake, not of a kilogram (sweet_home_pl, 2026-11-24).
+      const kept = (blocks: string[]) => blocks.filter((b, k) => !shared(b) || (!shared(blocks[k - 1]) && !shared(blocks[k + 1]) && k > 0 && k < blocks.length - 1));
       return pages
-        .map((p) => ({ url: p.url, title: p.title, text: p.blocks.filter((b) => pages.length < 4 || (seenOn.get(b) || 0) < limit).join("\n").slice(0, PAGE_MAX) }))
+        .map((p) => ({ url: p.url, title: p.title, text: kept(p.blocks).join("\n").slice(0, PAGE_MAX) }))
         .filter((p) => p.text.length >= 80);
     },
     finish(llm: Llm) {

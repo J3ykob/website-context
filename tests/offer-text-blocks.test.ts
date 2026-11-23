@@ -49,3 +49,20 @@ describe("offer page text on a real shop", () => {
     expect(l.text).toMatch(/^Piernik staropolski [^|\n]*\| SH-6922$/m);
   }, 60000);
 });
+
+// The same shop with all its pages: the unit line under the price is the same on every cake page, so the filter of
+// blocks most pages share took it for a menu ("95,- zł" was then read as the price of the cake, not of a kilogram).
+describe("blocks most pages share", () => {
+  const page = (name: string, price: string) => `<html><head><title>${name}</title></head><body>
+    <div><p>Torty</p><p>Ciasta</p><p>Kontakt</p></div>
+    <main><h1>${name}</h1><p>symbol: ${name}-1</p><p>${price},- zł</p><p>cena za kg tortu</p><p>${name} z kremem i owocami sezonowymi, dekorowany ręcznie w naszej pracowni.</p></main>
+    <div><p>Regulamin sklepu</p><p>Polityka prywatności</p></div></body></html>`;
+  it("a run of them (menu, footer) goes; one alone between the page's own text (the price's unit) stays", () => {
+    const idx = createOfferIndexer();
+    ["Alfa", "Beta", "Gama", "Delta", "Omega", "Sigma"].forEach((n, k) => idx.addPage(page(n, String(90 + k)), `https://x.pl/${n}`));
+    const t = idx.pageTexts()[0].text;
+    expect(t).toMatch(/90,- zł\ncena za kg tortu/);
+    expect(t).not.toContain("Ciasta");
+    expect(t).not.toContain("Regulamin sklepu");
+  });
+});
