@@ -1163,8 +1163,9 @@ export class WebsiteChat {
         packText = `### Key facts from our pages (word for word)\n${facts.map((f) => `- ${f.s}`).join("\n")}${packText ? `\n\n---\n\n${packText}` : ""}`;
         passages = [...facts.map((f) => f.s), ...passages];
       }
-      // A quote with no amount and nothing to ask for says nothing the pages don't: left out, and the items' own listed
-      // prices are read as without a quoting model.
+      // A quote with no amount and nothing to ask for says nothing the pages don't: left out of the prompt. Code still
+      // prices nothing beside it (`quoted` below): with the quote treated as absent, the items' own pricing read
+      // "6 dzieciaków" as 6 pieces of a 160 zł/kg cake and the reply gave 960 zł (hiring suite, 2026-11-23).
       const quoted = await work.quote;
       const modelQuote = quoted && (quoted.facts.length || quoted.missing) ? quoted : null;
       if (quoted) noteTurn("modelQuote", `${modelQuote ? "" : "(no amount - left out) "}${quoted.text.slice(0, 600)}`);
@@ -1179,7 +1180,7 @@ export class WebsiteChat {
         // own after the pick), priced by code (src/offer/quantities.ts) - a shop's catalogue items too (empro-1: "3 aku"
         // got "I won't total it", 3 x 699 = 2097 zł). null: the reading got no answer - no total, nothing said about the
         // quantity (told "not clear", the reply refused to total it: the empro-1 symptom again, from an outage).
-        const given = modelQuote || !judged ? null : await judged.given;
+        const given = quoted || !judged ? null : await judged.given; // a quoting model read the request: code prices nothing beside it, also when its quote had no amount
         const computed = given?.size ? priceGiven(given) : [];
         if (computed.length) {
           const texts = computed.map((c) => customerPriceLine(c));
