@@ -266,3 +266,17 @@ describe("amounts compared by code", () => {
     expect(sameAmount(Number("x"), [1])).toBe(false);
   });
 });
+
+describe("a line the program has no amount for, in the business's own quote", () => {
+  const cat = { business: "x", currency: "PLN", shared: [], items: [{ id: "cake", name: "Tort", inputs: [] }, { id: "delivery", name: "Dostawa", inputs: [] }] };
+  const quote = [{ lines: [{ item: "cake", status: "price" as const, amount: 190 }, { item: "delivery", status: "on_request" as const, note: "cena nie jest podana na stronach" }] }];
+  it("says only that no amount was computed - the program's reason is not passed on as a fact of the site", () => {
+    const own = renderQuote(cat, quote, [], true).text;
+    expect(own).toContain("Dostawa: no amount computed here");
+    expect(own).not.toContain("nie jest podana");
+    expect(own).toContain("190");
+  });
+  it("another business's quote keeps the wording and the note (its pages are not in the prompt)", () => {
+    expect(renderQuote(cat, quote).text).toContain("Dostawa: price on request (cena nie jest podana na stronach)");
+  });
+});

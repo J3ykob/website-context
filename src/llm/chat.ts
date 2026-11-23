@@ -1163,8 +1163,11 @@ export class WebsiteChat {
         packText = `### Key facts from our pages (word for word)\n${facts.map((f) => `- ${f.s}`).join("\n")}${packText ? `\n\n---\n\n${packText}` : ""}`;
         passages = [...facts.map((f) => f.s), ...passages];
       }
-      const modelQuote = await work.quote;
-      if (modelQuote) noteTurn("modelQuote", modelQuote.text.slice(0, 600));
+      // A quote with no amount and nothing to ask for says nothing the pages don't: left out, and the items' own listed
+      // prices are read as without a quoting model.
+      const quoted = await work.quote;
+      const modelQuote = quoted && (quoted.facts.length || quoted.missing) ? quoted : null;
+      if (quoted) noteTurn("modelQuote", `${modelQuote ? "" : "(no amount - left out) "}${quoted.text.slice(0, 600)}`);
       // The products / offer items this message is about.
       const judged = await work.products;
       const products = judged?.items || [];
@@ -1725,7 +1728,7 @@ ${behaviour.map((b) => `- ${b}`).join("\n")}
       if (!hit || Date.now() - hit.at > 10 * 60_000) this.pricingCache.set(tenantId, (hit = { at: Date.now(), pb: await m.loadCurrentPricing(tenantId) }));
       const pb = hit.pb;
       if (!pb?.parts.length) return null;
-      return m.quoteResult(pb, convo, { notes });
+      return m.quoteResult(pb, convo, { notes, own: tenantId === this.context.tenantId });
     })();
     if (this.quoteMemo.size > 200) this.quoteMemo.clear();
     this.quoteMemo.set(key, { at: Date.now(), p });

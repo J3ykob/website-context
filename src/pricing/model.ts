@@ -461,7 +461,11 @@ export async function priceRequest(pb: PricingBusiness, request: Request, units:
 
 const READING = ["A", "B", "C", "D"];
 /** The quotes of one request (one per reading) as the reply's fact lines, with every amount the program computed. */
-export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[][] = []): QuoteResult {
+/** `own`: the quote is the business's own, shown next to its pages in a reply. A line its program has no amount for
+ *  then says only that - not "price on request" with the program's reason: Sweet Home's program was built from the
+ *  category lists and without the terms page, called every cake and the delivery "on request - the pages give no
+ *  price", and the reply repeated that over the pages in the same prompt (95 zł/kg, delivery 19,5 zł - 2026-11-23). */
+export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[][] = [], own = false): QuoteResult {
   const q = quotes[0];
   const others = quotes.slice(1);
   const name = (id: string) => catalog.items.find((i) => i.id === id)?.name || id;
@@ -488,7 +492,7 @@ export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[]
   // 15 110 zl for "a wedding for 85" (2026-11-04 eval; the wedding itself is 18 085 zl).
   const several = new Set(kept.filter((l) => l.alternative).map((l) => l.need || ""));
   const tag = (l: QuoteLine) => (several.has(l.need || "") ? (l.alternative ? " (another option for the same thing)" : " (one option)") : "");
-  const priceOf = (l: QuoteLine) => l.status === "price" ? `${zl(l.amount!)} for this request (the customer's quantities, everything in the note included)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? "price on request" : l.status === "included" ? "included in another item's price" : "not in our offer";
+  const priceOf = (l: QuoteLine) => l.status === "price" ? `${zl(l.amount!)} for this request (the customer's quantities, everything in the note included)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? (own ? "no amount computed here - its price only as our information above states it" : "price on request") : l.status === "included" ? "included in another item's price" : "not in our offer";
   // The same line under the other readings: the same item for the same need - whichever option is the cheapest there (a
   // daily rate under one reading, the weekend package under the other, review 2026-11-05).
   const twin = (o: Quote, l: QuoteLine) => o.lines.find((x) => x.item === l.item && x.need === l.need);
@@ -501,7 +505,8 @@ export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[]
     const alts = others.map((o) => twin(o, l));
     const split = alts.length > 0 && !alts.every((x) => same(x, l));
     // Each reading with its own note (the note says what that reading's amount counts: 72 h vs 96 h).
-    const body = split ? [l, ...alts].map((x, k) => `${READING[k]}: ${x ? `${priceOf(x)}${x.note ? ` (${x.note})` : ""}` : "not priced"}`).join("; ") : `${priceOf(l)}${l.note ? ` (${l.note})` : ""}`;
+    const noteOf = (x: QuoteLine) => (x.note && !(own && x.status === "on_request") ? ` (${x.note})` : "");
+    const body = split ? [l, ...alts].map((x, k) => `${READING[k]}: ${x ? `${priceOf(x)}${noteOf(x)}` : "not priced"}`).join("; ") : `${priceOf(l)}${noteOf(l)}`;
     const line = `- ${name(l.item)}${tag(l)}: ${body}`;
     // One fact per reading when they differ: an amount is paired with the reading it is stated for.
     if (split) [l, ...alts].forEach((x, k) => { const a = amountsOf(x); if (a.length) facts.push({ item: name(l.item), kind: "computed", ...readingOf(k), amounts: a, line }); });
@@ -583,7 +588,7 @@ export function durationUnits(pb: PricingBusiness, catalog: Catalog): Promise<Re
  * an input: the catalogue does not carry an item's conversion ("1 l = 4 portions") and the customer gives the quantity in
  * its terms ("for 8 people").
  */
-export async function quoteResult(pb: PricingBusiness, convo: string, opts: { notes?: () => Promise<string[]> } = {}): Promise<QuoteResult | null> {
+export async function quoteResult(pb: PricingBusiness, convo: string, opts: { notes?: () => Promise<string[]>; own?: boolean } = {}): Promise<QuoteResult | null> {
   const catalog = catalogOf(pb);
   const { OpenRouterProvider } = await import("../llm/openrouter-provider.js");
   const or = new OpenRouterProvider({ model: "anthropic/claude-haiku-5.5", maxTokens: 1500, temperature: 0 });
@@ -595,7 +600,7 @@ export async function quoteResult(pb: PricingBusiness, convo: string, opts: { no
     const request = await read(convo, catalog, llm, partShared, { today, notes });
     if (!request.lines.length) return null;
     const { quotes, assumed } = await priceRequest(pb, request, await unitsP);
-    return { r: renderQuote(catalog, quotes, assumed), request, quotes };
+    return { r: renderQuote(catalog, quotes, assumed, !!opts.own), request, quotes };
   };
   const first = await once();
   // Read once more with the items' own words only when a line is left needing one of its item's own quantities (what an
