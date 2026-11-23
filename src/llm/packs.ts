@@ -20,11 +20,17 @@ export interface Pack { id: string; title: string; url: string; catalogs: string
 // Blog posts, news and guides describe a topic in general - read as the offer they made the bot claim
 // grades and services the business doesn't sell ("up to C90/105" from a concrete blog post).
 const ARTICLE_URL = /\/(blog|aktualnosci|aktualności|news|nowosci|poradnik|poradniki|porady|artykul|artykuly|wpis|article|articles|baza-wiedzy)(\/|$|-)/i;
-export interface PackIndex { packs: Map<string, Pack>; byUrl: Map<string, string>; topics: Map<string, string> }
+export interface PackIndex { packs: Map<string, Pack>; byUrl: Map<string, string>; topics: Map<string, string>; topicPages?: Map<string, string[]> }
 
 // Topics small enough to be one pack across all pages (everything about contact, all locations).
 const TOPIC_MAX_CHARS = 9000;
 const TOPIC_CATALOGS = new Set(["contact", "locations", "policies", "people"]);
+// A topic too large for one pack is stood for by this many of its pages (the ones holding most of it).
+const TOPIC_PAGES = 2;
+// The general topics judged every turn on a large site, whatever the search found: on a shop of 600 product pages
+// titled "... z dostawą, cena", "ile kosztuje dostawa" returned 20 product pages and the terms page (19,5 zł) was
+// never judged - the bot said the site gives no delivery fee (hiring suite on sweet_home_pl, 2026-11-23).
+const ALWAYS_TOPICS = ["contact", "locations", "policies"];
 
 const norm = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 160);
 
@@ -34,6 +40,7 @@ export function buildPackIndex(catalog: KnowledgeCatalog | null, articles?: Set<
   const packs = new Map<string, Pack>();
   const byUrl = new Map<string, string>();
   const topics = new Map<string, string>();
+  const topicPages = new Map<string, string[]>();
   const add = (p: Pack, c: CatalogChunk) => {
     const k = norm(c.content);
     if (p.chunks.some((x) => norm(x.content) === k)) return; // the same footer on every page once
@@ -52,9 +59,14 @@ export function buildPackIndex(catalog: KnowledgeCatalog | null, articles?: Set<
     if (!members.length) continue;
     const p: Pack = { id: `topic:${def.id}`, title: def.name, url: "", catalogs: [def.id], chunks: [], chars: 0 };
     for (const c of members) add(p, c);
-    if (p.chars <= TOPIC_MAX_CHARS) { packs.set(p.id, p); topics.set(def.id, p.id); }
+    if (p.chars <= TOPIC_MAX_CHARS) { packs.set(p.id, p); topics.set(def.id, p.id); continue; }
+    // Too much for one pack: the pages that hold most of the topic stand for it (the shop's terms page, the page of
+    // all addresses), so the topic is still judged every turn.
+    const share = new Map<string, number>();
+    for (const c of members) { const id = byUrl.get(c.url || `#${c.catalogId}`)!; share.set(id, (share.get(id) || 0) + c.content.length); }
+    topicPages.set(def.id, [...share].sort((a, b) => b[1] - a[1]).slice(0, TOPIC_PAGES).map(([id]) => id));
   }
-  return { packs, byUrl, topics };
+  return { packs, byUrl, topics, topicPages };
 }
 
 /** Candidate packs for this turn: the pages of the passages vector search found, best first, plus the
@@ -93,9 +105,9 @@ export function candidatePacks(index: PackIndex, hits: { content?: string; metad
     if (cat) push(index.topics.get(cat));
     if (out.length >= max) break;
   }
-  push(index.topics.get("contact"));
-  push(index.topics.get("locations"));
-  return out.slice(0, max + 2);
+  out.length = Math.min(out.length, max);
+  for (const t of ALWAYS_TOPICS) { push(index.topics.get(t)); for (const id of index.topicPages?.get(t) || []) push(id); }
+  return out;
 }
 
 // The pack's passages with the ones the search matched first: a long page (a price list of many
