@@ -123,9 +123,12 @@ Rules:
   4 single services), quote() picks the cheapest combination that covers it and says so in the note.
 Answer with the program in one \`\`\`js code block, nothing else.`;
 
+/** The page text one part is generated from (stored with it: a part built from the same text is not built again). */
+export const sourceOf = (pages: { url: string; text: string }[]) => pages.map((p) => `### ${p.url}\n${p.text}`).join("\n\n").slice(0, 60000);
+
 /** The business's quoting model from the text of its price pages; `feedback` = what a previous version got wrong. */
 export async function generate(business: string, pages: { url: string; text: string }[], llm: Llm, model: string, feedback?: { code: string; problems: string[] }, sharedSoFar: InputSpec[] = []): Promise<PricingModel> {
-  const source = pages.map((p) => `### ${p.url}\n${p.text}`).join("\n\n").slice(0, 60000);
+  const source = sourceOf(pages);
   const fix = !feedback ? "" : feedback.code
     ? `\n\nA previous version of the program:\n\`\`\`js\n${feedback.code}\n\`\`\`\nIt disagreed with these checks written from the pages - correct the program where the pages support the check:\n- ${feedback.problems.slice(0, 15).join("\n- ")}`
     : `\n\nMake sure of this:\n- ${feedback.problems.slice(0, 30).join("\n- ")}`;
@@ -339,8 +342,20 @@ function partsOf(pages: { url: string; text: string }[], rules: Set<string>): { 
 }
 
 /** The business's quoting model, built once from its offer pages (and its extracted items for completeness). */
+/**
+ * How a build runs. `concurrency`: parts built at once (a part reads only the shared inputs of the parts finished
+ * before it started). `prev`: a stored model - its parts built by the same builder from the same page text are kept,
+ * so a build that lost a part is finished without building the others again. `onPart`: called as each part ends.
+ * Sweet Home, 15 parts one after another with a 45-minute wait on each hung call: 13.4 h, one part lost (2026-11-24).
+ */
+export interface BuildOptions { concurrency?: number; prev?: PricingBusiness | null; onPart?: (k: number, of: number, how: "built" | "kept" | "failed") => void }
+async function each<T>(items: T[], at: number, fn: (x: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(at, items.length)) }, async () => { while (next < items.length) await fn(items[next++]); }));
+}
+
 /** `terms`: the business's general terms that are not offer pages (build-job.ts termsPages) - in every part, as rules. */
-export async function buildBusiness(tenantId: string, business: string, offerPages: { url: string; text: string }[], offerNames: string[], model = process.env.PRICING_MODEL || "anthropic/claude-opus-5.5", llms?: { gen: Llm; check: Llm }, terms: { url: string; text: string }[] = []): Promise<PricingBusiness> {
+export async function buildBusiness(tenantId: string, business: string, offerPages: { url: string; text: string }[], offerNames: string[], model = process.env.PRICING_MODEL || "anthropic/claude-opus-5.5", llms?: { gen: Llm; check: Llm }, terms: { url: string; text: string }[] = [], opts: BuildOptions = {}): Promise<PricingBusiness> {
   const usage = { usd: 0 };
   const llm = llms?.gen || reasonedLlm(model, usage);
   const hash = pagesHash(model, offerPages);
@@ -350,22 +365,29 @@ export async function buildBusiness(tenantId: string, business: string, offerPag
   const { jevAsk } = await import("../llm/jev.js");
   const rj = pages.length > 1 ? await jevAsk({ pages: pages.map((p) => `${p.url} - ${p.text.slice(0, 300)}`) }, Object.fromEntries(pages.map((_, k) => [`r${k}`, { type: "noul" as const, instructions: `Is \`pages[${k}]\` about terms that apply to all of the business's offers (rental or order conditions, delivery, deposits, discounts, minimums) rather than particular products?` }])), 15000).catch(() => null) : null;
   const rules = new Set([...extra.map((p) => p.url), ...pages.filter((_, k) => ((((rj as any)?.[`r${k}`]?.noul) as number) ?? 0) >= 0.5).map((p) => p.url)]);
-  const built: PricingModel[] = [], failed: string[] = [];
-  for (const part of partsOf(pages, rules)) {
-    const pm = await build(business, part, llm, llm, model, 2, [], built.flatMap((b) => b.catalog.shared || [])).catch((e) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; });
-    if (pm) built.push(pm);
-  }
+  const parts = partsOf(pages, rules), failed: string[] = [], at = opts.concurrency || 1;
+  // One slot per part, in the parts' order (a failed part leaves its slot empty; the completeness round below used
+  // the built list's index for the part and rebuilt the wrong pages after a failure).
+  const slots: (PricingModel | null)[] = parts.map((part) => opts.prev?.parts.find((x) => x.model === model && x.source === sourceOf(part)) || null);
+  slots.forEach((x, k) => { if (x) opts.onPart?.(k, parts.length, "kept"); });
+  const sharedBut = (k: number) => slots.flatMap((b, j) => (b && j !== k ? b.catalog.shared || [] : []));
+  await each(parts.map((_, k) => k).filter((k) => !slots[k]), at, async (k) => {
+    slots[k] = await build(business, parts[k], llm, llm, model, 2, [], sharedBut(k)).catch((e) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; });
+    opts.onPart?.(k, parts.length, slots[k] ? "built" : "failed");
+  });
+  const items = () => slots.flatMap((p) => p?.catalog.items || []);
   // Completeness: offer items no part covers, judged by a cheaper model; those parts are rebuilt once with the gap named.
   const cheap = llms?.check || reasonedLlm(process.env.PRICING_CHECK_MODEL || "anthropic/claude-sonnet-5.5", usage);
-  const all: Catalog = { business, currency: "PLN", shared: [], items: built.flatMap((p) => p.catalog.items || []) };
+  const all: Catalog = { business, currency: "PLN", shared: [], items: items() };
   let missing = await missingFromCatalog(all, offerNames.slice(0, 300), cheap).catch(() => [] as string[]);
   if (missing.length) {
-    for (let k = 0; k < built.length; k++) {
-      const again = await build(business, partsOf(pages, rules)[k], llm, llm, model, 1, missing, built.filter((_, j) => j !== k).flatMap((b) => b.catalog.shared || [])).catch(() => null);
-      if (again && again.catalog.items.length > built[k].catalog.items.length && again.verified!.agreed >= built[k].verified!.agreed) built[k] = again;
-    }
-    missing = await missingFromCatalog({ ...all, items: built.flatMap((p) => p.catalog.items || []) }, offerNames.slice(0, 300), cheap).catch(() => missing);
+    await each(parts.map((_, k) => k).filter((k) => !!slots[k]), at, async (k) => {
+      const again = await build(business, parts[k], llm, llm, model, 1, missing, sharedBut(k)).catch(() => null);
+      if (again && again.catalog.items.length > slots[k]!.catalog.items.length && again.verified!.agreed >= slots[k]!.verified!.agreed) slots[k] = again;
+    });
+    missing = await missingFromCatalog({ ...all, items: items() }, offerNames.slice(0, 300), cheap).catch(() => missing);
   }
+  const built = slots.filter((x): x is PricingModel => !!x);
   console.log(`[pricing] ${tenantId}: ${built.length} part(s), ${built.reduce((n, p) => n + p.catalog.items.length, 0)} items, checks ${built.reduce((n, p) => n + (p.verified?.agreed || 0), 0)}/${built.reduce((n, p) => n + (p.verified?.cases || 0), 0)}, missing ${missing.length}, $${usage.usd.toFixed(2)}`);
   return { tenantId, hash, builtAt: new Date().toISOString(), model, parts: built, costUsd: usage.usd, missing, failed };
 }

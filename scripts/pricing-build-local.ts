@@ -4,16 +4,20 @@
  * pages kept by its last scrape from R2, builds, verifies, saves tenants/<id>/pricing.json.
  *
  *   npx tsx scripts/pricing-build-local.ts sosnowydwor_com_pl aniatkaczyk_pl ...   (needs R2 + Jev env)
- *   env: CLAUDE_BIN (default ~/.local/bin/claude - the real binary, so no account switching), PRICING_MAX_PARTS
+ *   env: CLAUDE_BIN (default ~/.local/bin/claude - the real binary, so no account switching), PRICING_MAX_PARTS,
+ *        PRICING_CALL_MIN (10), PRICING_PARTS_AT_ONCE (4). Parts a stored model already has from the same page text are kept.
  */
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { buildBusiness, savePricing, catalogOf, type Llm } from "../src/pricing/model.js";
+import { buildBusiness, savePricing, loadPricing, catalogOf, type Llm } from "../src/pricing/model.js";
 import { termsPages } from "../src/pricing/build-job.js";
 
 const BIN = process.env.CLAUDE_BIN || `${homedir()}/.local/bin/claude`;
 // A call that hangs (2026-11-16: four calls sat 9-12 h with no output) is killed after CALL_MIN and asked again.
-const CALL_MIN = Number(process.env.PRICING_CALL_MIN) || 45;
+// 45 min at first; calls that answer take 2-6 min, and 12 hung ones cost 9 of a build's 13.4 hours (2026-11-24).
+const CALL_MIN = Number(process.env.PRICING_CALL_MIN) || 10;
+// Parts built at once (each call is its own CLI process).
+const AT_ONCE = Number(process.env.PRICING_PARTS_AT_ONCE) || 4;
 const once = (model: string, system: string, user: string) => new Promise<string>((ok, fail) => {
   const p = spawn(BIN, ["-p", "--model", model, "--system-prompt", system, "--tools", "", "--output-format", "text"], { stdio: ["pipe", "pipe", "pipe"] });
   let out = "", err = "";
@@ -44,7 +48,10 @@ for (const id of ids) {
   const terms = await termsPages(id);
   console.log(`${id}: ${pages.length} offer pages, general terms from ${terms.length} page(s) (${terms.reduce((n, p) => n + p.text.length, 0)} chars)`);
   try {
-    const pb = await buildBusiness(id, t?.brandName || t?.domain || id, pages, offer.map((i) => i.name), "claude-code:opus", { gen: claude("opus"), check: claude("sonnet") }, terms);
+    const pb = await buildBusiness(id, t?.brandName || t?.domain || id, pages, offer.map((i) => i.name), "claude-code:opus", { gen: claude("opus"), check: claude("sonnet") }, terms, {
+      concurrency: AT_ONCE, prev: await loadPricing(id),
+      onPart: (k, of, how) => console.log(`${id}: part ${k + 1}/${of} ${how} (${((Date.now() - t0) / 60000).toFixed(1)} min)`),
+    });
     if (pb.parts.length) await savePricing(pb);
     console.log(`${id}: ${pb.parts.length} part(s), ${catalogOf(pb).items.length} items, checks ${pb.parts.reduce((n, p) => n + (p.verified?.agreed || 0), 0)}/${pb.parts.reduce((n, p) => n + (p.verified?.cases || 0), 0)}, missing ${pb.missing.length}, ${((Date.now() - t0) / 60000).toFixed(1)} min, from ${pages.length} pages${pb.failed?.length ? `, ${pb.failed.length} part(s) FAILED: ${pb.failed[0]}` : ""}`);
   } catch (e) { console.log(`${id}: failed - ${(e as Error).message}`); }
