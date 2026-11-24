@@ -45,3 +45,37 @@ describe("a quoting model built in parts", () => {
     expect(new Set(m.state.calls)).toEqual(new Set(["a", "b", "c"]));
   }, 20000);
 });
+
+// With general terms: every part reads them, so every part has the order's delivery fee. Left alone, a part names it
+// its own way ("oplata"); told the terms part's id, it uses that one.
+describe("the items of the whole order", () => {
+  const terms = [{ url: "https://x.pl/terms", text: "terms: delivery fee 19,5 " + "t ".repeat(500) }];
+  const program = (ids: string[]) => "```js\nconst catalog = { business: 'x', currency: 'PLN', shared: [], items: [" + ids.map((id) => `{ id: '${id}', name: '${id}', inputs: [] }`).join(", ") + "] };\nfunction needs() { return []; }\nfunction quote(r) { return { lines: r.lines.map(function (l) { return { item: l.item, status: 'price', amount: 10 }; }), total: null, rules: [] }; }\n```";
+  const maker = () => {
+    const calls: string[] = [];
+    const gen: Llm = async (_s, user) => {
+      const n = /page-(\w)/.exec(user)?.[1] || "terms";
+      calls.push(n);
+      return program(n === "terms" ? ["fee"] : [n, /^- fee: /m.test(user) ? "fee" : "oplata"]);
+    };
+    return { calls, llms: { gen, check: (async () => '{"cases": []}') as Llm } };
+  };
+  const all = (pb: { parts: { catalog: { items: { id: string }[] } }[] }) => pb.parts.map((p) => p.catalog.items.map((i) => i.id).join("+"));
+
+  it("come from a part of the terms alone, built first; every other part uses their ids", async () => {
+    const m = maker();
+    const pb = await buildBusiness("t", "x", pages, [], "test", m.llms, terms, { concurrency: 3 });
+    expect(m.calls[0]).toBe("terms");
+    expect(all(pb)).toEqual(["fee", "a+fee", "b+fee", "c+fee"]);
+  }, 20000);
+
+  it("a stored part that names an order item its own way is built again; the others are kept", async () => {
+    const first = await buildBusiness("t", "x", pages, [], "test", maker().llms, terms, { concurrency: 3 });
+    // As stored before the order items were recorded, one part with its own name for the fee.
+    const old = { ...first, parts: first.parts.map((p, k) => { const { order, ...rest } = p; return k === 2 ? { ...rest, catalog: { ...p.catalog, items: [{ id: "b", name: "b", inputs: [] }, { id: "oplata", name: "oplata", inputs: [] }] } } : rest; }) };
+    const m = maker();
+    const pb = await buildBusiness("t", "x", pages, [], "test", m.llms, terms, { concurrency: 3, prev: old });
+    expect(new Set(m.calls)).toEqual(new Set(["b"]));
+    expect(all(pb)).toEqual(["fee", "a+fee", "b+fee", "c+fee"]);
+  }, 20000);
+});

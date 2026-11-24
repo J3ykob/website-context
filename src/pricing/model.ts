@@ -31,7 +31,7 @@ export interface Catalog { business: string; currency: string; shared: InputSpec
 export interface Request { context: Record<string, unknown>; lines: { item: string; inputs: Record<string, unknown>; need?: string }[] }
 export interface QuoteLine { item: string; status: "price" | "range" | "needs" | "on_request" | "not_offered" | "included"; amount?: number; min?: number; max?: number | null; needs?: string[]; note?: string; need?: string; alternative?: boolean }
 export interface Quote { lines: QuoteLine[]; total?: { min: number; max: number | null } | null; rules?: string[] }
-export interface PricingModel { catalog: Catalog; code: string; source: string; model: string; verified?: { cases: number; agreed: number; problems: string[] } }
+export interface PricingModel { catalog: Catalog; code: string; source: string; model: string; /** the ids of the order-wide items it was built to use (buildBusiness) */ order?: string[]; verified?: { cases: number; agreed: number; problems: string[] } }
 
 export type Llm = (system: string, user: string, maxTokens?: number) => Promise<string>;
 
@@ -126,8 +126,9 @@ Answer with the program in one \`\`\`js code block, nothing else.`;
 /** The page text one part is generated from (stored with it: a part built from the same text is not built again). */
 export const sourceOf = (pages: { url: string; text: string }[]) => pages.map((p) => `### ${p.url}\n${p.text}`).join("\n\n").slice(0, 60000);
 
+export interface OrderItem { id: string; name: string }
 /** The business's quoting model from the text of its price pages; `feedback` = what a previous version got wrong. */
-export async function generate(business: string, pages: { url: string; text: string }[], llm: Llm, model: string, feedback?: { code: string; problems: string[] }, sharedSoFar: InputSpec[] = []): Promise<PricingModel> {
+export async function generate(business: string, pages: { url: string; text: string }[], llm: Llm, model: string, feedback?: { code: string; problems: string[] }, sharedSoFar: InputSpec[] = [], orderItems: OrderItem[] = []): Promise<PricingModel> {
   const source = sourceOf(pages);
   const fix = !feedback ? "" : feedback.code
     ? `\n\nA previous version of the program:\n\`\`\`js\n${feedback.code}\n\`\`\`\nIt disagreed with these checks written from the pages - correct the program where the pages support the check:\n- ${feedback.problems.slice(0, 15).join("\n- ")}`
@@ -135,7 +136,9 @@ export async function generate(business: string, pages: { url: string; text: str
   // The business's other parts already named their shared inputs: the same names for the same things (Rentbud's
   // parts said "godziny" and "hours" - the reader used one, the other part's program never saw the duration).
   const vocab = sharedOf(sharedSoFar).length ? `\n\nShared inputs this business's other programs already use - for the same thing use exactly the same name and unit:\n${sharedOf(sharedSoFar).map((x) => `- ${x.name}${x.unit ? ` (${x.unit})` : ""}: ${x.meaning}`).join("\n")}` : "";
-  const code = codeBlock(await llm(GENERATE, `Business: ${business}\n\nIts pages:\n${source}${vocab}${fix}`, 8000));
+  // The same for the items of the whole order (buildBusiness): one id for one thing in every part.
+  const order = orderItems.length ? `\n\nItems of the whole order that this business's other programs already define (charges made once per order, from its terms) - when these pages' rules use one, give it exactly this id, and define no other item for the same thing:\n${orderItems.map((x) => `- ${x.id}: ${x.name}`).join("\n")}` : "";
+  const code = codeBlock(await llm(GENERATE, `Business: ${business}\n\nIts pages:\n${source}${vocab}${order}${fix}`, 8000));
   const catalog = (await run(code, "catalog", null)) as Catalog; // read through the sandbox too
   return { catalog, code, source, model };
 }
@@ -150,12 +153,12 @@ function contractProblems(q: any): string[] {
 }
 
 /** Generate -> verify -> regenerate with the disagreements (up to `rounds` more), keeping the best version. */
-export async function build(business: string, pages: { url: string; text: string }[], gen: Llm, check: Llm, model: string, rounds = 2, missing: string[] = [], sharedSoFar: InputSpec[] = []): Promise<PricingModel> {
+export async function build(business: string, pages: { url: string; text: string }[], gen: Llm, check: Llm, model: string, rounds = 2, missing: string[] = [], sharedSoFar: InputSpec[] = [], orderItems: OrderItem[] = []): Promise<PricingModel> {
   let best: PricingModel | null = null, feedback: { code: string; problems: string[] } | undefined = missing.length ? { code: "", problems: missing.slice(0, 30).map((n) => `the catalogue leaves out "${n}" - include it if these pages offer it`) } : undefined;
   let cases: any[] | null = null;
   for (let k = 0; k <= rounds; k++) {
     let pm: PricingModel;
-    try { pm = await generate(business, pages, gen, model, feedback, sharedSoFar); } catch (e) { feedback = feedback && { ...feedback, problems: [`the program did not run: ${(e as Error).message.slice(0, 120)}`, ...feedback.problems] }; continue; }
+    try { pm = await generate(business, pages, gen, model, feedback, sharedSoFar, orderItems); } catch (e) { feedback = feedback && { ...feedback, problems: [`the program did not run: ${(e as Error).message.slice(0, 120)}`, ...feedback.problems] }; continue; }
     cases ||= await writeCases(pm, check).catch(() => null); // the same independent checks for every version
     pm = await checkAgainst(pm, cases || []);
     if (!best || (pm.verified!.agreed > best.verified!.agreed)) best = pm;
@@ -365,15 +368,41 @@ export async function buildBusiness(tenantId: string, business: string, offerPag
   const { jevAsk } = await import("../llm/jev.js");
   const rj = pages.length > 1 ? await jevAsk({ pages: pages.map((p) => `${p.url} - ${p.text.slice(0, 300)}`) }, Object.fromEntries(pages.map((_, k) => [`r${k}`, { type: "noul" as const, instructions: `Is \`pages[${k}]\` about terms that apply to all of the business's offers (rental or order conditions, delivery, deposits, discounts, minimums) rather than particular products?` }])), 15000).catch(() => null) : null;
   const rules = new Set([...extra.map((p) => p.url), ...pages.filter((_, k) => ((((rj as any)?.[`r${k}`]?.noul) as number) ?? 0) >= 0.5).map((p) => p.url)]);
-  const parts = partsOf(pages, rules), failed: string[] = [], at = opts.concurrency || 1;
-  // One slot per part, in the parts' order (a failed part leaves its slot empty; the completeness round below used
-  // the built list's index for the part and rebuilt the wrong pages after a failure).
-  const slots: (PricingModel | null)[] = parts.map((part) => opts.prev?.parts.find((x) => x.model === model && x.source === sourceOf(part)) || null);
-  slots.forEach((x, k) => { if (x) opts.onPart?.(k, parts.length, "kept"); });
+  const failed: string[] = [], at = opts.concurrency || 1;
+  // The rules pages are in every part, so every part's program has the charges of the whole order (a delivery fee) -
+  // and named them on its own: 15 of Sweet Home's 16 parts called it "delivery", one "dostawa", and with that part's
+  // cakes the fee was counted twice (quoteBusiness keeps such a charge once BY ITS ID). So a business of several
+  // parts gets a part of the rules pages alone, built first; its items are the order's items, and every other part is
+  // told their ids. With a stored model, that first part is told the ids most of the stored parts already share.
+  const rulePages = pages.filter((p) => rules.has(p.url)), productParts = partsOf(pages, rules);
+  const rulesPart = rulePages.length > 0 && productParts.length > 1;
+  const parts = rulesPart ? [rulePages, ...productParts] : productParts;
+  const stored = (part: { url: string; text: string }[]) => opts.prev?.parts.filter((x) => x.model === model && x.source === sourceOf(part)) || [];
+  const slots: (PricingModel | null)[] = parts.map(() => null);
   const sharedBut = (k: number) => slots.flatMap((b, j) => (b && j !== k ? b.catalog.shared || [] : []));
-  await each(parts.map((_, k) => k).filter((k) => !slots[k]), at, async (k) => {
-    slots[k] = await build(business, parts[k], llm, llm, model, 2, [], sharedBut(k)).catch((e) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; });
-    opts.onPart?.(k, parts.length, slots[k] ? "built" : "failed");
+  const done = (k: number, pm: PricingModel | null, how: "built" | "kept" | "failed") => { slots[k] = pm; opts.onPart?.(k, parts.length, how); };
+  const make = (k: number, order: OrderItem[], rounds: number, missing: string[] = []) => build(business, parts[k], llm, llm, model, rounds, missing, sharedBut(k), order).then((pm) => ({ ...pm, order: order.map((x) => x.id) }));
+  const lost = (e: unknown) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; };
+  let order: OrderItem[] = [];
+  if (rulesPart) {
+    const kept = stored(parts[0])[0];
+    if (kept) done(0, kept, "kept");
+    else {
+      const prev = opts.prev?.parts || [], seen = new Map<string, { n: number; name: string }>();
+      for (const part of prev) for (const id of new Set(part.catalog.items.map((i) => i.id))) seen.set(id, { n: (seen.get(id)?.n || 0) + 1, name: part.catalog.items.find((i) => i.id === id)!.name });
+      const common = [...seen].filter(([, v]) => v.n >= 2 && v.n > prev.length / 2).map(([id, v]) => ({ id, name: v.name }));
+      const pm = await make(0, common, 2).catch(lost);
+      done(0, pm && { ...pm, order: [] }, pm ? "built" : "failed");
+    }
+    order = (slots[0]?.catalog.items || []).map((i) => ({ id: i.id, name: i.name }));
+  }
+  // A stored part is kept when it was built from the same text to use the same order items - or, built before they
+  // were recorded, has every one of them in its catalogue.
+  const fits = (x: PricingModel) => (x.order ? x.order.length === order.length && order.every((o) => x.order!.includes(o.id)) : order.every((o) => x.catalog.items.some((i) => i.id === o.id)));
+  for (let k = rulesPart ? 1 : 0; k < parts.length; k++) { const kept = stored(parts[k]).find(fits); if (kept) done(k, kept, "kept"); }
+  await each(parts.map((_, k) => k).filter((k) => !slots[k] && !(rulesPart && k === 0)), at, async (k) => {
+    const pm = await make(k, order, 2).catch(lost);
+    done(k, pm, pm ? "built" : "failed");
   });
   const items = () => slots.flatMap((p) => p?.catalog.items || []);
   // Completeness: offer items no part covers, judged by a cheaper model; those parts are rebuilt once with the gap named.
@@ -381,8 +410,8 @@ export async function buildBusiness(tenantId: string, business: string, offerPag
   const all: Catalog = { business, currency: "PLN", shared: [], items: items() };
   let missing = await missingFromCatalog(all, offerNames.slice(0, 300), cheap).catch(() => [] as string[]);
   if (missing.length) {
-    await each(parts.map((_, k) => k).filter((k) => !!slots[k]), at, async (k) => {
-      const again = await build(business, parts[k], llm, llm, model, 1, missing, sharedBut(k)).catch(() => null);
+    await each(parts.map((_, k) => k).filter((k) => !!slots[k] && !(rulesPart && k === 0)), at, async (k) => {
+      const again = await make(k, order, 1, missing).catch(() => null);
       if (again && again.catalog.items.length > slots[k]!.catalog.items.length && again.verified!.agreed >= slots[k]!.verified!.agreed) slots[k] = again;
     });
     missing = await missingFromCatalog({ ...all, items: items() }, offerNames.slice(0, 300), cheap).catch(() => missing);
