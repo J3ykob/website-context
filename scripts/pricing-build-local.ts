@@ -52,7 +52,14 @@ for (const id of ids) {
       concurrency: AT_ONCE, prev: await loadPricing(id),
       onPart: (k, of, how) => console.log(`${id}: part ${k + 1}/${of} ${how} (${((Date.now() - t0) / 60000).toFixed(1)} min)`),
     });
-    if (pb.parts.length) await savePricing(pb);
+    // Stored straight to the storage; when this machine's upload fails (large uploads stalled on its network,
+    // 2026-11-24), through the server (PUT /api/admin/pricing/<id>; needs ADMIN_SECRET).
+    if (pb.parts.length) await savePricing(pb).catch(async (e) => {
+      if (!process.env.ADMIN_SECRET) throw e;
+      const r = await fetch(`${process.env.WHISP_BASE || "https://whisp.so"}/api/admin/pricing/${id}`, { method: "PUT", headers: { "x-admin-secret": process.env.ADMIN_SECRET, "Content-Type": "application/octet-stream" }, body: JSON.stringify(pb) });
+      if (!r.ok) throw new Error(`${(e as Error).message}; through the server: HTTP ${r.status} ${(await r.text()).slice(0, 120)}`);
+      console.log(`${id}: stored through the server`);
+    });
     console.log(`${id}: ${pb.parts.length} part(s), ${catalogOf(pb).items.length} items, checks ${pb.parts.reduce((n, p) => n + (p.verified?.agreed || 0), 0)}/${pb.parts.reduce((n, p) => n + (p.verified?.cases || 0), 0)}, missing ${pb.missing.length}, ${((Date.now() - t0) / 60000).toFixed(1)} min, from ${pages.length} pages${pb.failed?.length ? `, ${pb.failed.length} part(s) FAILED: ${pb.failed[0]}` : ""}`);
   } catch (e) { console.log(`${id}: failed - ${(e as Error).message}`); }
 }

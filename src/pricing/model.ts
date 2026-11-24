@@ -464,7 +464,13 @@ export async function catalogFor(pb: PricingBusiness): Promise<Catalog> {
 const KEY = (tenantId: string) => `tenants/${tenantId}/pricing.json`;
 export async function savePricing(pb: PricingBusiness): Promise<void> {
   const { uploadToR2 } = await import("../storage/r2.js");
-  await uploadToR2(KEY(pb.tenantId), JSON.stringify(pb), "application/json");
+  // uploadToR2 reports a failure as false: ignored, a finished build was announced as saved and lost (a part of
+  // Sweet Home's, 2026-11-24). Tried again, then an error.
+  for (let k = 1; ; k++) {
+    if (await uploadToR2(KEY(pb.tenantId), JSON.stringify(pb), "application/json")) return;
+    if (k >= 4) throw new Error(`the quoting model of ${pb.tenantId} could not be stored`);
+    await new Promise((r) => setTimeout(r, 5000 * k));
+  }
 }
 /** What a quoting model was built from: the builder's name and the offer pages' text (build-job.ts skips an unchanged one). */
 export function pagesHash(model: string, pages: { url: string; text: string }[]): string {

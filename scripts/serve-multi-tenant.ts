@@ -1806,6 +1806,27 @@ app.get("/api/admin/pricing/:tenantId", async (req, res) => {
   res.json({ tenantId: pb.tenantId, builtAt: pb.builtAt, model: pb.model, costUsd: pb.costUsd, missing: pb.missing, parts: pb.parts.map((p) => ({ items: p.catalog.items.length, shared: p.catalog.shared.map((s) => s.name), verified: p.verified })) });
 });
 
+// A quoting model built on another machine (scripts/pricing-build-local.ts), stored through this server: that
+// machine's own upload of the 1.5 MB file to the storage stalled on its network (2026-11-24). Sent as
+// application/octet-stream, so the JSON body parser leaves the body alone.
+app.put("/api/admin/pricing/:tenantId", (req, res) => {
+  if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
+  const id = req.params.tenantId;
+  if (!getTenant(id)) { res.status(404).json({ error: "Tenant not found" }); return; }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  req.on("data", (c: Buffer) => { size += c.length; if (size <= 30 * 1024 * 1024) chunks.push(c); });
+  req.on("end", async () => {
+    try {
+      if (size > 30 * 1024 * 1024) { res.status(413).json({ error: "too large" }); return; }
+      const pb = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+      if (pb?.tenantId !== id || typeof pb.hash !== "string" || !Array.isArray(pb.parts) || !pb.parts.length || !pb.parts.every((x: any) => typeof x?.code === "string" && Array.isArray(x?.catalog?.items))) { res.status(400).json({ error: "not a quoting model of this business" }); return; }
+      await (await import("../src/pricing/model.js")).savePricing(pb);
+      res.json({ ok: true, parts: pb.parts.length, builtAt: pb.builtAt });
+    } catch (e) { res.status(500).json({ error: (e as Error).message.slice(0, 200) }); }
+  });
+});
+
 app.post("/api/admin/rescrape/:tenantId", (req, res) => {
   if (!adminOk(req)) { res.status(403).json({ error: "Forbidden" }); return; }
   const tenant = getTenant(req.params.tenantId);
