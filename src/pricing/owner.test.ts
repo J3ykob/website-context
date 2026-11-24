@@ -27,3 +27,19 @@ describe("an item that several parts of a quoting model have", () => {
     expect(c.items.find((i) => i.id === "SH-1")!.inputs.map((x) => x.name)).toEqual(["weight_kg"]);
   });
 });
+
+describe("a charge every part adds once per order", () => {
+  // Each part knows the delivery fee from the terms and adds it when the order is delivered.
+  const withFee = (id: string) => part([{ id, inputs: [] }, { id: "delivery", inputs: [] }], `return { item: l.item, status: "price", amount: l.item === "delivery" ? 19.5 : 190 }; }).concat(r.context.delivery && !r.lines.some(function (l) { return l.item === "delivery"; }) ? [{ item: "delivery", status: "price", amount: 19.5 }] : []).map(function (l) { return l;`);
+  const two = (): PricingBusiness => ({ tenantId: "t", hash: "", builtAt: "", model: "", costUsd: 0, missing: [], parts: [withFee("A"), withFee("B")] });
+  it("is counted once when it is also asked for as a line", async () => {
+    const q = await quoteBusiness(two(), { context: { delivery: true }, lines: [{ item: "B", inputs: {} }, { item: "delivery", inputs: {} }] });
+    expect(q.lines.filter((l) => l.item === "delivery")).toHaveLength(1);
+    expect(q.total).toEqual({ min: 209.5, max: 209.5 });
+  });
+  it("is counted once when two parts add it", async () => {
+    const q = await quoteBusiness(two(), { context: { delivery: true }, lines: [{ item: "A", inputs: {} }, { item: "B", inputs: {} }] });
+    expect(q.lines.filter((l) => l.item === "delivery")).toHaveLength(1);
+    expect(q.total).toEqual({ min: 399.5, max: 399.5 });
+  });
+});

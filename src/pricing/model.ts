@@ -433,7 +433,14 @@ export async function quoteBusiness(pb: PricingBusiness, request: Request): Prom
     const own = request.lines.filter((l) => owner.get(l.item) === k);
     if (!own.length) continue;
     const q = (await run(pb.parts[k].code, "quote", { context: request.context, lines: own.map(({ item, inputs }) => ({ item, inputs })) }).catch((e) => ({ lines: own.map((l) => ({ item: l.item, status: "on_request", note: `could not compute: ${(e as Error).message.slice(0, 60)}` })) }))) as Quote;
-    for (const l of q.lines || []) lines.push({ ...l, need: own.find((x) => x.item === l.item)?.need });
+    for (const l of q.lines || []) {
+      const asked = own.find((x) => x.item === l.item);
+      // A line a part adds itself (a charge made once per order: every part has the delivery fee from the terms) is
+      // in the quote once - not next to the same item asked for, or added by another part. Sweet Home: a 190 zł cake
+      // with delivery came to 229 zł, the 19,5 zł fee from the delivery line and again from the cake's part (2026-11-24).
+      if (!asked && (lines.some((x) => x.item === l.item) || request.lines.some((x) => x.item === l.item))) continue;
+      lines.push({ ...l, need: asked?.need });
+    }
     rules.push(...(q.rules || []));
   }
   for (const l of request.lines) if (!lines.some((x) => x.item === l.item)) lines.push({ item: l.item, status: "not_offered", need: l.need });
