@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 const files = new Map<string, string>();
 vi.mock("../src/storage/r2.js", () => ({
   downloadFromR2: async (key: string) => (files.has(key) ? Buffer.from(files.get(key)!) : null),
-  uploadToR2: async (key: string, body: string) => { files.set(key, body); },
+  uploadToR2: async (key: string, body: string) => { files.set(key, body); return true; },
 }));
 
 describe("a quoting model is used only while it matches the scraped pages", () => {
