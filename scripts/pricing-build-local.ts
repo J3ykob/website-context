@@ -8,7 +8,10 @@
  *        PRICING_CALL_MIN (10), PRICING_PARTS_AT_ONCE (4). Parts a stored model already has from the same page text are kept.
  */
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { writeFileSync, rmSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { buildBusiness, savePricing, loadPricing, catalogOf, type Llm } from "../src/pricing/model.js";
 import { termsPages } from "../src/pricing/build-job.js";
 
@@ -52,14 +55,21 @@ for (const id of ids) {
       concurrency: AT_ONCE, prev: await loadPricing(id),
       onPart: (k, of, how) => console.log(`${id}: part ${k + 1}/${of} ${how} (${((Date.now() - t0) / 60000).toFixed(1)} min)`),
     });
-    // Stored straight to the storage; when this machine's upload fails (large uploads stalled on its network,
-    // 2026-11-24), through the server (PUT /api/admin/pricing/<id>; needs ADMIN_SECRET).
-    if (pb.parts.length) await savePricing(pb).catch(async (e) => {
-      if (!process.env.ADMIN_SECRET) throw e;
-      const r = await fetch(`${process.env.WHISP_BASE || "https://whisp.so"}/api/admin/pricing/${id}`, { method: "PUT", headers: { "x-admin-secret": process.env.ADMIN_SECRET, "Content-Type": "application/octet-stream" }, body: JSON.stringify(pb) });
-      if (!r.ok) throw new Error(`${(e as Error).message}; through the server: HTTP ${r.status} ${(await r.text()).slice(0, 120)}`);
-      console.log(`${id}: stored through the server`);
-    });
+    // Kept on this machine first (a build is hours of work; three rebuilt parts were lost to failed uploads). Then
+    // stored straight to the storage; when that upload fails (uploads over about 1 MB stalled on this network,
+    // 2026-11-24), gzipped through the server (PUT /api/admin/pricing/<id>; needs ADMIN_SECRET).
+    if (pb.parts.length) {
+      const file = join(tmpdir(), `pricing-${id}.json`);
+      writeFileSync(file, JSON.stringify(pb));
+      await savePricing(pb).catch(async (e) => {
+        if (!process.env.ADMIN_SECRET) throw new Error(`${(e as Error).message} - the model is in ${file}`);
+        const body = gzipSync(JSON.stringify(pb));
+        const r = await fetch(`${process.env.WHISP_BASE || "https://whisp.so"}/api/admin/pricing/${id}`, { method: "PUT", headers: { "x-admin-secret": process.env.ADMIN_SECRET, "Content-Type": "application/octet-stream" }, body }).catch((x) => { throw new Error(`${(e as Error).message}; through the server: ${(x as Error).message} - the model is in ${file}`); });
+        if (!r.ok) throw new Error(`${(e as Error).message}; through the server: HTTP ${r.status} ${(await r.text()).slice(0, 120)} - the model is in ${file}`);
+        console.log(`${id}: stored through the server (${body.length} bytes gzipped)`);
+      });
+      rmSync(file);
+    }
     console.log(`${id}: ${pb.parts.length} part(s), ${catalogOf(pb).items.length} items, checks ${pb.parts.reduce((n, p) => n + (p.verified?.agreed || 0), 0)}/${pb.parts.reduce((n, p) => n + (p.verified?.cases || 0), 0)}, missing ${pb.missing.length}, ${((Date.now() - t0) / 60000).toFixed(1)} min, from ${pages.length} pages${pb.failed?.length ? `, ${pb.failed.length} part(s) FAILED: ${pb.failed[0]}` : ""}`);
   } catch (e) { console.log(`${id}: failed - ${(e as Error).message}`); }
 }

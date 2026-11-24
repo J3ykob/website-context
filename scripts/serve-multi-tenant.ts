@@ -1819,7 +1819,10 @@ app.put("/api/admin/pricing/:tenantId", (req, res) => {
   req.on("end", async () => {
     try {
       if (size > 30 * 1024 * 1024) { res.status(413).json({ error: "too large" }); return; }
-      const pb = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+      // Gzipped by the sender (the first two bytes say so): uploads over about 1 MB stalled on its network.
+      let body = Buffer.concat(chunks);
+      if (body[0] === 0x1f && body[1] === 0x8b) body = (await import("node:zlib")).gunzipSync(body, { maxOutputLength: 100 * 1024 * 1024 });
+      const pb = JSON.parse(body.toString("utf-8"));
       if (pb?.tenantId !== id || typeof pb.hash !== "string" || !Array.isArray(pb.parts) || !pb.parts.length || !pb.parts.every((x: any) => typeof x?.code === "string" && Array.isArray(x?.catalog?.items))) { res.status(400).json({ error: "not a quoting model of this business" }); return; }
       await (await import("../src/pricing/model.js")).savePricing(pb);
       res.json({ ok: true, parts: pb.parts.length, builtAt: pb.builtAt });
