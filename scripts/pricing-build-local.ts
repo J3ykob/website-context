@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { buildBusiness, savePricing, loadPricing, catalogOf, type Llm, type PricingModel } from "../src/pricing/model.js";
-import { termsPages } from "../src/pricing/build-job.js";
+import { termsPages, pricedPages } from "../src/pricing/build-job.js";
 
 const BIN = process.env.CLAUDE_BIN || `${homedir()}/.local/bin/claude`;
 // A call that hangs (2026-11-16: four calls sat 9-12 h with no output) is killed after CALL_MIN and asked again.
@@ -53,13 +53,15 @@ for (const id of ids) {
   const t = getTenant(id);
   const offer = (await loadOffer(id).catch(() => null))?.items || [];
   const terms = await termsPages(id);
+  const more = await pricedPages(id, pages.map((p) => p.url));
+  if (more.length) console.log(`${id}: ${more.length} priced page(s) outside the offer pages: ${more.map((p) => `${p.url} (${p.text.length} chars)`).join(", ")}`);
   const stored = await loadPricing(id);
   const partial: PricingModel[] = existsSync(PARTIAL(id)) ? JSON.parse(readFileSync(PARTIAL(id), "utf-8")) : [];
   if (partial.length) console.log(`${id}: ${partial.length} part(s) kept from an unfinished build`);
   console.log(`${id}: ${pages.length} offer pages, general terms from ${terms.length} page(s) (${terms.reduce((n, p) => n + p.text.length, 0)} chars)`);
   try {
     const pb = await buildBusiness(id, t?.brandName || t?.domain || id, pages, offer.map((i) => i.name), "claude-code:opus", { gen: claude("opus"), check: claude("sonnet") }, terms, {
-      concurrency: AT_ONCE,
+      concurrency: AT_ONCE, more,
       // The stored model's parts and the ones an earlier, unfinished run of this build left in the file.
       prev: { ...(stored || { tenantId: id, hash: "", builtAt: "", model: "", costUsd: 0, missing: [] }), parts: [...partial, ...(stored?.parts || [])] },
       onPart: (k, of, how, soFar) => {

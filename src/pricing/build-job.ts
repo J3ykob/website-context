@@ -26,6 +26,26 @@ export async function termsPages(tenantId: string): Promise<{ url: string; text:
   return [...pages].map(([url, texts]) => ({ url, text: texts.join("\n\n") }));
 }
 
+/**
+ * Pages with prices that the offer pages leave out: every page that has a passage of the knowledge catalogue's
+ * "pricing" topic and is not an offer page or a post (the scrape's site map), as its pricing, services and products
+ * passages. The offer pages are chosen by a step of their own at the scrape, and it missed price lists: Ania Tkaczyk's
+ * bridal page (packages 3000 / 4200 zł) and Angelika Solecka's booking page (33 prices) - their quoting models priced
+ * those "on request" while the chat read the prices from the same pages (2026-11-25).
+ */
+export async function pricedPages(tenantId: string, offerUrls: string[]): Promise<{ url: string; text: string }[]> {
+  const { downloadFromR2 } = await import("../storage/r2.js");
+  const json = (f: string) => downloadFromR2(`tenants/${tenantId}/${f}`).then((b) => (b ? JSON.parse(b.toString("utf-8")) : null)).catch(() => null);
+  const [cat, meta] = await Promise.all([json("knowledge-catalog.json"), json("context-meta.json")]);
+  const { siteText } = await import("../llm/packs.js");
+  const same = (u: string) => u.replace(/\/+$/, "");
+  const skip = new Set([...offerUrls.map(same), ...((meta?.siteMap || []) as { url: string; type?: string }[]).filter((p) => p.type === "article").map((p) => same(p.url))]);
+  const chunks: { catalogId: string; content: string; url?: string }[] = (cat?.chunks || []).filter((c: any) => c.url && !skip.has(same(c.url)));
+  const priced = new Set(chunks.filter((c) => c.catalogId === "pricing").map((c) => same(c.url!)));
+  const USED = new Set(["pricing", "services", "products"]);
+  return [...priced].map((url) => ({ url, text: chunks.filter((c) => same(c.url!) === url && USED.has(c.catalogId)).map((c) => siteText(c.content)).join("\n\n") }));
+}
+
 export async function buildPricingFor(tenantId: string, opts: { force?: boolean } = {}): Promise<PricingBusiness | { skipped: string }> {
   if (running.has(tenantId)) return { skipped: "already building" };
   running.add(tenantId);
@@ -41,7 +61,7 @@ export async function buildPricingFor(tenantId: string, opts: { force?: boolean 
     const { getTenant } = await import("../multi-tenant/d1-registry.js");
     const t = getTenant(tenantId);
     const offer = (await loadOffer(tenantId).catch(() => null))?.items || [];
-    const pb = await buildBusiness(tenantId, t?.brandName || t?.domain || tenantId, pages, offer.map((i) => i.name), model, undefined, await termsPages(tenantId));
+    const pb = await buildBusiness(tenantId, t?.brandName || t?.domain || tenantId, pages, offer.map((i) => i.name), model, undefined, await termsPages(tenantId), { more: await pricedPages(tenantId, pages.map((p) => p.url)) });
     if (pb.parts.length) await savePricing(pb);
     return pb;
   } finally {

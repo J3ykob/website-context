@@ -366,7 +366,7 @@ function partsOf(pages: { url: string; text: string }[], rules: Set<string>): { 
  * with the parts there are so far (the local build keeps them in a file: a stopped build lost three finished parts).
  * Sweet Home, 15 parts one after another with a 45-minute wait on each hung call: 13.4 h, one part lost (2026-11-24).
  */
-export interface BuildOptions { concurrency?: number; prev?: PricingBusiness | null; onPart?: (k: number, of: number, how: "built" | "kept" | "failed", soFar: PricingModel[]) => void }
+export interface BuildOptions { concurrency?: number; /** priced pages the offer pages leave out (build-job.ts pricedPages): built after them, not part of the hash */ more?: { url: string; text: string }[]; prev?: PricingBusiness | null; onPart?: (k: number, of: number, how: "built" | "kept" | "failed", soFar: PricingModel[]) => void }
 async function each<T>(items: T[], at: number, fn: (x: T) => Promise<void>): Promise<void> {
   let next = 0;
   await Promise.all(Array.from({ length: Math.max(1, Math.min(at, items.length)) }, async () => { while (next < items.length) await fn(items[next++]); }));
@@ -378,7 +378,7 @@ export async function buildBusiness(tenantId: string, business: string, offerPag
   const llm = llms?.gen || reasonedLlm(model, usage);
   const hash = pagesHash(model, offerPages);
   const extra = terms.filter((t) => !offerPages.some((p) => p.url === t.url));
-  const pages = [...extra, ...offerPages];
+  const pages = [...extra, ...offerPages, ...(opts.more || []).filter((m) => !offerPages.some((p) => p.url === m.url) && !extra.some((p) => p.url === m.url))];
   // Rules pages (terms, delivery, deposits, discounts that apply to every offer) go into every part.
   const { jevAsk } = await import("../llm/jev.js");
   const rj = pages.length > 1 ? await jevAsk({ pages: pages.map((p) => `${p.url} - ${p.text.slice(0, 300)}`) }, Object.fromEntries(pages.map((_, k) => [`r${k}`, { type: "noul" as const, instructions: `Is \`pages[${k}]\` about terms that apply to all of the business's offers (rental or order conditions, delivery, deposits, discounts, minimums) rather than particular products?` }])), 15000).catch(() => null) : null;
