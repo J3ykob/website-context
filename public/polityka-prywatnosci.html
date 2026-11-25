@@ -45,7 +45,9 @@
     .t-recipients td:nth-child(3)::before { content: "Gdzie: "; }
     .t-retention td:nth-child(2)::before, .t-storage td:nth-child(3)::before { content: "Jak długo: "; }
   }
+  .consent-reset { background: transparent; color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; }
 </style>
+<script src="/consent.js" data-pixel="off" defer></script>
 </head>
 <body>
 <main>
@@ -61,7 +63,7 @@
       <li>Decyzje modeli AI zapisujemy razem z danymi, na podstawie których zapadły (także z treścią rozmów), żeby sprawdzać ich jakość i wytrenować własny model Whisp.</li>
       <li>Wiadomości z czatu usuwamy po {{CHAT_RETENTION_DAYS}} dniach. Inne dane mają własne terminy, a części nie usuwamy automatycznie (pkt 8).</li>
       <li>Większość naszych dostawców to firmy z USA, a dane mogą trafić także do innych krajów spoza Europejskiego Obszaru Gospodarczego (pkt 6 i 7).</li>
-      <li>Możesz żądać dostępu do swoich danych i ich usunięcia oraz sprzeciwić się ich przetwarzaniu (pkt 9). Nie używamy plików cookies reklamowych. Pytania o dane: <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>.</li>
+      <li>Możesz żądać dostępu do swoich danych i ich usunięcia oraz sprzeciwić się ich przetwarzaniu (pkt 9). Reklamowych plików cookies (piksel Meta) używamy tylko za Twoją zgodą (pkt 10). Pytania o dane: <a href="mailto:{{PRIVACY_EMAIL}}">{{PRIVACY_EMAIL}}</a>.</li>
     </ul>
   </div>
 
@@ -221,6 +223,7 @@
     <tr><td>Stripe</td><td>płatność za abonament: dane karty, dane do faktury i NIP podajesz bezpośrednio w formularzu Stripe</td><td>UE (Irlandia) i USA</td></tr>
     <tr><td>Google (Gmail)</td><td>poczta do nas i automatyczne powiadomienia z serwisu (np. treść SMS-ów wysłanych na nasz numer) - nasza skrzynka jest w Gmailu</td><td>USA i globalnie</td></tr>
     <tr><td>WhatsApp (Meta, przez Twilio) i Telegram</td><td>powiadomienia - tylko gdy strona statusu zapytania oferuje taki kanał i go wybierzesz</td><td>WhatsApp: serwery Meta i Twilio, także w USA; Telegram: Zjednoczone Emiraty Arabskie</td></tr>
+    <tr><td>Meta Platforms Ireland (Facebook, Instagram)</td><td>piksel Meta na whisp.so - tylko jeśli się na niego zgodzisz: adres IP, dane o przeglądarce i urządzeniu, adres odwiedzonej strony i strony, z której przychodzisz, czas wizyty, identyfikatory z plików cookies _fbp i _fbc (pkt 10)</td><td>UE (Irlandia) i USA</td></tr>
     <tr><td>jsDelivr i Unsplash</td><td>adres IP Twojej przeglądarki, gdy pobiera bibliotekę czatu na stronie przeglądu odpowiedzi (dla firm) albo zdjęcie na stronie głównej whisp.so</td><td>globalne sieci serwerów</td></tr>
     </tbody>
   </table>
@@ -284,7 +287,7 @@
   <p>Masz też prawo złożyć skargę do Prezesa Urzędu Ochrony Danych Osobowych (ul. Stawki 2, 00-193 Warszawa, <a href="https://uodo.gov.pl">uodo.gov.pl</a>).</p>
 
   <h2 id="cookies">10. Pliki cookies i pamięć przeglądarki</h2>
-  <p>Czat i strony whisp.so zapisują w Twojej przeglądarce kilka informacji (w pamięci strony: localStorage i sessionStorage). Służą tylko temu, żeby czat i strony whisp.so działały tak, jak z nich korzystasz, dlatego nie prosimy o zgodę na ich zapis. Nie używamy ich do reklamy ani profilowania.</p>
+  <p>Czat i strony whisp.so zapisują w Twojej przeglądarce kilka informacji (w pamięci strony: localStorage i sessionStorage). Wpisy z tabeli poniżej - poza plikami piksela Meta - służą tylko temu, żeby czat i strony whisp.so działały tak, jak z nich korzystasz, dlatego nie prosimy o zgodę na ich zapis i nie używamy ich do reklamy ani profilowania. Piksel Meta włączamy dopiero po Twojej zgodzie - opisujemy go pod tabelą.</p>
   <table class="t-storage">
     <thead><tr><th>Wpis</th><th>Po co</th><th>Jak długo</th></tr></thead>
     <tbody>
@@ -298,10 +301,17 @@
     <tr><td>wctx-dashboard-token, wctx-tenant-id</td><td>zalogowanie do panelu firmy</td><td>do wylogowania; sesja wygasa po 7 dniach</td></tr>
     <tr><td>whisp-lang</td><td>wybrany język strony</td><td>do usunięcia w przeglądarce</td></tr>
     <tr><td>wctx-ai-summary (sessionStorage)</td><td>komunikat po zmianie strony firmy w edytorze</td><td>do wyświetlenia komunikatu</td></tr>
+    <tr><td>whisp-consent</td><td>Twoja decyzja w sprawie piksela Meta (zgoda albo odmowa) - żebyśmy nie pytali ponownie</td><td>do zmiany decyzji albo usunięcia w przeglądarce</td></tr>
+    <tr><td>cookies _fbp i _fbc (piksel Meta)</td><td>tylko po Twojej zgodzie: identyfikator przeglądarki i identyfikator kliknięcia w reklamę - do pomiaru skuteczności naszych reklam na Facebooku i Instagramie</td><td>90 dni</td></tr>
     <tr><td>cookie wdemo</td><td>tylko w przeglądarce administratora Whisp: pokazy bez limitów</td><td>90 dni</td></tr>
     </tbody>
   </table>
   <p>Strona główna whisp.so pobiera zdjęcie z Unsplash, a strona przeglądu odpowiedzi - bibliotekę czatu z jsDelivr; Twoja przeglądarka łączy się wtedy z serwerami tych firm i przekazuje im swój adres IP. Czcionki czatu i stron whisp.so pobiera z naszego serwera. Płatność odbywa się na stronie Stripe, która stosuje własne pliki cookies. Zapisane wpisy możesz w każdej chwili usunąć w ustawieniach przeglądarki (dane witryny) - po usunięciu czat zacznie nową rozmowę.</p>
+
+  <h3 id="piksel">Piksel Meta</h3>
+  <p>Na stronie głównej whisp.so i na stronach zakładania czatu (/claim, /build) pytamy, czy zgadzasz się na piksel Meta - narzędzie Meta Platforms Ireland Limited (Facebook, Instagram). Dopóki się nie zgodzisz, nie pobieramy go i nie trafiają do Meta żadne dane o Twojej wizycie. Jeśli się zgodzisz, piksel zapisuje w Twojej przeglądarce pliki cookies _fbp i _fbc i przekazuje Meta: adres IP, dane o przeglądarce i urządzeniu, adres odwiedzonej strony i strony, z której przychodzisz, oraz czas wizyty. Treść rozmów z czatem ani dane wpisane w formularzach nie są przekazywane.</p>
+  <p>Używamy piksela, żeby sprawdzać, czy nasze reklamy na Facebooku i Instagramie działają, i żeby kierować je do osób, które odwiedziły whisp.so, lub do osób do nich podobnych. Podstawą jest Twoja zgoda (lit. a). Za zebranie tych danych i przekazanie ich Meta odpowiadamy wspólnie z Meta Platforms Ireland; to, co Meta robi z nimi dalej - także łączenie ich z Twoim kontem na Facebooku lub Instagramie i przekazywanie do USA - opisuje <a href="https://www.facebook.com/privacy/policy">polityka prywatności Meta</a>.</p>
+  <p>Zgodę możesz w każdej chwili wycofać - nie wpływa to na zgodność z prawem tego, co działo się przed jej wycofaniem: <button type="button" class="consent-reset" onclick="window.whispConsent && whispConsent.reset()">Zmień decyzję w sprawie piksela Meta</button></p>
 
   <h2 id="zmiany">11. Zmiany polityki</h2>
   <p>Aktualna wersja polityki jest zawsze na tej stronie, a data na górze pokazuje, od kiedy obowiązuje. Wcześniejsze wersje prześlemy na prośbę.</p>
