@@ -43,3 +43,22 @@ describe("a charge every part adds once per order", () => {
     expect(q.total).toEqual({ min: 399.5, max: 399.5 });
   });
 });
+
+describe("a value the reader gives in a form code does not count", () => {
+  const cat = { business: "x", currency: "PLN", shared: [{ name: "guests", meaning: "number of guests", type: "number" as const }], items: [{ id: "menu", name: "Wedding menu", inputs: [] }] };
+  it("is asked for again, and the plain number is taken", async () => {
+    const { read } = await import("./model.js");
+    const answers = ['{"context": {"guests": {"value": 80, "unit": "persons"}}, "needs": [{"what": "wedding", "options": [{"item": "menu", "inputs": {}}]}]}', '{"context": {"guests": 80}, "needs": [{"what": "wedding", "options": [{"item": "menu", "inputs": {}}]}]}'];
+    const asked: string[] = [];
+    const req = await read("a wedding for 80", cat, async (_s, user) => { asked.push(user); return answers[asked.length - 1]; });
+    expect(req.context).toEqual({ guests: 80 });
+    expect(asked).toHaveLength(2);
+    expect(asked[1]).toContain("guests");
+  });
+  it("a period or a conversion is a form code counts: not asked again", async () => {
+    const { read } = await import("./model.js");
+    let n = 0;
+    await read("soup for 8", cat, async () => { n++; return '{"context": {"guests": {"amount": 8, "equals": {"input": 1, "given": 4}}}, "needs": [{"what": "w", "options": [{"item": "menu", "inputs": {}}]}]}'; });
+    expect(n).toBe(1);
+  });
+});

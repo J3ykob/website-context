@@ -23,7 +23,7 @@
  */
 import { createHash } from "node:crypto";
 import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
-import { countInputs, todayLine, type TimeUnit } from "./quantity.js";
+import { countInputs, readingsOf, todayLine, type TimeUnit } from "./quantity.js";
 
 export interface InputSpec { name: string; meaning: string; type: "number" | "boolean" | "choice" | "date" | "text"; unit?: string; options?: string[] }
 export interface CatalogItem { id: string; name: string; inputs: InputSpec[]; note?: string }
@@ -273,6 +273,12 @@ function unknownInputs(j: any, catalog: Catalog, partShared?: Map<string, Set<st
   return [...bad];
 }
 
+/** Input names whose value is an object that is none of the forms code counts (a period, a length, a conversion). */
+function oddValues(j: any): string[] {
+  const records: Record<string, unknown>[] = [j?.context || {}, ...(Array.isArray(j?.needs) ? j.needs : []).flatMap((n: any) => (Array.isArray(n?.options) ? n.options : []).map((o: any) => o?.inputs || {}))];
+  return [...new Set(records.flatMap((rec) => Object.entries(rec).filter(([, v]) => v !== null && typeof v === "object" && readingsOf(v, "hour") === null).map(([name]) => name)))];
+}
+
 /**
  * The customer's message as a request in the business's terms (text -> structure); its quantities as read - numbers,
  * periods, conversions (priceRequest counts them). `today`: what the dates are read against; `notes`: what the business's
@@ -289,6 +295,14 @@ export async function read(message: string, catalog: Catalog, llm: Llm, partShar
     const names = partShared ? [...new Set(chosen.flatMap((id) => [...(partShared.get(id) || [])]))] : catalog.shared.map((x) => x.name);
     const again = firstJson(await llm(READ, `${ask}\n\nYour previous answer used input names the chosen items do not read: ${unknown.join(", ")}. For these items use only these shared names: ${names.join(", ") || "none"}; and each item's own input names as listed. Answer the JSON again.`, 1500));
     if (again && unknownInputs(again, catalog, partShared).length < unknown.length) j = again;
+  }
+  // Values in a form the contract does not have (a structure check): asked once more. A number of guests came as
+  // {"value": 80, "unit": "persons"} when the catalogue gave the input no unit; code counts only the forms above, the
+  // object went to the program as it was, and "a wedding for 80" got "needs: guests" (dworekstaropolski_com, 2026-11-25).
+  const odd = oddValues(j);
+  if (odd.length) {
+    const again = firstJson(await llm(READ, `${ask}\n\nYour previous answer gave these inputs a value in a form that is not allowed: ${odd.join(", ")}. A value is one plain number in the catalogue's unit (80, not an object with a unit), a text or true/false as the input's type says, or one of the two forms described. Answer the JSON again.`, 1500));
+    if (again && oddValues(again).length < odd.length && unknownInputs(again, catalog, partShared).length <= unknownInputs(j, catalog, partShared).length) j = again;
   }
   // Needs with their options -> lines; the options of one need share its position as their "need" (structure, no text).
   const needs: any[] = Array.isArray(j?.needs) ? j.needs : [];
@@ -701,7 +715,9 @@ export async function quoteResult(pb: PricingBusiness, convo: string, opts: { no
   const catalog = await catalogFor(pb);
   const { OpenRouterProvider } = await import("../llm/openrouter-provider.js");
   const or = new OpenRouterProvider({ model: "anthropic/claude-haiku-5.5", maxTokens: 1500, temperature: 0 });
-  const partShared = new Map(pb.parts.flatMap((p) => (p.catalog.items || []).map((i) => [i.id, new Set((p.catalog.shared || []).map((x) => x.name))] as const)));
+  // The shared inputs of the part that quotes each item (ownersOf; it was the last part that has the item).
+  const owner = await ownersOf(pb);
+  const partShared = new Map([...owner].map(([id, k]) => [id, new Set((pb.parts[k].catalog.shared || []).map((x) => x.name))] as const));
   const llm: Llm = async (sys, user, max = 1500) => (await or.chat([{ role: "system", content: sys }, { role: "user", content: user }], { maxTokens: max })).content;
   const today = todayLine();
   const unitsP = durationUnits(pb, catalog);
