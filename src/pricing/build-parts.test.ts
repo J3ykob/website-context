@@ -79,3 +79,16 @@ describe("the items of the whole order", () => {
     expect(all(pb)).toEqual(["fee", "a+fee", "b+fee", "c+fee"]);
   }, 20000);
 });
+
+describe("a build that stops half-way", () => {
+  it("has handed over every finished part, and a new build from those builds only the rest", async () => {
+    const lost = maker("c");
+    let kept: any[] = [];
+    await buildBusiness("t", "x", pages, [], "test", lost.llms, [], { concurrency: 1, onPart: (_k, _of, how, soFar) => { if (how === "built") kept = soFar; } });
+    expect(kept.map((p) => p.catalog.items[0].id)).toEqual(["a", "b"]);
+    const m = maker();
+    const pb = await buildBusiness("t", "x", pages, [], "test", m.llms, [], { prev: { tenantId: "t", hash: "", builtAt: "", model: "", costUsd: 0, missing: [], parts: kept } });
+    expect(ids(pb)).toEqual(["a", "b", "c"]);
+    expect(new Set(m.state.calls)).toEqual(new Set(["c"]));
+  }, 20000);
+});

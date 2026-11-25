@@ -348,10 +348,11 @@ function partsOf(pages: { url: string; text: string }[], rules: Set<string>): { 
 /**
  * How a build runs. `concurrency`: parts built at once (a part reads only the shared inputs of the parts finished
  * before it started). `prev`: a stored model - its parts built by the same builder from the same page text are kept,
- * so a build that lost a part is finished without building the others again. `onPart`: called as each part ends.
+ * so a build that lost a part is finished without building the others again. `onPart`: called as each part ends,
+ * with the parts there are so far (the local build keeps them in a file: a stopped build lost three finished parts).
  * Sweet Home, 15 parts one after another with a 45-minute wait on each hung call: 13.4 h, one part lost (2026-11-24).
  */
-export interface BuildOptions { concurrency?: number; prev?: PricingBusiness | null; onPart?: (k: number, of: number, how: "built" | "kept" | "failed") => void }
+export interface BuildOptions { concurrency?: number; prev?: PricingBusiness | null; onPart?: (k: number, of: number, how: "built" | "kept" | "failed", soFar: PricingModel[]) => void }
 async function each<T>(items: T[], at: number, fn: (x: T) => Promise<void>): Promise<void> {
   let next = 0;
   await Promise.all(Array.from({ length: Math.max(1, Math.min(at, items.length)) }, async () => { while (next < items.length) await fn(items[next++]); }));
@@ -380,7 +381,8 @@ export async function buildBusiness(tenantId: string, business: string, offerPag
   const stored = (part: { url: string; text: string }[]) => opts.prev?.parts.filter((x) => x.model === model && x.source === sourceOf(part)) || [];
   const slots: (PricingModel | null)[] = parts.map(() => null);
   const sharedBut = (k: number) => slots.flatMap((b, j) => (b && j !== k ? b.catalog.shared || [] : []));
-  const done = (k: number, pm: PricingModel | null, how: "built" | "kept" | "failed") => { slots[k] = pm; opts.onPart?.(k, parts.length, how); };
+  // `soFar`: every part there is now - the caller may keep them, so a build that stops loses nothing it finished.
+  const done = (k: number, pm: PricingModel | null, how: "built" | "kept" | "failed") => { slots[k] = pm; opts.onPart?.(k, parts.length, how, slots.filter((x): x is PricingModel => !!x)); };
   const make = (k: number, order: OrderItem[], rounds: number, missing: string[] = []) => build(business, parts[k], llm, llm, model, rounds, missing, sharedBut(k), order).then((pm) => ({ ...pm, order: order.map((x) => x.id) }));
   const lost = (e: unknown) => { failed.push((e as Error).message.slice(0, 200)); console.warn(`[pricing] ${tenantId}: a part failed - ${(e as Error).message}`); return null; };
   let order: OrderItem[] = [];

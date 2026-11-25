@@ -5,20 +5,22 @@
  *
  *   npx tsx scripts/pricing-build-local.ts sosnowydwor_com_pl aniatkaczyk_pl ...   (needs R2 + Jev env)
  *   env: CLAUDE_BIN (default ~/.local/bin/claude - the real binary, so no account switching), PRICING_MAX_PARTS,
- *        PRICING_CALL_MIN (10), PRICING_PARTS_AT_ONCE (4). Parts a stored model already has from the same page text are kept.
+ *        PRICING_CALL_MIN (25), PRICING_PARTS_AT_ONCE (4). Parts a stored model already has from the same page text are kept.
  */
 import { spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { buildBusiness, savePricing, loadPricing, catalogOf, type Llm } from "../src/pricing/model.js";
+import { buildBusiness, savePricing, loadPricing, catalogOf, type Llm, type PricingModel } from "../src/pricing/model.js";
 import { termsPages } from "../src/pricing/build-job.js";
 
 const BIN = process.env.CLAUDE_BIN || `${homedir()}/.local/bin/claude`;
 // A call that hangs (2026-11-16: four calls sat 9-12 h with no output) is killed after CALL_MIN and asked again.
-// 45 min at first; calls that answer take 2-6 min, and 12 hung ones cost 9 of a build's 13.4 hours (2026-11-24).
-const CALL_MIN = Number(process.env.PRICING_CALL_MIN) || 10;
+// 45 min at first: 12 hung calls cost 9 of a build's 13.4 hours (2026-11-24). 10 min fitted a shop's simple
+// product pages (calls of 2-6 min) but not a wedding hall's price list (halls x seasons x days): two parts ran out
+// of time three times in a row (2026-11-25). 25 min; what a stopped build finished is kept (PARTIAL below).
+const CALL_MIN = Number(process.env.PRICING_CALL_MIN) || 25;
 // Parts built at once (each call is its own CLI process).
 const AT_ONCE = Number(process.env.PRICING_PARTS_AT_ONCE) || 4;
 const once = (model: string, system: string, user: string) => new Promise<string>((ok, fail) => {
@@ -36,6 +38,8 @@ const claude = (model: string): Llm => async (system, user) => {
   }
 };
 
+// The parts a running build has finished, kept on this machine until the whole model is stored.
+const PARTIAL = (id: string) => join(tmpdir(), `pricing-${id}.partial.json`);
 const ids = process.argv.slice(2);
 if (!ids.length) { console.error("Give tenant ids."); process.exit(1); }
 const { hydrateRegistry, getTenant } = await import("../src/multi-tenant/d1-registry.js");
@@ -49,11 +53,19 @@ for (const id of ids) {
   const t = getTenant(id);
   const offer = (await loadOffer(id).catch(() => null))?.items || [];
   const terms = await termsPages(id);
+  const stored = await loadPricing(id);
+  const partial: PricingModel[] = existsSync(PARTIAL(id)) ? JSON.parse(readFileSync(PARTIAL(id), "utf-8")) : [];
+  if (partial.length) console.log(`${id}: ${partial.length} part(s) kept from an unfinished build`);
   console.log(`${id}: ${pages.length} offer pages, general terms from ${terms.length} page(s) (${terms.reduce((n, p) => n + p.text.length, 0)} chars)`);
   try {
     const pb = await buildBusiness(id, t?.brandName || t?.domain || id, pages, offer.map((i) => i.name), "claude-code:opus", { gen: claude("opus"), check: claude("sonnet") }, terms, {
-      concurrency: AT_ONCE, prev: await loadPricing(id),
-      onPart: (k, of, how) => console.log(`${id}: part ${k + 1}/${of} ${how} (${((Date.now() - t0) / 60000).toFixed(1)} min)`),
+      concurrency: AT_ONCE,
+      // The stored model's parts and the ones an earlier, unfinished run of this build left in the file.
+      prev: { ...(stored || { tenantId: id, hash: "", builtAt: "", model: "", costUsd: 0, missing: [] }), parts: [...partial, ...(stored?.parts || [])] },
+      onPart: (k, of, how, soFar) => {
+        console.log(`${id}: part ${k + 1}/${of} ${how} (${((Date.now() - t0) / 60000).toFixed(1)} min)`);
+        if (how === "built") writeFileSync(PARTIAL(id), JSON.stringify(soFar));
+      },
     });
     // Kept on this machine first (a build is hours of work; three rebuilt parts were lost to failed uploads). Then
     // stored straight to the storage; when that upload fails (uploads over about 1 MB stalled on this network,
@@ -69,6 +81,7 @@ for (const id of ids) {
         console.log(`${id}: stored through the server (${body.length} bytes gzipped)`);
       });
       rmSync(file);
+      if (existsSync(PARTIAL(id))) rmSync(PARTIAL(id));
     }
     console.log(`${id}: ${pb.parts.length} part(s), ${catalogOf(pb).items.length} items, checks ${pb.parts.reduce((n, p) => n + (p.verified?.agreed || 0), 0)}/${pb.parts.reduce((n, p) => n + (p.verified?.cases || 0), 0)}, missing ${pb.missing.length}, ${((Date.now() - t0) / 60000).toFixed(1)} min, from ${pages.length} pages${pb.failed?.length ? `, ${pb.failed.length} part(s) FAILED: ${pb.failed[0]}` : ""}`);
   } catch (e) { console.log(`${id}: failed - ${(e as Error).message}`); }
