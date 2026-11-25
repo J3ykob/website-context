@@ -28,10 +28,12 @@ export async function termsPages(tenantId: string): Promise<{ url: string; text:
 
 /**
  * Pages with prices that the offer pages leave out: every page that has a passage of the knowledge catalogue's
- * "pricing" topic and is not an offer page or a post (the scrape's site map), as its pricing, services and products
- * passages. The offer pages are chosen by a step of their own at the scrape, and it missed price lists: Ania Tkaczyk's
- * bridal page (packages 3000 / 4200 zł) and Angelika Solecka's booking page (33 prices) - their quoting models priced
- * those "on request" while the chat read the prices from the same pages (2026-11-25).
+ * "pricing" topic and is not an offer page, as its pricing, services and products passages - when Jev reads it as the
+ * business's own offer and not an article about a topic (a guide that names prices was read as the offer before).
+ * The offer pages are chosen by a step of their own at the scrape, and it missed price lists: Ania Tkaczyk's bridal
+ * page (packages 3000 / 4200 zł) and Angelika Solecka's booking page (33 prices; the site map calls it a post, so the
+ * map's page type does not decide) - their quoting models priced those "on request" while the chat read the prices
+ * from the same pages (2026-11-25). Jev not answering: only the pages the site map does not call posts.
  */
 export async function pricedPages(tenantId: string, offerUrls: string[]): Promise<{ url: string; text: string }[]> {
   const { downloadFromR2 } = await import("../storage/r2.js");
@@ -39,12 +41,20 @@ export async function pricedPages(tenantId: string, offerUrls: string[]): Promis
   const [cat, meta] = await Promise.all([json("knowledge-catalog.json"), json("context-meta.json")]);
   const { siteText } = await import("../llm/packs.js");
   const same = (u: string) => u.replace(/\/+$/, "");
-  const skip = new Set([...offerUrls.map(same), ...((meta?.siteMap || []) as { url: string; type?: string }[]).filter((p) => p.type === "article").map((p) => same(p.url))]);
+  const skip = new Set(offerUrls.map(same));
   const chunks: { catalogId: string; content: string; url?: string }[] = (cat?.chunks || []).filter((c: any) => c.url && !skip.has(same(c.url)));
-  const priced = new Set(chunks.filter((c) => c.catalogId === "pricing").map((c) => same(c.url!)));
   const USED = new Set(["pricing", "services", "products"]);
-  return [...priced].map((url) => ({ url, text: chunks.filter((c) => same(c.url!) === url && USED.has(c.catalogId)).map((c) => siteText(c.content)).join("\n\n") }));
+  const pages = [...new Set(chunks.filter((c) => c.catalogId === "pricing").map((c) => same(c.url!)))]
+    .map((url) => ({ url, text: chunks.filter((c) => same(c.url!) === url && USED.has(c.catalogId)).map((c) => siteText(c.content)).join("\n\n") }))
+    .slice(0, PRICED_PAGES_MAX);
+  if (!pages.length) return [];
+  const { jevAsk } = await import("../llm/jev.js");
+  const a = await jevAsk({ pages: pages.map((p) => `${p.url}\n${p.text.slice(0, 3000)}`) }, Object.fromEntries(pages.map((_, k) => [`o${k}`, { type: "noul" as const, instructions: `Does \`pages[${k}]\` present the business's own offer with its prices - a price list, a service, product or booking page - rather than an article, guide or post about a topic that merely mentions prices?` }])), 20000).catch(() => null);
+  const posts = new Set(((meta?.siteMap || []) as { url: string; type?: string }[]).filter((p) => p.type === "article").map((p) => same(p.url)));
+  return pages.filter((p, k) => (a ? ((((a as any)[`o${k}`]?.noul) as number) ?? 0) >= 0.5 : !posts.has(p.url)));
 }
+// Candidates read by Jev in one call (3,000 characters each).
+const PRICED_PAGES_MAX = 20;
 
 export async function buildPricingFor(tenantId: string, opts: { force?: boolean } = {}): Promise<PricingBusiness | { skipped: string }> {
   if (running.has(tenantId)) return { skipped: "already building" };
