@@ -476,6 +476,7 @@ export function ownersOf(pb: PricingBusiness): Promise<Map<string, number>> {
 export async function quoteBusiness(pb: PricingBusiness, request: Request): Promise<Quote> {
   const lines: QuoteLine[] = [], rules: string[] = [];
   const owner = await ownersOf(pb);
+  const added = new Map<QuoteLine, number>(); // the lines a part added itself -> that part
   for (let k = 0; k < pb.parts.length; k++) {
     const own = request.lines.filter((l) => owner.get(l.item) === k);
     if (!own.length) continue;
@@ -487,9 +488,17 @@ export async function quoteBusiness(pb: PricingBusiness, request: Request): Prom
       // with delivery came to 229 zł, the 19,5 zł fee from the delivery line and again from the cake's part (2026-11-24).
       if (!asked && (lines.some((x) => x.item === l.item) || request.lines.some((x) => x.item === l.item))) continue;
       lines.push({ ...l, need: asked?.need });
+      if (!asked) added.set(lines[lines.length - 1], k);
     }
     rules.push(...(q.rules || []));
   }
+  // The same charge under another id: a part without the other parts' ids names it itself (Angelika Solecka's part
+  // from her booking page has its own "Dojazd do klientki"). The reply's lines are one per name, status and amounts
+  // (renderQuote); the total counted both - 300 zł + 100 zł travel came to 500 zł (2026-11-25). An added line that
+  // reads the same as another line of the quote is dropped here, so the total is over the lines shown.
+  const nameOf = (l: QuoteLine, k: number) => pb.parts[k]?.catalog.items.find((i) => i.id === l.item)?.name || l.item;
+  const shown = (l: QuoteLine) => JSON.stringify([nameOf(l, added.get(l) ?? owner.get(l.item) ?? -1), l.status, l.amount, l.min, l.max]);
+  for (const l of [...added.keys()]) if (lines.some((x) => x !== l && shown(x) === shown(l) && (!added.has(x) || lines.indexOf(x) < lines.indexOf(l)))) lines.splice(lines.indexOf(l), 1);
   for (const l of request.lines) if (!lines.some((x) => x.item === l.item)) lines.push({ item: l.item, status: "not_offered", need: l.need });
   // One line per need in the total: the cheapest priced alternative (by its lower amount).
   const low = (l: QuoteLine) => (l.status === "price" ? l.amount! : l.status === "range" ? l.min! : Infinity);

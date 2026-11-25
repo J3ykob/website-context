@@ -62,3 +62,27 @@ describe("a value the reader gives in a form code does not count", () => {
     expect(n).toBe(1);
   });
 });
+
+describe("a charge a part adds under its own id", () => {
+  // The make-up part asks nothing of travel; the travel line is asked for from the first part, and the second part -
+  // built from another page - adds its own travel item ("dojazd_2") with the same name and amount.
+  const named = (items: { id: string; name: string }[], body: string) => ({
+    catalog: { business: "x", currency: "PLN", shared: [], items: items.map((i) => ({ ...i, inputs: [] })) },
+    code: `const catalog = {}; function needs() { return []; } function quote(r) { var out = r.lines.map(function (l) { ${body} }); if (r.context.travel) out.push(EXTRA); return { lines: out.filter(Boolean), total: null, rules: [] }; }`,
+    source: "", model: "",
+  });
+  const a = named([{ id: "dojazd", name: "Dojazd do klientki" }], `return { item: l.item, status: "price", amount: 100 };`);
+  const b = named([{ id: "makijaz", name: "Makijaż" }, { id: "dojazd_2", name: "Dojazd do klientki" }], `return { item: l.item, status: "price", amount: 300 };`);
+  const withExtra = (p: typeof a, extra: string) => ({ ...p, code: p.code.replace("EXTRA", extra) });
+  const pb = (): PricingBusiness => ({ tenantId: "t", hash: "", builtAt: "", model: "", costUsd: 0, missing: [], parts: [withExtra(a, "null"), withExtra(b, `{ item: "dojazd_2", status: "price", amount: 100 }`)] });
+  it("is not counted next to the same charge asked for as a line: the total is over the lines shown", async () => {
+    const q = await quoteBusiness(pb(), { context: { travel: true }, lines: [{ item: "makijaz", inputs: {} }, { item: "dojazd", inputs: {} }] });
+    expect(q.lines.map((l) => l.item).sort()).toEqual(["dojazd", "makijaz"]);
+    expect(q.total).toEqual({ min: 400, max: 400 });
+  });
+  it("stays when nothing else in the quote reads the same", async () => {
+    const q = await quoteBusiness(pb(), { context: { travel: true }, lines: [{ item: "makijaz", inputs: {} }] });
+    expect(q.total).toEqual({ min: 400, max: 400 });
+    expect(q.lines.map((l) => l.item).sort()).toEqual(["dojazd_2", "makijaz"]);
+  });
+});
