@@ -221,7 +221,9 @@ export async function verify(pm: PricingModel, llm: Llm): Promise<PricingModel> 
 const READ = `You turn a customer's message into a request for this business's quoting program. Use ONLY the catalogue's
 item ids and input names. Put an input only when the customer states it or it follows directly ("for a day" = 24 hours
 when the input counts hours, "4x5 m" = 20 m², "the bride and 3 bridesmaids" = 4 people); leave out what they did not
-say - never assume. A duration is not a choice of rate ("6 hours" sets the duration, not "pay per hour"). An input's
+say - never assume: a choice the customer did not make (which hall, which package or variant) is left out even when
+one option fits what they said, and the program then gives every option that fits. A duration is not a choice of
+rate ("6 hours" sets the duration, not "pay per hour"). An input's
 value is one number in the catalogue's unit ("30 hours over two days" = 30 hours), or:
 - a duration given by its start and end ("from Friday to Monday", "pick-up Saturday 8:00"): {"from": {"date":
   "YYYY-MM-DD", "time": "HH:MM" or null if no clock time is said ("in the morning" is none)}, "to": {...}} - code counts
