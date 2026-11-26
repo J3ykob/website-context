@@ -467,6 +467,24 @@ export function ownersOf(pb: PricingBusiness): Promise<Map<string, number>> {
   return p;
 }
 
+/** For each of `others`: is it the same charge as the added line `a`, under another name? Jev, remembered per pair of
+ *  items for the loaded model; no answer = not the same (both stay). */
+const sameMemo = new WeakMap<PricingBusiness, Map<string, boolean>>();
+async function sameCharge(pb: PricingBusiness, a: QuoteLine, ka: number, others: { line: QuoteLine; part: number }[]): Promise<boolean[]> {
+  let memo = sameMemo.get(pb);
+  if (!memo) sameMemo.set(pb, (memo = new Map()));
+  const item = (id: string, k: number) => pb.parts[k]?.catalog.items.find((i) => i.id === id);
+  const text = (id: string, k: number) => `${item(id, k)?.name || id}${item(id, k)?.note ? ` - ${String(item(id, k)!.note).slice(0, 300)}` : ""}`;
+  const key = (o: { line: QuoteLine; part: number }) => `${ka}:${a.item}=${o.part}:${o.line.item}`;
+  const ask = others.filter((o) => !memo!.has(key(o)));
+  if (ask.length) {
+    const { jevAsk } = await import("../llm/jev.js");
+    const ans = await jevAsk({ added: text(a.item, ka), others: ask.map((o) => text(o.line.item, o.part)) }, Object.fromEntries(ask.map((_, k) => [`s${k}`, { type: "noul" as const, instructions: `Are \`added\` and \`others[${k}]\` one and the same charge of this business under two names (for example the travel to the customer, the delivery, a deposit) - so that an order is charged it once, not once for each?` }])), 8000).catch(() => null);
+    if (ans) ask.forEach((o, k) => memo!.set(key(o), ((((ans as any)[`s${k}`]?.noul) as number) ?? 0) >= 0.5));
+  }
+  return others.map((o) => memo!.get(key(o)) === true);
+}
+
 /**
  * A quote over every part: each line goes to the part that quotes its item (ownersOf - an item found on two
  * pages is quoted once). Lines sharing a "need" are alternatives for one thing: only
@@ -499,6 +517,16 @@ export async function quoteBusiness(pb: PricingBusiness, request: Request): Prom
   const nameOf = (l: QuoteLine, k: number) => pb.parts[k]?.catalog.items.find((i) => i.id === l.item)?.name || l.item;
   const shown = (l: QuoteLine) => JSON.stringify([nameOf(l, added.get(l) ?? owner.get(l.item) ?? -1), l.status, l.amount, l.min, l.max]);
   for (const l of [...added.keys()]) if (lines.some((x) => x !== l && shown(x) === shown(l) && (!added.has(x) || lines.indexOf(x) < lines.indexOf(l)))) lines.splice(lines.indexOf(l), 1);
+  // The same charge under another id AND another name: Angelika Solecka's make-up part adds "Dojazd do klientki" while
+  // the reader asked for "Dojazd na terenie Warszawy" of the part built from her booking page - 300 + 100 + 100 = 500 zł
+  // in 2 of 2 replies (2026-11-26). Whether two differently named lines are one charge is a reading (Jev, once per
+  // pair of items and model): only for a line a part added itself, against the amount lines of other parts.
+  const partOf = (l: QuoteLine) => added.get(l) ?? owner.get(l.item) ?? -1;
+  const AMOUNT = new Set(["price", "range", "included"]);
+  for (const a of [...added.keys()].filter((l) => AMOUNT.has(l.status))) {
+    const others = lines.filter((x) => x !== a && AMOUNT.has(x.status) && partOf(x) !== partOf(a) && (!added.has(x) || lines.indexOf(x) < lines.indexOf(a)));
+    if (others.length && (await sameCharge(pb, a, partOf(a), others.map((x) => ({ line: x, part: partOf(x) })))).some(Boolean)) lines.splice(lines.indexOf(a), 1);
+  }
   for (const l of request.lines) if (!lines.some((x) => x.item === l.item)) lines.push({ item: l.item, status: "not_offered", need: l.need });
   // One line per need in the total: the cheapest priced alternative (by its lower amount).
   const low = (l: QuoteLine) => (l.status === "price" ? l.amount! : l.status === "range" ? l.min! : Infinity);
