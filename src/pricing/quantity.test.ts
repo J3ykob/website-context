@@ -216,7 +216,7 @@ describe("two readings whose cheapest option flips", () => {
     const request = { context: { hours: period("2026-11-06", "2026-11-09", null, null, "hour") }, lines: [{ item: "daily", inputs: {}, need: "n0" }, { item: "weekend", inputs: {}, need: "n0" }] };
     const { quotes, assumed } = await priceRequest(optionsBusiness, request);
     const q = renderQuote(catalogOf(optionsBusiness), quotes, assumed);
-    expect(q.text).toContain("- Stawka dobowa (one option): A: 450 PLN for this request (the customer's quantities, everything in the note included) (72 h = 3 doby); B: 600 PLN");
+    expect(q.text).toContain("- Stawka dobowa (one option): A: 450 PLN for this request, final (its note shows how it is worked out - add nothing from the note) (72 h = 3 doby); B: 600 PLN");
     expect(q.text).toContain("(96 h = 4 doby)");
     expect(q.text).not.toContain("not priced");
     expect(q.text).toContain("- Pakiet weekendowy (do 96 h) (another option for the same thing): 520 PLN");

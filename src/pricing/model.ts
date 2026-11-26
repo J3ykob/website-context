@@ -626,7 +626,7 @@ export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[]
   // 15 110 zl for "a wedding for 85" (2026-11-04 eval; the wedding itself is 18 085 zl).
   const several = new Set(kept.filter((l) => l.alternative).map((l) => l.need || ""));
   const tag = (l: QuoteLine) => (several.has(l.need || "") ? (l.alternative ? " (another option for the same thing)" : " (one option)") : "");
-  const priceOf = (l: QuoteLine) => l.status === "price" ? `${zl(l.amount!)} for this request (the customer's quantities, everything in the note included)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? (own ? "no amount computed here - its price only as our information above states it" : "price on request") : l.status === "included" ? "included in another item's price" : "not in our offer";
+  const priceOf = (l: QuoteLine) => l.status === "price" ? `${zl(l.amount!)} for this request, final (its note shows how it is worked out - add nothing from the note)` : l.status === "range" ? `${zl(l.min!)}${l.max != null ? ` - ${zl(l.max)}` : " or more"}` : l.status === "needs" ? `needs: ${(l.needs || []).join(", ")} (ask the customer)` : l.status === "on_request" ? (own ? "no amount computed here - its price only as our information above states it" : "price on request") : l.status === "included" ? "included in another item's price" : "not in our offer";
   // The same line under the other readings: the same item for the same need - whichever option is the cheapest there (a
   // daily rate under one reading, the weekend package under the other, review 2026-11-05).
   const twin = (o: Quote, l: QuoteLine) => o.lines.find((x) => x.item === l.item && x.need === l.need);
@@ -647,7 +647,10 @@ export function renderQuote(catalog: Catalog, quotes: Quote[], assumed: string[]
     else if (amountsOf(l).length) facts.push({ item: name(l.item), kind: "computed", amounts: amountsOf(l), line });
     return line;
   });
-  lines.unshift("Each amount already includes everything its note lists (e.g. travel) - nothing of it is added again.");
+  // "Everything in the note included" (2026-11, against adding a note's 2 extra hours to an amount that had them) made
+  // a note's mere mention part of the price: Rentbud's "Transport needs at least an estate car" was answered as
+  // "transport is already in these amounts" in 3 of 5 replies (2026-11-26).
+  lines.unshift("Each amount is final for its line. A note may also mention things the amount does not contain (how to transport it, a deposit): only what the note counts into the amount is in it.");
   // What code counted from the customer's words: both readings when a time is left open (the reply gives both).
   if (quotes.length > 1) lines.splice(1, 0, `A time is left open, so every amount is computed for two readings - give both: ${assumed.map((a, k) => `${READING[k]} = ${a.join("; ")}`).join("; ")}.`);
   else if (assumed[0]?.length) lines.splice(1, 0, `Counted from the customer's words: ${assumed[0].join("; ")}.`);
